@@ -1978,6 +1978,22 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         surfaceUsesOuterExpeditionRecovery(expedition, catalog);
     const MiningArenaRules arenaRules = upcomingMiningArenaRules(state, catalog);
     const bool authoredMiningSite = !expedition.pendingMiningSiteDefinitionId.empty();
+    const MiningSiteDefinition* authoredSite = authoredMiningSite
+        ? catalog.findMiningSite(expedition.pendingMiningSiteDefinitionId)
+        : nullptr;
+    const MiningSiteProgress* compatibilitySite = authoredMiningSite
+        ? nullptr
+        : pendingCompatibilityMiningSite(state.meta, expedition.destinationId);
+    const MiningEnemyTheme enemyTheme = resolveMiningEnemyTheme(
+        arenaRules,
+        authoredSite,
+        compatibilitySite);
+    const MiningElementalAffinity themeAffinity = miningEnemyThemeAffinity(enemyTheme);
+    const std::string ecologyForecast = enemyTheme == MiningEnemyTheme::Neutral
+        ? "Neutral ecology // No site affinity"
+        : std::string(miningEnemyThemeName(enemyTheme)) + " ecology // " +
+            std::string(miningElementalAffinityName(themeAffinity)) +
+            " pressure on Elementals and true elites only";
     const MiningSwarmPreview swarmPreview = miningSwarmPreview(
         state,
         catalog,
@@ -2009,6 +2025,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         detailPresentationRow("Current loadout", miningGateCapabilityStatus(capability, gate)),
         detailPresentationRow("New complication", std::string(arenaRules.complication)),
         detailPresentationRow("Mineral forecast", std::string(arenaRules.mineralAvailability)),
+        detailPresentationRow("Enemy ecology", ecologyForecast),
         detailPresentationRow("Known enemy roles", std::string(arenaRules.knownEnemyRoles)),
         detailPresentationRow("Recommended counters", std::string(arenaRules.recommendedCounters))
     });
@@ -2144,6 +2161,7 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     miningPreview.availability = miningSurfaceActionAvailability(state);
     miningPreview.payoffChips.push_back(panelMetric("Run", "One deployment"));
     miningPreview.payoffChips.push_back(panelMetric("Mining start", "Layer +" + std::to_string(expedition.depth)));
+    miningPreview.payoffChips.push_back(panelMetric("Ecology", std::string(miningEnemyThemeName(enemyTheme))));
     miningPreview.payoffChips.push_back(panelMetric("Ship", "SURFACE"));
     addPositiveChip(miningPreview.payoffChips, "Tagged CM", expedition.prospectMaterials.common);
     addPositiveChip(miningPreview.payoffChips, "Tagged RM", expedition.prospectMaterials.rare);

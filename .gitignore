@@ -28,6 +28,7 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 tmp_generated_*
+.codex-tmp/
 *.user
 *.suo
 *.obj

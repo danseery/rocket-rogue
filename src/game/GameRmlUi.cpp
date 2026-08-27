@@ -1026,9 +1026,12 @@ Rml::Rectanglei panelBounds(RmlPanelMode mode)
     }
     if (mode == RmlPanelMode::MissionStamp) {
         const int width = std::clamp(viewportWidth - 48, 320, 560);
-        const int height = std::clamp(viewportHeight - 48, 230, 270);
-        const int left = std::max(16, (viewportWidth - width) / 2);
-        const int top = std::max(16, (viewportHeight - height) / 2 - 24);
+        // A completed Flyby can carry three reward chips plus a real Continue
+        // button. The former 270 px cap pressed that footer against (or below)
+        // the stamp edge at short browser heights.
+        const int height = std::max(1, std::min(320, viewportHeight - 20));
+        const int left = std::max(12, (viewportWidth - width) / 2);
+        const int top = std::max(10, (viewportHeight - height) / 2 - 24);
         return Rml::Rectanglei::FromPositionSize({left, top}, {width, height});
     }
     const UiViewportLayout layout = resolveUiViewportLayout(

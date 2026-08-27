@@ -43,6 +43,8 @@ constexpr double kTitleLaunchIgnitionDelaySeconds = 0.50;
 constexpr double kTitleLaunchDepartureSeconds = 0.65 / 0.75;
 constexpr double kTitleLaunchSequenceSeconds =
     kTitleLaunchIgnitionDelaySeconds + kTitleLaunchDepartureSeconds;
+constexpr double kSceneFadeToBlackSeconds = 1.0;
+constexpr double kSceneFadeFromBlackSeconds = 0.25;
 
 int destinationIndexForId(const ContentCatalog& catalog, std::string_view destinationId);
 
@@ -608,7 +610,10 @@ bool RocketGameApp::openRefitIfAvailable(bool regenerateOffers)
 void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
 {
     session_.preparedLaunch = preparedLaunch;
-    const Destination* destination = catalog_.findDestination(preparedLaunch.config.destinationId);
+    const Destination* destination = catalog_.findDestination(
+        preparedLaunch.routeProfileDestinationId.empty()
+            ? preparedLaunch.config.destinationId
+            : preparedLaunch.routeProfileDestinationId);
     session_.flight = beginLaunchFlight(
         preparedLaunch,
         destination == nullptr ? currentDestination(state_, catalog_) : *destination);
@@ -652,6 +657,8 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
     rng_ = Random(state_.seed);
     session_ = {};
     miningExtraction_ = {};
+    miningSceneHandoff_ = MiningSceneHandoff::None;
+    miningSceneHandoffCommitted_ = false;
     levelUp_ = {};
     expeditionXpPulseSeconds_ = 0.0;
     expeditionXpObservationInitialized_ = false;
@@ -1272,6 +1279,11 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
 
 void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGameInput& input)
 {
+    if (miningSceneHandoff_ != MiningSceneHandoff::None) {
+        releaseRealtimeInputs(true);
+        return;
+    }
+
     if (context == InputContext::Launch) {
         // Launch steering is lateral: negative moves toward the left side of
         // the rendered corridor, matching the raw left-stick X convention.
@@ -1530,15 +1542,34 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
 void RocketGameApp::tick(double deltaSeconds)
 {
     if (titleScreenActive_) {
+        const double transitionDeltaSeconds = std::clamp(deltaSeconds, 0.0, 0.25);
         if (titleLaunchActive_) {
             titleLaunchElapsedSeconds_ = std::min(
-                titleLaunchElapsedSeconds_ + std::clamp(deltaSeconds, 0.0, 0.25),
+                titleLaunchElapsedSeconds_ + transitionDeltaSeconds,
                 kTitleLaunchSequenceSeconds);
             if (titleLaunchElapsedSeconds_ >= kTitleLaunchSequenceSeconds) {
                 completeTitleLaunch();
             }
+        } else {
+            if (sceneTransition_.advance(transitionDeltaSeconds)) {
+                finishTitleLaunch();
+            } else if (sceneTransition_.active()) {
+                // The UI is an independent layer above the scene renderer.
+                // Refresh its lightweight title document while fading so both
+                // layers share the same blackout envelope.
+                refreshPanel();
+            }
         }
         return;
+    }
+    if (advanceMiningSceneHandoff(deltaSeconds)) {
+        return;
+    }
+    if (sceneTransition_.active()) {
+        sceneTransition_.advance(std::clamp(deltaSeconds, 0.0, 0.25));
+        // The fade is a shared scene/UI overlay, so remove it from both
+        // renderers on the frame it completes.
+        refreshPanel();
     }
     visualTimeSeconds_ += std::clamp(deltaSeconds, 0.0, 0.25);
     if (expeditionXpPulseSeconds_ > 0.0) {
@@ -1626,7 +1657,10 @@ void RocketGameApp::tick(double deltaSeconds)
             return;
         }
         const PreparedLaunch flightModel = currentFlightModel();
-        const Destination* activeDestination = catalog_.findDestination(session_.preparedLaunch.config.destinationId);
+        const Destination* activeDestination = catalog_.findDestination(
+            session_.preparedLaunch.routeProfileDestinationId.empty()
+                ? session_.preparedLaunch.config.destinationId
+                : session_.preparedLaunch.routeProfileDestinationId);
         const Destination& destination = activeDestination == nullptr ? currentDestination(state_, catalog_) : *activeDestination;
 
         const double clampedDelta = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
@@ -1680,8 +1714,7 @@ void RocketGameApp::tick(double deltaSeconds)
                 tuning::mining::miningExtractionSequenceSeconds);
             if (miningExtraction_.elapsed >= tuning::mining::miningExtractionSequenceSeconds) {
                 miningExtraction_ = {};
-                state_.run.mining = {};
-                state_.screen = Screen::SurfaceExpedition;
+                queueMiningSceneHandoff(MiningSceneHandoff::ReturnToSurface);
             }
         } else {
             const bool wasActive = state_.run.mining.active;
@@ -1856,6 +1889,8 @@ void RocketGameApp::prepareForLaunch()
     }
 
     syncLaunchConfig(state_, catalog_);
+    const bool queuedRouteTransit = state_.run.routeTransit.active() &&
+        routeLinkForTransit(catalog_, state_.run.routeTransit) != nullptr;
     const Destination& currentFrontier = currentDestination(state_, catalog_);
     const bool hiddenStarterOrigin = currentFrontier.hiddenFromProgression;
     if (!currentDestinationLaunchReady(state_, catalog_)) {
@@ -1880,7 +1915,7 @@ void RocketGameApp::prepareForLaunch()
     }
 
     state_.run.active = true;
-    if (!hiddenStarterOrigin) {
+    if (!hiddenStarterOrigin && !queuedRouteTransit) {
         state_.launchConfig.frontierTransfer =
             hostileSystemActive(state_) || launchStageUsesArrival(state_.meta.launchLessons.stage);
         state_.launchConfig.missionKind = LaunchMissionKind::Standard;
@@ -2269,15 +2304,32 @@ void RocketGameApp::flybyContinue()
         panelDirty_ = true;
         return;
     }
+    const bool genericRouteCleared =
+        (grade == FlybyGrade::Good || grade == FlybyGrade::Perfect) &&
+        bankFlybyRouteClearance(state_, catalog_);
     completeFlybyRun(state_, catalog_);
     switch (grade) {
     case FlybyGrade::Perfect:
-        (void)bankFlybyRouteClearance(state_, catalog_);
-        finishArrivalVisit("Planet skipped. Powered-fuel savings and extra velocity stored for the next launch.");
+        if (genericRouteCleared) {
+            finishArrivalVisit("Planet skipped. Powered-fuel savings and extra velocity stored for the next launch.");
+        } else if (queueBlockedArrivalFlybyRecovery(state_, catalog_)) {
+            state_.statusLine = "RECOVERY ROUTE — fly back to the prior staging body before reapproaching this objective.";
+            syncLaunchConfig(state_, catalog_);
+            attemptFrontierTransfer();
+        } else {
+            finishArrivalVisit("Planet skipped. The active capture objective and its next route remain blocked.");
+        }
         break;
     case FlybyGrade::Good:
-        (void)bankFlybyRouteClearance(state_, catalog_);
-        finishArrivalVisit("Planet skipped. Pass Through complete.");
+        if (genericRouteCleared) {
+            finishArrivalVisit("Planet skipped. Pass Through complete.");
+        } else if (queueBlockedArrivalFlybyRecovery(state_, catalog_)) {
+            state_.statusLine = "RECOVERY ROUTE — fly back to the prior staging body before reapproaching this objective.";
+            syncLaunchConfig(state_, catalog_);
+            attemptFrontierTransfer();
+        } else {
+            finishArrivalVisit("Planet skipped. The active capture objective and its next route remain blocked.");
+        }
         break;
     case FlybyGrade::Miss:
     default:
@@ -2440,6 +2492,30 @@ void RocketGameApp::mineSurface()
     if (state_.screen != Screen::SurfaceExpedition) {
         return;
     }
+
+    if (!surfaceOpsTutorialMiningUnlocked(state_)) {
+        state_.statusLine = "Set a start depth before deploying the Mining Rig.";
+        panelDirty_ = true;
+        return;
+    }
+    const ScenarioObjectivePresentation objective = scenarioObjectiveForDestination(
+        state_,
+        catalog_,
+        state_.run.surfaceExpedition.destinationId);
+    if (objective.available && objective.mandatoryBriefing && !objective.briefingAcknowledged) {
+        state_.statusLine = "Acknowledge " + objective.title + " before deploying the Mining Rig.";
+        panelDirty_ = true;
+        return;
+    }
+
+    queueMiningSceneHandoff(MiningSceneHandoff::EnterMining);
+}
+
+void RocketGameApp::startMiningRunAfterFade()
+{
+    if (state_.screen != Screen::SurfaceExpedition) {
+        return;
+    }
     if (!surfaceOpsTutorialMiningUnlocked(state_)) {
         state_.statusLine = "Set a start depth before deploying the Mining Rig.";
         panelDirty_ = true;
@@ -2474,12 +2550,16 @@ void RocketGameApp::mineSurface()
     if (!pendingSite && step != nullptr &&
         step->completionEvent == ScenarioEventKind::ProtectedObjectiveExtracted &&
         !step->miningSiteDefinitionId.empty()) {
-        state_.statusLine = "Begin " + objective.title + " from the active objective before deploying the Mining Rig.";
-        panelDirty_ = true;
-        return;
+        // Mine is the stable player-facing verb for every excavation. When a
+        // campaign recovery is active, direct Mine into its authored site
+        // rather than hiding the action or asking the player to discover a
+        // separate story-labelled substitute.
+        expedition.pendingScenarioId = objective.scenarioId;
+        expedition.pendingScenarioStepId = objective.stepId;
+        expedition.pendingMiningSiteDefinitionId = step->miningSiteDefinitionId;
     }
 
-    const MiningSiteDefinition* site = pendingSite
+    const MiningSiteDefinition* site = !expedition.pendingMiningSiteDefinitionId.empty()
         ? findMiningSiteDefinition(catalog_, expedition.pendingMiningSiteDefinitionId)
         : nullptr;
     const bool siteRequiresHazard = site != nullptr && std::any_of(
@@ -2945,7 +3025,8 @@ void RocketGameApp::pushSurfaceBank()
 
 void RocketGameApp::miningAbort()
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || miningExtraction_.active ||
+        miningSceneHandoff_ != MiningSceneHandoff::None) {
         return;
     }
     if (miningAtReturnZone(state_.run.mining) && !state_.run.mining.failurePending) {
@@ -2954,11 +3035,7 @@ void RocketGameApp::miningAbort()
         return;
     }
 
-    recordActiveMiningScenarioAbort(state_, catalog_);
-    const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
-    state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningAborted);
-    save();
-    panelDirty_ = true;
+    queueMiningSceneHandoff(MiningSceneHandoff::AbortMining);
 }
 
 void RocketGameApp::miningFailureAck()
@@ -2977,11 +3054,7 @@ void RocketGameApp::miningFailureAck()
         clearControllerPause();
     }
 
-    recordActiveMiningScenarioAbort(state_, catalog_);
-    const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
-    state_.statusLine = outcome.applied ? surfaceActionSummary(outcome) : std::string(text::status::miningAborted);
-    save();
-    panelDirty_ = true;
+    queueMiningSceneHandoff(MiningSceneHandoff::AbortMining);
 }
 
 void RocketGameApp::debugStartFlyby()
@@ -3672,6 +3745,8 @@ void RocketGameApp::attemptFrontierTransfer()
     }
 
     syncLaunchConfig(state_, catalog_);
+    const bool queuedRouteTransit = state_.run.routeTransit.active() &&
+        routeLinkForTransit(catalog_, state_.run.routeTransit) != nullptr;
     if (!launchMissionReady(state_, catalog_)) {
         const Destination* next = nextDestination(state_, catalog_);
         state_.statusLine = next != nullptr && next->id == content::destination::jupiter
@@ -3684,21 +3759,37 @@ void RocketGameApp::attemptFrontierTransfer()
     const bool qualificationFlight =
         state_.meta.launchLessons.stage != LaunchTrainingStage::Complete &&
         !state_.launchConfig.frontierTransfer;
-    if (!qualificationFlight && !canCommitToNextFrontier(state_, catalog_)) {
+    if (!queuedRouteTransit && !qualificationFlight && !canCommitToNextFrontier(state_, catalog_)) {
         const Destination* next = nextDestination(state_, catalog_);
         state_.statusLine = next == nullptr ? std::string(text::status::noFartherFrontier) : std::string(text::status::moreProvingDataBeforeTransfer);
         refreshPanel();
         return;
     }
 
-    const Destination* next = nextDestination(state_, catalog_);
+    const Destination* next = queuedRouteTransit
+        ? catalog_.findDestination(state_.run.routeTransit.targetDestinationId)
+        : nextDestination(state_, catalog_);
     if (next == nullptr) {
         state_.statusLine = std::string(text::status::noFartherFrontier);
         refreshPanel();
         return;
     }
 
-    if (state_.meta.launchLessons.stage == LaunchTrainingStage::Complete) {
+    // Every genuine interplanetary attempt carries its physical origin. This
+    // includes the guided Moon/Mars/Jupiter curriculum; campaign frontier is
+    // progress only and must never be used as a substitute for ship position.
+    if (!queuedRouteTransit &&
+        (state_.launchConfig.frontierTransfer ||
+         state_.meta.launchLessons.stage == LaunchTrainingStage::Complete)) {
+        state_.run.routeTransit = makeRouteTransit(
+            catalog_,
+            currentDestination(state_, catalog_).id,
+            next->id,
+            RouteTransitIntent::Outbound);
+        syncLaunchConfig(state_, catalog_);
+    }
+
+    if (state_.meta.launchLessons.stage == LaunchTrainingStage::Complete && !queuedRouteTransit) {
         state_.launchConfig.frontierTransfer = true;
         state_.launchConfig.destinationId = next->id;
         state_.launchConfig.burnGoalMultiplier = next->targetMultiplier;
@@ -3864,7 +3955,7 @@ void RocketGameApp::resetSave()
 
 void RocketGameApp::newGame()
 {
-    if (!titleScreenActive_ || titleLaunchActive_) {
+    if (!titleScreenActive_ || titleLaunchActive_ || sceneTransition_.active()) {
         return;
     }
 
@@ -3930,7 +4021,7 @@ void RocketGameApp::disableDebugToolsForFreshCampaign()
 
 void RocketGameApp::continueGame()
 {
-    if (!titleScreenActive_ || !hasSavedGame_ || titleLaunchActive_) {
+    if (!titleScreenActive_ || !hasSavedGame_ || titleLaunchActive_ || sceneTransition_.active()) {
         return;
     }
     beginTitleLaunch(false);
@@ -3941,24 +4032,112 @@ void RocketGameApp::beginTitleLaunch(bool newCampaign)
     titleLaunchActive_ = true;
     titleLaunchStartsNewCampaign_ = newCampaign;
     titleLaunchElapsedSeconds_ = 0.0;
+    sceneTransition_.clear();
     releaseRealtimeInputs(true);
     refreshPanel();
 }
 
 void RocketGameApp::completeTitleLaunch()
 {
-    const bool startsNewCampaign = titleLaunchStartsNewCampaign_;
     titleLaunchActive_ = false;
+    beginSceneFadeToBlack(kSceneFadeToBlackSeconds);
+    refreshPanel();
+}
+
+void RocketGameApp::finishTitleLaunch()
+{
+    const bool startsNewCampaign = titleLaunchStartsNewCampaign_;
     titleLaunchStartsNewCampaign_ = false;
     titleLaunchElapsedSeconds_ = 0.0;
     if (startsNewCampaign) {
         startNewGame();
+        if (!titleScreenActive_) {
+            beginSceneFadeFromBlack(kSceneFadeFromBlackSeconds);
+            refreshPanel();
+        }
         return;
     }
     titleScreenActive_ = false;
     titleNotice_.clear();
     releaseRealtimeInputs(true);
+    beginSceneFadeFromBlack(kSceneFadeFromBlackSeconds);
     refreshPanel();
+}
+
+void RocketGameApp::beginSceneFadeToBlack(double durationSeconds)
+{
+    sceneTransition_.beginFadeToBlack(durationSeconds);
+}
+
+void RocketGameApp::beginSceneFadeFromBlack(double durationSeconds)
+{
+    sceneTransition_.beginFadeFromBlack(durationSeconds);
+}
+
+void RocketGameApp::queueMiningSceneHandoff(MiningSceneHandoff handoff)
+{
+    if (handoff == MiningSceneHandoff::None ||
+        miningSceneHandoff_ != MiningSceneHandoff::None ||
+        sceneTransition_.active()) {
+        return;
+    }
+
+    miningSceneHandoff_ = handoff;
+    miningSceneHandoffCommitted_ = false;
+    releaseRealtimeInputs(true);
+    beginSceneFadeToBlack(kSceneFadeToBlackSeconds);
+    refreshPanel();
+}
+
+bool RocketGameApp::advanceMiningSceneHandoff(double deltaSeconds)
+{
+    if (miningSceneHandoff_ == MiningSceneHandoff::None) {
+        return false;
+    }
+
+    const bool blackoutReady = sceneTransition_.advance(std::clamp(deltaSeconds, 0.0, 0.25));
+    if (!miningSceneHandoffCommitted_ && blackoutReady) {
+        completeMiningSceneHandoff();
+        miningSceneHandoffCommitted_ = true;
+        beginSceneFadeFromBlack(kSceneFadeFromBlackSeconds);
+    } else if (miningSceneHandoffCommitted_ && !sceneTransition_.active()) {
+        miningSceneHandoff_ = MiningSceneHandoff::None;
+        miningSceneHandoffCommitted_ = false;
+    }
+
+    refreshPanel();
+    // This frame belonged to the handoff even when the fade-in just finished.
+    // Do not immediately apply a full simulation step to the newly revealed
+    // mining scene; doing so can pull the untouched rig out of the ship zone
+    // before the player receives control.
+    return true;
+}
+
+void RocketGameApp::completeMiningSceneHandoff()
+{
+    switch (miningSceneHandoff_) {
+    case MiningSceneHandoff::EnterMining:
+        startMiningRunAfterFade();
+        break;
+    case MiningSceneHandoff::ReturnToSurface:
+        state_.run.mining = {};
+        state_.screen = Screen::SurfaceExpedition;
+        save();
+        panelDirty_ = true;
+        break;
+    case MiningSceneHandoff::AbortMining: {
+        recordActiveMiningScenarioAbort(state_, catalog_);
+        const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, true);
+        state_.statusLine = outcome.applied
+            ? surfaceActionSummary(outcome)
+            : std::string(text::status::miningAborted);
+        save();
+        panelDirty_ = true;
+        break;
+    }
+    case MiningSceneHandoff::None:
+        break;
+    }
 }
 
 bool RocketGameApp::uiMouseMove(int x, int y)
@@ -4118,7 +4297,8 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         services_.saves.description(),
         services_.renderer.description(),
         titleScreenActive_,
-        titleLaunchActive_,
+        titleLaunchActive_ || sceneTransition_.active(),
+        sceneTransition_.blackoutOpacity(),
         hasSavedGame_,
         titleNotice_,
         firstTimeIntroductionsEnabled_,
@@ -4361,6 +4541,10 @@ bool RocketGameApp::runLegacyScenarioUiAction(std::string_view action)
 
 void RocketGameApp::runUiAction(const std::string& action)
 {
+    if (miningSceneHandoff_ != MiningSceneHandoff::None) {
+        return;
+    }
+
     int index = 0;
     if (runScenarioUiAction(action) || runLegacyScenarioUiAction(action)) {
         return;
@@ -4508,7 +4692,7 @@ RenderSnapshot RocketGameApp::snapshot() const
     if (titleScreenActive_) {
         result.screen = Screen::Hangar;
         result.titleScreen = true;
-        if (titleLaunchActive_) {
+        if (titleLaunchActive_ || sceneTransition_.active()) {
             result.titleLaunchRumble = std::clamp(
                 1.0 - titleLaunchElapsedSeconds_ / kTitleLaunchIgnitionDelaySeconds,
                 0.0,
@@ -4518,11 +4702,13 @@ RenderSnapshot RocketGameApp::snapshot() const
                 0.0,
                 1.0);
         }
+        result.sceneFadeToBlack = sceneTransition_.blackoutOpacity();
         result.animationTime = services_.host.monotonicSeconds();
         return result;
     }
     const PreparedLaunch flightModel = currentFlightModel();
     result.screen = state_.screen;
+    result.sceneFadeToBlack = sceneTransition_.blackoutOpacity();
     result.lastResult = state_.screen == Screen::Results ? state_.lastOutcome.type : LaunchResultType::None;
     result.lastLaunchFailureCause = state_.screen == Screen::Results
         ? state_.lastOutcome.failureCause
@@ -4609,6 +4795,19 @@ RenderSnapshot RocketGameApp::snapshot() const
     }
     result.shipDamage = static_cast<double>(state_.run.shipDamage);
     result.destinationTier = visualDestination->tier;
+    if (state_.screen == Screen::Launch) {
+        if (flightModel.config.routeTransit.active()) {
+            if (const Destination* source = catalog_.findDestination(flightModel.config.routeTransit.originDestinationId)) {
+                result.launchOriginTier = source->tier;
+            }
+        } else if (!flightModel.transferAssistId.empty()) {
+            if (const TransferAssistDefinition* assist = catalog_.findTransferAssist(flightModel.transferAssistId)) {
+                if (const Destination* source = catalog_.findDestination(assist->sourceDestinationId)) {
+                    result.launchOriginTier = source->tier;
+                }
+            }
+        }
+    }
     result.debugActOneCheckpoint = debugActOneCheckpoint_;
     result.arkCondition = state_.meta.ark.condition;
     result.straylightStoryReveal = state_.screen == Screen::StoryBriefing
@@ -4717,6 +4916,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningSwarmArtifact = mining.swarm.bonusArtifactRolled;
         result.miningSwarmCacheX = mining.swarm.cacheX;
         result.miningSwarmCacheY = mining.swarm.cacheY;
+        result.miningEnemyTheme = mining.enemyTheme;
         if (mining.artifact.present) {
             result.miningArtifact = {
                 true,

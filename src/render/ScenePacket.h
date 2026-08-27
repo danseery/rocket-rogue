@@ -61,6 +61,36 @@ enum class TextureId : std::uint8_t {
     PoiGuidanceArrow,
     Asteroid,
     FlightInstrumentCluster,
+    EnemyAntNeutral,
+    EnemyAntLava,
+    EnemyAntIce,
+    EnemyAntRadioactive,
+    EnemyAntToxic,
+    EnemyFlyingNeutral,
+    EnemyFlyingLava,
+    EnemyFlyingIce,
+    EnemyFlyingRadioactive,
+    EnemyFlyingToxic,
+    EnemyBeetleNeutral,
+    EnemyBeetleLava,
+    EnemyBeetleIce,
+    EnemyBeetleRadioactive,
+    EnemyBeetleToxic,
+    EnemyElementalNeutral,
+    EnemyElementalLava,
+    EnemyElementalIce,
+    EnemyElementalRadioactive,
+    EnemyElementalToxic,
+    EnemyMammalNeutral,
+    EnemyMammalLava,
+    EnemyMammalIce,
+    EnemyMammalRadioactive,
+    EnemyMammalToxic,
+    EnemySpawnerNeutral,
+    EnemySpawnerLava,
+    EnemySpawnerIce,
+    EnemySpawnerRadioactive,
+    EnemySpawnerToxic,
     Count
 };
 
@@ -409,6 +439,10 @@ struct SceneDraw {
     // logical asset identity used for readiness, while draws from different
     // logical textures can batch when their page and other ordered state match.
     std::uint8_t atlasPage = kNoSceneAtlasPage;
+    // Scene content is normally clipped to its authored playfield. A scene
+    // handoff is deliberately the exception: it must cover the full drawable
+    // viewport, including persistent UI rails and letterboxed space.
+    bool fullViewport = false;
 };
 
 struct SceneTransform {

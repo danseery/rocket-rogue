@@ -23,6 +23,14 @@ A tutorial callout appears at a band transition, not at every number. Swarm comb
 
 Optional Swarm Nests are horde set-pieces rather than ordinary room encounters. Their simultaneous enemy cap starts at 24, reaches 32 in the Act 2 Combine band used by the debug Swarm Arena, and scales to 64 in Act 3 Mastery. Each nest sends three rapid waves containing 1x, 1.5x, and 2x the simultaneous cap. Each wave begins beyond evenly distributed radial points outside the visible mine bounds, then moves quickly inward before entering the nest chamber; enemies never materialize around the player. Swarm enemies have reduced individual health and damage so the threat comes from crowd movement, target saturation, and sustained replacement rather than four oversized enemies. The pack occupies rotating slots around the player instead of collapsing into one point: melee creatures stagger their dives, bite, and retreat to the ring, while ranged creatures fire from a wider band and pull back between shots.
 
+### Coherent enemy ecologies
+
+Each mining site has one fixed visual ecology: Neutral, Lava, Ice, Radioactive, or Toxic. The site keeps that ecology across every depth and save/load. Authored sites select it directly; the existing Thermal Lava recovery site is always Lava. Generic sites remain Neutral until Elementals enter the progression, then choose deterministically from affinities legal at that Act and level. The Surface Ops forecast shows the ecology before deployment.
+
+Ordinary enemies use the site theme cosmetically and keep their existing stats and AI. Elementals and true elites—explicit Swarm elites, Minibosses, Bosses, and elite Spawners—also receive the matching existing affinity mechanics. Lava maps to Thermal, Ice to Cryo, Radioactive to Radiation, and Toxic to Toxic. Ordinary units spawned by an elite Spawner inherit the site skin but not its affinity unless they are independently Elemental or elite.
+
+Enemy bodies use the shared side-view animated sprite contract in [ENEMY_SPRITE_LIBRARY.md](ENEMY_SPRITE_LIBRARY.md). Health bars, attack tells, projectiles, affinity auras, and elite marks remain procedural overlays so visual variants cannot obscure combat information.
+
 ### Act 1: learn the mining rig
 
 Act 1 never creates enemies or exotic minerals.

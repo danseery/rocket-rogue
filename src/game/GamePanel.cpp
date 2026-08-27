@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <iomanip>
 #include <sstream>
 #include <utility>
 #include <vector>
@@ -542,7 +543,7 @@ std::string miningTetherBurdenLabel(const MiningRunState& mining, const MiningLo
         mining.artifact.tethered &&
         mining.artifact.state != MiningArtifactState::Delivered &&
         mining.artifact.state != MiningArtifactState::Destroyed;
-    const bool operatorRigTethered = mining.operatorRigTethered && !mining.rigDisabled;
+    const bool operatorRigTethered = mining.operatorRigTethered;
     if (!artifactTethered && !operatorRigTethered) {
         return "CLEAR";
     }
@@ -617,7 +618,8 @@ std::string miningSupportTileValue(const MiningRunState& mining)
             const MiningCell* cell = miningCellAt(mining.terrain, drone.targetCellX, drone.targetCellY);
             const MiningCellMaterial material = cell == nullptr ? MiningCellMaterial::CommonOre : cell->material;
             const double duration = tuning::mining::miningDroneWorkSeconds(drone.upgradeLevel, material);
-            return "MINING " + display::percent(std::clamp(drone.taskProgressSeconds / std::max(0.01, duration), 0.0, 1.0)) +
+            return std::string(drone.finishTargetBeforeReturn ? "FINISHING ORE • RETURN PENDING " : "MINING ") +
+                display::percent(std::clamp(drone.taskProgressSeconds / std::max(0.01, duration), 0.0, 1.0)) +
                 " â¢ ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
         }
         if (drone.behavior == MiningMiniDroneBehavior::DeliveringToShip) {
@@ -625,6 +627,12 @@ std::string miningSupportTileValue(const MiningRunState& mining)
         }
         if (drone.behavior == MiningMiniDroneBehavior::ReturningFromShip) {
             return "RETURNING TO RIG â¢ ORE 0/" + std::to_string(capacity);
+        }
+        if (drone.behavior == MiningMiniDroneBehavior::RecoveringToRig) {
+            return "SAFE RECALLING TO RIG â¢ ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
+        }
+        if (drone.behavior == MiningMiniDroneBehavior::Returning) {
+            return "RETURNING TO RIG â¢ ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
         }
         if (ore > 0 && drone.targetCellX < 0) {
             return "NO REACHABLE ORE â¢ ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
@@ -1742,6 +1750,38 @@ std::string scenarioProgressTargetLabel(const ScenarioObjectivePresentation& pre
     return label;
 }
 
+std::string miningCocoonLayerLabel(const MiningGateRuntime& gate, std::size_t layerIndex)
+{
+    if (layerIndex >= gate.cocoonLayers.size()) {
+        return {};
+    }
+    const MiningCocoonLayerProgress& layer = gate.cocoonLayers[layerIndex];
+    if (layer.revealed) {
+        return layer.label;
+    }
+    if (layerIndex == 0U) {
+        return layer.label + " — FIND";
+    }
+    return layer.label + " — LOCKED UNTIL " +
+        gate.cocoonLayers[layerIndex - 1U].label + " CLEAR";
+}
+
+std::string miningCocoonLayerValue(const MiningGateRuntime& gate, std::size_t layerIndex)
+{
+    if (layerIndex >= gate.cocoonLayers.size()) {
+        return {};
+    }
+    const MiningCocoonLayerProgress& layer = gate.cocoonLayers[layerIndex];
+    if (layer.revealed) {
+        const int cleared = std::clamp(layer.total - layer.remaining, 0, std::max(0, layer.total));
+        return std::to_string(cleared) + "/" + std::to_string(std::max(0, layer.total));
+    }
+    if (layerIndex == 0U) {
+        return "FIND";
+    }
+    return gate.cocoonLayers[layerIndex - 1U].label + " FIRST";
+}
+
 std::string compactMiningScenarioObjective(const GameState& state, const ContentCatalog& catalog)
 {
     const ScenarioObjectivePresentation presentation = scenarioObjectiveForMining(state, catalog);
@@ -1751,9 +1791,10 @@ std::string compactMiningScenarioObjective(const GameState& state, const Content
     if (!gate.cocoonLayers.empty()) {
         std::ostringstream out;
         out << (presentation.location.empty() ? "RECOVERY SITE" : presentation.location);
-        for (const MiningCocoonLayerProgress& layer : gate.cocoonLayers) {
+        for (std::size_t layerIndex = 0; layerIndex < gate.cocoonLayers.size(); ++layerIndex) {
+            const MiningCocoonLayerProgress& layer = gate.cocoonLayers[layerIndex];
             if (!layer.revealed) {
-                out << " // NEXT LAYER LOCKED";
+                out << " // " << miningCocoonLayerLabel(gate, layerIndex);
                 break;
             }
             const int cleared = std::max(0, layer.total - layer.remaining);
@@ -1763,8 +1804,7 @@ std::string compactMiningScenarioObjective(const GameState& state, const Content
             }
         }
         const MiningArtifactObject& artifact = state.run.mining.artifact;
-        const bool rigTethered = state.run.mining.operatorRigTethered &&
-            !state.run.mining.rigDisabled;
+        const bool rigTethered = state.run.mining.operatorRigTethered;
         const std::string objectiveState = artifact.revealed
             ? (artifact.state == MiningArtifactState::Delivered
                    ? "EXTRACT SAFELY"
@@ -1788,7 +1828,7 @@ std::string compactMiningScenarioObjective(const GameState& state, const Content
 std::string miningCocoonObjectiveState(const MiningRunState& mining)
 {
     const MiningArtifactObject& artifact = mining.artifact;
-    const bool rigTethered = mining.operatorRigTethered && !mining.rigDisabled;
+    const bool rigTethered = mining.operatorRigTethered;
     if (artifact.revealed) {
         if (artifact.state == MiningArtifactState::Delivered) {
             return "EXTRACT SAFELY";
@@ -1798,7 +1838,15 @@ std::string miningCocoonObjectiveState(const MiningRunState& mining)
     if (rigTethered) {
         return "TOW MINING RIG TO SHUTTLE";
     }
-    return "CLEAR ACTIVE LAYER";
+    for (const MiningCocoonLayerProgress& layer : mining.gate.cocoonLayers) {
+        if (!layer.revealed) {
+            return "FIND " + layer.label;
+        }
+        if (!layer.completed) {
+            return "CLEAR " + layer.label;
+        }
+    }
+    return "LOCATE PROTECTED OBJECTIVE";
 }
 
 struct MiningCocoonHudLayout {
@@ -2514,6 +2562,11 @@ const Destination& hangarLaunchTargetDestination(
     const GameState& state,
     const ContentCatalog& catalog)
 {
+    if (state.run.routeTransit.active()) {
+        if (const Destination* target = catalog.findDestination(state.run.routeTransit.targetDestinationId)) {
+            return *target;
+        }
+    }
     const Destination& current = currentDestination(state, catalog);
     if (current.hiddenFromProgression) {
         if (const Destination* target = catalog.findDestination(state.launchConfig.destinationId)) {
@@ -2766,7 +2819,7 @@ std::string scenarioMapCocoonDetail(
                 break;
             }
         }
-        if (mining.operatorRigTethered && !mining.rigDisabled) {
+        if (mining.operatorRigTethered) {
             out << " / TOW MINING RIG TO SHUTTLE";
         }
         if (mining.artifact.revealed) {
@@ -3384,6 +3437,20 @@ std::string buildGamePanelMarkup(
         }
 
         if (flyby.completed) {
+            const bool successfulRecon = !scenarioChallenge && !flyby.collidedWithBody &&
+                (grade == FlybyGrade::Good || grade == FlybyGrade::Perfect);
+            const RouteTransitState& incomingRoute = state.run.arrivalOps.incomingRoute;
+            const Destination* recoveryDestination = incomingRoute.active()
+                ? catalog.findDestination(incomingRoute.originDestinationId)
+                : nullptr;
+            const RouteLinkDefinition* recoveryLink = recoveryDestination == nullptr
+                ? nullptr
+                : catalog.findRouteLink(recoveryDestination->id, flyby.destinationId);
+            const bool recoveryRequired = successfulRecon && !clearsGenericRoute &&
+                recoveryDestination != nullptr && recoveryLink != nullptr && recoveryLink->recoveryAvailable;
+            const std::string recoveryRouteLabel = recoveryRequired
+                ? destinationName + " \xE2\x86\x92 " + recoveryDestination->name
+                : std::string();
             const std::string resultTitle = scenarioChallenge
                 ? (grade == FlybyGrade::Perfect
                       ? challengeObjective.title + " READY"
@@ -3393,7 +3460,7 @@ std::string buildGamePanelMarkup(
                 : (flyby.collidedWithBody
                       ? "IMPACT RECORDED"
                       : (grade == FlybyGrade::Good || grade == FlybyGrade::Perfect
-                            ? "PLANET SKIPPED"
+                            ? (recoveryRequired ? "RECOVERY ROUTE REQUIRED" : "PLANET SKIPPED")
                             : flybyGradeLabel(grade)));
             const double flybySpeedScale = flyby.slingshotAwarded ? flyby.slingshotSpeedScale : flybySlingshotScale(flyby);
             const double flybyFuelSavings = flyby.slingshotAwarded ? flyby.slingshotFuelSavings : tuning::flyby::slingshotFuelBoost * flybySpeedScale;
@@ -3406,9 +3473,16 @@ std::string buildGamePanelMarkup(
                             : challengeObjective.detail))
                 : (flyby.collidedWithBody
                 ? "The ship clipped the destination body. Hull damage added and no Research Data was recovered."
-                : (flybyResultBody(grade)
+                : ((recoveryRequired
+                    ? "Planet skipped. " +
+                        (skippedObjective.available
+                            ? "“" + skippedObjective.title + "” remains active; "
+                            : std::string()) +
+                        "the onward route stays locked. Fly " + recoveryRouteLabel +
+                        " to recover, then reapproach."
+                    : flybyResultBody(grade))
                     + ((grade == FlybyGrade::Good || grade == FlybyGrade::Perfect) && skippedObjective.available
-                          ? " “" + skippedObjective.title + "” remains active; the next story route is still blocked."
+                          ? (recoveryRequired ? "" : " “" + skippedObjective.title + "” remains active; the next story route is still blocked.")
                           : ((grade == FlybyGrade::Good || grade == FlybyGrade::Perfect) && clearsGenericRoute
                                 ? " The generic onward route is cleared by sacrificing this world's surface resources for speed."
                                 : ""))));
@@ -3431,7 +3505,9 @@ std::string buildGamePanelMarkup(
                 : (grade == FlybyGrade::Perfect
                     ? display::fixed(flybyFuelSavings, 1) + " fuel saved, +" + display::percent(flybySpeedBoost) + " velocity"
                     : (grade == FlybyGrade::Good
-                          ? (skippedObjective.available ? "STORY ROUTE BLOCKED" : (clearsGenericRoute ? "GENERIC ROUTE CLEARED" : "NEXT LAUNCH: NO BOOST"))
+                          ? (recoveryRequired
+                              ? recoveryRouteLabel + " RECOVERY"
+                              : (skippedObjective.available ? "STORY ROUTE BLOCKED" : (clearsGenericRoute ? "GENERIC ROUTE CLEARED" : "NEXT LAUNCH: NO BOOST")))
                           : "APPROACH UNCOMMITTED")));
             out << "<div data-panel-mode=\"mission-stamp\" data-flyby-run=\"1\" data-flyby-completed=\"1\" data-flyby-purpose=\""
                 << (scenarioChallenge ? "scenario-challenge" : "recon") << "\" hidden></div>";
@@ -3452,7 +3528,9 @@ std::string buildGamePanelMarkup(
                     ? std::string_view(challengeObjective.actionLabel)
                     : (scenarioChallenge
                           ? std::string_view("Return to Hangar")
-                          : std::string_view("Continue")),
+                          : (recoveryRequired
+                                ? std::string_view("Begin Recovery: " + recoveryRouteLabel)
+                                : std::string_view("Continue"))),
                 scenarioChallenge && grade == FlybyGrade::Perfect ? &challengeObjective : nullptr);
             if (scenarioChallenge) {
                 out << scenarioObjectiveModal(challengeObjective);
@@ -3544,7 +3622,7 @@ std::string buildGamePanelMarkup(
 
         out << "<div data-orbit-run=\"1\" data-orbit-completed=\"0\" hidden></div>";
         out << "<section class=\"live-hud-header\"><div><h2>" << htmlEscape("Orbit Capture") << "</h2>"
-            << "<p class=\"phase-copy\">" << htmlEscape("The insertion solution holds Good without input. Trim inward and hold the Perfect band for the bonus.")
+            << "<p class=\"phase-copy\">" << htmlEscape("The insertion holds Good without input. Finish in Perfect without entering red for the bonus.")
             << "</p></div>" << modalButton("DETAILS", "flight_details", "ghost") << "</section>";
         const std::string zoneValue = orbitZoneLabel(orbit.currentZone);
 
@@ -4074,13 +4152,13 @@ std::string buildGamePanelMarkup(
                 out << "<div id=\"rr-hud-cocoon-layer-" << layerIndex << "\" class=\""
                     << (!layer.revealed ? "is-locked" : (layer.completed ? "is-complete" : "")) << "\">"
                     << "<span id=\"rr-hud-cocoon-label-" << layerIndex << "\">"
-                    << htmlEscape(layer.revealed ? layer.label : "NEXT LAYER LOCKED") << "</span><section>";
+                    << htmlEscape(miningCocoonLayerLabel(mining.gate, layerIndex)) << "</span><section>";
                 for (int cellIndex = 0; cellIndex < std::max(0, layer.total); ++cellIndex) {
                     out << "<i id=\"rr-hud-cocoon-" << layerIndex << "-" << cellIndex << "\" class=\""
                         << (layer.revealed && cellIndex < cleared ? "is-cleared" : "") << "\"></i>";
                 }
                 out << "</section><b id=\"rr-hud-cocoon-value-" << layerIndex << "\">"
-                    << (layer.revealed ? std::to_string(cleared) + "/" + std::to_string(std::max(0, layer.total)) : "LOCKED")
+                    << htmlEscape(miningCocoonLayerValue(mining.gate, layerIndex))
                     << "</b></div>";
             }
             out << "<strong id=\"rr-hud-cocoon-objective-state\">"
@@ -4468,9 +4546,10 @@ std::string buildGamePanelMarkup(
         const ScenarioDeliveryPresentation surfaceDelivery =
             scenarioSafeDeliveryPresentation(state, catalog, expedition);
         const bool scenarioSurface = surfaceScenario.available;
-        // A fixed scenario mining site is the sole mining deployment for its
-        // Surface Ops loop. Showing the generic deposit action alongside it
-        // lets the player spend that deployment on the wrong activity.
+        // A fixed scenario mining site still uses Surface Ops' single Mining
+        // Rig deployment. Mine remains visible so the core activity is never
+        // hidden behind a campaign-specific label; its action routes into the
+        // active recovery site.
         const bool scenarioMiningSiteActive = scenarioSurface &&
             surfaceScenario.state == ScenarioStepState::Active &&
             !surfaceScenario.miningSiteDefinitionId.empty();
@@ -4546,18 +4625,9 @@ std::string buildGamePanelMarkup(
                 << "</section>";
         }
         out << "</div>";
-        std::vector<const SurfaceActionPreviewPresentation*> orderedActions;
-        orderedActions.reserve(surfacePanel.actions.size());
-        for (const SurfaceActionPreviewPresentation& action : surfacePanel.actions) {
-            if (scenarioMiningSiteActive && isSurfaceMiningAction(action)) {
-                continue;
-            }
-            orderedActions.push_back(&action);
-        }
         out << "<section class=\"board-primary surface-actions phase-lane primary-actions rr-fixed-action-lane rr-action-footer\">";
         out << "<div class=\"surface-choice-list controller-action-row surface-controller-action-row rr-card-grid\">";
-        for (const SurfaceActionPreviewPresentation* actionPointer : orderedActions) {
-            const SurfaceActionPreviewPresentation& action = *actionPointer;
+        for (const SurfaceActionPreviewPresentation& action : surfacePanel.actions) {
             const std::string_view introductionModal =
                 showSurveyIntroduction && action.action.actionId == ui::actions::surveySurface
                     ? ui::modals::surfaceSurveyIntroduction
@@ -4865,6 +4935,18 @@ std::string buildGamePanelMarkup(
         out << "</div><div class=\"hangar-frontier-foot\"><p>Either option creates the required margin. Both stack to 10 margin and slingshot velocity.</p>"
             << modalButton("Review options", ui::modals::jupiterWindow, "ghost")
             << "</div></section>";
+    } else if (state.run.routeTransit.active()) {
+        const Destination* routeOrigin = catalog.findDestination(state.run.routeTransit.originDestinationId);
+        const Destination* routeTarget = catalog.findDestination(state.run.routeTransit.targetDestinationId);
+        const std::string routeLabel = std::string(routeOrigin == nullptr ? "Staging" : routeOrigin->name) +
+            " \xE2\x86\x92 " + (routeTarget == nullptr ? "destination" : routeTarget->name);
+        if (state.run.routeTransit.intent == RouteTransitIntent::Recovery) {
+            out << phaseAdvisory({"RECOVERY ROUTE", routeLabel + ". Complete the return flight to regain a safe staging point.", "warning"});
+        } else if (state.run.routeTransit.intent == RouteTransitIntent::Reapproach) {
+            out << phaseAdvisory({"REAPPROACH", routeLabel + ". The prior objective remains active.", "info"});
+        } else {
+            out << phaseAdvisory({"TRANSFER ROUTE", routeLabel + ".", "info"});
+        }
     } else if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
         const auto [title, detail] = launchLessonHangarObjective(state, catalog);
         out << "<section class=\"objective-strip rr-objective-strip phase-lane\"><span>Objective</span><strong>"
@@ -4894,7 +4976,19 @@ std::string buildGamePanelMarkup(
         && !ui::briefings::acknowledged(
             state.meta.acknowledgedActivityBriefingIds,
             ui::briefings::flightControlsCalibration);
-    const std::string prepareLaunchLabel = "Launch: " + launchTarget.name;
+    std::string prepareLaunchLabel = "Launch: " + launchTarget.name;
+    if (state.run.routeTransit.active()) {
+        const Destination* origin = catalog.findDestination(state.run.routeTransit.originDestinationId);
+        const std::string route = (origin == nullptr ? std::string("Staging") : origin->name) +
+            " \xE2\x86\x92 " + launchTarget.name;
+        if (state.run.routeTransit.intent == RouteTransitIntent::Recovery) {
+            prepareLaunchLabel = "Begin Recovery: " + route;
+        } else if (state.run.routeTransit.intent == RouteTransitIntent::Reapproach) {
+            prepareLaunchLabel = "Reapproach: " + launchTarget.name;
+        } else {
+            prepareLaunchLabel = "Transfer: " + route;
+        }
+    }
     const bool prepareLaunchBlocked =
         launchReadiness.blocked || !currentDestinationLaunchReady(state, catalog);
     out << "<div class=\"actions action-row rr-action-footer hangar-actions controller-action-row hangar-controller-action-row primary-actions\">";
@@ -5275,6 +5369,13 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
     }
 
     result.contentMarkup = buildGamePanelMarkup(context, result.modals);
+    if (context.sceneFadeToBlack > 0.0) {
+        std::ostringstream opacity;
+        opacity << std::fixed << std::setprecision(3)
+            << std::clamp(context.sceneFadeToBlack, 0.0, 1.0);
+        result.contentMarkup += "<div class=\"rr-scene-transition\" aria-hidden=\"true\" style=\"opacity: "
+            + opacity.str() + "\"></div>";
+    }
     const bool canReviewResearchBreakthrough = !context.titleScreenActive
         && (context.state.screen == Screen::ArrivalOps
             || context.state.screen == Screen::Hangar
@@ -5577,13 +5678,11 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
             appendHudText(
                 result,
                 prefix + "-label",
-                layer.revealed ? layer.label : "NEXT LAYER LOCKED");
+                miningCocoonLayerLabel(mining.gate, layerIndex));
             appendHudText(
                 result,
                 prefix + "-value",
-                layer.revealed
-                    ? std::to_string(cleared) + "/" + std::to_string(std::max(0, layer.total))
-                    : "LOCKED");
+                miningCocoonLayerValue(mining.gate, layerIndex));
             for (int cellIndex = 0; cellIndex < std::max(0, layer.total); ++cellIndex) {
                 appendHudClass(
                     result,

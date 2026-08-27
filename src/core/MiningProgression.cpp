@@ -845,4 +845,83 @@ bool miningRoomFeatureAllowed(const MiningArenaRules& rules, MiningCellFeature f
     return isAllowed(rules.allowedRoomFeatures, feature);
 }
 
+std::string_view miningEnemyThemeName(MiningEnemyTheme theme)
+{
+    switch (theme) {
+    case MiningEnemyTheme::Neutral: return "Neutral";
+    case MiningEnemyTheme::Lava: return "Lava";
+    case MiningEnemyTheme::Ice: return "Ice";
+    case MiningEnemyTheme::Radioactive: return "Radioactive";
+    case MiningEnemyTheme::Toxic: return "Toxic";
+    }
+    return "Neutral";
+}
+
+MiningElementalAffinity miningEnemyThemeAffinity(MiningEnemyTheme theme)
+{
+    switch (theme) {
+    case MiningEnemyTheme::Lava: return MiningElementalAffinity::Thermal;
+    case MiningEnemyTheme::Ice: return MiningElementalAffinity::Cryo;
+    case MiningEnemyTheme::Radioactive: return MiningElementalAffinity::Radiation;
+    case MiningEnemyTheme::Toxic: return MiningElementalAffinity::Toxic;
+    case MiningEnemyTheme::Neutral: return MiningElementalAffinity::None;
+    }
+    return MiningElementalAffinity::None;
+}
+
+MiningEnemyTheme miningEnemyThemeForAffinity(MiningElementalAffinity affinity)
+{
+    switch (affinity) {
+    case MiningElementalAffinity::Thermal: return MiningEnemyTheme::Lava;
+    case MiningElementalAffinity::Cryo: return MiningEnemyTheme::Ice;
+    case MiningElementalAffinity::Radiation: return MiningEnemyTheme::Radioactive;
+    case MiningElementalAffinity::Toxic: return MiningEnemyTheme::Toxic;
+    case MiningElementalAffinity::None: return MiningEnemyTheme::Neutral;
+    }
+    return MiningEnemyTheme::Neutral;
+}
+
+MiningEnemyTheme selectMiningEnemyTheme(const MiningArenaRules& rules, std::uint64_t seed)
+{
+    // Before affinity-bearing enemies enter the curriculum, retain the
+    // neutral ecology. Once Elementals are legal, choose one whole-site theme
+    // from the same affinity whitelist used by gameplay.
+    if (!miningEnemyAllowed(rules, MiningEnemyType::Elemental)) {
+        return MiningEnemyTheme::Neutral;
+    }
+    std::array<MiningEnemyTheme, 4> candidates {};
+    std::size_t count = 0;
+    const auto addIfAllowed = [&](MiningEnemyTheme theme) {
+        if (miningAffinityAllowed(rules, miningEnemyThemeAffinity(theme))) {
+            candidates[count++] = theme;
+        }
+    };
+    addIfAllowed(MiningEnemyTheme::Lava);
+    addIfAllowed(MiningEnemyTheme::Ice);
+    addIfAllowed(MiningEnemyTheme::Radioactive);
+    addIfAllowed(MiningEnemyTheme::Toxic);
+    if (count == 0) {
+        return MiningEnemyTheme::Neutral;
+    }
+    return candidates[static_cast<std::size_t>(mix64(seed ^ 0x454e454d5954484dULL) % count)];
+}
+
+MiningEnemyTheme resolveMiningEnemyTheme(
+    const MiningArenaRules& rules,
+    const MiningSiteDefinition* authoredSite,
+    const MiningSiteProgress* compatibilitySite)
+{
+    if (authoredSite != nullptr) {
+        return authoredSite->biome == MiningSiteBiome::ThermalLava
+            ? MiningEnemyTheme::Lava
+            : authoredSite->enemyTheme;
+    }
+    if (compatibilitySite != nullptr &&
+        (compatibilitySite->enemyTheme != MiningEnemyTheme::Neutral ||
+            !miningEnemyAllowed(rules, MiningEnemyType::Elemental))) {
+        return compatibilitySite->enemyTheme;
+    }
+    return selectMiningEnemyTheme(rules, rules.request.seed);
+}
+
 } // namespace rocket

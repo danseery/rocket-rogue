@@ -229,10 +229,33 @@ inline LaunchPanelPresentation launchPanelPresentation(
     LaunchPanelPresentation presentation;
     const Destination& destination = launchDisplayDestination(state, catalog, flightModel);
     presentation.destinationName = destination.name;
-    presentation.sectionTitle = launchFlight != nullptr
-        ? (actions.returningHome ? "Return \xE2\x80\xA2 " : "Outbound \xE2\x80\xA2 ") + destination.name
-        : "Launch \xE2\x80\xA2 " + destination.name;
-    addLaunchLessonCopy(presentation, flightModel, destination);
+    const RouteTransitState& transit = flightModel.config.routeTransit;
+    const Destination* origin = transit.active()
+        ? catalog.findDestination(transit.originDestinationId)
+        : nullptr;
+    const std::string routeLabel = origin == nullptr
+        ? destination.name
+        : origin->name + " \xE2\x86\x92 " + destination.name;
+    if (transit.active() && transit.intent == RouteTransitIntent::Recovery) {
+        presentation.sectionTitle = launchFlight != nullptr
+            ? (actions.returningHome ? "Return \xE2\x80\xA2 " : "Recovery \xE2\x80\xA2 ") + routeLabel
+            : "Recovery \xE2\x80\xA2 " + routeLabel;
+        presentation.objectiveTitle = "RECOVER TO " + destination.name;
+        presentation.objectiveCopy = "Fly the return route to " + destination.name + ". Turning around returns to the passed destination.";
+    } else if (transit.active() && transit.intent == RouteTransitIntent::Reapproach) {
+        presentation.sectionTitle = launchFlight != nullptr
+            ? (actions.returningHome ? "Return \xE2\x80\xA2 " : "Reapproach \xE2\x80\xA2 ") + routeLabel
+            : "Reapproach \xE2\x80\xA2 " + routeLabel;
+        presentation.objectiveTitle = "REAPPROACH " + destination.name;
+        presentation.objectiveCopy = "Re-enter " + destination.name + " from the recovered staging route.";
+    } else {
+        presentation.sectionTitle = launchFlight != nullptr
+            ? (actions.returningHome ? "Return \xE2\x80\xA2 " : "Outbound \xE2\x80\xA2 ") + routeLabel
+            : "Launch \xE2\x80\xA2 " + routeLabel;
+    }
+    if (presentation.objectiveTitle.empty()) {
+        addLaunchLessonCopy(presentation, flightModel, destination);
+    }
 
     if (launchFlight == nullptr) {
         presentation.displayedMultiplier = currentMultiplier;

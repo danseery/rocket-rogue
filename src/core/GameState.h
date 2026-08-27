@@ -53,6 +53,15 @@ double pendingLaunchSpeedBoostForDestination(
 double pendingLaunchInstabilityPenaltyForDestination(
     const GameState& state,
     std::string_view destinationId);
+const RouteLinkDefinition* routeLinkForTransit(
+    const ContentCatalog& catalog,
+    const RouteTransitState& transit);
+RouteTransitState makeRouteTransit(
+    const ContentCatalog& catalog,
+    std::string_view sourceDestinationId,
+    std::string_view targetDestinationId,
+    RouteTransitIntent intent);
+bool routeTransitIsRecovery(const RouteTransitState& transit);
 double calibratedTransferFuelMargin(
     const GameState& state,
     const Destination& destination);

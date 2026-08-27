@@ -214,6 +214,7 @@ double orbitCreditReward(const Destination& destination, OrbitGrade grade);
 int orbitResearchDataReward(const Destination& destination, OrbitGrade grade);
 bool flybyClearsGenericNextRoute(const GameState& state, const ContentCatalog& catalog);
 bool bankFlybyRouteClearance(GameState& state, const ContentCatalog& catalog);
+bool queueBlockedArrivalFlybyRecovery(GameState& state, const ContentCatalog& catalog);
 bool captureArrivalOrbit(GameState& state);
 bool shouldOpenArrivalOps(const LaunchOutcome& outcome, const ContentCatalog& catalog);
 bool shouldOpenPostArrivalPhases(const LaunchOutcome& outcome, const ContentCatalog& catalog);

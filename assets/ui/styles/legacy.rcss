@@ -163,6 +163,21 @@ scrollbarcorner {
     border-width: 0px;
     border-radius: 0px;
 }
+.rr-scene-transition {
+    /* This is a document handoff, not panel content. Fixed positioning keeps
+       the native and web fallback overlays over the entire viewport even when
+       the active panel is a narrow control rail. */
+    position: fixed;
+    left: 0px;
+    top: 0px;
+    right: 0px;
+    bottom: 0px;
+    width: 100%;
+    height: 100%;
+    background-color: #000000;
+    pointer-events: auto;
+    z-index: 1000;
+}
 #rr-panel.story-briefing-panel-mode {
     left: 0px;
     top: 0px;
@@ -5373,7 +5388,8 @@ button.settings-toggle:hover {
 #rr-modal.modal-mars_bay_completion .modal-scroll-body,
 #rr-modal.modal-io_volcanic_briefing .modal-scroll-body,
 #rr-modal.modal-saturn_slingshot_briefing .modal-scroll-body,
-#rr-modal.modal-saturn_slingshot_failure .modal-scroll-body {
+#rr-modal.modal-saturn_slingshot_failure .modal-scroll-body,
+#rr-modal.modal-jupiter_slingshot_active .modal-scroll-body {
     overflow-y: auto;
     padding-right: 8px;
 }
@@ -5389,7 +5405,8 @@ button.settings-toggle:hover {
 #rr-modal.modal-mars_bay_completion,
 #rr-modal.modal-io_volcanic_briefing,
 #rr-modal.modal-saturn_slingshot_briefing,
-#rr-modal.modal-saturn_slingshot_failure {
+#rr-modal.modal-saturn_slingshot_failure,
+#rr-modal.modal-jupiter_slingshot_active {
     left: var(--rr-legacy-layout-119, 0px);
     top: var(--rr-legacy-layout-120, 0px);
     width: var(--rr-legacy-layout-121, 0px);
@@ -5408,7 +5425,8 @@ button.settings-toggle:hover {
 #rr-modal.modal-mars_bay_completion .modal-head,
 #rr-modal.modal-io_volcanic_briefing .modal-head,
 #rr-modal.modal-saturn_slingshot_briefing .modal-head,
-#rr-modal.modal-saturn_slingshot_failure .modal-head {
+#rr-modal.modal-saturn_slingshot_failure .modal-head,
+#rr-modal.modal-jupiter_slingshot_active .modal-head {
     margin-bottom: 12px;
 }
 #rr-modal.modal-launch_outcome .modal-head button,
@@ -5424,7 +5442,8 @@ button.settings-toggle:hover {
 #rr-modal.modal-mars_bay_completion .modal-head button,
 #rr-modal.modal-io_volcanic_briefing .modal-head button,
 #rr-modal.modal-saturn_slingshot_briefing .modal-head button,
-#rr-modal.modal-saturn_slingshot_failure .modal-head button {
+#rr-modal.modal-saturn_slingshot_failure .modal-head button,
+#rr-modal.modal-jupiter_slingshot_active .modal-head button {
     box-sizing: border-box;
     width: 72px;
     height: 34px;
@@ -10260,12 +10279,16 @@ button:disabled:hover {
 .title-menu .title-action:hover,
 .title-menu .title-action:focus,
 body.controller-focus-visible .title-menu .title-action.rr-controller-focus {
-    color: #f4c95d;
-    font-effect: glow(2px #9b761e);
+    color: #ffd166;
     background-color: #155d78;
     border-width: 2px;
     border-color: #ffffff;
     animation: title-action-engage 0.20s cubic-in-out 1;
+}
+.title-menu .title-action:hover .rr-button-label,
+.title-menu .title-action:focus .rr-button-label,
+body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-button-label {
+    color: #ffd166;
 }
 .title-screen.is-launching .title-content {
     animation: title-content-depart 0.87s cubic-in 0.50s 1 forwards;
@@ -10277,11 +10300,13 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus {
     pointer-events: none;
 }
 .title-screen.is-launching .title-action {
-    color: #f4c95d;
+    color: #ffd166;
     background-color: #155d78;
     border-width: 2px;
     border-color: #ffffff;
-    font-effect: glow(2px #9b761e);
+}
+.title-screen.is-launching .title-action .rr-button-label {
+    color: #ffd166;
 }
 @keyframes title-action-engage {
     from { transform: translateY(0px) scale(1.0); }

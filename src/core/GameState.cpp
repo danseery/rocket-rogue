@@ -414,6 +414,58 @@ double pendingLaunchInstabilityPenaltyForDestination(
         1.0);
 }
 
+const RouteLinkDefinition* routeLinkForTransit(
+    const ContentCatalog& catalog,
+    const RouteTransitState& transit)
+{
+    if (!transit.active()) {
+        return nullptr;
+    }
+    const RouteLinkDefinition* link = catalog.findRouteLink(transit.routeLinkId);
+    if (link == nullptr) {
+        return nullptr;
+    }
+    const bool forward = link->sourceDestinationId == transit.originDestinationId &&
+        link->targetDestinationId == transit.targetDestinationId;
+    const bool recovery = transit.intent == RouteTransitIntent::Recovery &&
+        link->recoveryAvailable &&
+        link->targetDestinationId == transit.originDestinationId &&
+        link->sourceDestinationId == transit.targetDestinationId;
+    return forward || recovery ? link : nullptr;
+}
+
+RouteTransitState makeRouteTransit(
+    const ContentCatalog& catalog,
+    std::string_view sourceDestinationId,
+    std::string_view targetDestinationId,
+    RouteTransitIntent intent)
+{
+    RouteTransitState transit;
+    if (intent == RouteTransitIntent::None || sourceDestinationId.empty() || targetDestinationId.empty()) {
+        return transit;
+    }
+    const RouteLinkDefinition* link = catalog.findRouteLink(sourceDestinationId, targetDestinationId);
+    if (link == nullptr && intent == RouteTransitIntent::Recovery) {
+        link = catalog.findRouteLink(targetDestinationId, sourceDestinationId);
+        if (link == nullptr || !link->recoveryAvailable) {
+            return {};
+        }
+    }
+    if (link == nullptr) {
+        return transit;
+    }
+    transit.routeLinkId = link->id;
+    transit.originDestinationId = std::string(sourceDestinationId);
+    transit.targetDestinationId = std::string(targetDestinationId);
+    transit.intent = intent;
+    return transit;
+}
+
+bool routeTransitIsRecovery(const RouteTransitState& transit)
+{
+    return transit.active() && transit.intent == RouteTransitIntent::Recovery;
+}
+
 double calibratedTransferFuelMargin(
     const GameState& state,
     const Destination& destination)
@@ -879,6 +931,20 @@ void syncLaunchConfig(GameState& state, const ContentCatalog& catalog)
     state.launchConfig.missionKind = currentLaunchMissionKind(state, catalog);
     state.launchConfig.frameId = state.run.frameId;
     state.launchConfig.equippedModuleIds = state.run.equippedModuleIds;
+
+    // A queued route always overrides the otherwise frontier-derived target.
+    // Training missions intentionally do not carry a route transit.
+    if (state.run.routeTransit.active() &&
+        routeLinkForTransit(catalog, state.run.routeTransit) != nullptr) {
+        state.launchConfig.routeTransit = state.run.routeTransit;
+        state.launchConfig.destinationId = state.run.routeTransit.targetDestinationId;
+        state.launchConfig.frontierTransfer = true;
+        if (const Destination* routeTarget = catalog.findDestination(state.run.routeTransit.targetDestinationId)) {
+            state.launchConfig.burnGoalMultiplier = routeTarget->targetMultiplier;
+        }
+    } else {
+        state.launchConfig.routeTransit = {};
+    }
 
     if (launchTrainingDestination(state, catalog) != nullptr) {
         state.launchConfig.burnGoalMultiplier = state.launchConfig.frontierTransfer
@@ -1989,6 +2055,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         outcome.recoveryMethod == RecoveryMethod::TransferArrival;
     const bool failedCurriculumTransfer =
         curriculumTransferAttempt && !curriculumTransferSucceeded;
+    const bool recoveryTransit = routeTransitIsRecovery(outcome.routeTransit);
     if (failedCurriculumTransfer) {
         // These are explicit arrival missions, not the legacy proving loop.
         // Returning early is safe, but it must not manufacture progress or an
@@ -2022,7 +2089,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         && outcomeDestinationIndex == state.run.destinationIndex;
     const bool solarFrontierRevisit = !hostileSystemActive(state)
         && outcomeDestinationIndex == state.run.destinationIndex;
-    const bool validDestinationSuccess = outcome.type == LaunchResultType::MissionComplete
+    const bool validDestinationSuccess = !recoveryTransit && outcome.type == LaunchResultType::MissionComplete
         && outcomeDestination != nullptr
         && (!lessonMissionActive || lessonArrivalSucceeded)
         && (!outcome.frontierTransfer || solarFrontierAdvance || solarFrontierRevisit || selectedHostileSortie);
@@ -2095,7 +2162,33 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
             state.meta.famousLaunches.push_back(famous.str());
         }
 
-        if (lessonMissionActive) {
+        if (recoveryTransit) {
+            if (outcome.type == LaunchResultType::MissionComplete &&
+                outcome.recoveryMethod == RecoveryMethod::TransferArrival) {
+                state.run.routeTransit = makeRouteTransit(
+                    catalog,
+                    outcome.destinationId,
+                    outcome.routeTransit.originDestinationId,
+                    RouteTransitIntent::Reapproach);
+                const Destination* staging = catalog.findDestination(outcome.destinationId);
+                const Destination* retry = catalog.findDestination(outcome.routeTransit.originDestinationId);
+                const std::string retryLabel = retry == nullptr
+                    ? "a reapproach"
+                    : "reapproach " + retry->name;
+                state.statusLine = "Recovery complete: " +
+                    std::string(staging == nullptr ? "staging" : staging->name) +
+                    " is ready for " +
+                    retryLabel + ".";
+            } else {
+                // Turning around remains a valid choice during a recovery
+                // flight. The original recovery route stays queued at the
+                // passed body so the player may retry without a hidden jump.
+                state.run.routeTransit = outcome.routeTransit;
+                state.statusLine = outcome.recoveryMethod == RecoveryMethod::ReturnHome
+                    ? "Recovery turn-around complete. The ship is back at the passed destination."
+                    : "Recovery flight incomplete. The passed destination remains the active staging point.";
+            }
+        } else if (lessonMissionActive) {
             if (lessonReturnSucceeded) {
                 advanceLaunchLessonAfterReturn(state, missionKind);
                 state.statusLine = "Calibration telemetry validated. A direct launch upgrade is ready.";
@@ -2167,6 +2260,11 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
                 state.statusLine = std::string(text::status::earlyReturnShallow);
             }
         }
+    }
+
+    if (!recoveryTransit && outcome.type == LaunchResultType::MissionComplete &&
+        outcome.recoveryMethod == RecoveryMethod::TransferArrival && outcome.routeTransit.active()) {
+        state.run.routeTransit = {};
     }
 
     state.run.refitEntitled = state.run.refitEntitled ||

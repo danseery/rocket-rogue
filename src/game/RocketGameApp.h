@@ -4,6 +4,7 @@
 #include "core/GameState.h"
 #include "core/LaunchSimulation.h"
 #include "core/Random.h"
+#include "game/SceneTransition.h"
 #include "input/GameInputRouter.h"
 #include "platform/AppServices.h"
 #include "render/RenderSnapshot.h"
@@ -190,6 +191,13 @@ private:
         double elapsed = 0.0;
     };
 
+    enum class MiningSceneHandoff {
+        None,
+        EnterMining,
+        ReturnToSurface,
+        AbortMining
+    };
+
     struct ArrivalFanfareState {
         bool active = false;
         double elapsed = 0.0;
@@ -250,6 +258,13 @@ private:
     void save();
     void beginTitleLaunch(bool newCampaign);
     void completeTitleLaunch();
+    void finishTitleLaunch();
+    void beginSceneFadeToBlack(double durationSeconds);
+    void beginSceneFadeFromBlack(double durationSeconds);
+    void queueMiningSceneHandoff(MiningSceneHandoff handoff);
+    bool advanceMiningSceneHandoff(double deltaSeconds);
+    void completeMiningSceneHandoff();
+    void startMiningRunAfterFade();
     void startNewGame();
     PanelRenderContext panelRenderContext(const PreparedLaunch& flightModel) const;
     void refreshPanel();
@@ -301,6 +316,8 @@ private:
     InputSource activeInputSource_ = InputSource::None;
     LaunchSessionState session_;
     MiningExtractionState miningExtraction_;
+    MiningSceneHandoff miningSceneHandoff_ = MiningSceneHandoff::None;
+    bool miningSceneHandoffCommitted_ = false;
     LevelUpSessionState levelUp_;
     RealtimeInputState keyboardRealtimeInput_;
     RealtimeInputState controllerRealtimeInput_;
@@ -329,6 +346,7 @@ private:
     bool titleLaunchActive_ = false;
     bool titleLaunchStartsNewCampaign_ = false;
     double titleLaunchElapsedSeconds_ = 0.0;
+    SceneTransition sceneTransition_;
     bool hasSavedGame_ = false;
     std::string titleNotice_;
     bool panelDirty_ = true;

@@ -960,7 +960,8 @@ std::string serializeMiningSites(const std::vector<MiningSiteProgress>& sites)
             << encodeSaveBlob(site.artifactId) << save_schema::crewFieldDelimiter
             << (site.discovered ? 1 : 0) << save_schema::crewFieldDelimiter
             << (site.completed ? 1 : 0) << save_schema::crewFieldDelimiter
-            << (site.legacyMigrated ? 1 : 0);
+            << (site.legacyMigrated ? 1 : 0) << save_schema::crewFieldDelimiter
+            << static_cast<int>(site.enemyTheme);
     }
     return out.str();
 }
@@ -985,6 +986,12 @@ std::vector<MiningSiteProgress> parseMiningSites(std::string_view text)
             fields.size() > 9
             ? parseInt(fields[9], 0) != 0
             : true;
+        if (fields.size() > 10) {
+            site.enemyTheme = static_cast<MiningEnemyTheme>(std::clamp(
+                parseInt(fields[10], 0),
+                static_cast<int>(MiningEnemyTheme::Neutral),
+                static_cast<int>(MiningEnemyTheme::Toxic)));
+        }
         sites.push_back(std::move(site));
     }
     return sites;
@@ -1792,7 +1799,10 @@ std::string serializeMiningEnemies(const std::vector<MiningEnemy>& enemies)
             << save_schema::crewFieldDelimiter << (enemy.swarmAssociated ? 1 : 0)
             << save_schema::crewFieldDelimiter << (enemy.elite ? 1 : 0)
             << save_schema::crewFieldDelimiter << enemy.scannedPrioritySeconds
-            << save_schema::crewFieldDelimiter << enemy.insightGroupKey;
+            << save_schema::crewFieldDelimiter << enemy.insightGroupKey
+            << save_schema::crewFieldDelimiter << enemy.attackAnimationSeconds
+            << save_schema::crewFieldDelimiter << enemy.hitAnimationSeconds
+            << save_schema::crewFieldDelimiter << enemy.defeatAnimationSeconds;
     }
     return out.str();
 }
@@ -1861,6 +1871,15 @@ std::vector<MiningEnemy> parseMiningEnemies(std::string_view text)
         if (fields.size() > 25) {
             enemy.insightGroupKey = parseInt(fields[25], -1);
         }
+        if (fields.size() > 26) {
+            enemy.attackAnimationSeconds = std::max(0.0, parseDouble(fields[26], 0.0));
+        }
+        if (fields.size() > 27) {
+            enemy.hitAnimationSeconds = std::max(0.0, parseDouble(fields[27], 0.0));
+        }
+        if (fields.size() > 28) {
+            enemy.defeatAnimationSeconds = std::max(0.0, parseDouble(fields[28], 0.0));
+        }
         if (fields.size() > 16) {
             enemy.spawn.affinity = miningElementalAffinityFromInt(parseInt(fields[16], 0));
         }
@@ -1927,7 +1946,8 @@ std::string serializeMiningMiniDrones(const std::vector<MiningMiniDroneAgent>& a
             << save_schema::crewFieldDelimiter << agent.equippedFrame
             << save_schema::crewFieldDelimiter << agent.uncreditedHaulMaterials.common
             << save_schema::crewFieldDelimiter << agent.uncreditedHaulMaterials.rare
-            << save_schema::crewFieldDelimiter << agent.uncreditedHaulMaterials.exotic;
+            << save_schema::crewFieldDelimiter << agent.uncreditedHaulMaterials.exotic
+            << save_schema::crewFieldDelimiter << agent.returnPathFailureSeconds;
     }
     return out.str();
 }
@@ -1957,7 +1977,7 @@ std::vector<MiningMiniDroneAgent> parseMiningMiniDrones(std::string_view text)
         agent.behavior = static_cast<MiningMiniDroneBehavior>(std::clamp(
             parseInt(fields[7], static_cast<int>(MiningMiniDroneBehavior::Following)),
             static_cast<int>(MiningMiniDroneBehavior::Following),
-            static_cast<int>(MiningMiniDroneBehavior::ReturningFromShip)));
+            static_cast<int>(MiningMiniDroneBehavior::RecoveringToRig)));
         if (fields.size() > 8) {
             agent.targetCellX = parseInt(fields[8], agent.targetCellX);
         }
@@ -2026,6 +2046,9 @@ std::vector<MiningMiniDroneAgent> parseMiningMiniDrones(std::string_view text)
         }
         if (fields.size() > 29) {
             agent.uncreditedHaulMaterials.exotic = std::max(0, parseInt(fields[29], 0));
+        }
+        if (fields.size() > 30) {
+            agent.returnPathFailureSeconds = std::max(0.0, parseDouble(fields[30], 0.0));
         }
         agents.push_back(agent);
     }
@@ -2627,6 +2650,7 @@ SaveData captureSaveData(const GameState& state)
     save.nextLaunchSpeedBoost = state.run.nextLaunchSpeedBoost;
     save.nextLaunchInstabilityPenalty = state.run.nextLaunchInstabilityPenalty;
     save.pendingTransferAssist = state.run.pendingTransferAssist;
+    save.routeTransit = state.run.routeTransit;
     save.jupiterSlingshotActive = state.run.pendingTransferAssist.definitionId == content::transferAssist::marsJupiter;
     if ((state.screen == Screen::ArrivalFanfare || state.screen == Screen::Flyby || state.screen == Screen::Orbit) && state.run.arrivalOps.active) {
         save.screen = Screen::ArrivalOps;
@@ -2746,6 +2770,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         0.0,
         1.0);
     state.run.pendingTransferAssist = save.pendingTransferAssist;
+    state.run.routeTransit = save.routeTransit;
     if (!state.run.pendingTransferAssist.active() && save.jupiterSlingshotActive) {
         state.run.pendingTransferAssist = {
             content::transferAssist::marsJupiter,
@@ -2763,6 +2788,28 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         state.run.nextLaunchSpeedBoost = 0.0;
         state.run.nextLaunchInstabilityPenalty = 0.0;
     }
+    const auto legacyInboundRoute = [&]() -> RouteTransitState {
+        const int targetIndex = state.run.destinationIndex;
+        if (targetIndex <= 0 || targetIndex >= static_cast<int>(catalog.destinations.size())) {
+            return {};
+        }
+        const Destination& source = catalog.destinations[static_cast<std::size_t>(targetIndex - 1)];
+        const Destination& target = catalog.destinations[static_cast<std::size_t>(targetIndex)];
+        return makeRouteTransit(catalog, source.id, target.id, RouteTransitIntent::Reapproach);
+    };
+    if (routeLinkForTransit(catalog, state.run.routeTransit) == nullptr) {
+        state.run.routeTransit = {};
+        if (save.screen == Screen::Hangar && !hostileSystemActive(state)) {
+            state.run.routeTransit = legacyInboundRoute();
+        }
+    }
+    if (state.run.pendingTransferAssist.active()) {
+        state.run.routeTransit = makeRouteTransit(
+            catalog,
+            state.run.pendingTransferAssist.sourceDestinationId,
+            state.run.pendingTransferAssist.targetDestinationId,
+            RouteTransitIntent::Outbound);
+    }
     state.run.inventoryModuleIds = save.inventoryModuleIds.empty() ? state.run.inventoryModuleIds : save.inventoryModuleIds;
     state.run.equippedModuleIds = save.equippedModuleIds.empty() ? state.run.equippedModuleIds : save.equippedModuleIds;
     state.run.crewUpgradeIds = save.crewUpgradeIds;
@@ -2770,6 +2817,10 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.offerCrewUpgradeIds = vectorToOfferArray(save.offerCrewUpgradeIds);
     state.run.researchProjectIds = vectorToOfferArray(save.researchProjectIds);
     state.run.arrivalOps = save.arrivalOps;
+    if (state.run.arrivalOps.active &&
+        routeLinkForTransit(catalog, state.run.arrivalOps.incomingRoute) == nullptr) {
+        state.run.arrivalOps.incomingRoute = legacyInboundRoute();
+    }
     state.run.surfaceExpedition = save.surfaceExpedition;
     state.run.surfaceExpedition.droneModuleAssignments = save.droneModuleAssignments;
     state.run.surfaceExpedition.scannerCooldownSeconds = save.scannerCooldownSeconds;
@@ -2779,6 +2830,22 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     {
         MiningRunState& mining = state.run.mining;
         constexpr double tau = 6.28318530717958647692;
+
+        if (mining.active && mining.enemyTheme == MiningEnemyTheme::Neutral) {
+            if (const MiningSiteDefinition* site = catalog.findMiningSite(mining.miningSiteDefinitionId)) {
+                mining.enemyTheme = site->biome == MiningSiteBiome::ThermalLava
+                    ? MiningEnemyTheme::Lava
+                    : site->enemyTheme;
+            } else {
+                const MiningArenaRules rules = resolveMiningArenaRules({
+                    mining.arenaMetadata.act,
+                    mining.arenaMetadata.difficulty,
+                    mining.arenaMetadata.seed,
+                    mining.arenaMetadata.gateOverrideEnabled,
+                    mining.arenaMetadata.gateType});
+                mining.enemyTheme = selectMiningEnemyTheme(rules, mining.arenaMetadata.seed);
+            }
+        }
 
         mining.rigDepthZone = std::max(0, mining.rigDepthZone);
         // Version-13 saves can contain the retired rig-to-ship tether. Keep
@@ -3115,6 +3182,10 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::pendingTransferAssistFuelSavings, save.pendingTransferAssist.fuelSavings);
     writeField(out, save_schema::field::pendingTransferAssistSpeedBoost, save.pendingTransferAssist.speedBoost);
     writeField(out, save_schema::field::pendingTransferAssistInstability, save.pendingTransferAssist.instabilityPenalty);
+    writeField(out, save_schema::field::routeTransitId, save.routeTransit.routeLinkId);
+    writeField(out, save_schema::field::routeTransitOrigin, save.routeTransit.originDestinationId);
+    writeField(out, save_schema::field::routeTransitTarget, save.routeTransit.targetDestinationId);
+    writeField(out, save_schema::field::routeTransitIntent, static_cast<int>(save.routeTransit.intent));
     writeField(out, save_schema::field::screen, screenToInt(save.screen));
     writeField(out, save_schema::field::campaignMilestone, campaignMilestoneToInt(save.campaignMilestone));
     writeField(out, save_schema::field::chapter, gameChapterToInt(save.chapter));
@@ -3152,6 +3223,10 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::arrivalTransferFuelRemaining, save.arrivalOps.transferFuelRemaining);
     writeField(out, save_schema::field::arrivalTransferFuelCapacity, save.arrivalOps.transferFuelCapacity);
     writeField(out, save_schema::field::arrivalApproachCommitment, static_cast<int>(save.arrivalOps.commitment));
+    writeField(out, save_schema::field::arrivalRouteId, save.arrivalOps.incomingRoute.routeLinkId);
+    writeField(out, save_schema::field::arrivalRouteOrigin, save.arrivalOps.incomingRoute.originDestinationId);
+    writeField(out, save_schema::field::arrivalRouteTarget, save.arrivalOps.incomingRoute.targetDestinationId);
+    writeField(out, save_schema::field::arrivalRouteIntent, static_cast<int>(save.arrivalOps.incomingRoute.intent));
     writeField(out, save_schema::field::surfaceActive, save.surfaceExpedition.active ? 1 : 0);
     writeField(out, save_schema::field::surfaceDestination, save.surfaceExpedition.destinationId);
     writeField(out, save_schema::field::surfaceSite, surfaceSiteProfileToInt(save.surfaceExpedition.siteProfile));
@@ -3207,7 +3282,8 @@ std::string serializeSaveData(const SaveData& save)
             encodeSaveBlob(save.mining.scenarioStepId) + "^" +
             encodeSaveBlob(save.mining.miningSiteDefinitionId) + "^" +
             std::to_string(static_cast<int>(save.mining.miningSiteBiome)) + "^" +
-            std::to_string(std::max(0.0, save.mining.siteBaselineOxygenSeconds)));
+            std::to_string(std::max(0.0, save.mining.siteBaselineOxygenSeconds)) + "^" +
+            std::to_string(static_cast<int>(save.mining.enemyTheme)));
     writeField(out, save_schema::field::miningElapsed, save.mining.elapsedSeconds);
     writeField(out, save_schema::field::miningOxygen, save.mining.oxygenSeconds);
     writeField(out, save_schema::field::miningDroneHealth, save.mining.droneHealth);
@@ -3358,6 +3434,38 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.arrivalOps.commitment = parseInt(value, 0) == static_cast<int>(ApproachCommitment::OrbitCaptured)
                 ? ApproachCommitment::OrbitCaptured
                 : ApproachCommitment::Uncommitted;
+            continue;
+        }
+        if (key == save_schema::field::arrivalRouteId) {
+            save.arrivalOps.incomingRoute.routeLinkId = std::string(value);
+            continue;
+        }
+        if (key == save_schema::field::arrivalRouteOrigin) {
+            save.arrivalOps.incomingRoute.originDestinationId = std::string(value);
+            continue;
+        }
+        if (key == save_schema::field::arrivalRouteTarget) {
+            save.arrivalOps.incomingRoute.targetDestinationId = std::string(value);
+            continue;
+        }
+        if (key == save_schema::field::arrivalRouteIntent) {
+            save.arrivalOps.incomingRoute.intent = static_cast<RouteTransitIntent>(std::clamp(parseInt(value, 0), 0, 3));
+            continue;
+        }
+        if (key == save_schema::field::routeTransitId) {
+            save.routeTransit.routeLinkId = std::string(value);
+            continue;
+        }
+        if (key == save_schema::field::routeTransitOrigin) {
+            save.routeTransit.originDestinationId = std::string(value);
+            continue;
+        }
+        if (key == save_schema::field::routeTransitTarget) {
+            save.routeTransit.targetDestinationId = std::string(value);
+            continue;
+        }
+        if (key == save_schema::field::routeTransitIntent) {
+            save.routeTransit.intent = static_cast<RouteTransitIntent>(std::clamp(parseInt(value, 0), 0, 3));
             continue;
         }
         if (key == save_schema::field::surfaceRigFuel) {
@@ -3560,6 +3668,12 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             if (fields.size() > 4) {
                 save.mining.siteBaselineOxygenSeconds =
                     std::max(0.0, parseDouble(fields[4], 0.0));
+            }
+            if (fields.size() > 5) {
+                save.mining.enemyTheme = static_cast<MiningEnemyTheme>(std::clamp(
+                    parseInt(fields[5], 0),
+                    static_cast<int>(MiningEnemyTheme::Neutral),
+                    static_cast<int>(MiningEnemyTheme::Toxic)));
             }
         } else if (key == save_schema::field::miningElapsed) {
             save.mining.elapsedSeconds = parseDouble(value, save.mining.elapsedSeconds);

@@ -26,6 +26,11 @@ constexpr float kSceneViewportPadding = 0.92F;
 // trajectory remain legible on a Steam Deck without changing simulation.
 constexpr float kOrbitSceneScale = 1.66F;
 constexpr float kFlybySceneScale = 1.50F;
+// Active Flyby uses the side-panel scene viewport. Keep the actual finish
+// gate (including the full Good width) on-screen there; otherwise the player
+// can lose sight of the goal even though the maneuver remains active.
+constexpr float kFlybyGoalScreenMargin = 0.060F;
+constexpr float kFlybyFinishMarkerRadius = 0.028F;
 constexpr Color kFlightPathTrailColor {1.0F, 0.18F, 0.16F, 1.0F};
 constexpr float kFlightPathTrailAlphaStart = 0.18F;
 constexpr float kFlightPathTrailAlphaRange = 0.34F;
@@ -66,6 +71,31 @@ constexpr std::size_t kMaxSurfacePushRewardMarkers = 10U;
 // This is far above the largest supported mining scene, while keeping one
 // malformed frame below two megabytes of packed instance storage.
 constexpr std::size_t kMaxFrameInstances = 65'536U;
+
+std::pair<float, float> flybyFinishGateHalfExtents() noexcept
+{
+    const float tangentX = static_cast<float>(
+        tuning::flyby::endX - tuning::flyby::control2X);
+    const float tangentY = static_cast<float>(
+        tuning::flyby::endY - tuning::flyby::control2Y);
+    const float tangentLength = std::max(0.0001F, std::hypot(tangentX, tangentY));
+    const float normalX = -tangentY / tangentLength;
+    const float normalY = tangentX / tangentLength;
+    const float finishHalfWidth = static_cast<float>(tuning::flyby::goodBand)
+        + kFlybyFinishMarkerRadius + kFlybyGoalScreenMargin;
+    return {
+        std::abs(static_cast<float>(tuning::flyby::endX)) + std::abs(normalX) * finishHalfWidth,
+        std::abs(static_cast<float>(tuning::flyby::endY)) + std::abs(normalY) * finishHalfWidth
+    };
+}
+
+float flybyGoalWorldUnitLimit(float sceneWidthPixels, float sceneHeightPixels) noexcept
+{
+    const auto [goalHalfWidth, goalHalfHeight] = flybyFinishGateHalfExtents();
+    return std::min(
+        sceneWidthPixels * 0.5F / std::max(0.0001F, goalHalfWidth),
+        sceneHeightPixels * 0.5F / std::max(0.0001F, goalHalfHeight));
+}
 
 int boundedSurfacePushMaxSteps(int value) noexcept
 {
@@ -123,7 +153,37 @@ enum ArtAsset {
     JetpackCapybaraAsset = 34,
     PoiGuidanceArrowAsset = 35,
     AsteroidAsset = 36,
-    FlightInstrumentClusterAsset = 37
+    FlightInstrumentClusterAsset = 37,
+    EnemyAntNeutralAsset = 38,
+    EnemyAntLavaAsset = 39,
+    EnemyAntIceAsset = 40,
+    EnemyAntRadioactiveAsset = 41,
+    EnemyAntToxicAsset = 42,
+    EnemyFlyingNeutralAsset = 43,
+    EnemyFlyingLavaAsset = 44,
+    EnemyFlyingIceAsset = 45,
+    EnemyFlyingRadioactiveAsset = 46,
+    EnemyFlyingToxicAsset = 47,
+    EnemyBeetleNeutralAsset = 48,
+    EnemyBeetleLavaAsset = 49,
+    EnemyBeetleIceAsset = 50,
+    EnemyBeetleRadioactiveAsset = 51,
+    EnemyBeetleToxicAsset = 52,
+    EnemyElementalNeutralAsset = 53,
+    EnemyElementalLavaAsset = 54,
+    EnemyElementalIceAsset = 55,
+    EnemyElementalRadioactiveAsset = 56,
+    EnemyElementalToxicAsset = 57,
+    EnemyMammalNeutralAsset = 58,
+    EnemyMammalLavaAsset = 59,
+    EnemyMammalIceAsset = 60,
+    EnemyMammalRadioactiveAsset = 61,
+    EnemyMammalToxicAsset = 62,
+    EnemySpawnerNeutralAsset = 63,
+    EnemySpawnerLavaAsset = 64,
+    EnemySpawnerIceAsset = 65,
+    EnemySpawnerRadioactiveAsset = 66,
+    EnemySpawnerToxicAsset = 67
 };
 
 constexpr TextureId textureForAsset(int assetIndex) noexcept
@@ -315,6 +375,11 @@ int destinationBodyAsset(int destinationTier)
     return -1;
 }
 
+int originBodyAsset(int originTier)
+{
+    return originTier <= 0 ? EarthAsset : destinationBodyAsset(originTier);
+}
+
 int destinationBodyAsset(const RenderSnapshot& snapshot)
 {
     switch (snapshot.debugActOneCheckpoint) {
@@ -469,6 +534,101 @@ Color miningEnemyColor(int type, int affinity)
     }
 }
 
+MiningEnemyTheme miningEnemyVisualTheme(const MiningEnemy& enemy, MiningEnemyTheme siteTheme)
+{
+    if (enemy.affinity != MiningElementalAffinity::None) {
+        switch (enemy.affinity) {
+        case MiningElementalAffinity::Thermal:
+            return MiningEnemyTheme::Lava;
+        case MiningElementalAffinity::Cryo:
+            return MiningEnemyTheme::Ice;
+        case MiningElementalAffinity::Radiation:
+            return MiningEnemyTheme::Radioactive;
+        case MiningElementalAffinity::Toxic:
+            return MiningEnemyTheme::Toxic;
+        case MiningElementalAffinity::None:
+            break;
+        }
+    }
+    return siteTheme;
+}
+
+int miningEnemyAsset(MiningEnemyType type, MiningEnemyTheme theme)
+{
+    const int themeOffset = std::clamp(static_cast<int>(theme), 0, 4);
+    switch (type) {
+    case MiningEnemyType::Ant:
+        return EnemyAntNeutralAsset + themeOffset;
+    case MiningEnemyType::Flying:
+        return EnemyFlyingNeutralAsset + themeOffset;
+    case MiningEnemyType::Beetle:
+        return EnemyBeetleNeutralAsset + themeOffset;
+    case MiningEnemyType::Elemental:
+        return EnemyElementalNeutralAsset + themeOffset;
+    case MiningEnemyType::Mammal:
+        return EnemyMammalNeutralAsset + themeOffset;
+    case MiningEnemyType::Spawner:
+        return EnemySpawnerNeutralAsset + themeOffset;
+    case MiningEnemyType::None:
+        break;
+    }
+    return -1;
+}
+
+bool miningEnemyUsesAffinityPresentation(const MiningEnemy& enemy)
+{
+    return enemy.affinity != MiningElementalAffinity::None &&
+        (enemy.type == MiningEnemyType::Elemental || enemy.elite ||
+            enemy.sourceFeature == MiningCellFeature::MinibossLair ||
+            enemy.sourceFeature == MiningCellFeature::BossChamber);
+}
+
+struct MiningEnemyAnimationFrame {
+    int frame = 0;
+    bool attacking = false;
+};
+
+MiningEnemyAnimationFrame miningEnemyAnimationFrame(
+    const MiningEnemy& enemy,
+    double animationTime,
+    std::size_t enemyIndex)
+{
+    constexpr int framesPerClip = 4;
+    constexpr int idleStart = 0;
+    constexpr int moveStart = 4;
+    constexpr int attackStart = 8;
+    constexpr int hitStart = 12;
+    constexpr int defeatStart = 16;
+    const double loopPhase = std::fmod(static_cast<double>(enemyIndex) * 0.371, 1.0);
+    const auto loopFrame = [&](int start, double fps) {
+        return start + static_cast<int>(std::floor((animationTime + loopPhase) * fps)) % framesPerClip;
+    };
+    const auto oneShotFrame = [&](int start, double duration, double remaining, double fps) {
+        const double elapsed = std::clamp(duration - remaining, 0.0, duration);
+        return start + std::clamp(static_cast<int>(std::floor(elapsed * fps)), 0, framesPerClip - 1);
+    };
+
+    if (!enemy.active && enemy.defeatAnimationSeconds > 0.0) {
+        return {
+            oneShotFrame(defeatStart, tuning::mining::enemyDefeatAnimationSeconds, enemy.defeatAnimationSeconds, 10.0),
+            false};
+    }
+    if (enemy.hitAnimationSeconds > 0.0) {
+        return {
+            oneShotFrame(hitStart, tuning::mining::enemyHitAnimationSeconds, enemy.hitAnimationSeconds, 16.0),
+            false};
+    }
+    if (enemy.attackAnimationSeconds > 0.0) {
+        return {
+            oneShotFrame(attackStart, tuning::mining::enemyAttackAnimationSeconds, enemy.attackAnimationSeconds, 12.0),
+            true};
+    }
+    if (std::hypot(enemy.velocityX, enemy.velocityY) > 0.05) {
+        return {loopFrame(moveStart, 10.0), false};
+    }
+    return {loopFrame(idleStart, 6.0), false};
+}
+
 Color miningProjectileColor(int team, int sourceType, int affinity, bool critical)
 {
     if (critical) {
@@ -477,7 +637,7 @@ Color miningProjectileColor(int team, int sourceType, int affinity, bool critica
     if (team == static_cast<int>(MiningCombatTeam::Allied)) {
         return {0.30F, 0.92F, 1.0F, 0.94F};
     }
-    if (sourceType == static_cast<int>(MiningEnemyType::Elemental)) {
+    if (affinity != static_cast<int>(MiningElementalAffinity::None)) {
         Color elemental = miningEnemyColor(sourceType, affinity);
         elemental.a = 0.94F;
         return elemental;
@@ -878,6 +1038,7 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
     if (snapshot.flightInstrumentsVisible) {
         drawFlightInstruments(snapshot);
     }
+    drawSceneTransition(snapshot);
     finalizePacket();
     return packet_;
 }
@@ -1059,6 +1220,9 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
         sceneWorldUnit_ *= kOrbitSceneScale;
     } else if (snapshot.screen == Screen::Flyby) {
         sceneWorldUnit_ *= kFlybySceneScale;
+        sceneWorldUnit_ = std::min(
+            sceneWorldUnit_,
+            flybyGoalWorldUnitLimit(sceneWidthPixels, sceneHeightPixels));
     }
     sceneWorldUnitX_ = sceneWorldUnit_;
     sceneWorldUnitY_ = sceneWorldUnit_;
@@ -1819,6 +1983,34 @@ void SceneComposer::drawSprite(float cx, float cy, float w, float h, Color tint,
         PipelineClass::Textured);
 }
 
+void SceneComposer::drawSpriteMirrored(float cx, float cy, float w, float h, Color tint, int assetIndex, bool mirrorX, int frameIndex, int frameCount, bool worldSpace)
+{
+    if (!textureReady(assetIndex)) {
+        return;
+    }
+
+    const int frames = std::max(1, frameCount);
+    const int frame = std::clamp(frameIndex, 0, frames - 1);
+    const float frameU0 = static_cast<float>(frame) / static_cast<float>(frames);
+    const float frameU1 = static_cast<float>(frame + 1) / static_cast<float>(frames);
+    submitInstance(
+        {
+            cx, cy,
+            w * 0.5F, 0.0F,
+            0.0F, h * 0.5F,
+            tint,
+            mirrorX ? frameU1 : frameU0,
+            0.0F,
+            mirrorX ? frameU0 : frameU1,
+            1.0F,
+            SceneInstanceShape::Rectangle,
+            4
+        },
+        textureForAsset(assetIndex),
+        worldSpace ? CoordinateSpace::World : CoordinateSpace::Clip,
+        PipelineClass::Textured);
+}
+
 void SceneComposer::drawSpriteRotated(float cx, float cy, float w, float h, float forwardX, float forwardY, Color tint, int assetIndex, int frameIndex, int frameCount, bool worldSpace)
 {
     if (!textureReady(assetIndex)) {
@@ -1951,7 +2143,12 @@ void SceneComposer::drawFlyby(const RenderSnapshot& snapshot)
     drawCircle(startGate.x, startGate.y, 0.032F, {0.34F, 0.90F, 1.0F, 0.22F}, 24);
     drawFinishLine(goodBand, {0.28F, 0.88F, 1.0F, 0.38F}, 3.0F);
     drawFinishLine(perfectBand, {1.0F, 0.82F, 0.28F, 0.66F + pulse * 0.12F}, 5.0F);
-    drawCircle(endGate.x, endGate.y, 0.024F + pulse * 0.004F, {1.0F, 0.82F, 0.28F, 0.32F}, 24);
+    drawCircle(
+        endGate.x,
+        endGate.y,
+        kFlybyFinishMarkerRadius - 0.004F + pulse * 0.004F,
+        {1.0F, 0.82F, 0.28F, 0.32F},
+        24);
 
     const float planetRadius = 0.13F + std::min(4.0F, static_cast<float>(snapshot.destinationTier)) * 0.012F;
     drawRadialGlow(destX, destY, planetRadius * (1.46F + pulse * 0.05F), {0.01F, 0.22F, 0.36F, 0.14F}, 72);
@@ -2965,7 +3162,11 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             {chunkColor.r, chunkColor.g, chunkColor.b, 0.90F * pulse});
     }
 
-    const Vec2 activeActorCenterForTells = cellCenter(activeActorX, activeActorY);
+    // Terrain cells are indexed by their top-left grid coordinate, while the
+    // rig and EVA positions are continuous world points. Drawing the actors
+    // at a cell centre added half a tile to both axes, making a genuine wall
+    // collision appear to occur in empty space.
+    const Vec2 activeActorCenterForTells = gridPoint(activeActorX, activeActorY);
     for (const MiningProjectileVisual& projectile : snapshot.miningProjectiles) {
         const float t = static_cast<float>(std::clamp(projectile.lifetime <= 0.0 ? 1.0 : projectile.age / projectile.lifetime, 0.0, 1.0));
         const float fade = (1.0F - t) * (1.0F - t);
@@ -3007,88 +3208,95 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     }
 
     bool activeEnemyPresent = false;
-    for (const MiningEnemy& enemy : snapshot.miningEnemies) {
-        if (!enemy.active) {
+    for (std::size_t enemyIndex = 0; enemyIndex < snapshot.miningEnemies.size(); ++enemyIndex) {
+        const MiningEnemy& enemy = snapshot.miningEnemies[enemyIndex];
+        if (!enemy.active && enemy.defeatAnimationSeconds <= 0.0) {
             continue;
         }
-        activeEnemyPresent = true;
+        activeEnemyPresent = activeEnemyPresent || enemy.active;
         const Vec2 enemyCenter = cellCenter(enemy.x, enemy.y);
         const float health = static_cast<float>(std::clamp(enemy.maxHealth <= 0.0 ? 1.0 : enemy.health / enemy.maxHealth, 0.0, 1.0));
         const Color base = miningEnemyColor(static_cast<int>(enemy.type), static_cast<int>(enemy.affinity));
         const bool rangedEnemy = enemy.type == MiningEnemyType::Flying || enemy.type == MiningEnemyType::Elemental;
-        const bool eliteEnemy = enemy.elite || enemy.type == MiningEnemyType::Beetle || enemy.type == MiningEnemyType::Mammal;
-        const float swarmEliteScale = enemy.elite ? 1.20F : 1.0F;
+        const bool trueElite = enemy.elite || enemy.sourceFeature == MiningCellFeature::MinibossLair || enemy.sourceFeature == MiningCellFeature::BossChamber;
+        const bool largeEnemy = trueElite || enemy.type == MiningEnemyType::Beetle || enemy.type == MiningEnemyType::Mammal;
         const bool spawnerEnemy = enemy.type == MiningEnemyType::Spawner;
-        const float attackInterval = rangedEnemy
-            ? static_cast<float>(tuning::mining::enemyRangedAttackIntervalSeconds)
-            : static_cast<float>(tuning::mining::enemyMeleeAttackIntervalSeconds);
-        const float attackReady = 1.0F - std::clamp(static_cast<float>(enemy.attackCooldownSeconds) / std::max(0.01F, attackInterval), 0.0F, 1.0F);
-        const float tellPulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * (rangedEnemy ? 10.0F : 13.0F));
         const Vec2 directionToActor = normalize({
             activeActorCenterForTells.x - enemyCenter.x,
             activeActorCenterForTells.y - enemyCenter.y
         });
-        if (rangedEnemy) {
-            const Vec2 perpendicular {-directionToActor.y, directionToActor.x};
-            const float tellLength = std::min(cellW, cellH) * (0.62F + attackReady * 0.52F);
-            const float tellSpread = std::min(cellW, cellH) * (0.34F - attackReady * 0.10F + tellPulse * 0.025F);
-            const Vec2 tellTip {
-                enemyCenter.x + directionToActor.x * tellLength,
-                enemyCenter.y + directionToActor.y * tellLength
-            };
-            const Color tellColor {base.r, base.g, base.b, 0.12F + attackReady * 0.26F};
-            drawLine(
-                enemyCenter.x + perpendicular.x * tellSpread,
-                enemyCenter.y + perpendicular.y * tellSpread,
-                tellTip.x,
-                tellTip.y,
-                tellColor,
-                1.4F + attackReady * 0.8F);
-            drawLine(
-                enemyCenter.x - perpendicular.x * tellSpread,
-                enemyCenter.y - perpendicular.y * tellSpread,
-                tellTip.x,
-                tellTip.y,
-                tellColor,
-                1.4F + attackReady * 0.8F);
-        } else if (!spawnerEnemy) {
-            const float windupLength = std::min(cellW, cellH) * (0.74F + attackReady * 0.52F);
-            const Vec2 slashStart {
-                enemyCenter.x - directionToActor.y * windupLength * 0.35F,
-                enemyCenter.y + directionToActor.x * windupLength * 0.35F
-            };
-            const Vec2 slashEnd {
-                enemyCenter.x + directionToActor.x * windupLength,
-                enemyCenter.y + directionToActor.y * windupLength
-            };
-            drawLine(slashStart.x, slashStart.y, slashEnd.x, slashEnd.y, {1.0F, 0.22F, 0.12F, 0.12F + attackReady * 0.24F}, 1.8F + attackReady * 1.2F);
+
+        if (enemy.active) {
+            const float attackInterval = rangedEnemy
+                ? static_cast<float>(tuning::mining::enemyRangedAttackIntervalSeconds)
+                : static_cast<float>(tuning::mining::enemyMeleeAttackIntervalSeconds);
+            const float attackReady = 1.0F - std::clamp(static_cast<float>(enemy.attackCooldownSeconds) / std::max(0.01F, attackInterval), 0.0F, 1.0F);
+            const float tellPulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * (rangedEnemy ? 10.0F : 13.0F));
+            if (rangedEnemy) {
+                const Vec2 perpendicular {-directionToActor.y, directionToActor.x};
+                const float tellLength = std::min(cellW, cellH) * (0.62F + attackReady * 0.52F);
+                const float tellSpread = std::min(cellW, cellH) * (0.34F - attackReady * 0.10F + tellPulse * 0.025F);
+                const Vec2 tellTip {
+                    enemyCenter.x + directionToActor.x * tellLength,
+                    enemyCenter.y + directionToActor.y * tellLength
+                };
+                const Color tellColor {base.r, base.g, base.b, 0.12F + attackReady * 0.26F};
+                drawLine(enemyCenter.x + perpendicular.x * tellSpread, enemyCenter.y + perpendicular.y * tellSpread, tellTip.x, tellTip.y, tellColor, 1.4F + attackReady * 0.8F);
+                drawLine(enemyCenter.x - perpendicular.x * tellSpread, enemyCenter.y - perpendicular.y * tellSpread, tellTip.x, tellTip.y, tellColor, 1.4F + attackReady * 0.8F);
+            } else if (!spawnerEnemy) {
+                const float windupLength = std::min(cellW, cellH) * (0.74F + attackReady * 0.52F);
+                drawLine(
+                    enemyCenter.x - directionToActor.y * windupLength * 0.35F,
+                    enemyCenter.y + directionToActor.x * windupLength * 0.35F,
+                    enemyCenter.x + directionToActor.x * windupLength,
+                    enemyCenter.y + directionToActor.y * windupLength,
+                    {1.0F, 0.22F, 0.12F, 0.12F + attackReady * 0.24F},
+                    1.8F + attackReady * 1.2F);
+            }
         }
-        if (spawnerEnemy) {
+
+        if (miningEnemyUsesAffinityPresentation(enemy)) {
+            const float auraPulse = 0.88F + 0.12F * std::sin(static_cast<float>(snapshot.animationTime) * 6.0F + static_cast<float>(enemyIndex));
+            drawRadialGlow(enemyCenter.x, enemyCenter.y, cellSize * (trueElite ? 1.65F : 1.25F) * auraPulse, {base.r, base.g, base.b, trueElite ? 0.18F : 0.11F}, 20);
+        }
+        if (spawnerEnemy && enemy.active) {
             const float spawnProgress = enemy.spawn.intervalSeconds <= 0.0
                 ? 0.0F
                 : 1.0F - std::clamp(static_cast<float>(enemy.spawn.cooldownSeconds / enemy.spawn.intervalSeconds), 0.0F, 1.0F);
-            const float pulse = 0.92F + spawnProgress * 0.22F;
-            drawRect(enemyCenter.x, enemyCenter.y, cellW * 1.42F * pulse, cellH * 1.42F * pulse, {base.r, base.g, base.b, 0.34F});
-            drawRect(enemyCenter.x, enemyCenter.y, cellW * 0.92F, cellH * 0.92F, {0.28F, 0.02F, 0.12F, 0.96F});
-            drawLine(enemyCenter.x - cellW * 0.72F, enemyCenter.y, enemyCenter.x + cellW * 0.72F, enemyCenter.y, base, 2.5F);
-            drawLine(enemyCenter.x, enemyCenter.y - cellH * 0.72F, enemyCenter.x, enemyCenter.y + cellH * 0.72F, base, 2.5F);
-        } else if (rangedEnemy) {
-            drawRect(enemyCenter.x, enemyCenter.y, cellW * (eliteEnemy ? 0.82F : 0.66F) * swarmEliteScale, cellH * (eliteEnemy ? 0.82F : 0.66F) * swarmEliteScale, {base.r, base.g, base.b, 0.72F});
-            drawLine(enemyCenter.x - cellW * 0.62F, enemyCenter.y, enemyCenter.x, enemyCenter.y + cellH * 0.62F, base, 2.0F);
-            drawLine(enemyCenter.x, enemyCenter.y + cellH * 0.62F, enemyCenter.x + cellW * 0.62F, enemyCenter.y, base, 2.0F);
-            drawLine(enemyCenter.x + cellW * 0.62F, enemyCenter.y, enemyCenter.x, enemyCenter.y - cellH * 0.62F, base, 2.0F);
-            drawLine(enemyCenter.x, enemyCenter.y - cellH * 0.62F, enemyCenter.x - cellW * 0.62F, enemyCenter.y, base, 2.0F);
+            drawRadialGlow(enemyCenter.x, enemyCenter.y, cellSize * (1.20F + spawnProgress * 0.34F), {base.r, base.g, base.b, 0.08F + spawnProgress * 0.12F}, 18);
+        }
+
+        const MiningEnemyAnimationFrame animation = miningEnemyAnimationFrame(enemy, snapshot.animationTime, enemyIndex);
+        const int enemyAsset = miningEnemyAsset(enemy.type, miningEnemyVisualTheme(enemy, snapshot.miningEnemyTheme));
+        const float spriteCells = spawnerEnemy ? 2.45F : (largeEnemy ? 2.05F : 1.72F);
+        const float spriteWidth = cellW * spriteCells;
+        const float spriteHeight = cellH * spriteCells;
+        if (spawnerEnemy) {
+            drawSprite(enemyCenter.x, enemyCenter.y, spriteWidth, spriteHeight, {1.0F, 1.0F, 1.0F, 1.0F}, enemyAsset, animation.frame, 20);
         } else {
-            drawRect(enemyCenter.x, enemyCenter.y, cellW * (eliteEnemy ? 1.24F : 0.94F) * swarmEliteScale, cellH * (eliteEnemy ? 1.24F : 0.94F) * swarmEliteScale, {base.r, base.g, base.b, 0.88F});
+            const float facingX = animation.attacking
+                ? directionToActor.x
+                : static_cast<float>(enemy.velocityX);
+            drawSpriteMirrored(
+                enemyCenter.x,
+                enemyCenter.y,
+                spriteWidth,
+                spriteHeight,
+                {1.0F, 1.0F, 1.0F, 1.0F},
+                enemyAsset,
+                facingX < -0.05F,
+                animation.frame,
+                20);
         }
-        if (enemy.elite) {
-            drawRect(enemyCenter.x, enemyCenter.y, cellW * 1.62F, cellH * 1.62F, {1.0F, 0.45F, 0.06F, 0.16F});
-            drawLine(enemyCenter.x - cellW * 0.82F, enemyCenter.y - cellH * 0.82F, enemyCenter.x + cellW * 0.82F, enemyCenter.y - cellH * 0.82F, {1.0F, 0.52F, 0.10F, 0.92F}, 2.2F);
+
+        if (trueElite) {
+            drawRect(enemyCenter.x, enemyCenter.y, cellW * 1.72F, cellH * 1.72F, {base.r, base.g, base.b, 0.13F});
+            drawLine(enemyCenter.x - cellW * 0.86F, enemyCenter.y - cellH * 0.86F, enemyCenter.x + cellW * 0.86F, enemyCenter.y - cellH * 0.86F, {base.r, base.g, base.b, 0.96F}, 2.4F);
         }
-        const float enemyCoreSize = std::min(cellW, cellH) * (spawnerEnemy ? 0.34F : (0.48F + health * 0.18F));
-        drawRect(enemyCenter.x, enemyCenter.y, enemyCoreSize, enemyCoreSize, {1.0F, 0.20F, 0.14F, 0.70F});
-        drawRect(enemyCenter.x, enemyCenter.y - cellH * (eliteEnemy ? 0.98F : 0.72F), cellW * (eliteEnemy ? 1.58F : 1.18F), cellH * 0.12F, {0.16F, 0.02F, 0.02F, 0.78F});
-        drawRect(enemyCenter.x - cellW * (eliteEnemy ? 0.79F : 0.59F) * (1.0F - health), enemyCenter.y - cellH * (eliteEnemy ? 0.98F : 0.72F), cellW * (eliteEnemy ? 1.58F : 1.18F) * health, cellH * 0.12F, {1.0F, 0.18F, 0.12F, 0.90F});
+        if (enemy.active) {
+            drawRect(enemyCenter.x, enemyCenter.y - cellH * (largeEnemy ? 1.12F : 0.92F), cellW * (largeEnemy ? 1.58F : 1.18F), cellH * 0.12F, {0.16F, 0.02F, 0.02F, 0.78F});
+            drawRect(enemyCenter.x - cellW * (largeEnemy ? 0.79F : 0.59F) * (1.0F - health), enemyCenter.y - cellH * (largeEnemy ? 1.12F : 0.92F), cellW * (largeEnemy ? 1.58F : 1.18F) * health, cellH * 0.12F, {1.0F, 0.18F, 0.12F, 0.90F});
+        }
     }
 
     const double visualHeadingTime = presentationTimeSeconds_ >= 0.0
@@ -3111,11 +3319,11 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         miningVisualRecoilX_ += (targetVisualRecoil.x - miningVisualRecoilX_) * recoilResponse;
         miningVisualRecoilY_ += (targetVisualRecoil.y - miningVisualRecoilY_) * recoilResponse;
     }
-    Vec2 drone = cellCenter(snapshot.miningDroneX, snapshot.miningDroneY);
+    Vec2 drone = gridPoint(snapshot.miningDroneX, snapshot.miningDroneY);
     drone.x += miningVisualRecoilX_ * cellW;
     drone.y -= miningVisualRecoilY_ * cellH;
-    const Vec2 operatorPosition = cellCenter(snapshot.miningOperatorX, snapshot.miningOperatorY);
-    const Vec2 activeActor = cellCenter(activeActorX, activeActorY);
+    const Vec2 operatorPosition = gridPoint(snapshot.miningOperatorX, snapshot.miningOperatorY);
+    const Vec2 activeActor = gridPoint(activeActorX, activeActorY);
     if (snapshot.miningOperatorRigTethered && snapshot.miningRigPresent && snapshot.miningOperatorActive) {
         const float pulse = 0.78F + 0.14F * std::sin(static_cast<float>(snapshot.animationTime) * 6.0F);
         drawLine(operatorPosition.x, operatorPosition.y, drone.x, drone.y, {0.32F, 0.96F, 1.0F, pulse}, 2.6F);
@@ -3399,7 +3607,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         const MiningMiniDroneBehavior behavior = static_cast<MiningMiniDroneBehavior>(std::clamp(
             static_cast<int>(agent.behavior),
             static_cast<int>(MiningMiniDroneBehavior::Following),
-            static_cast<int>(MiningMiniDroneBehavior::Docked)));
+            static_cast<int>(MiningMiniDroneBehavior::RecoveringToRig)));
         float activity = 0.0F;
         switch (static_cast<MiniDroneRole>(role)) {
         case MiniDroneRole::Attack:
@@ -4438,12 +4646,31 @@ void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
     const float perfectWindowHalfAngle = static_cast<float>(
         tuning::research::surfaceScanPerfectWindowHalfAngleForDepth(currentDepthOffset));
 
-    // The home body is deliberately cropped by the protected scene clip. It
-    // supplies the same scale cue as the mockup without moving or replacing
-    // any destination artwork.
-    if (textureReady(EarthAsset)) {
-        drawRadialGlow(0.92F, -0.92F, 0.68F, {0.18F, 0.62F, 1.0F, 0.12F}, 72);
-        drawSprite(0.92F, -0.92F, 1.06F, 1.06F, {0.90F, 0.97F, 1.0F, 0.94F}, EarthAsset);
+    // Scans are local to the active body. Earth belongs only in the lunar
+    // composition and must not masquerade as a giant Jupiter companion.
+    if (snapshot.destinationTier == 1 && textureReady(EarthAsset)) {
+        drawRadialGlow(0.88F, -0.90F, 0.30F, {0.18F, 0.62F, 1.0F, 0.10F}, 56);
+        drawSprite(0.88F, -0.90F, 0.42F, 0.42F, {0.90F, 0.97F, 1.0F, 0.78F}, EarthAsset);
+    } else if (snapshot.destinationTier == 3) {
+        // The available moon artwork reads as a generic rocky satellite at
+        // this scale; three small companions make the Jupiter scan local
+        // without inventing a false Earth-distance cue.
+        const std::array<Vec2, 3> jupiterMoons {{
+            {-0.46F, 0.39F},
+            {0.48F, -0.30F},
+            {0.42F, 0.43F}
+        }};
+        constexpr std::array<float, 3> moonSizes {{0.055F, 0.042F, 0.032F}};
+        for (std::size_t index = 0; index < jupiterMoons.size(); ++index) {
+            const Vec2& moon = jupiterMoons[index];
+            const float size = moonSizes[index];
+            drawRadialGlow(moon.x, moon.y, size * 1.8F, {0.56F, 0.76F, 0.92F, 0.08F}, 24);
+            if (textureReady(MoonAsset)) {
+                drawSprite(moon.x, moon.y, size, size, {0.82F, 0.88F, 0.94F, 0.88F}, MoonAsset);
+            } else {
+                drawCircle(moon.x, moon.y, size * 0.5F, {0.58F, 0.62F, 0.67F, 0.82F}, 20);
+            }
+        }
     }
 
     const float outerRadius = 0.56F;
@@ -5265,6 +5492,30 @@ void SceneComposer::drawTitleBackdrop(const RenderSnapshot& snapshot)
         RocketClosedAsset);
 }
 
+void SceneComposer::drawSceneTransition(const RenderSnapshot& snapshot)
+{
+    const float opacity = static_cast<float>(std::clamp(snapshot.sceneFadeToBlack, 0.0, 1.0));
+    if (opacity <= 0.0F) {
+        return;
+    }
+    // Submit last so the transition covers the scene, HUD, and any temporary
+    // fanfare equally. The UI handoff waits for this envelope to reach black.
+    submitInstance(
+        {
+            0.0F, 0.0F,
+            1.0F, 0.0F,
+            0.0F, 1.0F,
+            {0.0F, 0.0F, 0.0F, opacity},
+            0.0F, 0.0F, 1.0F, 1.0F,
+            SceneInstanceShape::Rectangle,
+            4
+        },
+        TextureId::None,
+        CoordinateSpace::Clip,
+        PipelineClass::Solid,
+        true);
+}
+
 void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
 {
     const bool arrivalFanfare = snapshot.screen == Screen::ArrivalFanfare;
@@ -5706,11 +5957,36 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         const float radius = 0.065F + tier * 0.010F;
         const Color destination = mix({0.42F, 0.66F, 0.88F, 0.60F}, {0.95F, 0.72F, 0.35F, 0.72F}, tier / 5.0F);
         const Vec2 endpoint = routePoint(snapshot, 1.0F);
+        const bool authoredRouteDeparture = snapshot.screen == Screen::Launch &&
+            snapshot.launchOriginTier >= 0;
         if (arkVisible(snapshot.arkCondition) && snapshot.destinationTier >= 4 && !surfaceArkVisible) {
             const Vec2 arkHome = routePoint(snapshot, 0.0F);
             drawArkSprite({arkHome.x - 0.06F, arkHome.y - 0.01F}, 0.62F, arkDamaged(snapshot.arkCondition) ? 0.82F : 0.88F);
         }
-        if (snapshot.destinationTier == 2) {
+        if (authoredRouteDeparture) {
+            // A typed route leg is a physical departure from its authored
+            // source body, not a second launch from Earth. Transfer assists
+            // use the same path, so future content never needs a renderer
+            // branch for its source planet.
+            const Vec2 origin = routePoint(snapshot, 0.0F);
+            const int originAsset = originBodyAsset(snapshot.launchOriginTier);
+            const float originRadius = 0.110F +
+                std::min(4.0F, static_cast<float>(snapshot.launchOriginTier)) * 0.012F;
+            const Color originColor = snapshot.launchOriginTier >= 3
+                ? Color{0.82F, 0.62F, 0.34F, 0.82F}
+                : (snapshot.launchOriginTier == 2
+                    ? Color{0.90F, 0.34F, 0.16F, 0.82F}
+                    : Color{0.22F, 0.62F, 0.96F, 0.82F});
+            drawRadialGlow(origin.x, origin.y, originRadius * 1.72F, {originColor.r, originColor.g, originColor.b, 0.16F}, 64);
+            drawEllipseLine(origin.x, origin.y, originRadius * 1.34F, originRadius * 1.34F, {originColor.r, originColor.g, originColor.b, 0.34F}, 64, 0.0F, 2.0F * kPi);
+            if (originAsset >= 0 && textureReady(originAsset)) {
+                const float spriteSize = originRadius * bodySpriteScale(originAsset);
+                drawSprite(origin.x, origin.y, spriteSize, spriteSize, {1.0F, 1.0F, 1.0F, 0.92F}, originAsset);
+            } else {
+                drawCircle(origin.x, origin.y, originRadius, originColor, 56);
+                drawCircle(origin.x - originRadius * 0.20F, origin.y + originRadius * 0.18F, originRadius * 0.22F, {1.0F, 0.78F, 0.42F, 0.30F}, 18);
+            }
+        } else if (snapshot.destinationTier == 2) {
             const float earthX = -0.34F;
             const float earthY = -0.89F;
             const float earthR = 0.16F;
@@ -5996,7 +6272,8 @@ void SceneComposer::submitInstance(
     const SceneInstance& instance,
     TextureId texture,
     CoordinateSpace coordinateSpace,
-    PipelineClass pipeline)
+    PipelineClass pipeline,
+    bool fullViewport)
 {
     if (frameInstances_.size() >= kMaxFrameInstances) {
         if (droppedFrameInstances_ < std::numeric_limits<std::size_t>::max()) {
@@ -6037,6 +6314,7 @@ void SceneComposer::submitInstance(
     draw.instanceCount = 1;
     draw.instanceStream = SceneInstanceStream::Frame;
     draw.atlasPage = atlasPage;
+    draw.fullViewport = fullViewport;
     appendDrawCommand(draw);
 }
 
@@ -6091,6 +6369,7 @@ void SceneComposer::appendDrawCommand(SceneDraw next)
             && previous.blend == next.blend
             && (mergeableInstancePipelines || previous.pipeline == next.pipeline)
             && previous.coordinateSpace == next.coordinateSpace
+            && previous.fullViewport == next.fullViewport
             && sameColor(previous.effectColor, next.effectColor)
             && previous.effectParams == next.effectParams
             && previous.effectSize == next.effectSize;

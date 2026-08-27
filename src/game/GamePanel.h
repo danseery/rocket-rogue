@@ -31,6 +31,7 @@ struct PanelRenderContext {
     std::string_view renderDescription = "Shared scene renderer";
     bool titleScreenActive = false;
     bool titleLaunchActive = false;
+    double sceneFadeToBlack = 0.0;
     bool hasSavedGame = false;
     std::string_view titleNotice;
     bool firstTimeIntroductionsEnabled = true;

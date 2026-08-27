@@ -15,6 +15,8 @@ Use this page to choose the right source before changing gameplay, presentation,
 - [Support Drone System](MINI_DRONE_SYSTEM.md) - Drone Bay roles, owned frames, paid duplicates, upgrades, capacity, and passive support/combat contract.
 - [Mining Mini-Game](MINING_MINIGAME_PLAN.md) - current entry flow, shared-fuel tradeoff, controls, rewards, failure states, and implementation ownership.
 - [Mining and Combat Progression](MINING_COMBAT_PROGRESSION.md) - deterministic Act/level rules, encounter budgets, campaign mapping, and persistence invariants.
+- [Themed Enemy Sprite Library](ENEMY_SPRITE_LIBRARY.md) - side-view animation contract, reusable GenAI prompt bible, deterministic importer, theme mechanics, and provenance.
+- [Enemy Sprite Prompt Manifest](ENEMY_SPRITE_PROMPT_MANIFEST.md) - per-archetype generation records, shared prompt templates, and rejected-direction guardrails.
 - [Mining Lock-and-Key Sites](MINING_LOCK_AND_KEY_SITES.md) - artifact gate progression, capability forecasting, runtime state, and soft-lock prevention.
 
 ## Application, UI, and release

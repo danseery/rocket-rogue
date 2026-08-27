@@ -48,6 +48,7 @@ private:
     void drawPoiLabel(float cx, float cy, float pixelSize, std::string_view label, PoiGuidanceKind kind);
     void drawPoiGuidance(float cx, float cy, float directionX, float directionY, float size, std::string_view label, PoiGuidanceKind kind, double animationTime);
     void drawSprite(float cx, float cy, float w, float h, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
+    void drawSpriteMirrored(float cx, float cy, float w, float h, Color tint, int assetIndex, bool mirrorX, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
     void drawSpriteRotated(float cx, float cy, float w, float h, float forwardX, float forwardY, Color tint, int assetIndex, int frameIndex = 0, int frameCount = 1, bool worldSpace = true);
     std::vector<SceneVertex>& scratchVertices(std::size_t reserveCount);
     void appendRect(std::vector<SceneVertex>& vertices, float cx, float cy, float w, float h, Color color);
@@ -57,6 +58,7 @@ private:
     void drawFlightInstruments(const RenderSnapshot& snapshot);
     void drawRocket(const RenderSnapshot& snapshot);
     void drawTitleBackdrop(const RenderSnapshot& snapshot);
+    void drawSceneTransition(const RenderSnapshot& snapshot);
     void drawBackdrop(const RenderSnapshot& snapshot);
     void drawFlyby(const RenderSnapshot& snapshot);
     void drawOrbit(const RenderSnapshot& snapshot);
@@ -90,7 +92,8 @@ private:
         const SceneInstance& instance,
         TextureId texture = TextureId::None,
         CoordinateSpace coordinateSpace = CoordinateSpace::World,
-        PipelineClass pipeline = PipelineClass::Solid);
+        PipelineClass pipeline = PipelineClass::Solid,
+        bool fullViewport = false);
     void submitMiningTerrainInstanceRange(std::uint32_t firstInstance, std::uint32_t instanceCount);
     void appendDrawCommand(SceneDraw draw);
     void submitLines(const std::vector<SceneVertex>& vertices, float width, bool worldSpace = true);

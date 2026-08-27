@@ -140,6 +140,7 @@ public:
         animationTime = snapshot.animationTime;
         screen = snapshot.screen;
         titleScreen = snapshot.titleScreen;
+        sceneFadeToBlack = snapshot.sceneFadeToBlack;
         shipDamage = snapshot.shipDamage;
         miningHeat = snapshot.miningHeat;
         flybyInputY = snapshot.flybyInputY;
@@ -152,6 +153,7 @@ public:
         launchFuelCapacity = snapshot.launchFuelCapacity;
         launchAsteroidCount = snapshot.launchAsteroidCount;
         launchDestinationTier = snapshot.destinationTier;
+        launchOriginTier = snapshot.launchOriginTier;
         launchTravelProgress = snapshot.travelProgress;
         launchLunarImpactActive = snapshot.launchLunarImpactActive;
         launchLunarImpactElapsed = snapshot.launchLunarImpactElapsed;
@@ -234,6 +236,7 @@ public:
     double miningViewChecksum = 0.0;
     int launchAsteroidCount = 0;
     int launchDestinationTier = 0;
+    int launchOriginTier = -1;
     int surfacePushSteps = 0;
     int miningSwarmDepth = -1;
     int miningSwarmWave = 0;
@@ -245,6 +248,7 @@ public:
     std::vector<int> surfacePushForecastDepthOffsets;
     rocket::Screen screen = rocket::Screen::Hangar;
     bool titleScreen = false;
+    double sceneFadeToBlack = 0.0;
     bool launchManualControlsEnabled = false;
     bool launchHeatEnabled = false;
     bool launchAsteroidsEnabled = false;
@@ -507,12 +511,22 @@ struct AppFixture {
 void completeTitleLaunch(AppFixture& fixture)
 {
     fixture.runner.resetFrameClock();
-    for (int frame = 0; frame < 6; ++frame) {
+    for (int frame = 0; frame < 11; ++frame) {
         fixture.host.now += 0.25;
         fixture.runner.frame();
     }
     fixture.host.now += 1.0 / 120.0;
     fixture.runner.frame();
+}
+
+void advanceSceneHandoff(AppFixture& fixture)
+{
+    // Four quarter-second frames reach opaque black; the fifth performs the
+    // state handoff and starts the shared quarter-second fade-in.
+    for (int frame = 0; frame < 5; ++frame) {
+        fixture.host.now += 0.25;
+        fixture.runner.frame();
+    }
 }
 
 std::string activeMiningSave(double drillHeat)
@@ -1725,13 +1739,31 @@ int main()
         assert(fixture.saves.value == originalSave);
 
         fixture.ui.dispatchAction("continue_game");
-        completeTitleLaunch(fixture);
+        fixture.runner.resetFrameClock();
+        for (int frame = 0; frame < 7; ++frame) {
+            fixture.host.now += 0.25;
+            fixture.runner.frame();
+        }
+        assert(fixture.renderer.titleScreen);
+        assert(fixture.renderer.sceneFadeToBlack > 0.0 && fixture.renderer.sceneFadeToBlack < 1.0);
+        assert(fixture.ui.html.find("title-screen is-launching") != std::string::npos);
+        assert(fixture.ui.html.find("rr-scene-transition") != std::string::npos);
+        for (int frame = 0; frame < 4 && fixture.renderer.titleScreen; ++frame) {
+            fixture.host.now += 0.25;
+            fixture.runner.frame();
+        }
         assert(!fixture.renderer.titleScreen);
         assert(fixture.renderer.screen == rocket::Screen::Mining);
+        assert(fixture.renderer.sceneFadeToBlack > 0.0);
+        assert(fixture.ui.html.find("rr-scene-transition") != std::string::npos);
         assert(std::abs(fixture.renderer.shipDamage - 37.0) < 0.0001);
         assert(std::abs(fixture.renderer.miningHeat - 0.78) < 0.0001);
         assert(fixture.saves.storeCount == 0);
         assert(fixture.saves.value == originalSave);
+        fixture.host.now += 0.25;
+        fixture.runner.frame();
+        assert(fixture.renderer.sceneFadeToBlack == 0.0);
+        assert(fixture.ui.html.find("rr-scene-transition") == std::string::npos);
         fixture.runner.shutdown();
     }
 
@@ -2091,10 +2123,26 @@ int main()
         assert(acceptedBriefing != nullptr && acceptedBriefing->briefingAcknowledged);
 
         fixture.ui.dispatchAction("mine_surface");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+        fixture.host.now += 1.0 / 120.0;
+        fixture.runner.frame();
+        assert(fixture.renderer.sceneFadeToBlack > 0.0);
+        advanceSceneHandoff(fixture);
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
+        assert(fixture.renderer.sceneFadeToBlack > 0.0);
         const std::optional<rocket::SaveData> afterMining = rocket::deserializeSaveData(fixture.saves.value);
         assert(afterMining.has_value());
         assert(rocket::ui::briefings::acknowledged(afterMining->acknowledgedActivityBriefingIds, rocket::ui::briefings::mining));
+
+        fixture.host.now += 0.25;
+        fixture.runner.frame();
+        fixture.ui.dispatchAction("mining_abort");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
+        fixture.host.now += 1.0 / 120.0;
+        fixture.runner.frame();
+        assert(fixture.renderer.sceneFadeToBlack > 0.0);
+        advanceSceneHandoff(fixture);
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
         fixture.runner.shutdown();
     }
 
@@ -2257,6 +2305,10 @@ int main()
 
         fixture.ui.dispatchAction(std::string(rocket::ui::actions::continueJupiterSlingshot));
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+        fixture.host.now += 1.0 / 120.0;
+        fixture.runner.frame();
+        assert(fixture.renderer.launchDestinationTier == 3);
+        assert(fixture.renderer.launchOriginTier == 2);
         const std::optional<rocket::SaveData> spent = rocket::deserializeSaveData(fixture.saves.value);
         assert(spent.has_value());
         assert(!spent->jupiterSlingshotActive);

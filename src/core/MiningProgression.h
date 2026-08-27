@@ -86,5 +86,13 @@ bool miningMaterialAllowed(const MiningArenaRules& rules, MiningCellMaterial mat
 bool miningEnemyAllowed(const MiningArenaRules& rules, MiningEnemyType enemy);
 bool miningAffinityAllowed(const MiningArenaRules& rules, MiningElementalAffinity affinity);
 bool miningRoomFeatureAllowed(const MiningArenaRules& rules, MiningCellFeature feature);
+std::string_view miningEnemyThemeName(MiningEnemyTheme theme);
+MiningElementalAffinity miningEnemyThemeAffinity(MiningEnemyTheme theme);
+MiningEnemyTheme miningEnemyThemeForAffinity(MiningElementalAffinity affinity);
+MiningEnemyTheme selectMiningEnemyTheme(const MiningArenaRules& rules, std::uint64_t seed);
+MiningEnemyTheme resolveMiningEnemyTheme(
+    const MiningArenaRules& rules,
+    const MiningSiteDefinition* authoredSite,
+    const MiningSiteProgress* compatibilitySite = nullptr);
 
 } // namespace rocket

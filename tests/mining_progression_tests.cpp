@@ -209,6 +209,58 @@ void deterministicSeedsAndRewardProgressAreStable()
     require(repeat.rareCap == 4 && repeat.exoticCap == 2, "repeat caps should halve with rare rounding up and exotic rounding down");
 }
 
+void enemyThemesFollowProgressionAndRemainDeterministic()
+{
+    require(miningEnemyThemeAffinity(MiningEnemyTheme::Neutral) == MiningElementalAffinity::None,
+        "neutral enemy ecology should not add an affinity");
+    require(miningEnemyThemeAffinity(MiningEnemyTheme::Lava) == MiningElementalAffinity::Thermal,
+        "lava enemy ecology should map to the existing Thermal affinity");
+    require(miningEnemyThemeAffinity(MiningEnemyTheme::Ice) == MiningElementalAffinity::Cryo,
+        "ice enemy ecology should map to the existing Cryo affinity");
+    require(miningEnemyThemeAffinity(MiningEnemyTheme::Radioactive) == MiningElementalAffinity::Radiation,
+        "radioactive enemy ecology should map to the existing Radiation affinity");
+    require(miningEnemyThemeAffinity(MiningEnemyTheme::Toxic) == MiningElementalAffinity::Toxic,
+        "toxic enemy ecology should map to the existing Toxic affinity");
+
+    const MiningArenaRules earlyCombat = resolveMiningArenaRules({MiningAct::ActTwo, 1, 0x1234});
+    require(selectMiningEnemyTheme(earlyCombat, 0x1234) == MiningEnemyTheme::Neutral,
+        "combat sites should remain neutral until Elementals enter the curriculum");
+
+    const MiningArenaRules elementalCombat = resolveMiningArenaRules({MiningAct::ActTwo, 7, 0x5678});
+    for (std::uint64_t seed = 0; seed < 64; ++seed) {
+        const MiningEnemyTheme first = selectMiningEnemyTheme(elementalCombat, seed);
+        const MiningEnemyTheme second = selectMiningEnemyTheme(elementalCombat, seed);
+        require(first == second, "a mining site theme should be deterministic for its seed");
+        require(first == MiningEnemyTheme::Lava || first == MiningEnemyTheme::Ice,
+            "Act 2 elemental sites should select only currently legal Thermal or Cryo ecologies");
+    }
+
+    const MiningArenaRules toxicCombat = resolveMiningArenaRules({MiningAct::ActTwo, 9, 0x9abc});
+    bool sawToxic = false;
+    for (std::uint64_t seed = 0; seed < 128; ++seed) {
+        sawToxic = sawToxic || selectMiningEnemyTheme(toxicCombat, seed) == MiningEnemyTheme::Toxic;
+    }
+    require(sawToxic, "Toxic ecology should enter deterministic site selection at its existing affinity gate");
+
+    const MiningArenaRules radioactiveCombat = resolveMiningArenaRules({MiningAct::ActThree, 2, 0xdef0});
+    bool sawRadioactive = false;
+    for (std::uint64_t seed = 0; seed < 128; ++seed) {
+        sawRadioactive = sawRadioactive || selectMiningEnemyTheme(radioactiveCombat, seed) == MiningEnemyTheme::Radioactive;
+    }
+    require(sawRadioactive, "Radioactive ecology should enter deterministic site selection with Act 3 Radiation");
+
+    const ContentCatalog catalog = createDefaultContent();
+    const MiningSiteDefinition* thermalSite = catalog.findMiningSite(content::miningSite::thermalLayeredRecovery);
+    require(thermalSite != nullptr &&
+            resolveMiningEnemyTheme(elementalCombat, thermalSite) == MiningEnemyTheme::Lava,
+        "the authored Thermal Lava site should override generic ecology selection");
+
+    MiningSiteProgress savedSite;
+    savedSite.enemyTheme = MiningEnemyTheme::Toxic;
+    require(resolveMiningEnemyTheme(elementalCombat, nullptr, &savedSite) == MiningEnemyTheme::Toxic,
+        "a saved site ecology should remain fixed instead of rerolling on a later depth or reload");
+}
+
 void progressionSaveFieldsRoundTripAndLegacyDefault()
 {
     SaveData save;
@@ -798,6 +850,7 @@ int main()
     allActLevelContractsResolve();
     campaignMappingMatchesChapterPace();
     deterministicSeedsAndRewardProgressAreStable();
+    enemyThemesFollowProgressionAndRemainDeterministic();
     progressionSaveFieldsRoundTripAndLegacyDefault();
     miningGateContractsAndRuntimeAreDeterministic();
     thermalSiteRulesAreContentDriven();

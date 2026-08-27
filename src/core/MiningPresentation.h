@@ -174,11 +174,31 @@ inline int tunedMiningDroneCount(const GameState& state)
 inline std::string activeElementalSummary(const MiningRunState& mining)
 {
     for (const MiningEnemy& enemy : mining.enemies) {
-        if (enemy.active && enemy.type == MiningEnemyType::Elemental && enemy.affinity != MiningElementalAffinity::None) {
+        if (!enemy.active || enemy.affinity == MiningElementalAffinity::None) {
+            continue;
+        }
+        const bool trueElite = enemy.elite ||
+            enemy.sourceFeature == MiningCellFeature::MinibossLair ||
+            enemy.sourceFeature == MiningCellFeature::BossChamber;
+        if (trueElite) {
+            return "ELITE " + std::string(miningElementalAffinityName(enemy.affinity));
+        }
+        if (enemy.type == MiningEnemyType::Elemental) {
             return std::string(miningElementalAffinityName(enemy.affinity)) + " elemental";
         }
     }
     return "None";
+}
+
+inline std::string miningEnemyEcologySummary(const MiningRunState& mining)
+{
+    const std::string theme = std::string(miningEnemyThemeName(mining.enemyTheme));
+    if (mining.enemyTheme == MiningEnemyTheme::Neutral) {
+        return theme + " ecology; no site affinity.";
+    }
+    return theme + " ecology. Ordinary hostiles share the site skin; Elementals and true elites apply " +
+        std::string(miningElementalAffinityName(miningEnemyThemeAffinity(mining.enemyTheme))) +
+        " pressure.";
 }
 
 inline std::string activeThreatSummary(const MiningRunState& mining)
@@ -307,7 +327,10 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric("Rig cargo", std::to_string(carriedCargo)),
         panelMetric("Ship cargo", std::to_string(bankedCargo)),
         panelMetric(text::labels::load, display::fixed(load.currentLoad, 1)),
-        panelMetric(text::fuel::reserveLabel(arkKnown), display::fixed(surface.rigFuel, 1) + "/" + display::fixed(std::max(0.0, surface.rigFuelCapacity), 1)),
+        // Rig fuel is spent and collected in whole units. Keep the underlying
+        // value fractional for simulation compatibility, but the compact HUD
+        // must not overflow its tile with unnecessary decimal places.
+        panelMetric(text::fuel::reserveLabel(arkKnown), display::fixed(surface.rigFuel, 0) + "/" + display::fixed(std::max(0.0, surface.rigFuelCapacity), 0)),
         panelMetric("Next fuel", miningFuelCycleValue(mining.fuelCycleProgress)),
         panelMetric(text::labels::depth, std::to_string(mining.depthZone)),
         panelMetric("Arena", std::string(miningActName(arena.act)) + " L" + std::to_string(arena.difficulty)),
@@ -324,14 +347,14 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
     if (mining.artifact.present) {
         presentation.metrics.push_back(panelMetric("Artifact", miningArtifactStateLabel(mining.artifact.state)));
         const bool artifactTethered = mining.artifact.tethered;
-        const bool operatorRigTethered = mining.operatorRigTethered && !mining.rigDisabled;
+        const bool operatorRigTethered = mining.operatorRigTethered;
         presentation.metrics.push_back(panelMetric(
             "Tether",
             artifactTethered
                 ? "Artifact locked"
                 : (operatorRigTethered ? "EVA tow locked" : "Free")));
         presentation.metrics.push_back(panelMetric("Artifact integrity", display::percent(mining.artifact.maxHealth <= 0.0 ? 0.0 : mining.artifact.health / mining.artifact.maxHealth)));
-    } else if (mining.operatorRigTethered && !mining.rigDisabled) {
+    } else if (mining.operatorRigTethered) {
         presentation.metrics.push_back(panelMetric("Tether", "EVA tow locked"));
     }
     presentation.payloadMetrics = {
@@ -412,7 +435,8 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         detailPresentationRow("Passive defense", display::fixed(tuning::mining::baseDefenseDamagePerSecond + drones.sentryDamagePerSecond, 1) + " DPS; " + display::percent(std::clamp(drones.enemyDamageRelief + drones.environmentalShieldRelief, 0.0, 1.0)) + " shield relief"),
         detailPresentationRow("Area control", drones.areaControlDamagePerSecond > 0.0 ? (display::fixed(drones.areaControlDamagePerSecond, 1) + " DPS field; " + display::percent(drones.enemySlow) + " slow") : "None"),
         detailPresentationRow("Reactive armor", drones.reactiveArmorDamagePerSecond > 0.0 ? (display::fixed(drones.reactiveArmorDamagePerSecond, 1) + " DPS on contact") : "None"),
-        detailPresentationRow("Elemental contact", activeElementalSummary(mining)),
+        detailPresentationRow("Site ecology", miningEnemyEcologySummary(mining)),
+        detailPresentationRow("Elemental / elite pressure", activeElementalSummary(mining)),
         detailPresentationRow("Elemental exposure", mining.elementalExposureSeconds > 0.0 ? (display::fixed(mining.elementalExposureSeconds, 1) + "s") : "None"),
         detailPresentationRow("Cryo slow", mining.movementSlowSeconds > 0.0 ? (display::percent(1.0 - mining.movementSlowScale) + " for " + display::fixed(mining.movementSlowSeconds, 1) + "s") : "None"),
         detailPresentationRow("Support oxygen reserve", drones.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(drones.oxygenSeconds))) + "s") : "None"),
@@ -492,7 +516,10 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
                        tetherTarget.blocker == MiningTetherBlocker::None) {
                 tetherAction = panelActionButton("Tether artifact", ui::actions::miningTether, "warn");
             } else if (tetherTarget.target == MiningTetherTarget::MiningRig) {
-                tetherAction = panelActionButton("Tether Mining Rig", ui::actions::miningTether, "warn");
+                tetherAction = panelActionButton(
+                    mining.rigDisabled ? "Tether disabled Mining Rig" : "Tether Mining Rig",
+                    ui::actions::miningTether,
+                    "warn");
             } else if (tetherTarget.blocker == MiningTetherBlocker::ArtifactGateLocked) {
                 tetherAction = disabledPanelButton("Complete gate to tether artifact");
             } else if (tetherTarget.blocker == MiningTetherBlocker::ArtifactUnexposed) {
@@ -616,7 +643,7 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
     presentation.details = run.details;
     presentation.vitals = {{
         {"OXYGEN", metricValue(text::labels::oxygen), "oxygen", {}, {}},
-        {"RIG FUEL", metricValue(text::fuel::reserveLabel(arkKnown), display::fixed(surface.rigFuel, 1)), "fuel", "NEXT", metricValue("Next fuel", "100%")},
+        {"RIG FUEL", metricValue(text::fuel::reserveLabel(arkKnown), display::fixed(surface.rigFuel, 0)), "fuel", "NEXT", metricValue("Next fuel", "100%")},
         {"DRILL", metricValue(text::labels::drillBit), std::move(drillCssClass), "HEAT", metricValue(text::labels::drillHeat, "0%")},
         {"LOAD", display::fixed(load.currentLoad, 1), "load", {}, {}}
     }};

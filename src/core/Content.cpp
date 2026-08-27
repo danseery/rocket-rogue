@@ -221,6 +221,25 @@ const Destination* ContentCatalog::findDestination(std::string_view id) const
     return found == destinations.end() ? nullptr : &*found;
 }
 
+const RouteLinkDefinition* ContentCatalog::findRouteLink(std::string_view id) const
+{
+    const auto found = std::find_if(routeLinks.begin(), routeLinks.end(), [id](const RouteLinkDefinition& link) {
+        return link.id == id;
+    });
+    return found == routeLinks.end() ? nullptr : &*found;
+}
+
+const RouteLinkDefinition* ContentCatalog::findRouteLink(
+    std::string_view sourceDestinationId,
+    std::string_view targetDestinationId) const
+{
+    const auto found = std::find_if(routeLinks.begin(), routeLinks.end(), [&](const RouteLinkDefinition& link) {
+        return link.sourceDestinationId == sourceDestinationId &&
+            link.targetDestinationId == targetDestinationId;
+    });
+    return found == routeLinks.end() ? nullptr : &*found;
+}
+
 const TransferAssistDefinition* ContentCatalog::findTransferAssist(std::string_view id) const
 {
     const auto found = std::find_if(
@@ -484,11 +503,25 @@ ContentCatalog createDefaultContent()
         }
     }
 
+    // The solar campaign is linear today, but route identity is authored
+    // explicitly so travel, recovery, save migration, and scene presentation
+    // never infer a physical source from the frontier index.  Cost values
+    // preserve the existing target-tier launch math at calibrated throttle.
+    catalog.routeLinks = {
+        {content::routeLink::earthMoon, content::destination::earthOrbit, content::destination::moon, 10.0, true, false},
+        {content::routeLink::moonMars, content::destination::moon, content::destination::mars, 15.0, true, false},
+        {content::routeLink::marsJupiter, content::destination::mars, content::destination::jupiter, 20.0, true, false},
+        {content::routeLink::jupiterSaturn, content::destination::jupiter, content::destination::saturn, 20.0, false, true},
+        {content::routeLink::saturnUranus, content::destination::saturn, content::destination::uranus, 20.0, false, true},
+        {content::routeLink::uranusNeptune, content::destination::uranus, content::destination::neptune, 20.0, false, true}
+    };
+
     MiningSiteDefinition thermalLayeredRecovery;
     thermalLayeredRecovery.id = content::miningSite::thermalLayeredRecovery;
     thermalLayeredRecovery.version = 1;
     thermalLayeredRecovery.arena = {MiningAct::ActOne, 8, 0, true, MiningGateType::HazardCocoon};
     thermalLayeredRecovery.biome = MiningSiteBiome::ThermalLava;
+    thermalLayeredRecovery.enemyTheme = MiningEnemyTheme::Lava;
     thermalLayeredRecovery.gateType = MiningGateType::HazardCocoon;
     thermalLayeredRecovery.baselineOxygenSeconds = tuning::mining::ioArtifactOxygenSeconds;
     thermalLayeredRecovery.cocoon.id = "thermal_two_layer";
@@ -644,6 +677,52 @@ ContentCatalog createDefaultContent()
     };
 
     return catalog;
+}
+
+bool validateRouteCatalog(const ContentCatalog& catalog, std::string* error)
+{
+    const auto fail = [&](std::string message) {
+        if (error != nullptr) {
+            *error = std::move(message);
+        }
+        return false;
+    };
+
+    for (std::size_t index = 0; index < catalog.routeLinks.size(); ++index) {
+        const RouteLinkDefinition& link = catalog.routeLinks[index];
+        if (link.id.empty() || catalog.findRouteLink(link.id) != &link) {
+            return fail("Each route link needs a unique stable id.");
+        }
+        const Destination* source = catalog.findDestination(link.sourceDestinationId);
+        const Destination* target = catalog.findDestination(link.targetDestinationId);
+        if (source == nullptr || target == nullptr || source == target) {
+            return fail("Each route link needs distinct authored source and target destinations.");
+        }
+        if (link.cruiseFuelCost <= 0.0) {
+            return fail("Each route link needs a positive calibrated fuel profile.");
+        }
+        if (link.oneWayExpedition && link.recoveryAvailable) {
+            return fail("A one-way route cannot also offer recovery.");
+        }
+        if (link.oneWayExpedition != target->oneWayExpedition) {
+            return fail("Route one-way policy must match its target destination policy.");
+        }
+    }
+
+    for (const Destination& destination : catalog.destinations) {
+        if (destination.hiddenFromProgression || destination.requiresHostileSystem ||
+            destination.tier < 1 || destination.tier > 6) {
+            continue;
+        }
+        const auto incomingCount = std::count_if(
+            catalog.routeLinks.begin(),
+            catalog.routeLinks.end(),
+            [&](const RouteLinkDefinition& link) { return link.targetDestinationId == destination.id; });
+        if (incomingCount != 1) {
+            return fail("Each visible solar destination needs exactly one authored incoming route link.");
+        }
+    }
+    return true;
 }
 
 bool hasUnlock(const MetaProgress& meta, std::string_view key)

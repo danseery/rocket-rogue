@@ -255,7 +255,10 @@ enum class MiningMiniDroneBehavior {
     // Logistics drones can make a deterministic off-screen run through a
     // known shaft while the player remains on another depth layer.
     DeliveringToShip,
-    ReturningFromShip
+    ReturningFromShip,
+    // A Prospector that cannot find a traversable route back to its anchor
+    // takes the same bounded logistics transit rather than remaining stranded.
+    RecoveringToRig
 };
 
 enum class MiningOperatorMode {
@@ -329,6 +332,16 @@ enum class MiningElementalAffinity {
     Thermal,
     Cryo,
     Radiation,
+    Toxic
+};
+
+// Site-wide enemy art direction. Ordinary enemies use this cosmetically;
+// Elementals and true elites map it to the existing affinity mechanics.
+enum class MiningEnemyTheme {
+    Neutral,
+    Lava,
+    Ice,
+    Radioactive,
     Toxic
 };
 
@@ -542,6 +555,7 @@ struct MiningSiteDefinition {
     MiningGateType gateType = MiningGateType::None;
     double baselineOxygenSeconds = 0.0;
     MiningCocoonDefinition cocoon;
+    MiningEnemyTheme enemyTheme = MiningEnemyTheme::Neutral;
 };
 
 struct MiningCapabilityProfile {
@@ -621,6 +635,7 @@ struct MiningSiteProgress {
     // created by ScenarioInstance + MiningSiteDefinition, never by this
     // compatibility record.
     bool legacyMigrated = false;
+    MiningEnemyTheme enemyTheme = MiningEnemyTheme::Neutral;
 };
 
 // Kept solely for old save and migration code. Runtime systems should use
@@ -733,6 +748,29 @@ enum class RecoveryMethod {
     ReturnHome,
     ManualEject,
     TransferArrival
+};
+
+// Route state separates the campaign frontier (the objective the player is
+// working toward) from the body the ship is physically leaving.  It keeps
+// return/reapproach flights honest without making presentation infer an
+// origin from the target tier.
+enum class RouteTransitIntent {
+    None,
+    Outbound,
+    Reapproach,
+    Recovery
+};
+
+struct RouteTransitState {
+    std::string routeLinkId;
+    std::string originDestinationId;
+    std::string targetDestinationId;
+    RouteTransitIntent intent = RouteTransitIntent::None;
+
+    bool active() const {
+        return !routeLinkId.empty() && !originDestinationId.empty() &&
+            !targetDestinationId.empty() && intent != RouteTransitIntent::None;
+    }
 };
 
 enum class LaunchFailureCause {
@@ -1136,6 +1174,19 @@ struct Destination {
     std::string transferMarginBlockerText;
 };
 
+// A directed solar route owns its source, target, calibrated powered-fuel
+// demand, and whether an incomplete pass can fly the same route in reverse.
+// The runtime never needs destination-name branches to decide how a route
+// behaves.
+struct RouteLinkDefinition {
+    std::string id;
+    std::string sourceDestinationId;
+    std::string targetDestinationId;
+    double cruiseFuelCost = 0.0;
+    bool recoveryAvailable = false;
+    bool oneWayExpedition = false;
+};
+
 struct TransferAssistDefinition {
     std::string id;
     std::string sourceDestinationId;
@@ -1159,6 +1210,7 @@ struct LaunchConfig {
     std::string astronautId;
     std::string frameId;
     std::vector<std::string> equippedModuleIds;
+    RouteTransitState routeTransit;
 };
 
 struct TelemetryEvent {
@@ -1181,6 +1233,7 @@ struct LaunchOutcome {
     std::string destinationId;
     std::string assignedAstronautId;
     bool frontierTransfer = false;
+    RouteTransitState routeTransit;
     double crashMultiplier = 1.0;
     double ejectMultiplier = 1.0;
     double payout = 0.0;
@@ -1298,6 +1351,9 @@ struct ArrivalOpsState {
     double transferFuelRemaining = 0.0;
     double transferFuelCapacity = 0.0;
     ApproachCommitment commitment = ApproachCommitment::Uncommitted;
+    // Retained from the successful leg so a Pass Through can offer a real
+    // recovery route instead of silently restarting at Earth.
+    RouteTransitState incomingRoute;
 };
 
 struct FlybyTrailPoint {
@@ -1557,6 +1613,11 @@ struct MiningEnemy {
     bool gateAssociated = false;
     bool swarmAssociated = false;
     bool elite = false;
+    // Presentation timers do not drive combat outcomes. They select the
+    // shared Attack, Hit, and Defeat clips in the scene renderer.
+    double attackAnimationSeconds = 0.0;
+    double hitAnimationSeconds = 0.0;
+    double defeatAnimationSeconds = 0.0;
 };
 
 // One optional Swarm Nest is seeded for an eligible expedition. Its enemies
@@ -1680,6 +1741,7 @@ struct MiningMiniDroneAgent {
     MaterialInventory haulMaterials;
     MaterialInventory uncreditedHaulMaterials;
     bool finishTargetBeforeReturn = false;
+    double returnPathFailureSeconds = 0.0;
     bool defenseAngleInitialized = false;
     MiningAnchorTarget anchorTarget = MiningAnchorTarget::ControlledActor;
     int stableFormationSlot = 0;
@@ -1731,6 +1793,7 @@ struct MiningRunState {
     // Persist the resolved site profile so active procedural/authored sites
     // never fall back to destination-specific generation after a reload.
     MiningSiteBiome miningSiteBiome = MiningSiteBiome::Default;
+    MiningEnemyTheme enemyTheme = MiningEnemyTheme::Neutral;
     double siteBaselineOxygenSeconds = 0.0;
     SurfaceSiteProfile siteProfile = SurfaceSiteProfile::SurveyBasin;
     double elapsedSeconds = 0.0;
@@ -1876,6 +1939,8 @@ struct RunState {
     double nextLaunchSpeedBoost = 0.0;
     double nextLaunchInstabilityPenalty = 0.0;
     PendingTransferAssist pendingTransferAssist;
+    // A queued outbound, recovery, or reapproach leg shown in the Hangar.
+    RouteTransitState routeTransit;
     int launchesThisExpedition = 0;
     int offerRerollsThisExpedition = 0;
     int repairOpsThisExpedition = 0;

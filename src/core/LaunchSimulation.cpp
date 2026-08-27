@@ -373,6 +373,10 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
         ? currentDestination(state, catalog)
         : *configuredDestination;
     launch.config.destinationId = destination.id;
+    if (const RouteLinkDefinition* link = routeLinkForTransit(catalog, launch.config.routeTransit)) {
+        launch.cruiseFuelCost = link->cruiseFuelCost;
+        launch.routeProfileDestinationId = link->targetDestinationId;
+    }
     launch.slingshotFuelSavings = pendingLaunchFuelSavingsForDestination(state, destination.id);
     launch.slingshotSpeedBoost = pendingLaunchSpeedBoostForDestination(state, destination.id);
     launch.slingshotInstabilityPenalty = pendingLaunchInstabilityPenaltyForDestination(state, destination.id);
@@ -399,7 +403,9 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
         0,
         tuning::launchProgression::maximumUpgradeRank);
     launch.fuelCapacity = launchFuelCapacityForRank(fuelRank);
-    launch.cruiseFuelCost = launchCruiseFuelCostForTier(destination.tier);
+    if (launch.cruiseFuelCost <= 0.0) {
+        launch.cruiseFuelCost = launchCruiseFuelCostForTier(destination.tier);
+    }
     // Frontier transfers land as soon as the ship reaches the destination.
     // Fuel remains a range constraint, not a hidden landing-reserve check.
     launch.arrivalReserveFuel = 0.0;
@@ -894,6 +900,7 @@ LaunchOutcome resolveLaunch(
     outcome.destinationId = launch.config.destinationId;
     outcome.assignedAstronautId = launch.config.astronautId;
     outcome.frontierTransfer = launch.config.frontierTransfer;
+    outcome.routeTransit = launch.config.routeTransit;
     outcome.crashMultiplier = launch.crashMultiplier;
     outcome.ejectMultiplier = std::max(1.0, burnMultiplier);
     outcome.pilotedFlight = resolution.pilotedFlight;

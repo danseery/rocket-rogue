@@ -2878,6 +2878,108 @@ void arrivalPresentationExplainsCommitmentAndResearchProgress()
     }), "reviewed Research breakthrough should remain acknowledged in saved briefing state");
 }
 
+void solarRouteLegsKeepCampaignProgressSeparateFromShipPosition()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    std::string routeAuditError;
+    require(validateRouteCatalog(catalog, &routeAuditError),
+        "the authored solar route catalog should pass its source, target, fuel, and recovery-policy audit");
+    const std::array<std::string_view, 6> routeIds {{
+        content::routeLink::earthMoon,
+        content::routeLink::moonMars,
+        content::routeLink::marsJupiter,
+        content::routeLink::jupiterSaturn,
+        content::routeLink::saturnUranus,
+        content::routeLink::uranusNeptune,
+    }};
+    for (const std::string_view id : routeIds) {
+        const RouteLinkDefinition* route = catalog.findRouteLink(id);
+        require(route != nullptr && catalog.findDestination(route->sourceDestinationId) != nullptr &&
+                catalog.findDestination(route->targetDestinationId) != nullptr,
+            "every solar route must name valid authored source and target destinations");
+        require(route->cruiseFuelCost > 0.0,
+            "every solar route must provide a calibrated flight profile");
+    }
+    const RouteLinkDefinition* marsJupiter = catalog.findRouteLink(content::routeLink::marsJupiter);
+    const RouteLinkDefinition* jupiterSaturn = catalog.findRouteLink(content::routeLink::jupiterSaturn);
+    require(marsJupiter != nullptr && marsJupiter->recoveryAvailable,
+        "Mars to Jupiter must permit its authored return recovery flight");
+    require(jupiterSaturn != nullptr && jupiterSaturn->oneWayExpedition && !jupiterSaturn->recoveryAvailable,
+        "the Saturn expedition must retain its authored one-way policy");
+
+    GameState state = createNewGame(catalog, 0x71A9);
+    state.run.destinationIndex = 3;
+    state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+    LaunchOutcome jupiterArrival;
+    jupiterArrival.type = LaunchResultType::MissionComplete;
+    jupiterArrival.recoveryMethod = RecoveryMethod::TransferArrival;
+    jupiterArrival.frontierTransfer = true;
+    jupiterArrival.destinationId = content::destination::jupiter;
+    jupiterArrival.routeTransit = makeRouteTransit(
+        catalog,
+        content::destination::mars,
+        content::destination::jupiter,
+        RouteTransitIntent::Outbound);
+    startArrivalOps(state, jupiterArrival);
+    require(state.run.arrivalOps.incomingRoute.active() &&
+            state.run.arrivalOps.incomingRoute.originDestinationId == content::destination::mars,
+        "arrival operations must retain the physical origin of their incoming leg");
+
+    introduceArrivalFlybyForTest(state);
+    startArrivalFlybyRun(state, catalog);
+    state.run.flyby.completed = true;
+    state.run.flyby.result = FlybyGrade::Good;
+    state.run.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
+    Random panelRng(0x71A9);
+    const PreparedLaunch panelLaunch = prepareLaunch(state, catalog, panelRng);
+    const std::string flybyStamp = buildGamePanelHtml({state, catalog, panelLaunch, panelLaunch});
+    require(flybyStamp.find("RECOVERY ROUTE REQUIRED") != std::string::npos &&
+            flybyStamp.find("Begin Recovery: Jupiter \xE2\x86\x92 Mars") != std::string::npos,
+        "a blocked Jupiter Pass Through must offer a visible Jupiter-to-Mars recovery instead of an implicit relaunch");
+
+    completeFlybyRun(state, catalog);
+    require(state.screen == Screen::ArrivalOps,
+        "a normal Jupiter flyby must return to the arrival result stamp");
+    require(!flybyClearsGenericNextRoute(state, catalog),
+        "a normal Jupiter flyby must preserve Io's authored onward gate");
+
+    require(queueBlockedArrivalFlybyRecovery(state, catalog),
+        "blocked authored flybys must queue their route-defined recovery leg");
+    require(state.screen == Screen::Hangar && state.run.routeTransit.intent == RouteTransitIntent::Recovery &&
+            state.run.routeTransit.originDestinationId == content::destination::jupiter &&
+            state.run.routeTransit.targetDestinationId == content::destination::mars,
+        "the recovery leg must travel from Jupiter back to Mars");
+    syncLaunchConfig(state, catalog);
+    Random recoveryRng(0x71AA);
+    const PreparedLaunch recoveryLaunch = prepareLaunch(state, catalog, recoveryRng);
+    require(recoveryLaunch.config.destinationId == content::destination::mars &&
+            recoveryLaunch.routeProfileDestinationId == content::destination::jupiter &&
+            std::abs(recoveryLaunch.cruiseFuelCost - marsJupiter->cruiseFuelCost) < 0.001,
+        "recovery must arrive at Mars while reusing the authored Mars-Jupiter leg profile");
+
+    const std::optional<SaveData> saved = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+    require(saved.has_value(), "pending recovery route should serialize in the version-13 save");
+    GameState restored = createNewGame(catalog, 0x71AB);
+    restoreSaveData(restored, catalog, *saved);
+    require(restored.run.routeTransit.intent == RouteTransitIntent::Recovery &&
+            restored.run.routeTransit.originDestinationId == content::destination::jupiter &&
+            restored.run.routeTransit.targetDestinationId == content::destination::mars,
+        "saved recovery routes must restore their exact origin and target");
+
+    LaunchOutcome recovered;
+    recovered.type = LaunchResultType::MissionComplete;
+    recovered.recoveryMethod = RecoveryMethod::TransferArrival;
+    recovered.frontierTransfer = true;
+    recovered.destinationId = content::destination::mars;
+    recovered.routeTransit = restored.run.routeTransit;
+    applyLaunchOutcome(restored, catalog, recovered);
+    require(restored.run.destinationIndex == 3 &&
+            restored.run.routeTransit.intent == RouteTransitIntent::Reapproach &&
+            restored.run.routeTransit.originDestinationId == content::destination::mars &&
+            restored.run.routeTransit.targetDestinationId == content::destination::jupiter,
+        "successful recovery must retain Jupiter campaign frontier and queue an explicit Mars-to-Jupiter reapproach");
+}
+
 
 void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
 {
@@ -2916,6 +3018,21 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     require(miss.meta.blueprintProgress == missBlueprintsBefore, "missed flyby should not grant blueprint progress");
     require(std::abs(miss.run.credits - missCreditsBefore) < 0.001, "missed flyby should not grant credits");
     require(miss.meta.totalFlybyMisses == 1, "missed flyby should be counted for future achievement stats");
+
+    GameState completedPose = createNewGame(catalog, 7011);
+    startArrivalFlybyForTest(completedPose, moonArrival);
+    completedPose.run.flyby.durationSeconds = 0.001;
+    completedPose.run.flyby.gravityStrength = 0.0;
+    completedPose.run.flyby.velocityX = 0.24;
+    completedPose.run.flyby.velocityY = 0.18;
+    updateFlybyRun(completedPose, 0.01);
+    require(completedPose.run.flyby.completed &&
+            std::hypot(completedPose.run.flyby.velocityX, completedPose.run.flyby.velocityY) > 0.001 &&
+            nearlyEqual(
+                completedPose.run.flyby.velocityY / completedPose.run.flyby.velocityX,
+                0.18 / 0.24,
+                0.001),
+        "a completed Flyby must retain its final heading for the result stamp and achieved-speed reward");
 
     GameState good = createNewGame(catalog, 702);
     startArrivalFlybyForTest(good, moonArrival);
@@ -2999,7 +3116,13 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     updateFlybyRun(fastGate, tuning::launch::maxFrameStepSeconds);
     require(fastGate.run.flyby.completed, "fast flyby crossing the exit gate should complete in the crossing frame");
     require(fastGate.run.flyby.result == FlybyGrade::Perfect, "fast flyby should score the swept exit gate instead of missing after overshooting the sample");
-    require(std::hypot(fastGate.run.flyby.velocityX, fastGate.run.flyby.velocityY) < 0.001, "flyby should physically stop the shuttle when the exit gate is reached");
+    const double finalShipX = fastGate.run.flyby.shipX;
+    const double finalShipY = fastGate.run.flyby.shipY;
+    require(std::hypot(fastGate.run.flyby.velocityX, fastGate.run.flyby.velocityY) > 0.001,
+        "flyby should retain the shuttle's final heading when the exit gate is reached");
+    updateFlybyRun(fastGate, tuning::launch::maxFrameStepSeconds);
+    require(nearlyEqual(fastGate.run.flyby.shipX, finalShipX) && nearlyEqual(fastGate.run.flyby.shipY, finalShipY),
+        "completed flyby should freeze the shuttle in place after preserving its final heading");
 
     GameState fastOvershoot = createNewGame(catalog, 713);
     startArrivalFlybyForTest(fastOvershoot, moonArrival);
@@ -3270,14 +3393,32 @@ void orbitStartsCircularAndIsSolvableAcrossDestinationTiers()
                 + ", good seconds " + display::fixed(state.run.orbit.goodSeconds, 2)
                 + ", miss seconds " + display::fixed(state.run.orbit.missSeconds, 2) + ")");
 
+        GameState controlled = startOrbitForTest(catalog, destinations[index], 7300 + index);
+        for (int frame = 0; frame < 1200 && !controlled.run.orbit.completed; ++frame) {
+            const OrbitRunState& liveOrbit = controlled.run.orbit;
+            const double radialError = std::hypot(liveOrbit.shipX, liveOrbit.shipY) - liveOrbit.targetRadius;
+            const double trimThreshold = liveOrbit.perfectBand * 0.18;
+            setOrbitMove(
+                controlled,
+                radialError > trimThreshold ? -1.0 : (radialError < -trimThreshold ? 1.0 : 0.0),
+                0.0);
+            updateOrbitRun(controlled, 1.0 / 60.0);
+        }
+        require(controlled.run.orbit.completed && controlled.run.orbit.result == OrbitGrade::Perfect,
+            "controlled orbit inputs should retain or return to Perfect from the authored insertion at "
+                + std::string(destinations[index]));
+
         OrbitRunState trimmed = state.run.orbit;
         trimmed.orbitProgress = 1.0;
         trimmed.currentZone = 2;
-        trimmed.trimApplied = true;
-        trimmed.perfectSeconds = tuning::orbit::perfectHoldSeconds;
+        trimmed.perfectSeconds = 0.0;
+        trimmed.missSeconds = 0.0;
         trimmed.goodSeconds = std::max(trimmed.goodSeconds, 1.0);
         require(orbitGrade(trimmed) == OrbitGrade::Perfect,
-            "reaching and holding the Perfect band should promote a controlled trim above baseline Good");
+            "a clean loop that finishes in Perfect should promote a controlled trim above baseline Good");
+        trimmed.missSeconds = 0.02;
+        require(orbitGrade(trimmed) != OrbitGrade::Perfect,
+            "entering red must prevent a final Perfect orbit even when the ship recovers the inner band");
     }
 }
 
@@ -3364,7 +3505,7 @@ void arrivalOrbitMinigameRewardsProgressionOnlyResearch()
     require(nearlyEqual(miss.run.orbit.angleRadians, expectedOrbitEntryAngle) &&
             nearlyEqual(std::atan2(miss.run.orbit.shipY, miss.run.orbit.shipX), expectedOrbitEntryAngle) &&
             std::hypot(miss.run.orbit.shipX, miss.run.orbit.shipY) > miss.run.orbit.targetRadius + miss.run.orbit.perfectBand,
-        "orbit insertion should begin at Flyby's endpoint angle relative to the destination");
+        "orbit insertion should begin at Flyby's endpoint angle inside Good and outside Perfect");
     const double initialAngularMomentum = miss.run.orbit.shipX * miss.run.orbit.velocityY
         - miss.run.orbit.shipY * miss.run.orbit.velocityX;
     require(initialAngularMomentum < 0.0,
@@ -4679,6 +4820,20 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
                 content::drone::miningDrone,
                 content::drone::hazardDrone},
         "Io commissioning should grant and fill the empty slot with Hazard only");
+
+    // A recovery site is campaign context for the normal mining loop, not a
+    // replacement verb. Surface Ops must retain Mine alongside its named
+    // recovery action so players can use the familiar activity entry point.
+    GameState ioSurface = state;
+    startSurfaceExpedition(ioSurface, catalog);
+    require(ioSurface.run.surfaceExpedition.active,
+        "Io recovery presentation requires an active Surface Ops loop");
+    ioSurface.screen = Screen::SurfaceExpedition;
+    Random ioPanelRng(0x10F00D);
+    const PreparedLaunch ioPanelLaunch = prepareLaunch(ioSurface, catalog, ioPanelRng);
+    const std::string ioSurfaceHtml = buildGamePanelHtml({ioSurface, catalog, ioPanelLaunch, ioPanelLaunch});
+    require(ioSurfaceHtml.find(std::string(text::buttons::mineDeposit)) != std::string::npos,
+        "a named Io recovery should retain the normal Mine action");
 
     ArtifactRecord ioArtifact {
         "io_minor_artifact",
@@ -7371,10 +7526,20 @@ void miningAndSurveyDroneAgentsPerformWorldActions()
     updateMiningRun(state, catalog, 0.08);
     require(
         target->material == MiningCellMaterial::CommonOre &&
+            miningAgent->behavior == MiningMiniDroneBehavior::Working &&
+            miningAgent->finishTargetBeforeReturn,
+        "moving the rig beyond the leash should commit the Prospector to its current ore");
+    for (int step = 0; step < 80 && target->material != MiningCellMaterial::Empty; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(
+        target->material == MiningCellMaterial::Empty &&
             miningAgent->behavior == MiningMiniDroneBehavior::Returning &&
             miningAgent->targetCellX < 0 &&
             miningAgent->targetCellY < 0,
-        "a hard-leash event should cancel remote Mining work immediately instead of finishing the tile");
+        "a committed Prospector should finish exactly one ore before returning to the moved rig");
+    require(miningAgent->returnPathFailureSeconds == 0.0,
+        "a reachable Prospector return must not start the safe-recall timer");
 
     const int scanX = std::clamp(static_cast<int>(std::floor(state.run.mining.droneX)), 1, state.run.mining.terrain.width - 2);
     const int scanY = std::clamp(static_cast<int>(std::floor(state.run.mining.droneY + 10.0)), 1, state.run.mining.terrain.height - 2);
@@ -7390,6 +7555,95 @@ void miningAndSurveyDroneAgentsPerformWorldActions()
     pulseMiningScanner(state, catalog);
     require(remoteCell->revealed,
         "Survey drone should add its own remote scanner origin to the pulse reveal");
+}
+
+void prospectorSafeRecallRecoversFromBlockedReturnPath()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 91934);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 1;
+    state.meta.equippedDroneIds = {content::drone::miningDrone};
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog, {MiningAct::ActOne, 3, 91934}, false).applied,
+        "safe-recall fixture should start an active mining run");
+
+    MiningRunState& mining = state.run.mining;
+    mining.gravityStrength = 0.0;
+    mining.oxygenSeconds = 100.0;
+    for (MiningCell& cell : mining.terrain.cells) {
+        cell = {};
+        cell.material = MiningCellMaterial::Bedrock;
+        cell.revealed = true;
+    }
+    const int strandedX = 5;
+    const int strandedY = 10;
+    const int rigX = 25;
+    const int rigY = 10;
+    *miningCellAt(mining.terrain, strandedX, strandedY) = {};
+    *miningCellAt(mining.terrain, rigX, rigY) = {};
+    mining.droneX = static_cast<double>(rigX) + 0.5;
+    mining.droneY = static_cast<double>(rigY) + 0.5;
+    mining.rigDepthZone = mining.depthZone;
+    MiningMiniDroneAgent& prospector = mining.miniDrones.front();
+    prospector.x = static_cast<double>(strandedX) + 0.5;
+    prospector.y = static_cast<double>(strandedY) + 0.5;
+    prospector.velocityX = 0.0;
+    prospector.velocityY = 0.0;
+    prospector.behavior = MiningMiniDroneBehavior::Returning;
+    prospector.haulMaterials.common = 1;
+    prospector.uncreditedHaulMaterials.common = 1;
+
+    for (int step = 0;
+         step < 20 && prospector.behavior != MiningMiniDroneBehavior::RecoveringToRig;
+         ++step) {
+        updateMiningRun(state, catalog, 0.10);
+    }
+    require(
+        prospector.behavior == MiningMiniDroneBehavior::RecoveringToRig &&
+            prospector.returnPathFailureSeconds >=
+                tuning::mining::miningDroneReturnPathFailureSeconds &&
+            prospector.haulMaterials.common == 1 &&
+            prospector.uncreditedHaulMaterials.common == 1,
+        "a Prospector stranded behind solid terrain should safely recall without losing its cargo");
+
+    Random panelRng(91934);
+    const PreparedLaunch panelLaunch = prepareLaunch(state, catalog, panelRng);
+    const std::string recallingPanel = buildGamePanelHtml({state, catalog, panelLaunch, panelLaunch});
+    require(recallingPanel.find("SAFE RECALLING TO RIG") != std::string::npos,
+        "the Mining HUD should explain that a stranded Prospector is using safe recall");
+
+    const auto save = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+    require(save.has_value(), "safe-recall mining save should parse");
+    GameState restored = createNewGame(catalog, 91935);
+    restoreSaveData(restored, catalog, *save);
+    const auto restoredProspector = std::find_if(
+        restored.run.mining.miniDrones.begin(),
+        restored.run.mining.miniDrones.end(),
+        [](const MiningMiniDroneAgent& agent) {
+            return agent.role == MiniDroneRole::Mining;
+        });
+    require(
+        restoredProspector != restored.run.mining.miniDrones.end() &&
+            restoredProspector->behavior == MiningMiniDroneBehavior::RecoveringToRig &&
+            restoredProspector->returnPathFailureSeconds >=
+                tuning::mining::miningDroneReturnPathFailureSeconds &&
+            restoredProspector->haulMaterials.common == 1,
+        "safe-recall behavior, timer, and cargo should survive an active version-13 save");
+
+    for (int step = 0;
+         step < 40 && prospector.behavior == MiningMiniDroneBehavior::RecoveringToRig;
+         ++step) {
+        updateMiningRun(state, catalog, 0.10);
+    }
+    require(
+        prospector.behavior != MiningMiniDroneBehavior::RecoveringToRig &&
+            std::hypot(prospector.x - mining.droneX, prospector.y - mining.droneY) < 1.0 &&
+            prospector.haulMaterials.common == 1,
+        "safe recall should return the Prospector to an open rig rally point with cargo intact");
 }
 
 void surveyDroneRunsAnchoredPriorityScanCycles()
@@ -8377,6 +8631,37 @@ void elementalMiningCombatAppliesAffinityAndAreaDefenses()
     require(defended.run.mining.reactiveArmorDamageDealt > 0.0, "defense drones should retaliate against contact enemies");
     require(defended.run.mining.environmentalShieldAbsorbed > 0.0, "environmental shields should absorb incoming enemy damage");
     require(defended.run.mining.enemies[1].health < defended.run.mining.enemies[1].maxHealth, "area-control fields should damage non-targeted nearby enemies");
+}
+
+void themedAffinityMechanicsStayRestrictedToElementalsAndTrueElites()
+{
+    const MiningEnemy ordinary = createMiningEnemy(
+        MiningEnemyType::Ant,
+        MiningCellFeature::EncounterZone,
+        1.0,
+        1.0,
+        MiningElementalAffinity::Thermal);
+    require(ordinary.affinity == MiningElementalAffinity::None && !ordinary.elite,
+        "ordinary themed enemies should remain cosmetic and reject affinity mechanics");
+
+    const MiningEnemy elemental = createMiningEnemy(
+        MiningEnemyType::Elemental,
+        MiningCellFeature::EncounterZone,
+        1.0,
+        1.0,
+        MiningElementalAffinity::Thermal);
+    require(elemental.affinity == MiningElementalAffinity::Thermal && elemental.effectRadius > 0.0,
+        "Elementals should keep the site's matching affinity mechanics");
+
+    const MiningEnemy miniboss = createMiningEnemy(
+        MiningEnemyType::Beetle,
+        MiningCellFeature::MinibossLair,
+        1.0,
+        1.0,
+        MiningElementalAffinity::Cryo);
+    require(miniboss.elite && miniboss.affinity == MiningElementalAffinity::Cryo &&
+            miniboss.effectRadius >= tuning::mining::enemyElementalRadiusCells,
+        "true themed elites should inherit the existing affinity field and tuning");
 }
 
 void mammalBossChambersGrantAdvancedRewards()
@@ -9498,9 +9783,13 @@ void activeMiningRoundTripsThroughSave()
     state.run.mining.elementalExposureSeconds = 2.5;
     state.run.mining.movementSlowSeconds = 0.4;
     state.run.mining.movementSlowScale = 0.62;
+    state.run.mining.enemyTheme = MiningEnemyTheme::Radioactive;
     state.run.mining.enemies = {
         {MiningEnemyType::Elemental, MiningCellFeature::EncounterZone, 22.5, 10.5, 1.0, -0.5, 2.5, 4.0, 0.0, 3.1, 0.48, 1.8, true, MiningElementalAffinity::Radiation}
     };
+    state.run.mining.enemies.front().attackAnimationSeconds = 0.21;
+    state.run.mining.enemies.front().hitAnimationSeconds = 0.13;
+    state.run.mining.enemies.front().defeatAnimationSeconds = 0.31;
     if (MiningCell* cell = miningCellAt(state.run.mining.terrain, 20, 10)) {
         cell->material = MiningCellMaterial::RareOre;
         cell->maxToughness = 7.0;
@@ -9559,12 +9848,18 @@ void activeMiningRoundTripsThroughSave()
     require(std::abs(restored.run.mining.elementalExposureSeconds - 2.5) < 0.000001, "mining elemental exposure should round trip");
     require(std::abs(restored.run.mining.movementSlowSeconds - 0.4) < 0.000001, "mining slow timer should round trip");
     require(std::abs(restored.run.mining.movementSlowScale - 0.62) < 0.000001, "mining slow scale should round trip");
+    require(restored.run.mining.enemyTheme == MiningEnemyTheme::Radioactive,
+        "the active site's coherent enemy theme should round trip");
     require(restored.run.mining.enemies.size() == 1, "active mining enemies should round trip");
     require(restored.run.mining.enemies.front().type == MiningEnemyType::Elemental, "active mining enemy type should round trip");
     require(restored.run.mining.enemies.front().sourceFeature == MiningCellFeature::EncounterZone, "active mining enemy source feature should round trip");
 
     require(restored.run.mining.enemies.front().affinity == MiningElementalAffinity::Radiation, "active mining enemy affinity should round trip");
     require(std::abs(restored.run.mining.enemies.front().health - 2.5) < 0.000001, "active mining enemy health should round trip");
+    require(std::abs(restored.run.mining.enemies.front().attackAnimationSeconds - 0.21) < 0.000001
+            && std::abs(restored.run.mining.enemies.front().hitAnimationSeconds - 0.13) < 0.000001
+            && std::abs(restored.run.mining.enemies.front().defeatAnimationSeconds - 0.31) < 0.000001,
+        "enemy attack, hit, and defeat presentation timers should round trip");
     const MiningCell* restoredCell = miningCellAt(restored.run.mining.terrain, 20, 10);
     require(restoredCell != nullptr && restoredCell->material == MiningCellMaterial::RareOre, "mining terrain material should round trip");
     require(restoredCell != nullptr && std::abs(restoredCell->remainingToughness - 3.5) < 0.000001, "mining terrain toughness should round trip");
@@ -10443,6 +10738,47 @@ void miningEmergencyEvaFailureAndRecoveryRulesHold()
     require(
         finishMiningRun(ejected, catalog, false).applied,
         "an emergency-ejected operator should complete safe recovery without returning the wreck");
+
+    GameState towedWreck = activeMiningStateForEvaTest(catalog, 0xE7A107);
+    clearMiningTerrainForEvaTest(towedWreck.run.mining);
+    towedWreck.run.mining.droneHealth = 0.0;
+    updateMiningRun(towedWreck, catalog, 0.01);
+    MiningRunState& disabledRig = towedWreck.run.mining;
+    require(
+        disabledRig.rigDisabled &&
+            disabledRig.operatorMode == MiningOperatorMode::Jetpack &&
+            disabledRig.operatorPresent,
+        "the wreck-tow test should start from a disabled rig and live EVA operator");
+    disabledRig.gravityStrength = 0.0;
+    disabledRig.operatorX = disabledRig.droneX + 4.0;
+    disabledRig.operatorY = disabledRig.droneY;
+    const MiningTetherTargetResolution disabledRigTarget = resolveMiningTetherTarget(disabledRig);
+    require(
+        disabledRigTarget.target == MiningTetherTarget::MiningRig &&
+            disabledRigTarget.blocker == MiningTetherBlocker::None,
+        "a same-depth disabled Mining Rig should remain an EVA tow target");
+    const double distanceBeforeTow = std::hypot(
+        disabledRig.operatorX - disabledRig.droneX,
+        disabledRig.operatorY - disabledRig.droneY);
+    toggleMiningTether(towedWreck);
+    require(disabledRig.operatorRigTethered,
+        "T should attach EVA to a nearby disabled Mining Rig");
+    updateMiningRun(towedWreck, catalog, 0.40);
+    const double distanceAfterTow = std::hypot(
+        disabledRig.operatorX - disabledRig.droneX,
+        disabledRig.operatorY - disabledRig.droneY);
+    require(distanceAfterTow < distanceBeforeTow,
+        "an attached disabled Mining Rig should move toward the EVA operator");
+    disabledRig.operatorX = disabledRig.returnZoneX;
+    disabledRig.operatorY = disabledRig.returnZoneY;
+    disabledRig.droneX = disabledRig.returnZoneX + tuning::mining::returnZoneRadiusCells + 3.0;
+    disabledRig.droneY = disabledRig.returnZoneY;
+    require(!finishMiningRun(towedWreck, catalog, false).applied,
+        "an attached disabled rig must reach the shuttle with its EVA operator");
+    disabledRig.droneX = disabledRig.returnZoneX;
+    disabledRig.droneY = disabledRig.returnZoneY;
+    require(finishMiningRun(towedWreck, catalog, false).applied,
+        "EVA should complete recovery after towing the disabled rig to the shuttle");
 
     GameState failed = activeMiningStateForEvaTest(catalog, 0xE7A106);
     MiningRunState& mining = failed.run.mining;
@@ -11486,6 +11822,11 @@ void structuredPanelPresentationSelectsFirstWaveTemplates()
     mining.run.surfaceExpedition.miningSitePrepared = true;
     require(startMiningRun(mining, catalog, {MiningAct::ActOne, 4, 0xA113}, false).applied,
         "first-wave template test should create an active Mining run");
+    mining.run.surfaceExpedition.rigFuel = 16.0;
+    mining.run.surfaceExpedition.rigFuelCapacity = 18.0;
+    const MiningHudPresentation miningHud = miningHudPresentation(mining, catalog);
+    require(miningHud.vitals[1].value == "16/18",
+        "compact Mining HUD fuel should use whole units without overflowing its tile");
     const PanelDocumentPresentation miningPresentation = presentationFor(mining, 0xA113);
     require(
         miningPresentation.templateKind == PanelTemplateKind::Mining
@@ -12126,6 +12467,7 @@ int main()
     researchPhasesUnlockOnlyAfterMarsArrival();
     arrivalOperationsUseMutuallyExclusiveCommitments();
     arrivalPresentationExplainsCommitmentAndResearchProgress();
+    solarRouteLegsKeepCampaignProgressSeparateFromShipPosition();
     arrivalFlybyMinigameRewardsProgressionAndSlingshot();
     shipUpgradesAssistFlybyAndOrbitMinigames();
     orbitControlsFollowClockwiseProgradeDirection();
@@ -12194,6 +12536,7 @@ int main()
     hazardDroneAssignmentsNormalizeAcrossSaveRoundTrips();
     miningHazardAffinitiesApplyOnlyOnDrillContact();
     miningAndSurveyDroneAgentsPerformWorldActions();
+    prospectorSafeRecallRecoversFromBlockedReturnPath();
     surveyDroneRunsAnchoredPriorityScanCycles();
     surveyDronesMaintainCoordinatedSearchLanes();
     resourceDroneRunsTimedMaterialShuttles();
@@ -12202,6 +12545,7 @@ int main()
     defenseDronesCoordinateChargedShieldArcs();
     attackAndDefenseDroneAgentsOwnCombatBehavior();
     elementalMiningCombatAppliesAffinityAndAreaDefenses();
+    themedAffinityMechanicsStayRestrictedToElementalsAndTrueElites();
     mammalBossChambersGrantAdvancedRewards();
     enemyMovementTypesHaveDistinctBehavior();
     miningDrillBreaksCellsAndMarksChunks();

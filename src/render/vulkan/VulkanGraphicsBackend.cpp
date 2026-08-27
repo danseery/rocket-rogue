@@ -1429,12 +1429,28 @@ void VulkanGraphicsBackend::recordScene(const ScenePacket& packet)
         },
     };
     vkCmdSetScissor(activeFrame_->commandBuffer, 0, 1, &scissor);
+    const VkRect2D fullViewportScissor {
+        {0, 0},
+        {
+            static_cast<std::uint32_t>(framebufferWidth),
+            static_cast<std::uint32_t>(framebufferHeight),
+        },
+    };
+    bool fullViewportScissorBound = false;
     const VkDeviceSize vertexOffset = 0;
     vulkan_policy::SceneVertexBindingState vertexBinding;
     SceneDrawType boundDrawType = SceneDrawType::Triangles;
     bool pipelineBound = false;
     VkDescriptorSet boundDescriptor = VK_NULL_HANDLE;
     for (const SceneDraw& draw : packet.draws) {
+        if (draw.fullViewport != fullViewportScissorBound) {
+            vkCmdSetScissor(
+                activeFrame_->commandBuffer,
+                0,
+                1,
+                draw.fullViewport ? &fullViewportScissor : &scissor);
+            fullViewportScissorBound = draw.fullViewport;
+        }
         if (!pipelineBound || draw.drawType != boundDrawType) {
             vkCmdBindPipeline(
                 activeFrame_->commandBuffer,

@@ -36,6 +36,15 @@ namespace transferAssist {
 inline constexpr const char* marsJupiter = "mars_jupiter_slingshot";
 } // namespace transferAssist
 
+namespace routeLink {
+inline constexpr const char* earthMoon = "earth_moon";
+inline constexpr const char* moonMars = "moon_mars";
+inline constexpr const char* marsJupiter = "mars_jupiter";
+inline constexpr const char* jupiterSaturn = "jupiter_saturn";
+inline constexpr const char* saturnUranus = "saturn_uranus";
+inline constexpr const char* uranusNeptune = "uranus_neptune";
+} // namespace routeLink
+
 namespace miningSite {
 inline constexpr const char* thermalLayeredRecovery = "thermal_layered_recovery";
 } // namespace miningSite

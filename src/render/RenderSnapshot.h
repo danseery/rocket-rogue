@@ -149,6 +149,9 @@ struct RenderSnapshot {
     // Continue. It never affects campaign state or simulation time.
     double titleLaunchProgress = 0.0;
     double titleLaunchRumble = 0.0;
+    // Presentation-only scene handoff. The outgoing scene remains visible
+    // beneath this full-screen black fade until the owner swaps screens.
+    double sceneFadeToBlack = 0.0;
     LaunchResultType lastResult = LaunchResultType::None;
     LaunchFailureCause lastLaunchFailureCause = LaunchFailureCause::None;
     double currentMultiplier = 1.0;
@@ -191,6 +194,10 @@ struct RenderSnapshot {
     double launchLunarImpactElapsed = 0.0;
     double shipDamage = 0.0;
     int destinationTier = 0;
+    // -1 means the normal home-system departure. A typed route transit (or
+    // target-bound transfer assist) supplies its authored source tier so the
+    // launch scene starts from the body the ship is physically leaving.
+    int launchOriginTier = -1;
     int debugActOneCheckpoint = -1;
     ArkCondition arkCondition = ArkCondition::NotFound;
     bool straylightStoryReveal = false;
@@ -285,6 +292,7 @@ struct RenderSnapshot {
     std::span<const MiningGateMarker> miningGateMarkers;
     std::span<const MiningCell> miningCells;
     std::span<const MiningEnemy> miningEnemies;
+    MiningEnemyTheme miningEnemyTheme = MiningEnemyTheme::Neutral;
     std::span<const MiningMiniDroneAgent> miningMiniDrones;
     std::span<const DroneFrameModuleAssignment> miningDroneModuleAssignments;
     std::span<const TreasureMark> miningTreasureMarks;

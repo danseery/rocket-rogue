@@ -1400,6 +1400,28 @@ bool bankFlybyRouteClearance(GameState& state, const ContentCatalog& catalog)
     return state.run.frontierReadiness > before;
 }
 
+bool queueBlockedArrivalFlybyRecovery(GameState& state, const ContentCatalog& catalog)
+{
+    const ArrivalOpsState& arrival = state.run.arrivalOps;
+    if (!arrival.active || arrival.destinationId.empty() ||
+        !arrival.incomingRoute.active() ||
+        arrival.incomingRoute.targetDestinationId != arrival.destinationId) {
+        return false;
+    }
+    RouteTransitState recovery = makeRouteTransit(
+        catalog,
+        arrival.destinationId,
+        arrival.incomingRoute.originDestinationId,
+        RouteTransitIntent::Recovery);
+    if (!recovery.active()) {
+        return false;
+    }
+    state.run.routeTransit = std::move(recovery);
+    state.run.arrivalOps = {};
+    state.screen = Screen::Hangar;
+    return true;
+}
+
 bool captureArrivalOrbit(GameState& state)
 {
     if (!state.run.arrivalOps.active || state.run.arrivalOps.commitment != ApproachCommitment::Uncommitted) {
@@ -1424,6 +1446,9 @@ bool shouldOpenArrivalOps(const LaunchOutcome& outcome, const ContentCatalog& ca
         return false;
     }
 
+    if (routeTransitIsRecovery(outcome.routeTransit)) {
+        return false;
+    }
     const Destination* destination = catalog.findDestination(outcome.destinationId);
     return destination != nullptr
         && destination->tier >= 1
@@ -1555,12 +1580,14 @@ void preserveArrivalFuelAtDestination(GameState& state, std::string destinationI
     const double transferFuelRemaining = state.run.arrivalOps.transferFuelRemaining;
     const double transferFuelCapacity = state.run.arrivalOps.transferFuelCapacity;
     const ApproachCommitment commitment = state.run.arrivalOps.commitment;
+    const RouteTransitState incomingRoute = state.run.arrivalOps.incomingRoute;
     state.run.arrivalOps = {
         true,
         std::move(destinationId),
         transferFuelRemaining,
         transferFuelCapacity,
-        commitment
+        commitment,
+        incomingRoute
     };
 }
 
@@ -1573,7 +1600,8 @@ void startArrivalOps(GameState& state, const LaunchOutcome& outcome)
         outcome.destinationId,
         std::max(0.0, outcome.transferFuelRemaining),
         std::max(0.0, outcome.transferFuelCapacity),
-        ApproachCommitment::Uncommitted
+        ApproachCommitment::Uncommitted,
+        outcome.routeTransit
     };
 }
 
@@ -2027,8 +2055,9 @@ void updateFlybyRun(GameState& state, double deltaSeconds)
         flyby.collidedWithBody = true;
         flyby.completed = true;
         flyby.result = FlybyGrade::Miss;
-        flyby.velocityX = 0.0;
-        flyby.velocityY = 0.0;
+        // Freeze the final vector for the result stamp. It is both the visual
+        // heading and the achieved-speed record; the completed run no longer
+        // advances, so retaining it cannot continue the ship's movement.
         flyby.inputX = 0.0;
         flyby.inputY = 0.0;
         state.run.shipDamage = std::clamp(
@@ -2122,8 +2151,6 @@ void updateFlybyRun(GameState& state, double deltaSeconds)
     if (flyby.currentZone <= 0) {
         flyby.completed = true;
         flyby.result = FlybyGrade::Miss;
-        flyby.velocityX = 0.0;
-        flyby.velocityY = 0.0;
         flyby.inputX = 0.0;
         flyby.inputY = 0.0;
         return;
@@ -2134,8 +2161,6 @@ void updateFlybyRun(GameState& state, double deltaSeconds)
         flyby.completed = true;
         flyby.result = flybyGrade(flyby);
         populateFlybyRewardPreview(flyby, nullptr);
-        flyby.velocityX = 0.0;
-        flyby.velocityY = 0.0;
         flyby.inputX = 0.0;
         flyby.inputY = 0.0;
         return;
@@ -2150,8 +2175,6 @@ void updateFlybyRun(GameState& state, double deltaSeconds)
         flyby.result = FlybyGrade::Miss;
         flyby.worstZone = 0;
         flyby.currentZone = 0;
-        flyby.velocityX = 0.0;
-        flyby.velocityY = 0.0;
         flyby.inputX = 0.0;
         flyby.inputY = 0.0;
         flyby.missSeconds += dt;
@@ -2162,8 +2185,6 @@ void updateFlybyRun(GameState& state, double deltaSeconds)
         flyby.elapsedSeconds = flyby.durationSeconds;
         flyby.completed = true;
         flyby.result = FlybyGrade::Miss;
-        flyby.velocityX = 0.0;
-        flyby.velocityY = 0.0;
         flyby.inputX = 0.0;
         flyby.inputY = 0.0;
     }
@@ -2436,7 +2457,10 @@ void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog)
     applyLaunchUpgradeAssistToOrbit(state, orbit);
 
     const double angle = tuning::orbit::flybyExitAngleRadians();
-    const double insertionRadius = orbit.targetRadius + orbit.goodBand * 0.82;
+    // Start in the stable Good band, outside Perfect. A clean radial trim can
+    // promote the capture at the end of the loop without making the player
+    // first survive an intentionally unsafe insertion.
+    const double insertionRadius = orbit.targetRadius + orbit.goodBand * 0.55;
     orbit.shipX = std::cos(angle) * insertionRadius;
     orbit.shipY = std::sin(angle) * insertionRadius;
     const double insertionSpeed = circularOrbitSpeedAtRadius(orbit, insertionRadius);
@@ -2469,9 +2493,11 @@ OrbitGrade orbitGrade(const OrbitRunState& orbit)
     if (orbit.orbitProgress < 1.0) {
         return OrbitGrade::Miss;
     }
-    if (orbit.trimApplied
-        && orbit.currentZone >= 2
-        && orbit.perfectSeconds >= tuning::orbit::perfectHoldSeconds) {
+    // Perfect is a clean finish: complete the loop in the inner band without
+    // ever losing the capture solution. This lets a pilot correct from the
+    // authored Good-band insertion late in the loop instead of demanding an
+    // arbitrary multi-second hold after the correction.
+    if (orbit.currentZone >= 2 && orbit.missSeconds <= 0.001) {
         return OrbitGrade::Perfect;
     }
     const double trackedSeconds = orbit.goodSeconds + orbit.perfectSeconds + orbit.missSeconds;

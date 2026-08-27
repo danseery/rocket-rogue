@@ -2,6 +2,7 @@
 
 #include "platform/AppServices.h"
 #include "render/SceneAtlas.h"
+#include "render/SceneClip.h"
 #include "render/SceneComposer.h"
 
 #include <array>
@@ -34,7 +35,11 @@ private:
 
     bool textureReady(std::size_t pageIndex);
     void warmTextures();
-    void flushCommands(const ScenePacket& packet);
+    void flushCommands(
+        const ScenePacket& packet,
+        const FramebufferSceneClip& sceneClip,
+        int drawableWidth,
+        int drawableHeight);
 
     IPlatformHost& host_;
     ITextureSource& textures_;

@@ -329,7 +329,7 @@ void WebGlGraphicsBackend::render(const RenderSnapshot& snapshot)
         openGlSceneScissorY(sceneClip, drawableHeight),
         sceneClip.width,
         sceneClip.height);
-    flushCommands(packet);
+    flushCommands(packet, sceneClip, drawableWidth, drawableHeight);
     glDisable(GL_SCISSOR_TEST);
 }
 
@@ -405,7 +405,11 @@ void WebGlGraphicsBackend::warmTextures()
     }
 }
 
-void WebGlGraphicsBackend::flushCommands(const ScenePacket& packet)
+void WebGlGraphicsBackend::flushCommands(
+    const ScenePacket& packet,
+    const FramebufferSceneClip& sceneClip,
+    int drawableWidth,
+    int drawableHeight)
 {
     if (packet.draws.empty()) {
         return;
@@ -505,7 +509,20 @@ void WebGlGraphicsBackend::flushCommands(const ScenePacket& packet)
     bool vertexStreamInitialized = false;
     SceneDrawType lastDrawType = SceneDrawType::Triangles;
     bool drawTypeInitialized = false;
+    bool fullViewportScissor = false;
     for (const SceneDraw& command : packet.draws) {
+        if (command.fullViewport != fullViewportScissor) {
+            if (command.fullViewport) {
+                glScissor(0, 0, drawableWidth, drawableHeight);
+            } else {
+                glScissor(
+                    sceneClip.x,
+                    openGlSceneScissorY(sceneClip, drawableHeight),
+                    sceneClip.width,
+                    sceneClip.height);
+            }
+            fullViewportScissor = command.fullViewport;
+        }
         if (!drawTypeInitialized || command.drawType != lastDrawType) {
             const bool instanced = command.drawType == SceneDrawType::InstancedQuad;
             glUseProgram(instanced ? instanceProgram_ : program_);

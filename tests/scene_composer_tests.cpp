@@ -494,7 +494,6 @@ void testCompletedFlybyAndOrbitUseFullscreenSceneSurface()
     composer.setViewport({1280, 800, 1280, 800, 1.0F});
 
     RenderSnapshot snapshot;
-    float activeFlybyWorldUnit = 0.0F;
     for (const rocket::Screen screen : {rocket::Screen::Flyby, rocket::Screen::Orbit}) {
         snapshot = {};
         snapshot.screen = screen;
@@ -504,9 +503,32 @@ void testCompletedFlybyAndOrbitUseFullscreenSceneSurface()
         assert(std::abs(activePacket.transform.pixelCenterX - 799.5F) < 0.001F);
         assert(std::abs(activePacket.transform.pixelCenterY - 400.0F) < 0.001F);
         if (screen == rocket::Screen::Flyby) {
-            activeFlybyWorldUnit = activePacket.transform.worldUnitX;
+            // The authored Flyby finish gate must fit inside the active
+            // side-panel viewport, including the outer Good boundary and
+            // a small visible margin.
+            const float tangentX = static_cast<float>(
+                rocket::tuning::flyby::endX - rocket::tuning::flyby::control2X);
+            const float tangentY = static_cast<float>(
+                rocket::tuning::flyby::endY - rocket::tuning::flyby::control2Y);
+            const float tangentLength = std::max(0.0001F, std::hypot(tangentX, tangentY));
+            const float normalX = -tangentY / tangentLength;
+            const float normalY = tangentX / tangentLength;
+            constexpr float finishRadius = 0.028F;
+            constexpr float finishMargin = 0.060F;
+            const float finishHalfWidth = static_cast<float>(rocket::tuning::flyby::goodBand)
+                + finishRadius + finishMargin;
+            const float goalX = std::abs(static_cast<float>(rocket::tuning::flyby::endX))
+                + std::abs(normalX) * finishHalfWidth;
+            const float goalY = std::abs(static_cast<float>(rocket::tuning::flyby::endY))
+                + std::abs(normalY) * finishHalfWidth;
+            const float visibleHalfWidth = static_cast<float>(activePacket.logicalSceneClip.width)
+                * 0.5F / activePacket.transform.worldUnitX;
+            const float visibleHalfHeight = static_cast<float>(activePacket.logicalSceneClip.height)
+                * 0.5F / activePacket.transform.worldUnitY;
+            assert(goalX <= visibleHalfWidth);
+            assert(goalY <= visibleHalfHeight);
         } else {
-            const float expectedOrbitWorldUnit = activeFlybyWorldUnit / 1.50F * 1.66F;
+            const float expectedOrbitWorldUnit = 776.0F * 0.5F * 0.92F * 1.66F;
             assert(std::abs(activePacket.transform.worldUnitX - expectedOrbitWorldUnit) < 0.001F);
             assert(std::abs(activePacket.transform.worldUnitY - expectedOrbitWorldUnit) < 0.001F);
         }
@@ -884,6 +906,36 @@ void testFlybyGuideBandsHighlightActiveZone()
     assert(hasLineColor(missedPacket, 1.0F, 0.25F, 0.20F, 0.92F));
 }
 
+void testTransferAssistLaunchUsesItsSourceBody()
+{
+    const auto hasTexture = [](const ScenePacket& packet, TextureId texture) {
+        const rocket::SceneAtlasUvRect expected = rocket::mapSceneAtlasUvRect(texture, 0.0F, 0.0F, 1.0F, 1.0F);
+        return std::any_of(packet.instances.begin(), packet.instances.end(), [&](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return instance.textured &&
+                std::abs(instance.u0 - expected.u0) < 0.001F &&
+                std::abs(instance.v0 - expected.v0) < 0.001F &&
+                std::abs(instance.u1 - expected.u1) < 0.001F &&
+                std::abs(instance.v1 - expected.v1) < 0.001F;
+        });
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::Earth, true);
+    composer.setTextureReady(TextureId::Mars, true);
+    composer.setTextureReady(TextureId::Jupiter, true);
+
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::Launch;
+    snapshot.destinationTier = 3;
+    snapshot.frontierTransfer = true;
+    snapshot.launchOriginTier = 2;
+    const ScenePacket& packet = composer.compose(snapshot);
+    assert(hasTexture(packet, TextureId::Mars));
+    assert(!hasTexture(packet, TextureId::Earth));
+}
+
 void testManifestAndLogicalTextureMapping()
 {
     assert(rocket::kSceneAtlasTextures.size() == rocket::textureIndex(TextureId::Count));
@@ -922,6 +974,82 @@ void testManifestAndLogicalTextureMapping()
     assert(instruments.sourceWidth == 1821U);
     assert(instruments.sourceHeight == 864U);
     assert(instruments.frameCount == 1U);
+}
+
+bool packetHasTextureFrame(const ScenePacket& packet, TextureId texture, int frame, int frameCount)
+{
+    const float sourceU0 = static_cast<float>(frame) / static_cast<float>(frameCount);
+    const float sourceU1 = static_cast<float>(frame + 1) / static_cast<float>(frameCount);
+    const rocket::SceneAtlasUvRect expected = rocket::mapSceneAtlasUvRect(
+        texture, sourceU0, 0.0F, sourceU1, 1.0F);
+    constexpr float tolerance = 0.0015F;
+    return std::any_of(packet.instances.begin(), packet.instances.end(), [&](const PackedSceneInstance& packed) {
+        const SceneInstance instance = rocket::unpackSceneInstance(packed);
+        if (!instance.textured) {
+            return false;
+        }
+        const bool normal = std::abs(instance.u0 - expected.u0) < tolerance
+            && std::abs(instance.u1 - expected.u1) < tolerance;
+        const bool mirrored = std::abs(instance.u0 - expected.u1) < tolerance
+            && std::abs(instance.u1 - expected.u0) < tolerance;
+        return (normal || mirrored)
+            && std::abs(instance.v0 - expected.v0) < tolerance
+            && std::abs(instance.v1 - expected.v1) < tolerance;
+    });
+}
+
+RenderSnapshot miningSnapshot(rocket::MiningRunState& mining);
+
+void testEnemyThemesAndAnimationPriorityUseTheSharedSpriteContract()
+{
+    rocket::MiningRunState mining;
+    mining.terrain.width = 4;
+    mining.terrain.height = 4;
+    mining.terrain.cells.resize(16);
+    mining.droneX = 1.0;
+    mining.droneY = 1.0;
+    mining.targetTipX = 1.0;
+    mining.targetTipY = 2.0;
+    mining.enemyTheme = rocket::MiningEnemyTheme::Lava;
+
+    rocket::MiningEnemy enemy;
+    enemy.type = rocket::MiningEnemyType::Ant;
+    enemy.x = 2.0;
+    enemy.y = 2.0;
+    enemy.active = true;
+    enemy.health = 1.0;
+    enemy.maxHealth = 1.0;
+    enemy.attackAnimationSeconds = rocket::tuning::mining::enemyAttackAnimationSeconds;
+    enemy.hitAnimationSeconds = rocket::tuning::mining::enemyHitAnimationSeconds;
+    mining.enemies.push_back(enemy);
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setPresentationTime(1.0);
+    composer.setTextureReady(TextureId::EnemyAntLava, true);
+    composer.setTextureReady(TextureId::EnemyAntToxic, true);
+
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningEnemyTheme = mining.enemyTheme;
+    const ScenePacket hitPacket = composer.compose(snapshot);
+    assert(packetHasTextureFrame(hitPacket, TextureId::EnemyAntLava, 12, 20));
+    assert(!packetHasTextureFrame(hitPacket, TextureId::EnemyAntLava, 8, 20));
+
+    mining.enemies.front().hitAnimationSeconds = 0.0;
+    mining.enemies.front().affinity = rocket::MiningElementalAffinity::Toxic;
+    mining.enemies.front().elite = true;
+    snapshot = miningSnapshot(mining);
+    snapshot.miningEnemyTheme = mining.enemyTheme;
+    const ScenePacket attackPacket = composer.compose(snapshot);
+    assert(packetHasTextureFrame(attackPacket, TextureId::EnemyAntToxic, 8, 20));
+
+    mining.enemies.front().active = false;
+    mining.enemies.front().attackAnimationSeconds = 0.0;
+    mining.enemies.front().defeatAnimationSeconds = rocket::tuning::mining::enemyDefeatAnimationSeconds;
+    snapshot = miningSnapshot(mining);
+    snapshot.miningEnemyTheme = mining.enemyTheme;
+    const ScenePacket defeatPacket = composer.compose(snapshot);
+    assert(packetHasTextureFrame(defeatPacket, TextureId::EnemyAntToxic, 16, 20));
 }
 
 void testFlightInstrumentClusterUsesAtlasNeedlesAndBlinkingWarning()
@@ -1664,7 +1792,10 @@ void assertMiningDrillMounted(const SceneInstance& rig, const SceneInstance& dri
     const float forwardOffset = offsetX * forwardX + offsetY * forwardY;
     const float perpendicularOffset = offsetX * forwardY - offsetY * forwardX;
     assert(std::abs(perpendicularOffset) < 0.0005F);
-    assert(std::abs(forwardOffset - rigHalfHeight * 2.0F * 0.18F) < 0.0005F);
+    // Packed scene instances quantize positions independently. A half-cell
+    // actor-anchor correction can move the two values across adjacent packing
+    // steps without changing the authored drill mount.
+    assert(std::abs(forwardOffset - rigHalfHeight * 2.0F * 0.18F) < 0.00075F);
 }
 
 std::vector<PackedSceneInstance> nonTexturedFrameInstances(const ScenePacket& packet)
@@ -2027,6 +2158,74 @@ void testSurfaceScanUsesGoldForPerfectAndGreenForGood()
     assert(hasColor(good, {0.28F, 1.0F, 0.48F, 1.0F}));
 }
 
+void testSurfaceScanUsesDestinationAppropriateCompanions()
+{
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::Earth, true);
+    composer.setTextureReady(TextureId::Moon, true);
+    composer.setTextureReady(TextureId::Jupiter, true);
+
+    RenderSnapshot jupiter;
+    jupiter.screen = rocket::Screen::SurfaceScan;
+    jupiter.destinationTier = 3;
+    const ScenePacket& jupiterPacket = composer.compose(jupiter);
+    assert(std::any_of(jupiterPacket.draws.begin(), jupiterPacket.draws.end(), [](const SceneDraw& draw) {
+        return draw.texture == TextureId::Jupiter;
+    }));
+    assert(std::any_of(jupiterPacket.draws.begin(), jupiterPacket.draws.end(), [](const SceneDraw& draw) {
+        return draw.texture == TextureId::Moon;
+    }));
+    assert(std::none_of(jupiterPacket.draws.begin(), jupiterPacket.draws.end(), [](const SceneDraw& draw) {
+        return draw.texture == TextureId::Earth;
+    }));
+
+    RenderSnapshot moon;
+    moon.screen = rocket::Screen::SurfaceScan;
+    moon.destinationTier = 1;
+    const ScenePacket& moonPacket = composer.compose(moon);
+    assert(std::any_of(moonPacket.draws.begin(), moonPacket.draws.end(), [](const SceneDraw& draw) {
+        return draw.texture == TextureId::Earth;
+    }));
+}
+
+void testSceneTransitionFadesEverySceneToBlack()
+{
+    const auto hasBlackOverlay = [](const ScenePacket& packet, float opacity) {
+        return std::any_of(packet.instances.begin(), packet.instances.end(), [opacity](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return !instance.textured
+                && instance.shape == SceneInstanceShape::Rectangle
+                && std::abs(instance.color.r) < 0.001F
+                && std::abs(instance.color.g) < 0.001F
+                && std::abs(instance.color.b) < 0.001F
+                && std::abs(instance.color.a - opacity) < 0.02F;
+        });
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::Mining;
+    assert(!hasBlackOverlay(composer.compose(snapshot), 0.50F));
+
+    snapshot.sceneFadeToBlack = 0.50;
+    const ScenePacket& halfFade = composer.compose(snapshot);
+    assert(hasBlackOverlay(halfFade, 0.50F));
+    assert(!halfFade.draws.empty());
+    const SceneDraw& finalDraw = halfFade.draws.back();
+    assert(finalDraw.drawType == SceneDrawType::InstancedQuad);
+    assert(finalDraw.fullViewport);
+    const SceneInstance finalInstance = rocket::unpackSceneInstance(
+        halfFade.instances[finalDraw.firstInstance + finalDraw.instanceCount - 1U]);
+    assert(!finalInstance.textured);
+    assert(finalInstance.shape == SceneInstanceShape::Rectangle);
+    assert(std::abs(finalInstance.color.r) < 0.001F);
+    assert(std::abs(finalInstance.color.g) < 0.001F);
+    assert(std::abs(finalInstance.color.b) < 0.001F);
+    assert(std::abs(finalInstance.color.a - 0.50F) < 0.02F);
+}
+
 Color miningTerrainMaterialColor(rocket::MiningCellMaterial material)
 {
     rocket::MiningRunState mining;
@@ -2194,6 +2393,12 @@ void testMiningRigStaysVisibleAndTracksHeading()
     assert(first.color.a > 0.99F);
     assert(std::hypot(first.axisXx, first.axisXy) > 0.01F);
     assert(std::hypot(first.axisYx, first.axisYy) > 0.01F);
+    const float sceneAspect = static_cast<float>(firstPacket.logicalSceneClip.width)
+        / static_cast<float>(std::max(1, firstPacket.logicalSceneClip.height));
+    const float cellW = sceneAspect * 2.0F / static_cast<float>(snapshot.miningWidth);
+    const float cellH = 1.82F / static_cast<float>(snapshot.miningHeight);
+    assert(std::abs(first.centerX - (-sceneAspect + static_cast<float>(snapshot.miningDroneX) * cellW)) < 0.0005F);
+    assert(std::abs(first.centerY - (0.82F - static_cast<float>(snapshot.miningDroneY) * cellH)) < 0.0005F);
     assert(first.axisYx < -0.01F);
     assert(std::abs(first.axisYy) < 0.001F);
     const float firstLength = std::hypot(first.axisYx, first.axisYy);
@@ -2349,8 +2554,8 @@ void testMiningSurveyPulseWaveReachesItsRealRadiusThenFades()
         const float sceneAspect = static_cast<float>(packet.logicalSceneClip.width)
             / static_cast<float>(std::max(1, packet.logicalSceneClip.height));
         const float cellW = (sceneAspect * 2.0F) / 16.0F;
-        const float originX = -sceneAspect + 8.0F * cellW + cellW * 0.5F;
-        const float originY = 0.82F - 6.0F * cellH - cellH * 0.5F;
+        const float originX = -sceneAspect + 8.0F * cellW;
+        const float originY = 0.82F - 6.0F * cellH;
         WaveMetrics result;
         for (const PackedSceneInstance& packed : packet.instances) {
             const SceneInstance instance = rocket::unpackSceneInstance(packed);
@@ -3138,7 +3343,9 @@ int main()
     testLaunchDestinationGateUsesCorridorEndpoints();
     testOrbitGuideBandsHighlightActiveZone();
     testFlybyGuideBandsHighlightActiveZone();
+    testTransferAssistLaunchUsesItsSourceBody();
     testManifestAndLogicalTextureMapping();
+    testEnemyThemesAndAnimationPriorityUseTheSharedSpriteContract();
     testFlightInstrumentClusterUsesAtlasNeedlesAndBlinkingWarning();
     testFlybySteeringTriangleAndThrustFlameRemainDistinct();
     testLaunchUsesAttachedFlameAndSideSteeringTriangleOnly();
@@ -3155,6 +3362,8 @@ int main()
     testSurfaceScannerMarksUseMaterialSilhouettes();
     testSurfaceScanSuccessFanfareRespectsCameraShake();
     testSurfaceScanUsesGoldForPerfectAndGreenForGood();
+    testSurfaceScanUsesDestinationAppropriateCompanions();
+    testSceneTransitionFadesEverySceneToBlack();
     testMiningOrePaletteMakesCommonSilverAndRareGold();
     testMiningPickupTextUsesTypedColorsAndTwoSecondLifetime();
     testMiningRigSlerpsVerticalDuringExtraction();

@@ -18,6 +18,7 @@ struct ContentCatalog {
     std::vector<ShipFrame> frames;
     std::vector<Astronaut> astronauts;
     std::vector<Destination> destinations;
+    std::vector<RouteLinkDefinition> routeLinks;
     std::vector<TransferAssistDefinition> transferAssists;
     std::vector<ScenarioDefinition> scenarios;
     std::vector<ScenarioFactoryDefinition> scenarioFactories;
@@ -33,6 +34,10 @@ struct ContentCatalog {
     const ShipFrame* findFrame(std::string_view id) const;
     const Astronaut* findAstronaut(std::string_view id) const;
     const Destination* findDestination(std::string_view id) const;
+    const RouteLinkDefinition* findRouteLink(std::string_view id) const;
+    const RouteLinkDefinition* findRouteLink(
+        std::string_view sourceDestinationId,
+        std::string_view targetDestinationId) const;
     const TransferAssistDefinition* findTransferAssist(std::string_view id) const;
     const ScenarioDefinition* findScenario(std::string_view id) const;
     const ScenarioFactoryDefinition* findScenarioFactory(std::string_view id) const;
@@ -40,6 +45,7 @@ struct ContentCatalog {
 };
 
 ContentCatalog createDefaultContent();
+bool validateRouteCatalog(const ContentCatalog& catalog, std::string* error = nullptr);
 
 bool hasUnlock(const MetaProgress& meta, std::string_view key);
 std::string unlockDisplayName(std::string_view key);
