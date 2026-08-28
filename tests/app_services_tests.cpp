@@ -1323,12 +1323,16 @@ int main()
         ui.requestFocus("action:survey_surface");
         ui.refresh();
 
-        constexpr std::array<std::string_view, 4> focusPath {
-            "action:survey_surface",
+        // Survey is unavailable at the prepared depth. Disabled controls do
+        // not receive focus; the first navigation input enters the actionable
+        // portion of the row.
+        constexpr std::array<std::string_view, 3> focusPath {
             "action:push_surface",
             "action:mine_surface",
             "action:extract_surface",
         };
+        assert(ui.focusedId().empty());
+        assert(ui.navigate(rocket::UiDirection::Right));
         assert(ui.focusedId() == focusPath.front());
         assert(!ui.navigate(rocket::UiDirection::Left));
         assert(ui.focusedId() == focusPath.front());
@@ -1380,9 +1384,10 @@ int main()
         // px. Every Surface Ops card button must remain pointer-reachable
         // inside that lane instead of being positioned from the outer monitor
         // width.
-        constexpr std::array<std::string_view, 4> surfaceActions {
+        // Survey is intentionally disabled at the configured depth limit;
+        // pointer reachability applies to the remaining actionable controls.
+        constexpr std::array<std::string_view, 3> surfaceActions {
             rocket::ui::actions::mineSurface,
-            rocket::ui::actions::surveySurface,
             rocket::ui::actions::pushSurface,
             rocket::ui::actions::extractSurface,
         };
@@ -1412,9 +1417,8 @@ int main()
         if (!allSurfaceActionsReachable) {
             std::cerr << "Surface action reachability:"
                       << " mine=" << pointerReachable[0]
-                      << " survey=" << pointerReachable[1]
-                      << " push=" << pointerReachable[2]
-                      << " extract=" << pointerReachable[3] << '\n';
+                      << " push=" << pointerReachable[1]
+                      << " extract=" << pointerReachable[2] << '\n';
         }
         assert(allSurfaceActionsReachable);
         assert(digPointerX >= 0 && digPointerY >= 0);
