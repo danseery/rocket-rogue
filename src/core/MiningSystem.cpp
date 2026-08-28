@@ -1,4 +1,5 @@
 #include "core/MiningSystem.h"
+#include "core/PostSolarSystem.h"
 #include "core/ContentIds.h"
 #include "core/GameFormat.h"
 #include "core/GameText.h"
@@ -2229,6 +2230,17 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
             // return before considering any further work.
             agent.finishTargetBeforeReturn = true;
         }
+        const bool hazardTaskCommitted =
+            agent.role == MiniDroneRole::Hazard &&
+            hazardCoordinator.hasAssignment(agent);
+        if (hazardTaskCommitted &&
+            anchorDistance > tuning::mining::hazardDroneAcquireRadiusCells) {
+            // Acquisition range chooses new Hazard Drone work. Once a tile is
+            // reserved, moving the controlled actor must not erase that
+            // conversion. Finish this target, then rendezvous before taking
+            // another assignment, matching the Prospector contract.
+            agent.finishTargetBeforeReturn = true;
+        }
         const bool logisticsTransit =
             (agent.role == MiniDroneRole::Mining || agent.role == MiniDroneRole::Resource) &&
             (agent.behavior == MiningMiniDroneBehavior::DeliveringToShip ||
@@ -2656,6 +2668,7 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
                     returnSpeed,
                     dt,
                     MiniDroneArrivalStyle::SmoothFormation)) {
+                agent.finishTargetBeforeReturn = false;
                 agent.behavior = MiningMiniDroneBehavior::Following;
             }
             break;
@@ -6657,6 +6670,21 @@ bool miningAtReturnZone(const MiningRunState& mining)
     return controlledActorAtReturnZone(mining);
 }
 
+double miningRigFuelCycleSeconds(const GameState& state)
+{
+    return tuning::rigFuelLoopProgression::baseCycleSeconds +
+        tuning::rigFuelLoopProgression::secondsPerRank *
+            static_cast<double>(installedRigFuelLoopRank(state));
+}
+
+double miningRigFuelConsumptionPerSecond(
+    const GameState& state,
+    double loadMultiplier)
+{
+    return std::max(0.0, loadMultiplier) /
+        std::max(1.0, miningRigFuelCycleSeconds(state));
+}
+
 MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& catalog)
 {
     MiningLoadStats load;
@@ -7154,6 +7182,30 @@ SurfaceActionOutcome startMiningRun(
     mining.rewardBudget = rewardBudget;
     mining.progressionCreditEligible = progressionCreditEligible;
     mining.destinationId = expedition.destinationId;
+    const std::string_view postSolarSystemId = expedition.postSolarSystemId.empty()
+        ? postSolarSystemForDestination(expedition.destinationId)
+        : std::string_view(expedition.postSolarSystemId);
+    if (!postSolarSystemId.empty()) {
+        expedition.postSolarSystemId = postSolarSystemId;
+        mining.postSolarSystemId = postSolarSystemId;
+        PostSolarSystemRoster& roster = ensurePostSolarSystemRoster(
+            state.meta,
+            postSolarSystemId,
+            state.seed);
+        const PostSolarBodyProfile* body = expedition.bodyId.empty()
+            ? primaryPostSolarBody(roster)
+            : findPostSolarBody(roster, expedition.bodyId);
+        if (body == nullptr) {
+            body = primaryPostSolarBody(roster);
+        }
+        if (body != nullptr) {
+            expedition.bodyId = body->id;
+            mining.bodyId = body->id;
+            mining.surfaceGeologyId = body->surfaceGeologyId;
+            mining.deepGeologyId = body->deepGeologyId;
+            mining.geologySeed = body->seed;
+        }
+    }
     mining.scenarioId = expedition.pendingScenarioId;
     mining.scenarioStepId = expedition.pendingScenarioStepId;
     mining.miningSiteDefinitionId = expedition.pendingMiningSiteDefinitionId;
@@ -7992,7 +8044,9 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     loadStats = miningLoadStats(state, catalog);
     if (arenaRules.mechanics.oxygenAndFuel) {
         mining.fuelCycleProgress +=
-            dt * tuning::mining::fuelCycleProgressPerSecond * loadStats.fuelConsumptionMultiplier;
+            dt * miningRigFuelConsumptionPerSecond(
+                state,
+                loadStats.fuelConsumptionMultiplier);
     }
     if (arenaRules.mechanics.oxygenAndFuel && mining.oxygenSeconds > 0.0) {
         while (mining.fuelCycleProgress >= 1.0) {

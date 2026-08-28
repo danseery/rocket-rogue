@@ -125,8 +125,20 @@ public:
     void debugStartMining();
     void debugStartCombatMining();
     void debugStartSwarmArena();
-    void debugStartMiningArena(int act, int difficulty, std::uint64_t seed, int loadoutMode, int gateOverride = -1);
+    void debugStartMiningArena(
+        int act,
+        int difficulty,
+        std::uint64_t seed,
+        int loadoutMode,
+        int gateOverride = -1,
+        int destinationTierOverride = -1,
+        int postSolarSystemOverride = 0,
+        int bodyIndex = 0);
     std::string debugMiningArenaPreview(int act, int difficulty, int gateOverride = -1) const;
+    std::string debugPostSolarBodyPreview(
+        int postSolarSystemOverride,
+        int bodyIndex,
+        std::uint64_t seed) const;
     void debugStartSurfaceScan();
     void debugStartSurfacePush();
     void debugStartFlyby();

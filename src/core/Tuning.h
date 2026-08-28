@@ -22,6 +22,18 @@ namespace presentation {
 inline constexpr double statChipMinimumMagnitude = 0.05;
 } // namespace presentation
 
+namespace surfaceDepthProgression {
+inline constexpr int baseDepthRating = 1;
+inline constexpr int maximumUpgradeRank = 3;
+inline constexpr int maximumDepthRating = baseDepthRating + maximumUpgradeRank;
+} // namespace surfaceDepthProgression
+
+namespace rigFuelLoopProgression {
+inline constexpr int maximumUpgradeRank = 3;
+inline constexpr double baseCycleSeconds = 15.0;
+inline constexpr double secondsPerRank = 3.0;
+} // namespace rigFuelLoopProgression
+
 namespace records {
 inline constexpr double closeCallSurvivalMargin = 0.05;
 inline constexpr double skinOfYourTeethCreditBonus = 0.10;
@@ -200,6 +212,10 @@ inline constexpr double controlChaosRankThree = 0.00;
 inline constexpr double controlRightOvershoot = 0.45;
 inline constexpr double controlSteeringResponseVariance = 0.20;
 inline constexpr double controlStartupDrift = 0.80;
+// A slingshot exit that is already off-center carries an outward lateral
+// vector into the next launch. Centered exits add none; edge exits begin with
+// a visibly wilder correction without changing their independent speed award.
+inline constexpr double slingshotExitCourseDrift = 0.65;
 inline constexpr double controlThrottleKick = 0.35;
 inline constexpr double controlThrottleKickThreshold = 0.05;
 inline constexpr double controlThrottleKickCooldown = 0.35;
@@ -507,8 +523,10 @@ inline constexpr int analysisLabBlueprintBonus = 1;
 inline constexpr int artifactInsightBlueprintPerIdentified = 1;
 inline constexpr int artifactInsightBlueprintMaximum = 3;
 inline constexpr int surfaceLogEntryLimit = 5;
-inline constexpr int pushMaxSteps = 4;
-inline constexpr int scanMaxPulses = pushMaxSteps + 1;
+// Absolute Survey Array and Bore System ratings now own the reachable depth
+// envelope. These legacy maxima remain only as render-array headroom.
+inline constexpr int pushMaxSteps = surfaceDepthProgression::maximumDepthRating;
+inline constexpr int scanMaxPulses = surfaceDepthProgression::maximumDepthRating + 1;
 inline constexpr double scanSweepRadiansPerSecond = 2.70;
 inline constexpr double scanWindowCenterRadians = 1.57079632679489661923;
 inline constexpr double scanGoodWindowHalfAngleRadians = 0.42;
@@ -559,7 +577,8 @@ inline constexpr double oxygenSeconds = 30.0;
 inline constexpr double ioArtifactOxygenSeconds = 60.0;
 inline constexpr double maximumOxygenSeconds = 120.0;
 inline constexpr double oxygenPocketRestoreSeconds = 10.0;
-inline constexpr double fuelCycleProgressPerSecond = 1.0 / 15.0;
+inline constexpr double fuelCycleProgressPerSecond =
+    1.0 / rigFuelLoopProgression::baseCycleSeconds;
 // Presentation reserve for a deliberate return through generated terrain.
 // Ideal straight-line speed badly understates acceleration, gravity, steering,
 // and the time needed to find each layer transition.

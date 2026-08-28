@@ -14,6 +14,7 @@
 #include "core/MiniDroneCoordination.h"
 #include "core/MiningSystem.h"
 #include "core/MiningPresentation.h"
+#include "core/PostSolarSystem.h"
 #include "core/OutcomePresentation.h"
 #include "core/PanelChromePresentation.h"
 #include "core/ProgramPresentation.h"
@@ -24,6 +25,7 @@
 #include "core/SaveData.h"
 #include "core/SaveSchema.h"
 #include "core/ShipPresentation.h"
+#include "core/SurfaceScanPresentation.h"
 #include "core/Tuning.h"
 #include "core/GameUi.h"
 #include "game/GamePanel.h"
@@ -1747,8 +1749,17 @@ void moduleOffersAreOneChoiceRefits()
     require(offerKeyAt(state, 0) != offerKeyAt(state, 2), "offer one and three should be distinct when possible");
     require(offerKeyAt(state, 1) != offerKeyAt(state, 2), "offer two and three should be distinct when possible");
 
-    const std::string picked = offerKeyAt(state, 1);
-    require(buyOffer(state, catalog, 1), "player should be able to install one affordable reward module");
+    int pickedIndex = -1;
+    for (int index = 0; index < 3; ++index) {
+        const ShipModule* module = catalog.findModule(state.run.offerModuleIds[static_cast<std::size_t>(index)]);
+        if (module == nullptr || (module->surfaceDepthUpgradeKind == SurfaceDepthUpgradeKind::None && module->rigFuelLoopRank <= 0)) {
+            pickedIndex = index;
+            break;
+        }
+    }
+    require(pickedIndex >= 0, "the mixed Refit fixture should retain one ordinary one-choice offer");
+    const std::string picked = offerKeyAt(state, static_cast<std::size_t>(pickedIndex));
+    require(buyOffer(state, catalog, static_cast<std::size_t>(pickedIndex)), "player should be able to install one affordable reward module");
     require(state.run.offerModuleIds[0].empty() && state.run.offerModuleIds[1].empty() && state.run.offerModuleIds[2].empty(), "buying one reward should consume the refit window");
     require(state.run.offerCrewUpgradeIds[0].empty() && state.run.offerCrewUpgradeIds[1].empty() && state.run.offerCrewUpgradeIds[2].empty(), "buying one reward should consume crew refit offers");
     if (picked.find("module:") == 0) {
@@ -1947,10 +1958,35 @@ void fuelRefitsTeachMarsAndFundJupiter()
     slingshotOnly.run.flyby.completed = true;
     slingshotOnly.run.flyby.result = FlybyGrade::Perfect;
     slingshotOnly.run.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
-    slingshotOnly.run.flyby.velocityX = tuning::flyby::maxSpeed;
+    slingshotOnly.run.flyby.pathProgress = 1.0;
+    const double exitTangentXRaw =
+        tuning::flyby::endX - tuning::flyby::control2X;
+    const double exitTangentYRaw =
+        tuning::flyby::endY - tuning::flyby::control2Y;
+    const double exitTangentLength = std::hypot(exitTangentXRaw, exitTangentYRaw);
+    const double exitTangentX = exitTangentXRaw / exitTangentLength;
+    const double exitTangentY = exitTangentYRaw / exitTangentLength;
+    const double exitRightX = exitTangentY;
+    const double exitRightY = -exitTangentX;
+    const double flybyExitOffset =
+        -slingshotOnly.run.flyby.perfectBand * 0.50;
+    slingshotOnly.run.flyby.shipX =
+        tuning::flyby::endX + exitRightX * flybyExitOffset;
+    slingshotOnly.run.flyby.shipY =
+        tuning::flyby::endY + exitRightY * flybyExitOffset;
+    slingshotOnly.run.flyby.velocityX =
+        exitTangentX * tuning::flyby::maxSpeed;
+    slingshotOnly.run.flyby.velocityY =
+        exitTangentY * tuning::flyby::maxSpeed;
     require(armJupiterSlingshot(slingshotOnly),
         "a Perfect Mars pass must physically arm the one-attempt Jupiter slingshot");
     const double achievedSpeedBoost = slingshotOnly.run.pendingTransferAssist.speedBoost;
+    const double expectedLaunchCourseOffset =
+        -tuning::launch::pilotingCourseSafe * 0.50;
+    require(nearlyEqual(
+                slingshotOnly.run.pendingTransferAssist.exitCourseOffset,
+                expectedLaunchCourseOffset),
+        "the transfer assist must preserve the Flyby exit side and its exact position within the gold band");
     completeFlybyRun(slingshotOnly, catalog);
     require(slingshotOnly.run.pendingTransferAssist.active() &&
             nearlyEqual(launchFuelCapacity(slingshotOnly), 20.0) &&
@@ -1964,10 +2000,61 @@ void fuelRefitsTeachMarsAndFundJupiter()
     require(nearlyEqual(slingshotOnly.run.credits, slingshotCreditsBefore) &&
             slingshotOnly.meta.blueprintProgress == slingshotResearchBefore,
         "the dedicated departure slingshot must award no credits or Research Data");
-    require(achievedSpeedBoost >= tuning::flyby::slingshotSpeedBoost - 0.001 &&
-            achievedSpeedBoost <= tuning::flyby::slingshotSpeedBoost *
-                    tuning::flyby::slingshotMaxSpeedScale + 0.001,
-        "the dedicated slingshot must retain the achieved 20-40 percent travel-rate range");
+    require(nearlyEqual(
+                achievedSpeedBoost,
+                tuning::flyby::slingshotSpeedBoost *
+                    tuning::flyby::slingshotMaxSpeedScale),
+        "a maximum-speed slingshot must retain the full 40 percent travel-rate bonus");
+
+    GameState slowGoldSlingshot = jupiterRefit;
+    require(startJupiterSlingshotRun(slowGoldSlingshot, catalog),
+        "the slow-Gold anti-cheese fixture must start a Mars slingshot");
+    slowGoldSlingshot.run.flyby.completed = true;
+    slowGoldSlingshot.run.flyby.result = FlybyGrade::Perfect;
+    slowGoldSlingshot.run.flyby.pathProgress = 1.0;
+    slowGoldSlingshot.run.flyby.shipX = tuning::flyby::endX;
+    slowGoldSlingshot.run.flyby.shipY = tuning::flyby::endY;
+    slowGoldSlingshot.run.flyby.velocityX =
+        exitTangentX * tuning::flyby::minSpeed;
+    slowGoldSlingshot.run.flyby.velocityY =
+        exitTangentY * tuning::flyby::minSpeed;
+    require(armJupiterSlingshot(slowGoldSlingshot) &&
+            nearlyEqual(
+                slowGoldSlingshot.run.pendingTransferAssist.speedBoost,
+                0.0),
+        "slowing to minimum speed in Gold must grant zero bonus velocity");
+
+    GameState fastGreenSlingshot = jupiterRefit;
+    require(startJupiterSlingshotRun(fastGreenSlingshot, catalog),
+        "the fast-Green fixture must start a Mars slingshot");
+    fastGreenSlingshot.run.flyby.completed = true;
+    fastGreenSlingshot.run.flyby.result = FlybyGrade::Good;
+    fastGreenSlingshot.run.flyby.pathProgress = 1.0;
+    const double greenBandShare = 0.75;
+    const double fastGreenExitOffset =
+        fastGreenSlingshot.run.flyby.perfectBand +
+        (fastGreenSlingshot.run.flyby.goodBand -
+            fastGreenSlingshot.run.flyby.perfectBand) * greenBandShare;
+    fastGreenSlingshot.run.flyby.shipX =
+        tuning::flyby::endX + exitRightX * fastGreenExitOffset;
+    fastGreenSlingshot.run.flyby.shipY =
+        tuning::flyby::endY + exitRightY * fastGreenExitOffset;
+    fastGreenSlingshot.run.flyby.velocityX =
+        exitTangentX * tuning::flyby::maxSpeed;
+    fastGreenSlingshot.run.flyby.velocityY =
+        exitTangentY * tuning::flyby::maxSpeed;
+    require(armJupiterSlingshot(fastGreenSlingshot) &&
+            fastGreenSlingshot.run.pendingTransferAssist.grade == FlybyGrade::Good &&
+            nearlyEqual(
+                fastGreenSlingshot.run.pendingTransferAssist.speedBoost,
+                tuning::flyby::slingshotSpeedBoost *
+                    tuning::flyby::slingshotMaxSpeedScale) &&
+            nearlyEqual(
+                fastGreenSlingshot.run.pendingTransferAssist.exitCourseOffset,
+                tuning::launch::pilotingCourseSafe +
+                    (tuning::launch::pilotingCourseCaution -
+                        tuning::launch::pilotingCourseSafe) * greenBandShare),
+        "a breakneck Green exit must keep its full speed while preserving its farther-off-center launch position");
 
     const double calibratedBurn = launchPoweredFuelCost(
         20.0,
@@ -1990,8 +2077,10 @@ void fuelRefitsTeachMarsAndFundJupiter()
         {goodSlingshot, catalog, goodResultLaunch, goodResultLaunch});
     require(goodResultHtml.find("SLINGSHOT ACTIVE — WILD RIDE") != std::string::npos &&
             goodResultHtml.find("+35% flight instability") != std::string::npos &&
+            goodResultHtml.find("finish // +") != std::string::npos &&
+            goodResultHtml.find("launch velocity") != std::string::npos &&
             goodResultHtml.find("Continue to Jupiter") != std::string::npos,
-        "a Good Mars result must clearly offer departure while naming the wilder flight-control cost");
+        "a Good Mars result must show its actual finish-derived velocity and the wilder flight-control cost");
     completeFlybyRun(goodSlingshot, catalog);
     require(goodSlingshot.run.pendingTransferAssist.active() &&
             nearlyEqual(pendingLaunchFuelSavingsForDestination(goodSlingshot, content::destination::jupiter), 5.0) &&
@@ -2045,7 +2134,10 @@ void fuelRefitsTeachMarsAndFundJupiter()
     require(restoredSlingshot.run.pendingTransferAssist.active() &&
             restoredSlingshot.run.pendingTransferAssist.definitionId == content::transferAssist::marsJupiter &&
             nearlyEqual(restoredSlingshot.run.pendingTransferAssist.fuelSavings, 5.0) &&
-            nearlyEqual(restoredSlingshot.run.pendingTransferAssist.instabilityPenalty, 0.0),
+            nearlyEqual(restoredSlingshot.run.pendingTransferAssist.instabilityPenalty, 0.0) &&
+            nearlyEqual(
+                restoredSlingshot.run.pendingTransferAssist.exitCourseOffset,
+                expectedLaunchCourseOffset),
         "an active Mars slingshot must survive save/load until the Jupiter attempt begins");
     SaveData legacySlingshot = slingshotSave;
     legacySlingshot.pendingTransferAssist = {};
@@ -2190,6 +2282,53 @@ void fuelRefitsTeachMarsAndFundJupiter()
             nearlyEqual(calibratedTransferFuelMargin(both, *jupiter), 10.0) &&
             jupiterTransferMarginReady(both),
         "Fuel Tanks III and the Mars slingshot must stack to 25 tank, 15 burn, and 10 margin");
+
+    Random inheritedLaunchRng(0xF0047);
+    const PreparedLaunch inheritedLaunch = prepareLaunch(
+        slingshotOnly,
+        catalog,
+        inheritedLaunchRng);
+    const LaunchFlightState inheritedFlight = beginLaunchFlight(
+        inheritedLaunch,
+        *jupiter);
+    const double expectedInheritedVelocity =
+        tuning::launch::pilotingBaseProgressRate *
+        (tuning::launch::pilotingPoweredSteeringBase +
+            tuning::launch::pilotingInitialThrottle) /
+        (1.0 + static_cast<double>(jupiter->tier) *
+            tuning::launch::pilotingTierDurationScale) *
+        (1.0 + achievedSpeedBoost);
+    require(nearlyEqual(
+                inheritedLaunch.slingshotCourseOffset,
+                expectedLaunchCourseOffset) &&
+            nearlyEqual(inheritedFlight.courseOffset, expectedLaunchCourseOffset),
+        "the post-slingshot launch must begin at the saved left/right corridor position");
+    require(nearlyEqual(
+                inheritedFlight.travelVelocity,
+                expectedInheritedVelocity) &&
+            inheritedFlight.travelVelocity > 0.0,
+        "the post-slingshot launch must start with the earned physical velocity instead of accelerating from rest");
+
+    PreparedLaunch centeredAssistLaunch = inheritedLaunch;
+    centeredAssistLaunch.controlChaos = 0.0;
+    centeredAssistLaunch.slingshotCourseOffset = 0.0;
+    const LaunchFlightState centeredAssistFlight = beginLaunchFlight(
+        centeredAssistLaunch,
+        *jupiter);
+    PreparedLaunch greenAssistLaunch = centeredAssistLaunch;
+    greenAssistLaunch.slingshotCourseOffset =
+        tuning::launch::pilotingCourseCaution * 0.90;
+    const LaunchFlightState greenAssistFlight = beginLaunchFlight(
+        greenAssistLaunch,
+        *jupiter);
+    require(nearlyEqual(centeredAssistFlight.courseVelocity, 0.0) &&
+            greenAssistFlight.courseVelocity > 0.0 &&
+            nearlyEqual(
+                greenAssistFlight.courseVelocity,
+                greenAssistLaunch.slingshotCourseOffset /
+                    launchCourseLimit(greenAssistLaunch) *
+                    tuning::launch::slingshotExitCourseDrift),
+        "farther off-center transfer exits must seed proportionally wilder outward launch navigation");
 
     PreparedLaunch heatBaseline;
     heatBaseline.config.destinationId = jupiter->id;
@@ -2958,7 +3097,7 @@ void solarRouteLegsKeepCampaignProgressSeparateFromShipPosition()
         "recovery must arrive at Mars while reusing the authored Mars-Jupiter leg profile");
 
     const std::optional<SaveData> saved = deserializeSaveData(serializeSaveData(captureSaveData(state)));
-    require(saved.has_value(), "pending recovery route should serialize in the version-13 save");
+    require(saved.has_value(), "pending recovery route should serialize in the version-14 save");
     GameState restored = createNewGame(catalog, 0x71AB);
     restoreSaveData(restored, catalog, *saved);
     require(restored.run.routeTransit.intent == RouteTransitIntent::Recovery &&
@@ -3067,7 +3206,8 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
         "completed flyby RmlUi stamp should expose its continue action");
     completeFlybyRun(perfect, catalog);
     require(perfect.run.nextLaunchFuelBoost >= tuning::flyby::slingshotFuelBoost - 0.001, "perfect flyby should grant next-launch fuel boost");
-    require(perfect.run.nextLaunchSpeedBoost >= tuning::flyby::slingshotSpeedBoost - 0.001, "perfect flyby should grant next-launch speed boost");
+    require(perfect.run.nextLaunchSpeedBoost > 0.0,
+        "a moving perfect flyby should grant a next-launch speed boost derived from its actual finish velocity");
     require(perfect.meta.totalFlybyPerfects == 1, "perfect flyby should be counted for future achievement stats");
     const double baselineFuelBoost = perfect.run.nextLaunchFuelBoost;
     const double baselineSpeedBoost = perfect.run.nextLaunchSpeedBoost;
@@ -3077,7 +3217,8 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
     require(launch.slingshotFuelSavings >= tuning::flyby::slingshotFuelBoost - 0.001, "prepared launch should include pending slingshot fuel savings");
     require(nearlyEqual(launch.fuelCapacity, launchFuelCapacity(perfect)),
         "a flyby benefit must save powered fuel without changing tank capacity");
-    require(launch.slingshotSpeedBoost >= tuning::flyby::slingshotSpeedBoost - 0.001, "prepared launch should include pending slingshot speed");
+    require(nearlyEqual(launch.slingshotSpeedBoost, baselineSpeedBoost),
+        "prepared launch should include the exact pending finish-speed bonus");
 
     GameState fastPerfect = createNewGame(catalog, 711);
     startArrivalFlybyForTest(fastPerfect, moonArrival);
@@ -3593,21 +3734,21 @@ void activeOrbitSaveResumesAtApproach()
     GameState capturedRestored = createNewGame(catalog, 726);
     restoreSaveData(capturedRestored, catalog, *capturedSave);
     require(capturedRestored.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured,
-        "captured Orbit should survive a v13 save round trip");
+        "captured Orbit should survive a v14 save round trip");
     require(!canRunArrivalFlyby(capturedRestored, catalog) && canAttemptArrivalLanding(capturedRestored, catalog),
         "restored captured Orbit should keep mutually exclusive availability");
 
     std::string legacyV13 = serializeSaveData(captureSaveData(restored));
     const std::string commitmentField = std::string(save_schema::field::arrivalApproachCommitment) + "=";
     const std::size_t commitmentStart = legacyV13.find(commitmentField);
-    require(commitmentStart != std::string::npos, "v13 save should write the optional approach commitment field");
+    require(commitmentStart != std::string::npos, "v14 save should write the optional approach commitment field");
     const std::size_t commitmentEnd = legacyV13.find('\n', commitmentStart);
     legacyV13.erase(commitmentStart, commitmentEnd == std::string::npos
         ? std::string::npos
         : commitmentEnd - commitmentStart + 1);
     const auto olderV13 = deserializeSaveData(legacyV13);
     require(olderV13.has_value() && olderV13->arrivalOps.commitment == ApproachCommitment::Uncommitted,
-        "older v13 saves without the optional field should default safely to Uncommitted");
+        "current saves without the optional field should default safely to Uncommitted");
 }
 
 void researchProjectsGenerateAndCompleteFromSharedRules()
@@ -4096,7 +4237,7 @@ void postExtractionLevelUpDraftRestoresWithoutSurfaceRuntime()
 
     const std::optional<SaveData> save = deserializeSaveData(
         serializeSaveData(captureSaveData(state)));
-    require(save.has_value(), "a post-extraction Level Up draft should serialize as a valid v13 save");
+    require(save.has_value(), "a post-extraction Level Up draft should serialize as a valid v14 save");
 
     GameState restored = createNewGame(catalog, 1);
     restoreSaveData(restored, catalog, *save);
@@ -4162,7 +4303,8 @@ void surfaceUpgradesAndDronesModifyScanMiniGame()
     Random upgradedRng(1934);
     require(startSurfaceScanRun(baseline, baselineRng).applied, "baseline scan should start");
     require(startSurfaceScanRun(upgraded, upgradedRng).applied, "upgraded scan should start");
-    require(upgraded.run.surfaceScan.maxPulses > baseline.run.surfaceScan.maxPulses, "scanner support should add scan push-your-luck capacity");
+    require(upgraded.run.surfaceScan.maxPulses == baseline.run.surfaceScan.maxPulses,
+        "temporary scanner support must not extend the permanent Survey Array rating");
     require(upgraded.run.surfaceScan.signal > baseline.run.surfaceScan.signal, "scanner support should improve starting scan signal");
     require(upgraded.run.surfaceScan.interference <= baseline.run.surfaceScan.interference, "scanner support should soften starting interference");
     require(upgraded.run.surfaceScan.bustRisk < baseline.run.surfaceScan.bustRisk, "scanner support should reduce scan bust risk");
@@ -4183,6 +4325,7 @@ void surfaceUpgradesAndDronesModifyPushDeeperMiniGame()
     baseline.run.destinationIndex = 2;
     startSurfaceExpedition(baseline, catalog);
     baseline.run.surfaceExpedition.hazard = 0.35;
+    baseline.run.surfaceExpedition.depthProspects.push_back({1, 1});
 
     GameState upgraded = baseline;
     upgraded.run.surfaceExpedition.runRigUpgradeRanks = {
@@ -4200,7 +4343,8 @@ void surfaceUpgradesAndDronesModifyPushDeeperMiniGame()
     Random upgradedRng(1936);
     require(startSurfacePushRun(baseline, baselineRng).applied, "baseline Push Deeper should start");
     require(startSurfacePushRun(upgraded, upgradedRng).applied, "upgraded Push Deeper should start");
-    require(upgraded.run.surfacePush.maxSteps > baseline.run.surfacePush.maxSteps, "structural support should add Push Deeper capacity");
+    require(upgraded.run.surfacePush.maxSteps == baseline.run.surfacePush.maxSteps,
+        "temporary structural support must not extend the permanent Bore System rating");
     require(upgraded.run.surfacePush.pressure <= baseline.run.surfacePush.pressure, "structural support should reduce starting Push Deeper pressure");
     require(upgraded.run.surfacePush.collapseRisk < baseline.run.surfacePush.collapseRisk, "structural support should reduce starting collapse risk");
 
@@ -4213,7 +4357,7 @@ void surfaceUpgradesAndDronesModifyPushDeeperMiniGame()
     require(upgraded.run.surfacePush.collapseRisk < baseline.run.surfacePush.collapseRisk, "structural support should keep post-step collapse risk lower");
 }
 
-void surfaceScanAndPushDepthLimitsStayInParity()
+void surfaceDepthRatingsReplaceTemporaryEnvelopeBonuses()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState baseline = createNewGame(catalog, 1937);
@@ -4221,9 +4365,25 @@ void surfaceScanAndPushDepthLimitsStayInParity()
     startSurfaceExpedition(baseline, catalog);
     baseline.run.surfaceExpedition.supply = 10;
 
+    const int supplyBeforeBlockedDig = baseline.run.surfaceExpedition.supply;
+    Random blockedRng(1938);
+    const SurfaceActionOutcome blocked = startSurfacePushRun(baseline, blockedRng);
+    require(!blocked.applied &&
+            baseline.run.surfaceExpedition.supply == supplyBeforeBlockedDig &&
+            blocked.message.find("Survey level +1") != std::string::npos,
+        "Dig must reject an unsurveyed next level before spending action kits");
+
+    baseline.run.surfaceExpedition.depthProspects = {
+        {1, 1},
+        {2, 2}
+    };
+    baseline.meta.surfaceDepthUpgrades.surveyArray = 1;
+    baseline.meta.surfaceDepthUpgrades.boreSystem = 1;
+
     auto scanPushLimitPair = [](const GameState& state, int seed) {
         GameState scanState = state;
         GameState pushState = state;
+        scanState.run.surfaceExpedition.depthProspects.clear();
         Random scanRng(seed);
         Random pushRng(seed + 1);
         require(startSurfaceScanRun(scanState, scanRng).applied, "scan should start for depth-limit parity");
@@ -4235,7 +4395,8 @@ void surfaceScanAndPushDepthLimitsStayInParity()
     };
 
     const auto baselineLimits = scanPushLimitPair(baseline, 1938);
-    require(baselineLimits.first == baselineLimits.second + 1, "baseline scan should map current layer plus every reachable pushed layer");
+    require(baselineLimits.first == 3 && baselineLimits.second == 2,
+        "rank I Survey and Bore systems should expose current through depth +2 and two legal Dig steps");
 
     GameState scannerUpgraded = baseline;
     scannerUpgraded.run.surfaceExpedition.runRigUpgradeRanks = {
@@ -4247,8 +4408,8 @@ void surfaceScanAndPushDepthLimitsStayInParity()
     scannerUpgraded.meta.droneBaySlots = 1;
     scannerUpgraded.meta.equippedDroneIds = {content::drone::surveyDrone};
     const auto scannerLimits = scanPushLimitPair(scannerUpgraded, 1939);
-    require(scannerLimits.first == scannerLimits.second + 1, "scanner support should keep scan and push depth limits in parity");
-    require(scannerLimits.second > baselineLimits.second, "scanner support should also expand reachable push depth");
+    require(scannerLimits == baselineLimits,
+        "temporary scanner upgrades and Survey Drones must not change hard Survey or Bore limits");
 
     GameState structureUpgraded = baseline;
     structureUpgraded.run.surfaceExpedition.runRigUpgradeRanks = {
@@ -4261,8 +4422,242 @@ void surfaceScanAndPushDepthLimitsStayInParity()
     structureUpgraded.meta.droneBaySlots = 1;
     structureUpgraded.meta.equippedDroneIds = {content::drone::hazardDrone};
     const auto structureLimits = scanPushLimitPair(structureUpgraded, 1940);
-    require(structureLimits.first == structureLimits.second + 1, "structural support should keep scan and push depth limits in parity");
-    require(structureLimits.first > baselineLimits.first, "structural support should also expand scan depth");
+    require(structureLimits == baselineLimits,
+        "temporary structural upgrades and Hazard Drones must not change hard Survey or Bore limits");
+}
+
+void permanentSurfaceDepthRefitsUnlockAndPersist()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 19401);
+    state.meta.unlockKeys.push_back(content::unlock::surfaceProbes);
+    state.meta.unlockKeys.push_back(content::unlock::surfaceDrills);
+    state.run.refitEntitled = true;
+    state.run.credits = 200.0;
+
+    const ShipModule* surveyOne = catalog.findModule(content::module::surveyArray1);
+    const ShipModule* surveyTwo = catalog.findModule(content::module::surveyArray2);
+    const ShipModule* surveyThree = catalog.findModule(content::module::surveyArray3);
+    const ShipModule* boreOne = catalog.findModule(content::module::boreSystem1);
+    const ShipModule* fuelLoopOne = catalog.findModule(content::module::rigFuelLoop1);
+    const ShipModule* fuelLoopTwo = catalog.findModule(content::module::rigFuelLoop2);
+    const ShipModule* fuelLoopThree = catalog.findModule(content::module::rigFuelLoop3);
+    require(surveyOne != nullptr && surveyTwo != nullptr && surveyThree != nullptr &&
+            boreOne != nullptr && fuelLoopOne != nullptr && fuelLoopTwo != nullptr &&
+            fuelLoopThree != nullptr,
+        "all permanent Survey Array, Bore System, and Rig Fuel Loop ranks must resolve from content");
+    require(moduleOfferCost(*surveyOne) == 22 && moduleOfferCost(*surveyTwo) == 34 &&
+            moduleOfferCost(*surveyThree) == 62 && moduleOfferCost(*fuelLoopOne) == 22 &&
+            moduleOfferCost(*fuelLoopTwo) == 34 && moduleOfferCost(*fuelLoopThree) == 62,
+        "all surface progression ranks must use the selected Common, Uncommon, and Rare Refit costs");
+
+    Random rng(19402);
+    generateModuleOffers(state, catalog, rng);
+    require(state.run.offerModuleIds[0] == content::module::surveyArray1 &&
+            state.run.offerModuleIds[1] == content::module::boreSystem1 &&
+            state.run.offerModuleIds[2] == content::module::rigFuelLoop1,
+        "the next missing rank from all three researched surface chains must be guaranteed in Refit");
+
+    GameState lowCreditState = createNewGame(catalog, 19403);
+    lowCreditState.meta.unlockKeys.push_back(content::unlock::surfaceProbes);
+    lowCreditState.meta.unlockKeys.push_back(content::unlock::surfaceDrills);
+    lowCreditState.meta.surfaceDepthUpgrades = {1, 1};
+    lowCreditState.meta.rigFuelLoop.rank = 1;
+    lowCreditState.meta.ownedModuleIds.push_back(content::module::surveyArray1);
+    lowCreditState.meta.ownedModuleIds.push_back(content::module::boreSystem1);
+    lowCreditState.meta.ownedModuleIds.push_back(content::module::rigFuelLoop1);
+    lowCreditState.run.refitEntitled = true;
+    lowCreditState.run.credits = 22.0;
+    generateModuleOffers(lowCreditState, catalog, rng);
+    require(lowCreditState.run.offerModuleIds[0] == content::module::surveyArray2 &&
+            lowCreditState.run.offerModuleIds[1] == content::module::boreSystem2 &&
+            lowCreditState.run.offerModuleIds[2] == content::module::rigFuelLoop2,
+        "the affordable-offer fallback must not replace guaranteed surface progression ranks");
+
+    require(buyOffer(state, catalog, 0) &&
+            state.meta.surfaceDepthUpgrades.surveyArray == 1 &&
+            surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray) == 2,
+        "installing Survey Array I must permanently raise survey depth to +2");
+    require(std::find(
+                state.run.equippedModuleIds.begin(),
+                state.run.equippedModuleIds.end(),
+                content::module::surveyArray1) == state.run.equippedModuleIds.end(),
+        "permanent surface depth systems must consume no equipment slot");
+    require(buyOffer(state, catalog, 1) &&
+            state.meta.surfaceDepthUpgrades.boreSystem == 1,
+        "the same Refit visit must allow one Bore purchase after a Survey purchase");
+    require(buyOffer(state, catalog, 2) &&
+            state.meta.rigFuelLoop.rank == 1,
+        "the same Refit visit must allow one Rig Fuel Loop purchase after the depth purchases");
+    generateModuleOffers(state, catalog, rng);
+    require(std::find(state.run.offerModuleIds.begin(), state.run.offerModuleIds.end(), content::module::surveyArray2) == state.run.offerModuleIds.end() &&
+            std::find(state.run.offerModuleIds.begin(), state.run.offerModuleIds.end(), content::module::boreSystem2) == state.run.offerModuleIds.end() &&
+            std::find(state.run.offerModuleIds.begin(), state.run.offerModuleIds.end(), content::module::rigFuelLoop2) == state.run.offerModuleIds.end(),
+        "a Refit reroll must not expose the next rank of a chain already purchased this visit");
+
+    beginRefitVisit(state);
+    generateModuleOffers(state, catalog, rng);
+    require(state.run.offerModuleIds[0] == content::module::surveyArray2 &&
+            state.run.offerModuleIds[1] == content::module::boreSystem2 &&
+            state.run.offerModuleIds[2] == content::module::rigFuelLoop2,
+        "all following surface ranks must wait for the next Refit visit");
+
+    state.meta.surfaceDepthUpgrades.surveyArray = 3;
+    state.meta.surfaceDepthUpgrades.boreSystem = 2;
+    state.meta.rigFuelLoop.rank = 2;
+    state.run.surfaceRefitPurchases.rigFuelLoop = true;
+    const SaveData captured = captureSaveData(state);
+    const std::optional<SaveData> decoded = deserializeSaveData(serializeSaveData(captured));
+    require(decoded.has_value() &&
+            decoded->surfaceDepthUpgrades.surveyArray == 3 &&
+            decoded->surfaceDepthUpgrades.boreSystem == 2 &&
+            decoded->rigFuelLoop.rank == 2 &&
+            decoded->surfaceRefitPurchases.rigFuelLoop,
+        "version-14 saves must round-trip all permanent surface ranks and active Refit purchase limits");
+    SaveData old = captured;
+    old.version = 13;
+    require(!deserializeSaveData(serializeSaveData(old)).has_value(),
+        "version-13 saves must be rejected at the requested fresh-campaign boundary");
+}
+
+void surfaceDepthTutorialAndSafetyGatesAreHard()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState tutorial = createNewGame(catalog, 19411);
+    tutorial.run.destinationIndex = 2;
+    startSurfaceExpedition(tutorial, catalog);
+    tutorial.run.surfaceExpedition.supply = 10;
+    Random rng(19412);
+
+    require(startSurfaceScanRun(tutorial, rng).applied &&
+            tutorial.run.surfaceScan.maxPulses == 2,
+        "the base Survey Array must map the current level and depth +1 only");
+    tutorial.run.surfaceScan.bustRisk = 0.0;
+    require(pulseSurfaceScan(tutorial, rng).applied,
+        "the tutorial should allow its current-level survey pulse");
+    require(bankSurfaceScan(tutorial).applied &&
+            !surfaceOpsTutorialDigUnlocked(tutorial),
+        "logging only the current level must not unlock Dig");
+    const int supplyBeforeUnsurveyedDig = tutorial.run.surfaceExpedition.supply;
+    const SurfaceActionOutcome unsurveyed = startSurfacePushRun(tutorial, rng);
+    require(!unsurveyed.applied &&
+            tutorial.run.surfaceExpedition.supply == supplyBeforeUnsurveyedDig,
+        "an unsurveyed Dig must fail without consuming supplies");
+
+    require(startSurfaceScanRun(tutorial, rng).applied,
+        "the tutorial should allow another Survey attempt");
+    tutorial.run.surfaceScan.bustRisk = 0.0;
+    require(pulseSurfaceScan(tutorial, rng).applied,
+        "the repeated Survey should map the current level");
+    tutorial.run.surfaceScan.bustRisk = 0.0;
+    require(pulseSurfaceScan(tutorial, rng).applied,
+        "the repeated Survey should map depth +1");
+    require(bankSurfaceScan(tutorial).applied &&
+            surfaceOpsTutorialDigUnlocked(tutorial),
+        "Dig must unlock only after depth +1 is successfully logged");
+
+    const int supplyBeforeSurveyLimit = tutorial.run.surfaceExpedition.supply;
+    const SurfaceActionOutcome surveyLimit = startSurfaceScanRun(tutorial, rng);
+    require(!surveyLimit.applied &&
+            tutorial.run.surfaceExpedition.supply == supplyBeforeSurveyLimit &&
+            surveyLimit.message.find("Survey Array limit +1 reached") != std::string::npos,
+        "a fully mapped Survey Array envelope must reject another Survey before spending an action kit");
+    const SurfaceExpeditionPresentation limitedSurveyPresentation =
+        surfaceExpeditionPresentation(tutorial, catalog);
+    const auto limitedSurveyAction = std::find_if(
+        limitedSurveyPresentation.actions.begin(),
+        limitedSurveyPresentation.actions.end(),
+        [](const SurfaceActionPreviewPresentation& action) {
+            return action.title == text::buttons::surveySite;
+        });
+    require(limitedSurveyAction != limitedSurveyPresentation.actions.end() &&
+            !limitedSurveyAction->action.enabled &&
+            limitedSurveyAction->action.label.find("Survey limit +1 reached") != std::string::npos &&
+            limitedSurveyAction->availability == "Upgrade Survey Array to survey and dig deeper",
+        "Surface Ops must visibly disable Survey when every reachable layer is already mapped");
+
+    const int depthBeforeEmptyBank = tutorial.run.surfaceExpedition.depth;
+    require(startSurfacePushRun(tutorial, rng).applied,
+        "a surveyed base-depth Dig should start");
+    require(!bankSurfacePush(tutorial).applied &&
+            tutorial.run.surfaceExpedition.depth == depthBeforeEmptyBank,
+        "returning before a Dig step must never advance the start depth");
+    tutorial.run.surfacePush.collapseRisk = 0.0;
+    require(pushSurfaceDepthStep(tutorial, rng).applied &&
+            bankSurfacePush(tutorial).applied &&
+            tutorial.run.surfaceExpedition.depth == 1,
+        "one surveyed base-rated Dig step should bank depth +1");
+    const int supplyBeforeRepeat = tutorial.run.surfaceExpedition.supply;
+    require(!startSurfacePushRun(tutorial, rng).applied &&
+            tutorial.run.surfaceExpedition.supply == supplyBeforeRepeat,
+        "reopening Dig must not refresh or bypass the absolute Survey Array limit");
+
+    GameState limits = createNewGame(catalog, 19413);
+    limits.run.destinationIndex = 2;
+    startSurfaceExpedition(limits, catalog);
+    limits.meta.chapter = GameChapter::RedFrontier;
+    limits.meta.surfaceDepthUpgrades.surveyArray = 1;
+    limits.run.surfaceExpedition.depthProspects = {{1, 1}, {2, 2}};
+    limits.run.surfaceExpedition.depth = 1;
+    ui::briefings::acknowledge(
+        limits.meta.acknowledgedActivityBriefingIds,
+        ui::briefings::surfaceSurveyComplete);
+    const int supplyBeforeBoreLimitedSurvey = limits.run.surfaceExpedition.supply;
+    const SurfaceActionOutcome boreLimitedSurvey = startSurfaceScanRun(limits, rng);
+    require(!boreLimitedSurvey.applied &&
+            limits.run.surfaceExpedition.supply == supplyBeforeBoreLimitedSurvey &&
+            boreLimitedSurvey.message.find("Bore System limit +1 reached") != std::string::npos,
+        "Survey must stop when the Bore System cannot use another mapped layer");
+    const SurfaceExpeditionPresentation boreLimitedPresentation =
+        surfaceExpeditionPresentation(limits, catalog);
+    const auto boreLimitedSurveyAction = std::find_if(
+        boreLimitedPresentation.actions.begin(),
+        boreLimitedPresentation.actions.end(),
+        [](const SurfaceActionPreviewPresentation& action) {
+            return action.title == text::buttons::surveySite;
+        });
+    const auto boreLimitedDigAction = std::find_if(
+        boreLimitedPresentation.actions.begin(),
+        boreLimitedPresentation.actions.end(),
+        [](const SurfaceActionPreviewPresentation& action) {
+            return action.title == text::buttons::pushDeeper;
+        });
+    require(boreLimitedSurveyAction != boreLimitedPresentation.actions.end() &&
+            boreLimitedDigAction != boreLimitedPresentation.actions.end() &&
+            !boreLimitedSurveyAction->action.enabled &&
+            !boreLimitedDigAction->action.enabled &&
+            boreLimitedSurveyAction->action.label == "Bore limit +1 reached" &&
+            boreLimitedDigAction->action.label == "Bore limit +1 reached" &&
+            boreLimitedSurveyAction->availability ==
+                "Upgrade Bore System to survey and dig deeper",
+        "Survey and Dig must expose the same Bore bottleneck when their permanent ranks diverge");
+    SurfaceDepthCapability boreBlocked = surfaceDepthCapability(limits, catalog, 2);
+    require(!boreBlocked.canDig && boreBlocked.blocker == SurfaceDepthBlocker::BoreRating,
+        "a surveyed level beyond the Bore System rating must remain physically unreachable");
+
+    limits.meta.surfaceDepthUpgrades.boreSystem = 1;
+    const SurfaceDepthCapability caution = surfaceDepthCapability(limits, catalog, 2);
+    require(caution.canDig &&
+            caution.returnSafety.severity != SurfaceReturnSafetySeverity::Critical,
+        "a caution-range surveyed level within both ratings must remain selectable");
+
+    limits.meta.surfaceDepthUpgrades.surveyArray = 2;
+    limits.meta.surfaceDepthUpgrades.boreSystem = 2;
+    limits.run.surfaceExpedition.depth = 2;
+    limits.run.surfaceExpedition.depthProspects.push_back({1, 3});
+    const SurfaceDepthCapability critical = surfaceDepthCapability(limits, catalog, 3);
+    require(!critical.canDig &&
+            critical.blocker == SurfaceDepthBlocker::ReturnCritical &&
+            (critical.returnSafety.oxygenCritical || critical.returnSafety.fuelCritical),
+        "a surveyed and physically reachable layer must still be blocked when return endurance is critical; blocker=" +
+            std::to_string(static_cast<int>(critical.blocker)) +
+            " severity=" + std::to_string(static_cast<int>(critical.returnSafety.severity)) +
+            " oxygen=" + std::to_string(critical.returnSafety.oxygenSeconds) +
+            " return=" + std::to_string(critical.returnSafety.estimatedReturnSeconds));
+    const int supplyBeforeCritical = limits.run.surfaceExpedition.supply;
+    require(!startSurfacePushRun(limits, rng).applied &&
+            limits.run.surfaceExpedition.supply == supplyBeforeCritical,
+        "critical-return Dig must be rejected before action kits are spent");
 }
 
 void surfaceScanTimingWindowsTightenByMappedDepth()
@@ -4724,6 +5119,87 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
     require(gate.kind == FrontierGateKind::ScenarioRequirement && !gate.satisfied &&
             gate.scenarioId == content::scenario::lunarProspector && gate.scenarioStepId == "delivery",
         "Mars should be gated by the explicit Lunar Prospector scenario requirement");
+    state.meta.launchUpgrades.fuelTanks = 1;
+    gate = frontierGateStatus(state, catalog);
+    require(gate.kind == FrontierGateKind::ScenarioRequirement && !gate.satisfied,
+        "an authored route requirement must remain the visible Mars blocker before ship hardware readiness");
+    Random lockedMarsPanelRng(0x10A7);
+    const PreparedLaunch lockedMarsPrepared = prepareLaunch(state, catalog, lockedMarsPanelRng);
+    const std::string lockedMarsPanel = buildGamePanelHtml({
+        state,
+        catalog,
+        lockedMarsPrepared,
+        lockedMarsPrepared});
+    const std::size_t lockedMarsLabel = lockedMarsPanel.find("Mars: Unavailable");
+    const std::size_t lockedMarsButton = lockedMarsLabel == std::string::npos
+        ? std::string::npos
+        : lockedMarsPanel.rfind("<button", lockedMarsLabel);
+    const std::size_t lockedMarsButtonEnd = lockedMarsLabel == std::string::npos
+        ? std::string::npos
+        : lockedMarsPanel.find("</button>", lockedMarsLabel);
+    require(lockedMarsButton != std::string::npos
+            && lockedMarsButtonEnd != std::string::npos
+            && lockedMarsPanel.substr(
+                lockedMarsButton,
+                lockedMarsButtonEnd - lockedMarsButton).find(" disabled") != std::string::npos
+            && lockedMarsPanel.substr(
+                lockedMarsButton,
+                lockedMarsButtonEnd - lockedMarsButton).find("data-ui-modal") == std::string::npos
+            && lockedMarsPanel.substr(
+                lockedMarsButton,
+                lockedMarsButtonEnd - lockedMarsButton).find("data-rr-action") == std::string::npos,
+        "a mission-locked destination must render as Unavailable without a details or action target");
+
+    GameState genericLockedRoute = createNewGame(catalog, 0x10A9);
+    genericLockedRoute.run.destinationIndex = 4;
+    genericLockedRoute.meta.furthestTier = 4;
+    genericLockedRoute.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+    genericLockedRoute.run.frontierReadiness = 0;
+    genericLockedRoute.screen = Screen::Hangar;
+    Random genericLockedPanelRng(0x10A9);
+    const PreparedLaunch genericLockedPrepared = prepareLaunch(
+        genericLockedRoute,
+        catalog,
+        genericLockedPanelRng);
+    const std::string genericLockedPanel = buildGamePanelHtml({
+        genericLockedRoute,
+        catalog,
+        genericLockedPrepared,
+        genericLockedPrepared});
+    require(
+        frontierGateStatus(genericLockedRoute, catalog).kind == FrontierGateKind::FlightData
+            && !frontierGateStatus(genericLockedRoute, catalog).satisfied
+            && genericLockedPanel.find(
+                "<button class=\"disabled rr-text-button\" disabled><span class=\"rr-button-label\">Uranus: Unavailable</span></button>")
+                != std::string::npos,
+        "a generic Flight Data lock must use the same disabled Unavailable destination treatment");
+
+    GameState lockedJupiterRoute = createNewGame(catalog, 0x10AA);
+    lockedJupiterRoute.run.destinationIndex = 2;
+    lockedJupiterRoute.meta.furthestTier = 2;
+    lockedJupiterRoute.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
+    lockedJupiterRoute.meta.launchUpgrades.fuelTanks = 3;
+    lockedJupiterRoute.meta.unlockKeys.push_back(content::unlock::routeMars);
+    lockedJupiterRoute.screen = Screen::Hangar;
+    Random lockedJupiterPanelRng(0x10AA);
+    const PreparedLaunch lockedJupiterPrepared = prepareLaunch(
+        lockedJupiterRoute,
+        catalog,
+        lockedJupiterPanelRng);
+    const std::string lockedJupiterPanel = buildGamePanelHtml({
+        lockedJupiterRoute,
+        catalog,
+        lockedJupiterPrepared,
+        lockedJupiterPrepared});
+    require(
+        lockedJupiterPanel.find("Jupiter: Unavailable") != std::string::npos
+            && lockedJupiterPanel.find("JUPITER OPTIONS") == std::string::npos
+            && lockedJupiterPanel.find("Review options") == std::string::npos
+            && lockedJupiterPanel.find("Transfer: Jupiter") == std::string::npos
+            && lockedJupiterPanel.find("Begin Mars Slingshot") == std::string::npos,
+        "an authored Jupiter lock must suppress its special transfer details and actions until the objective opens the route");
+
+    state.meta.launchUpgrades.fuelTanks = 2;
     require(acknowledgeCampaignObjectiveBriefing(state, CampaignObjectiveId::LunarProspector),
         "the lunar objective briefing should require an explicit acknowledgment");
     require(tuning::research::prospectorCommonOreGoal == 30
@@ -4788,6 +5264,24 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
                 content::scenario::marsBayExpansion,
                 "funding") == ScenarioStepState::Active,
         "claiming the Mars contract must reveal one saved Jupiter funding briefing without granting another reward");
+
+    GameState preReviewJupiterWindow = state;
+    preReviewJupiterWindow.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
+    Random preReviewJupiterPanelRng(0x10AB);
+    const PreparedLaunch preReviewJupiterPrepared = prepareLaunch(
+        preReviewJupiterWindow,
+        catalog,
+        preReviewJupiterPanelRng);
+    const std::string preReviewJupiterPanel = buildGamePanelHtml({
+        preReviewJupiterWindow,
+        catalog,
+        preReviewJupiterPrepared,
+        preReviewJupiterPrepared});
+    require(
+        preReviewJupiterPanel.find("Review Options") != std::string::npos
+            && preReviewJupiterPanel.find("Begin Mars Slingshot") == std::string::npos,
+        "the Mars Hangar must present the authored Jupiter review before offering the slingshot action");
+
     const ScenarioActionOutcome fundingAcknowledged = performScenarioAction(
         state,
         catalog,
@@ -4800,6 +5294,21 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
                 content::scenario::marsBayExpansion,
                 "funding"),
         "the Jupiter funding briefing must acknowledge once through the existing scenario action system");
+    GameState reviewedJupiterWindow = state;
+    reviewedJupiterWindow.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
+    Random reviewedJupiterPanelRng(0x10AC);
+    const PreparedLaunch reviewedJupiterPrepared = prepareLaunch(
+        reviewedJupiterWindow,
+        catalog,
+        reviewedJupiterPanelRng);
+    const std::string reviewedJupiterPanel = buildGamePanelHtml({
+        reviewedJupiterWindow,
+        catalog,
+        reviewedJupiterPrepared,
+        reviewedJupiterPrepared});
+    require(
+        reviewedJupiterPanel.find("Begin Mars Slingshot") != std::string::npos,
+        "reviewing the Jupiter options must reveal the now-actionable Mars slingshot control");
 
     state.run.destinationIndex = 3;
     state.meta.furthestTier = 3;
@@ -4957,10 +5466,39 @@ void scenarioUiActionsDoNotAwardExpeditionExperience()
         ScenarioActionKind::BeginActivity);
     require(outcome.applied,
         "the manual Hazard Drone commissioning action should resolve in the UI-action XP regression");
+    require(hasUnlock(state.meta, content::unlock::droneBay)
+            && state.meta.droneBaySlots == 1
+            && state.meta.ownedDroneIds == std::vector<std::string>{content::drone::hazardDrone}
+            && state.meta.equippedDroneIds == std::vector<std::string>{content::drone::hazardDrone},
+        "Io commissioning should provide a usable bay and assigned Hazard frame even when route access came from outside the early campaign");
     require(state.run.surfaceExpedition.expeditionLevel == 1 &&
             state.run.surfaceExpedition.expeditionExperience == 0.0 &&
             state.run.surfaceExpedition.pendingRunUpgradeChoices == 0,
         "briefings, manual actions, equipment assignment, and other UI actions must not grant expedition XP");
+
+    ScenarioInstance* volcanic = findScenarioInstance(state.meta, content::scenario::volcanicDescent);
+    require(volcanic != nullptr, "the Io reward repair fixture requires its authored scenario instance");
+    volcanic->awardedRewardIds = {
+        std::string(content::scenario::volcanicDescent) + "/commission/0",
+        std::string(content::scenario::volcanicDescent) + "/commission/1"};
+    state.meta.unlockKeys.erase(
+        std::remove(state.meta.unlockKeys.begin(), state.meta.unlockKeys.end(), content::unlock::droneBay),
+        state.meta.unlockKeys.end());
+    state.meta.droneBaySlots = 0;
+    state.meta.ownedDroneIds.clear();
+    state.meta.equippedDroneIds.clear();
+
+    ensureScenarioInstances(state, catalog);
+    require(hasUnlock(state.meta, content::unlock::droneBay)
+            && state.meta.droneBaySlots == 1
+            && state.meta.ownedDroneIds == std::vector<std::string>{content::drone::hazardDrone}
+            && state.meta.equippedDroneIds == std::vector<std::string>{content::drone::hazardDrone},
+        "a claimed Io commission should repair missing permanent bay and Hazard rewards from a partial save");
+
+    state.meta.equippedDroneIds.clear();
+    ensureScenarioInstances(state, catalog);
+    require(state.meta.equippedDroneIds.empty(),
+        "persistent reward repair should preserve a player's later choice to unequip an owned frame");
 }
 
 
@@ -5960,6 +6498,27 @@ void surfaceScanMiniGameBanksSurveyPayload()
     require(state.run.surfaceExpedition.temporaryArtifacts.size() == recoveredArtifactsBefore,
         "scan pulses should not move forecast artifacts into the recovered expedition payload");
 
+    while (!state.run.surfaceScan.completed) {
+        state.run.surfaceScan.elapsedSeconds =
+            tuning::research::scanWindowCenterRadians /
+            tuning::research::scanSweepRadiansPerSecond;
+        require(pulseSurfaceScan(state, rng).applied,
+            "each available Survey pulse should resolve before the scan limit");
+    }
+    const SurfaceScanRailPresentation limitedPresentation = surfaceScanRailPresentation(state);
+    require(limitedPresentation.objective.find("SURVEY SCAN LIMIT REACHED") != std::string::npos
+            && !limitedPresentation.actions.empty()
+            && limitedPresentation.actions.front().enabled
+            && limitedPresentation.actions.front().actionId == ui::actions::surfaceScanPulse
+            && limitedPresentation.actions.front().label == "SURVEY SCAN LIMIT REACHED",
+        "an exhausted Survey should keep its pulse focus target and visibly explain the scan limit");
+    const int pulsesAtLimit = state.run.surfaceScan.pulses;
+    const SurfaceActionOutcome exhaustedPulse = pulseSurfaceScan(state, rng);
+    require(!exhaustedPulse.applied
+            && state.run.surfaceScan.pulses == pulsesAtLimit
+            && exhaustedPulse.message.find("Survey scan limit reached") != std::string::npos,
+        "pressing Survey again at the limit should report the limit without consuming another pulse");
+
     const SurfaceActionOutcome banked = bankSurfaceScan(state);
     require(banked.applied, "banking scan should resolve");
     require(state.screen == Screen::SurfaceExpedition, "banking scan should return to Surface Ops");
@@ -5985,6 +6544,9 @@ void surfacePushMiniGameBanksDepthRoute()
     state.meta.chapter = GameChapter::RedFrontier;
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
+    state.meta.surfaceDepthUpgrades.surveyArray = 1;
+    state.meta.surfaceDepthUpgrades.boreSystem = 1;
+    state.run.surfaceExpedition.depthProspects = {{1, 1}, {2, 2}};
     Random rng(94202);
 
     const int supplyBefore = state.run.surfaceExpedition.supply;
@@ -6037,6 +6599,9 @@ void surfacePushLaterCollapseLosesUncommittedRoute()
     GameState state = createNewGame(catalog, 94211);
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
+    state.meta.surfaceDepthUpgrades.surveyArray = 1;
+    state.meta.surfaceDepthUpgrades.boreSystem = 1;
+    state.run.surfaceExpedition.depthProspects = {{1, 1}, {2, 2}};
     Random rng(94212);
 
     require(startSurfacePushRun(state, rng).applied, "collapse test should start Push Deeper");
@@ -6060,8 +6625,12 @@ void scannedArtifactBecomesARecoverableMiningTarget()
     startSurfaceExpedition(state, catalog);
     state.run.surfaceExpedition.supply = 10;
     const int baseDepth = state.run.surfaceExpedition.depth;
-    state.run.surfaceExpedition.depthProspects.push_back(
-        {2, baseDepth + 2, {}, 1});
+    state.meta.surfaceDepthUpgrades.surveyArray = 1;
+    state.meta.surfaceDepthUpgrades.boreSystem = 1;
+    state.run.surfaceExpedition.depthProspects = {
+        {1, baseDepth + 1},
+        {2, baseDepth + 2, {}, 1}
+    };
     Random rng(94222);
 
     require(startSurfacePushRun(state, rng).applied, "artifact route should start Push Deeper");
@@ -6292,6 +6861,9 @@ void thermalSurfacePushStillMapsResourceLayers()
         : state.run.surfaceScan.depthProspects.front().possibleMaterials;
     require(mapped.common > 0 || mapped.rare > 0 || mapped.exotic > 0,
         "thermal scan should display the resources sealed behind Hazard treatment");
+    state.run.surfaceScan.bustRisk = 0.0;
+    require(pulseSurfaceScan(state, rng).applied,
+        "thermal scan should map the first diggable layer before Dig unlocks");
     require(bankSurfaceScan(state).applied,
         "thermal resource forecast should remain available to Push Deeper");
 
@@ -7162,6 +7734,92 @@ void hazardDronesCrossSolidTerrainButNeverTargetHiddenCells()
         "a Hazard Drone should return directly to the controlled actor after treatment");
 }
 
+void hazardDroneFinishesCommittedTreatmentBeforeFollowingMovedPlayer()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 93017);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
+    state.meta.unlockKeys.push_back(content::unlock::ioHazardDrone);
+    state.meta.ownedDroneIds.push_back(content::drone::hazardDrone);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 1;
+    state.meta.equippedDroneIds = {content::drone::hazardDrone};
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.runDroneRanks = {{content::drone::hazardDrone, 1}};
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog).applied,
+        "the committed Hazard Drone fixture should start a mining run");
+
+    MiningRunState& mining = state.run.mining;
+    clearMiningTerrainForEvaTest(mining);
+    const auto found = std::find_if(
+        mining.miniDrones.begin(),
+        mining.miniDrones.end(),
+        [](const MiningMiniDroneAgent& agent) {
+            return agent.role == MiniDroneRole::Hazard;
+        });
+    require(found != mining.miniDrones.end(),
+        "the committed treatment fixture should deploy a Hazard Drone");
+    MiningMiniDroneAgent& hazard = *found;
+    const int targetX = std::clamp(
+        static_cast<int>(std::floor(mining.droneX)) + 2,
+        1,
+        mining.terrain.width - 2);
+    const int targetY = std::clamp(
+        static_cast<int>(std::floor(mining.droneY)) + 1,
+        1,
+        mining.terrain.height - 2);
+    MiningCell* target = miningCellAt(mining.terrain, targetX, targetY);
+    require(target != nullptr, "the committed hazard target should exist");
+    const double toughness = miningMaterialToughness(
+        MiningCellMaterial::HazardPocket,
+        mining.depthZone);
+    *target = {
+        MiningCellMaterial::HazardPocket,
+        toughness,
+        toughness,
+        true,
+        true};
+    target->hazardAffinity = MiningElementalAffinity::Thermal;
+
+    hazard.x = static_cast<double>(targetX) + 0.5;
+    hazard.y = static_cast<double>(targetY) + 0.5 -
+        tuning::mining::hazardDroneWorkRangeCells * 0.72;
+    hazard.targetCellX = targetX;
+    hazard.targetCellY = targetY;
+    hazard.behavior = MiningMiniDroneBehavior::Working;
+    hazard.taskProgressSeconds =
+        tuning::mining::hazardDroneTreatmentSeconds(hazard.upgradeLevel) * 0.75;
+
+    mining.droneX = std::min(
+        static_cast<double>(mining.terrain.width - 2),
+        hazard.x + tuning::mining::hazardDroneAcquireRadiusCells + 1.0);
+    mining.droneY = hazard.y;
+    updateMiningRun(state, catalog, 0.08);
+    require(
+        target->material == MiningCellMaterial::HazardPocket &&
+            hazard.behavior == MiningMiniDroneBehavior::Working &&
+            hazard.targetCellX == targetX &&
+            hazard.targetCellY == targetY &&
+            hazard.finishTargetBeforeReturn,
+        "moving away must commit the Hazard Drone to its current conversion instead of recalling it");
+
+    for (int step = 0;
+         step < 80 && target->material == MiningCellMaterial::HazardPocket;
+         ++step) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    require(
+        target->material != MiningCellMaterial::HazardPocket &&
+            hazard.behavior == MiningMiniDroneBehavior::Returning &&
+            hazard.targetCellX < 0 &&
+            hazard.targetCellY < 0 &&
+            hazard.finishTargetBeforeReturn,
+        "the committed Hazard Drone should finish exactly one conversion before following the moved player");
+}
+
 void duplicateHazardDronesCoordinatePriorityAndExactAssistance()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -7632,7 +8290,7 @@ void prospectorSafeRecallRecoversFromBlockedReturnPath()
             restoredProspector->returnPathFailureSeconds >=
                 tuning::mining::miningDroneReturnPathFailureSeconds &&
             restoredProspector->haulMaterials.common == 1,
-        "safe-recall behavior, timer, and cargo should survive an active version-13 save");
+        "safe-recall behavior, timer, and cargo should survive an active version-14 save");
 
     for (int step = 0;
          step < 40 && prospector.behavior == MiningMiniDroneBehavior::RecoveringToRig;
@@ -8843,6 +9501,72 @@ void miningUsesRigFuelReserve()
     require(state.run.mining.failurePending, "mining should recall when upgraded oxygen outlasts rig fuel");
 }
 
+void rigFuelLoopRanksControlOperatingCadence()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const std::array<double, 4> expectedCycleSeconds {15.0, 18.0, 21.0, 24.0};
+    for (int rank = 0; rank <= 3; ++rank) {
+        GameState state = createNewGame(catalog, 92940 + rank);
+        state.meta.rigFuelLoop.rank = rank;
+        state.run.destinationIndex = 2;
+        startSurfaceExpedition(state, catalog);
+        prepareMiningSiteForTest(state);
+        state.run.surfaceExpedition.rigFuel = 5.0;
+        const double fuelBeforeDeployment = state.run.surfaceExpedition.rigFuel;
+        require(
+            startMiningRun(
+                state,
+                catalog,
+                {MiningAct::ActOne, 2, static_cast<std::uint64_t>(92940 + rank)},
+                false).applied,
+            "each Rig Fuel Loop rank should start an oxygen/fuel-enabled Mining run");
+        require(
+            nearlyEqual(
+                state.run.surfaceExpedition.rigFuel,
+                fuelBeforeDeployment - 1.0) &&
+                state.run.mining.fuelSpent == 1,
+            "Mining Rig deployment must remain exactly one fuel at every Fuel Loop rank");
+        require(
+            nearlyEqual(miningRigFuelCycleSeconds(state), expectedCycleSeconds[rank]),
+            "Fuel Loop ranks zero through three must map to 15, 18, 21, and 24 seconds");
+
+        state.run.mining.enemies.clear();
+        state.run.mining.swarm = {};
+        const double cycleStart = state.run.mining.elapsedSeconds;
+        while (state.run.mining.fuelSpent == 1 &&
+               state.run.mining.elapsedSeconds - cycleStart < expectedCycleSeconds[rank] + 0.5) {
+            updateMiningRun(state, catalog, 0.08);
+        }
+        const double elapsedToBurn = state.run.mining.elapsedSeconds - cycleStart;
+        require(
+            state.run.mining.fuelSpent == 2 &&
+                elapsedToBurn >= expectedCycleSeconds[rank] - 0.08 &&
+                elapsedToBurn <= expectedCycleSeconds[rank] + 0.08,
+            "each Fuel Loop rank must burn its next fuel at the configured unloaded cadence");
+    }
+
+    GameState baseline = createNewGame(catalog, 92950);
+    baseline.meta.chapter = GameChapter::RedFrontier;
+    baseline.run.destinationIndex = 2;
+    startSurfaceExpedition(baseline, catalog);
+    baseline.run.surfaceExpedition.rigFuel = 10.0;
+    GameState efficient = baseline;
+    efficient.meta.rigFuelLoop.rank = 3;
+    const SurfaceReturnSafetyAssessment baselineForecast =
+        surfaceReturnSafetyAssessment(baseline, catalog, 3);
+    const SurfaceReturnSafetyAssessment efficientForecast =
+        surfaceReturnSafetyAssessment(efficient, catalog, 3);
+    require(
+        baselineForecast.oxygenSeconds == efficientForecast.oxygenSeconds &&
+            baselineForecast.estimatedReturnSeconds == efficientForecast.estimatedReturnSeconds,
+        "Fuel Loop progression must not alter the oxygen or traversal estimate");
+    require(
+        efficientForecast.fuelCycleSeconds > baselineForecast.fuelCycleSeconds &&
+            efficientForecast.fuelNeededAfterDeployment <
+                baselineForecast.fuelNeededAfterDeployment,
+        "Fuel Loop progression must improve the fuel-based return forecast");
+}
+
 void miningDrillFootprintCapsWearToWorstContact()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -9515,6 +10239,14 @@ void miningLoadBurdenAndUpgradeRelief()
     require(heavyLoad.currentLoad == 9.0, "carried cargo should count as load");
     require(heavyLoad.speedMultiplier < 1.0, "carried load should slow the drone");
     require(heavyLoad.fuelConsumptionMultiplier > 1.0, "carried load should increase fuel consumption rate");
+    require(
+        miningRigFuelConsumptionPerSecond(
+            loaded,
+            heavyLoad.fuelConsumptionMultiplier) >
+            miningRigFuelConsumptionPerSecond(
+                loaded,
+                emptyLoad.fuelConsumptionMultiplier),
+        "heavy cargo must increase real operating fuel consumption");
     require(heavyLoad.speedMultiplier >= tuning::mining::minLoadedSpeedMultiplier, "load slowdown should keep the minimum speed floor");
 
     GameState upgraded = loaded;
@@ -9529,6 +10261,14 @@ void miningLoadBurdenAndUpgradeRelief()
     require(
         upgradedLoad.fuelConsumptionMultiplier < heavyLoad.fuelConsumptionMultiplier,
         "engine upgrades should reduce load fuel penalty");
+    require(
+        miningRigFuelConsumptionPerSecond(
+            upgraded,
+            upgradedLoad.fuelConsumptionMultiplier) <
+            miningRigFuelConsumptionPerSecond(
+                loaded,
+                heavyLoad.fuelConsumptionMultiplier),
+        "Hauler Thrusters and Vector Nozzles must continue reducing only the heavy-load fuel surcharge");
 }
 
 void miningRefitModulesImproveDrillProfileIncrementally()
@@ -10058,13 +10798,16 @@ void operatorRigTetherRoundTripsThroughSave()
     mining.droneY = mining.returnZoneY;
     mining.rigTethered = false;
     mining.operatorRigTethered = true;
+    mining.rigDisabled = true;
 
     const auto parsed = deserializeSaveData(serializeSaveData(captureSaveData(state)));
     require(parsed.has_value(), "operator tether save should deserialize");
     GameState restored = createNewGame(catalog, 0x70B);
     restoreSaveData(restored, catalog, *parsed);
-    require(restored.run.mining.operatorRigTethered && !restored.run.mining.rigTethered,
-        "an active EVA player-to-rig tether should round trip without restoring a ship-to-rig tether");
+    require(restored.run.mining.operatorRigTethered &&
+            restored.run.mining.rigDisabled &&
+            !restored.run.mining.rigTethered,
+        "an active EVA tow line to a disabled rig should round trip without restoring a ship-to-rig tether");
 }
 
 
@@ -11262,7 +12005,7 @@ void progressedSavesSkipTheFirstLaunchIntroduction()
 void saveSchemaConstantsMatchSerializedFields()
 {
     const ContentCatalog catalog = createDefaultContent();
-    require(save_schema::currentVersion == 13, "the current save schema should be version thirteen");
+    require(save_schema::currentVersion == 14, "the current save schema should be version fourteen");
     GameState state = createNewGame(catalog, 12);
     state.run.credits = 123.0;
     state.run.inventoryModuleIds = {content::module::sparrowEngine, content::module::cryoLoop};
@@ -11279,6 +12022,8 @@ void saveSchemaConstantsMatchSerializedFields()
     require(text.find(std::string(save_schema::field::acknowledgedActivityBriefings) + save_schema::keyValueDelimiter) != std::string::npos, "activity briefing acknowledgments should use a shared schema name");
     require(text.find(std::string(save_schema::field::offerModules) + save_schema::keyValueDelimiter) != std::string::npos, "refit offers key should use shared schema name");
     require(text.find(std::string(save_schema::field::screen) + save_schema::keyValueDelimiter) != std::string::npos, "screen key should use shared schema name");
+    require(text.find(std::string(save_schema::field::pendingTransferAssistExitCourseOffset) + save_schema::keyValueDelimiter) != std::string::npos,
+        "transfer-assist exit course offset should use a shared schema name");
     require(text.find(std::string(save_schema::field::chapter) + save_schema::keyValueDelimiter) != std::string::npos, "chapter key should use shared schema name");
     require(text.find(std::string(save_schema::field::materials) + save_schema::keyValueDelimiter) != std::string::npos, "materials key should use shared schema name");
     require(text.find(std::string(save_schema::field::surfaceSite) + save_schema::keyValueDelimiter) != std::string::npos, "surface site key should use shared schema name");
@@ -11314,18 +12059,18 @@ void saveSchemaConstantsMatchSerializedFields()
             text.find("pendingDroneModuleOfferIndex=") == std::string::npos &&
             text.find("pendingDroneModuleFrame=") == std::string::npos &&
             text.find("pendingDroneModuleReplacementConfirmation=") == std::string::npos,
-        "version-thirteen saves must not persist the retired surface draft subflows");
+        "version-fourteen saves must not persist the retired surface draft subflows");
     require(text.find("fieldInsight=") == std::string::npos &&
             text.find("fieldInsightAwardKeys=") == std::string::npos &&
             text.find("miningDraftsEarned=") == std::string::npos &&
             text.find("pendingFieldDraftThreshold=") == std::string::npos &&
             text.find("fieldDraftReturnScreen=") == std::string::npos,
-        "version-thirteen saves must not persist retired Field Insight progression");
+        "version-fourteen saves must not persist retired Field Insight progression");
     require(text.find("droneUpgrades=") == std::string::npos &&
             text.find("droneUpgradeCredits=") == std::string::npos,
-        "version-thirteen saves must not persist retired permanent drone progression");
+        "version-fourteen saves must not persist retired permanent drone progression");
     require(text.find("miningFuelBurn=") == std::string::npos,
-        "version-thirteen saves must not persist the retired seconds-based fuel field");
+        "version-fourteen saves must not persist the retired seconds-based fuel field");
     require(text.find(std::string(1, save_schema::textListDelimiter)) != std::string::npos, "text list delimiter should be shared");
 
     const std::string minimalSave = std::string(save_schema::header) + "\n" +
@@ -11348,14 +12093,14 @@ void saveSchemaConstantsMatchSerializedFields()
                 .has_value(),
         "save payloads with malformed version declarations must not parse");
     require(!deserializeSaveData(
-                std::string(save_schema::header) + "\nversion=13trailing-data\ncredits=1\n")
+                std::string(save_schema::header) + "\nversion=14trailing-data\ncredits=1\n")
                 .has_value(),
         "save payloads must declare the exact current version value");
 
     SaveData incompatible = captureSaveData(state);
     incompatible.version = save_schema::currentVersion - 1;
     require(!deserializeSaveData(serializeSaveData(incompatible)).has_value(),
-        "version-twelve saves must be rejected instead of partially migrated");
+        "version-thirteen saves must be rejected instead of partially migrated");
     incompatible.version = save_schema::currentVersion + 1;
     require(!deserializeSaveData(serializeSaveData(incompatible)).has_value(),
         "future save versions must also be rejected instead of partially restored");
@@ -11790,6 +12535,7 @@ void structuredPanelPresentationSelectsFirstWaveTemplates()
     GameState push = createNewGame(catalog, 0xA119);
     push.run.destinationIndex = 2;
     startSurfaceExpedition(push, catalog);
+    push.run.surfaceExpedition.depthProspects.push_back({1, 1});
     Random pushRng(0xA119);
     require(startSurfacePushRun(push, pushRng).applied,
         "first-wave template test should create an active Surface Push");
@@ -12432,6 +13178,87 @@ void secondaryHybridTuningCoversAllRanksAndCaps()
     require(std::max(.10, .25) == .25, "Hazard Screen duplicates should use highest protection");
 }
 
+void postSolarBodiesAndGeologiesAreDeterministicAndPersistent()
+{
+    const auto geologies = postSolarGeologyCatalog();
+    require(geologies.size() == 32U, "post-solar geology catalog should contain 32 families");
+    std::vector<bool> rows(32U, false);
+    std::vector<std::string> ids;
+    for (const PostSolarGeologyProfile& geology : geologies) {
+        require(geology.atlasRow >= 0 && geology.atlasRow < 32, "geology atlas row should be in range");
+        require(!rows[static_cast<std::size_t>(geology.atlasRow)], "geology atlas rows should be unique");
+        rows[static_cast<std::size_t>(geology.atlasRow)] = true;
+        require(std::find(ids.begin(), ids.end(), geology.id) == ids.end(), "geology ids should be unique");
+        ids.emplace_back(geology.id);
+    }
+
+    const auto requireSameRoster = [](const PostSolarSystemRoster& left, const PostSolarSystemRoster& right) {
+        require(left.systemId == right.systemId, "system ids should be deterministic");
+        require(left.seed == right.seed, "system seed should be deterministic");
+        require(left.primaryBodyId == right.primaryBodyId, "primary body should be deterministic");
+        require(left.bodies.size() == right.bodies.size(), "body count should be deterministic");
+        for (std::size_t index = 0; index < left.bodies.size(); ++index) {
+            const PostSolarBodyProfile& a = left.bodies[index];
+            const PostSolarBodyProfile& b = right.bodies[index];
+            require(a.id == b.id && a.name == b.name && a.parentId == b.parentId,
+                "body identity should be deterministic");
+            require(a.kind == b.kind && a.visualArchetype == b.visualArchetype,
+                "body archetype should be deterministic");
+            require(a.surfaceGeologyId == b.surfaceGeologyId && a.deepGeologyId == b.deepGeologyId,
+                "body geology should be deterministic");
+            require(a.seed == b.seed && a.mineable == b.mineable,
+                "body mining state should be deterministic");
+        }
+    };
+
+    constexpr std::uint64_t seed = 0xA4A2C0DEULL;
+    const PostSolarSystemRoster aaru = generatePostSolarSystemRoster(content::postSolarSystem::aaruVale, seed);
+    requireSameRoster(aaru, generatePostSolarSystemRoster(content::postSolarSystem::aaruVale, seed));
+    const auto primaryCount = [](const PostSolarSystemRoster& roster) {
+        return std::count_if(roster.bodies.begin(), roster.bodies.end(), [](const auto& body) {
+            return body.parentId.empty();
+        });
+    };
+    const auto moonCount = [](const PostSolarSystemRoster& roster) {
+        return std::count_if(roster.bodies.begin(), roster.bodies.end(), [](const auto& body) {
+            return body.kind == PostSolarBodyKind::Moon;
+        });
+    };
+    require(primaryCount(aaru) >= 4 && primaryCount(aaru) <= 6, "Aaru should generate 4-6 primary bodies");
+    require(moonCount(aaru) >= 3 && moonCount(aaru) <= 7, "Aaru should generate 3-7 moons");
+    require(primaryPostSolarBody(aaru) != nullptr, "Aaru should expose a mineable primary body");
+
+    const PostSolarSystemRoster khepri = generatePostSolarSystemRoster(content::postSolarSystem::khepriPrime, seed);
+    requireSameRoster(khepri, generatePostSolarSystemRoster(content::postSolarSystem::khepriPrime, seed));
+    require(primaryCount(khepri) >= 3 && primaryCount(khepri) <= 5, "Khepri should generate 3-5 primary bodies");
+    require(moonCount(khepri) >= 2 && moonCount(khepri) <= 8, "Khepri should generate 2-8 moons");
+
+    const PostSolarSystemRoster rift = generatePostSolarSystemRoster(content::postSolarSystem::riftBelt, seed);
+    require(rift.bodies.size() >= 4U && rift.bodies.size() <= 8U, "Rift should generate 4-8 fragments");
+    require(std::all_of(rift.bodies.begin(), rift.bodies.end(), [](const auto& body) {
+        return body.kind == PostSolarBodyKind::MinorBody && body.mineable;
+    }), "Rift fragments should be mineable minor bodies");
+
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, seed);
+    state.meta.postSolarSystemRosters.push_back(khepri);
+    state.run.surfaceExpedition.postSolarSystemId = khepri.systemId;
+    state.run.surfaceExpedition.bodyId = khepri.primaryBodyId;
+    state.run.mining.postSolarSystemId = khepri.systemId;
+    state.run.mining.bodyId = khepri.primaryBodyId;
+    state.run.mining.surfaceGeologyId = khepri.bodies.front().surfaceGeologyId;
+    state.run.mining.deepGeologyId = khepri.bodies.front().deepGeologyId;
+    state.run.mining.geologySeed = khepri.bodies.front().seed;
+    const std::optional<SaveData> restored = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+    require(restored.has_value(), "post-solar save should deserialize");
+    require(restored->postSolarSystemRosters.size() == 1U, "post-solar roster should persist");
+    require(restored->surfaceExpedition.bodyId == khepri.primaryBodyId, "selected body should persist");
+    require(restored->mining.surfaceGeologyId == state.run.mining.surfaceGeologyId,
+        "active geology should persist");
+    require(restored->mining.geologySeed == state.run.mining.geologySeed,
+        "geology seed should persist");
+}
+
 } // namespace
 
 int main()
@@ -12490,7 +13317,9 @@ int main()
     selectedSurfaceUpgradesModifyMiningAndSurfaceStats();
     surfaceUpgradesAndDronesModifyScanMiniGame();
     surfaceUpgradesAndDronesModifyPushDeeperMiniGame();
-    surfaceScanAndPushDepthLimitsStayInParity();
+    surfaceDepthRatingsReplaceTemporaryEnvelopeBonuses();
+    permanentSurfaceDepthRefitsUnlockAndPersist();
+    surfaceDepthTutorialAndSafetyGatesAreHard();
     surfaceScanTimingWindowsTightenByMappedDepth();
     runUpgradesSurviveEmergencyRecall();
     runUpgradeLifetimeFollowsTheTransport();
@@ -12532,6 +13361,7 @@ int main()
     miningMiniDronesFollowIndependentRolePositions();
     hazardDroneTreatsAffinityLadderAndBatches();
     hazardDronesCrossSolidTerrainButNeverTargetHiddenCells();
+    hazardDroneFinishesCommittedTreatmentBeforeFollowingMovedPlayer();
     duplicateHazardDronesCoordinatePriorityAndExactAssistance();
     hazardDroneAssignmentsNormalizeAcrossSaveRoundTrips();
     miningHazardAffinitiesApplyOnlyOnDrillContact();
@@ -12550,6 +13380,7 @@ int main()
     enemyMovementTypesHaveDistinctBehavior();
     miningDrillBreaksCellsAndMarksChunks();
     miningUsesRigFuelReserve();
+    rigFuelLoopRanksControlOperatingCadence();
     miningDrillFootprintCapsWearToWorstContact();
     miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain();
     miningDrillTargetsFirstSolidCellOnRay();
@@ -12598,6 +13429,7 @@ int main()
     secondaryPulseUsesUnifiedCooldownAndStrongestHit();
     treasurePingMarksRareFirstAndSkipsExcludedMaterials();
     secondaryHybridTuningCoversAllRanksAndCaps();
+    postSolarBodiesAndGeologiesAreDeterministicAndPersistent();
 
     std::cout << "rocket_core_tests passed\n";
     return 0;

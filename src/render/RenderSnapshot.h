@@ -219,6 +219,10 @@ struct RenderSnapshot {
     double levelUpFanfare = 0.0;
     int miningWidth = 0;
     int miningHeight = 0;
+    // Negative keeps the legacy destination sheet. Otherwise this selects one
+    // of the 32 body-owned rows in the post-solar mining library.
+    int miningPostSolarGeologyRow = -1;
+    std::uint64_t miningGeologySeed = 0;
     double miningDroneX = 0.0;
     double miningDroneY = 0.0;
     double miningTargetX = 0.0;
@@ -345,6 +349,7 @@ struct RenderSnapshot {
     std::vector<MiningCellMaterial> surfaceScanPreviewMarkers;
     std::vector<int> surfaceScanPreviewDepthOffsets;
     bool surfacePushBusted = false;
+    int surfacePushStartDepth = 0;
     int surfacePushSteps = 0;
     int surfacePushMaxSteps = 1;
     double surfacePushPressure = 0.0;

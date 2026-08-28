@@ -9,6 +9,7 @@
 #include "core/LaunchPresentation.h"
 #include "core/MiniDroneCoordination.h"
 #include "core/MiningSystem.h"
+#include "core/PostSolarSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/ScenarioSystem.h"
 #include "core/RefitPresentation.h"
@@ -594,6 +595,9 @@ bool RocketGameApp::openRefitIfAvailable(bool regenerateOffers)
     }
 
     if (regenerateOffers || refitWindowPresentation(state_, catalog_).offers.empty()) {
+        if (regenerateOffers) {
+            beginRefitVisit(state_);
+        }
         generateModuleOffers(state_, catalog_, rng_);
     }
     if (refitWindowPresentation(state_, catalog_).offers.empty()) {
@@ -678,7 +682,7 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
         state_.statusLine = std::string(text::status::saveRestored);
         hasSavedGame_ = true;
     } else if (!storedSave.empty()) {
-        // Save v13 is an intentional fresh-start boundary. Keep an older file
+        // Save v14 is an intentional fresh-start boundary. Keep an older file
         // untouched until New Game successfully replaces it, but never expose
         // Continue for partially compatible progression state.
         titleNotice_ = "Progression update requires a new game.";
@@ -3125,7 +3129,15 @@ void RocketGameApp::debugStartSwarmArena()
     panelDirty_ = true;
 }
 
-void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t seed, int loadoutMode, int gateOverride)
+void RocketGameApp::debugStartMiningArena(
+    int act,
+    int difficulty,
+    std::uint64_t seed,
+    int loadoutMode,
+    int gateOverride,
+    int destinationTierOverride,
+    int postSolarSystemOverride,
+    int bodyIndex)
 {
     const MiningAct miningAct = act <= 1
         ? MiningAct::ActOne
@@ -3169,11 +3181,51 @@ void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t
         addDebugUnlock(state_, content::unlock::perimeterDrones);
     }
 
+    if (destinationTierOverride >= 1 && destinationTierOverride <= 8) {
+        constexpr std::array<std::string_view, 8> destinationsByTier {{
+            content::destination::moon,
+            content::destination::mars,
+            content::destination::jupiter,
+            content::destination::saturn,
+            content::destination::uranus,
+            content::destination::neptune,
+            content::destination::nearbyStar,
+            content::destination::nearbyGalaxy,
+        }};
+        destinationId = destinationsByTier[static_cast<std::size_t>(destinationTierOverride - 1)];
+    }
+
+    std::string_view debugPostSolarSystemId;
+    if (postSolarSystemOverride == 1) {
+        debugPostSolarSystemId = content::postSolarSystem::aaruVale;
+        destinationId = content::destination::neptune;
+    } else if (postSolarSystemOverride == 2) {
+        debugPostSolarSystemId = content::postSolarSystem::khepriPrime;
+        destinationId = content::destination::nearbyStar;
+    } else if (postSolarSystemOverride == 3) {
+        debugPostSolarSystemId = content::postSolarSystem::riftBelt;
+        destinationId = content::destination::nearbyGalaxy;
+    }
+
     state_.run.destinationIndex = destinationIndexForId(catalog_, destinationId);
     SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
     expedition = {};
     expedition.active = true;
     expedition.destinationId = std::string(destinationId);
+    if (!debugPostSolarSystemId.empty()) {
+        expedition.postSolarSystemId = debugPostSolarSystemId;
+        PostSolarSystemRoster& roster = ensurePostSolarSystemRoster(
+            state_.meta, debugPostSolarSystemId, request.seed);
+        std::vector<const PostSolarBodyProfile*> mineableBodies;
+        for (const PostSolarBodyProfile& body : roster.bodies) {
+            if (body.mineable) mineableBodies.push_back(&body);
+        }
+        if (!mineableBodies.empty()) {
+            const std::size_t selected = static_cast<std::size_t>(std::clamp(
+                bodyIndex, 0, static_cast<int>(mineableBodies.size()) - 1));
+            expedition.bodyId = mineableBodies[selected]->id;
+        }
+    }
     expedition.siteProfile = rules.band == MiningProgressionBand::Learn
         ? SurfaceSiteProfile::SurveyBasin
         : (rules.band == MiningProgressionBand::Combine ? SurfaceSiteProfile::OreShelf : SurfaceSiteProfile::FractureField);
@@ -3231,6 +3283,35 @@ void RocketGameApp::debugStartMiningArena(int act, int difficulty, std::uint64_t
         : surfaceActionSummary(outcome);
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
+}
+
+std::string RocketGameApp::debugPostSolarBodyPreview(
+    int postSolarSystemOverride,
+    int bodyIndex,
+    std::uint64_t seed) const
+{
+    std::string_view systemId;
+    if (postSolarSystemOverride == 1) systemId = content::postSolarSystem::aaruVale;
+    if (postSolarSystemOverride == 2) systemId = content::postSolarSystem::khepriPrime;
+    if (postSolarSystemOverride == 3) systemId = content::postSolarSystem::riftBelt;
+    if (systemId.empty()) return {};
+    const PostSolarSystemRoster roster = generatePostSolarSystemRoster(
+        systemId, std::max<std::uint64_t>(1, seed));
+    std::vector<const PostSolarBodyProfile*> mineableBodies;
+    for (const PostSolarBodyProfile& body : roster.bodies) {
+        if (body.mineable) mineableBodies.push_back(&body);
+    }
+    if (mineableBodies.empty()) return "No mineable bodies generated.";
+    const int selected = std::clamp(bodyIndex, 0, static_cast<int>(mineableBodies.size()) - 1);
+    const PostSolarBodyProfile& body = *mineableBodies[static_cast<std::size_t>(selected)];
+    const PostSolarGeologyProfile* surface = findPostSolarGeology(body.surfaceGeologyId);
+    const PostSolarGeologyProfile* deep = findPostSolarGeology(body.deepGeologyId);
+    return body.name + "  •  body " + std::to_string(selected + 1) + "/"
+        + std::to_string(mineableBodies.size()) + "  •  portrait "
+        + std::to_string(body.visualArchetype) + "\nSurface: "
+        + (surface != nullptr ? std::string(surface->name) : body.surfaceGeologyId)
+        + "  •  Deep: "
+        + (deep != nullptr ? std::string(deep->name) : body.deepGeologyId);
 }
 
 std::string RocketGameApp::debugMiningArenaPreview(int act, int difficulty, int gateOverride) const
@@ -3421,8 +3502,12 @@ void RocketGameApp::debugShowJupiterOptions(int mode)
             content::destination::jupiter,
             goodSlingshot ? FlybyGrade::Good : FlybyGrade::Perfect,
             tuning::flyby::jupiterSlingshotFuelSavings,
-            tuning::flyby::slingshotSpeedBoost,
-            goodSlingshot ? tuning::flyby::jupiterSlingshotGoodInstabilityPenalty : 0.0 }
+            tuning::flyby::slingshotSpeedBoost *
+                (goodSlingshot ? 1.0 : tuning::flyby::slingshotMaxSpeedScale),
+            goodSlingshot ? tuning::flyby::jupiterSlingshotGoodInstabilityPenalty : 0.0,
+            goodSlingshot
+                ? 0.50
+                : tuning::launch::pilotingCourseSafe * 0.50 }
         : PendingTransferAssist {};
     state_.run.nextLaunchFuelBoost = 0.0;
     state_.run.nextLaunchSpeedBoost = 0.0;
@@ -3488,6 +3573,7 @@ void RocketGameApp::debugShowRefit()
     seedDebugResearchAccess(state_);
     state_.run.refitEntitled = true;
     state_.run.credits = std::max(state_.run.credits, 100.0);
+    beginRefitVisit(state_);
     generateModuleOffers(state_, catalog_, rng_);
     selectedRefitOfferIndex_ = 0;
     state_.screen = Screen::Upgrade;
@@ -3863,9 +3949,23 @@ void RocketGameApp::buyOffer(int index)
     if (state_.screen != Screen::Upgrade) {
         return;
     }
+    const ShipModule* selectedModule =
+        index >= 0 && index < static_cast<int>(state_.run.offerModuleIds.size())
+        ? catalog_.findModule(
+              state_.run.offerModuleIds[static_cast<std::size_t>(index)])
+        : nullptr;
+    const bool permanentSurfacePurchase = selectedModule != nullptr &&
+        (selectedModule->surfaceDepthUpgradeKind != SurfaceDepthUpgradeKind::None ||
+         selectedModule->rigFuelLoopRank > 0);
     if (rocket::buyOffer(state_, catalog_, index)) {
         selectedRefitOfferIndex_ = 0;
-        state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
+        if (permanentSurfacePurchase &&
+            !refitWindowPresentation(state_, catalog_).offers.empty()) {
+            state_.screen = Screen::Upgrade;
+        } else {
+            state_.run.refitEntitled = false;
+            state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
+        }
         save();
     }
     panelDirty_ = true;
@@ -4830,6 +4930,11 @@ RenderSnapshot RocketGameApp::snapshot() const
             : 0.0;
         result.miningWidth = mining.terrain.width;
         result.miningHeight = mining.terrain.height;
+        const std::string& activeGeology = mining.depthZone > mining.entryDepthZone
+            ? mining.deepGeologyId
+            : mining.surfaceGeologyId;
+        result.miningPostSolarGeologyRow = postSolarGeologyRow(activeGeology);
+        result.miningGeologySeed = mining.geologySeed;
         result.miningDroneX = mining.droneX;
         result.miningDroneY = mining.droneY;
         result.miningTargetX = mining.targetTipX;
@@ -4889,7 +4994,9 @@ RenderSnapshot RocketGameApp::snapshot() const
             std::clamp(mining.operatorFirePulseSeconds / 0.12, 0.0, 1.0);
         result.miningRigPresent = mining.rigDepthZone == mining.depthZone;
         result.miningRigDisabled = mining.rigDisabled;
-        result.miningOperatorRigTethered = mining.operatorRigTethered && !mining.rigDisabled &&
+        // Disabled rigs remain valid EVA recovery targets. Do not hide the
+        // tow line merely because the object being recovered is a wreck.
+        result.miningOperatorRigTethered = mining.operatorRigTethered &&
             mining.operatorMode == MiningOperatorMode::Jetpack && mining.operatorPresent;
         const MiniDroneAnchorFrame anchor = resolveMiniDroneAnchor(mining);
         result.miningAnchorValid = anchor.valid;
@@ -5009,6 +5116,7 @@ RenderSnapshot RocketGameApp::snapshot() const
     if (state_.screen == Screen::SurfacePush && (state_.run.surfacePush.active || state_.run.surfacePush.completed)) {
         const SurfacePushRunState& push = state_.run.surfacePush;
         result.surfacePushBusted = push.busted;
+        result.surfacePushStartDepth = std::max(0, state_.run.surfaceExpedition.depth);
         result.surfacePushSteps = push.steps;
         result.surfacePushMaxSteps = std::max(1, push.maxSteps);
         result.surfacePushPressure = push.pressure;
@@ -5046,6 +5154,11 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.launchProjectedFuelReserve = session_.flight.projectedFuelReserve;
         result.launchInsertionReserve = flightModel.arrivalReserveFuel;
         result.launchCourseLimit = launchCourseLimit(flightModel);
+        // The slingshot handoff is already physically in this lane during
+        // preflight; expose it before arming so the launch scene never flashes
+        // at center and then jumps sideways on ignition.
+        result.launchCourseOffset = session_.flight.courseOffset;
+        result.launchCourseVelocity = session_.flight.courseVelocity;
         result.launchAsteroidCount = std::clamp(
             flightModel.asteroidCount,
             0,
@@ -5074,8 +5187,6 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.launchSteerInput = session_.steerInput;
         result.launchThrottle = session_.controls.actions.cutEnginesActive ? 0.0 : session_.flight.selectedThrottle;
         result.launchFuel = session_.flight.fuelRemaining / std::max(0.01, session_.flight.fuelCapacity);
-        result.launchCourseOffset = session_.flight.courseOffset;
-        result.launchCourseVelocity = session_.flight.courseVelocity;
         result.launchHullRemaining = session_.flight.hullRemaining;
         result.launchHullMaximum = session_.flight.hullMaximum;
         result.launchHeatFailureProgress = std::clamp(

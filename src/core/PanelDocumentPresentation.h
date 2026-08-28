@@ -78,6 +78,9 @@ struct PanelRuntimeHints {
     bool titleScreen = false;
     bool responsiveViewport = false;
     bool gameplayInputHelper = false;
+    // Scene handoffs draw above every panel family and therefore require the
+    // RmlUi root clip to follow the complete live viewport, including resize.
+    bool sceneTransitionActive = false;
     bool preflightReady = true;
     bool launchQueued = false;
     bool miningEvaActive = false;

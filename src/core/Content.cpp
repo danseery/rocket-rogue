@@ -25,7 +25,10 @@ ShipModule module(
     std::string prerequisiteId = {},
     bool provingTier = false,
     LaunchUpgradeKind launchUpgradeKind = LaunchUpgradeKind::None,
-    int launchUpgradeRank = 0)
+    int launchUpgradeRank = 0,
+    SurfaceDepthUpgradeKind surfaceDepthUpgradeKind = SurfaceDepthUpgradeKind::None,
+    int surfaceDepthUpgradeRank = 0,
+    int rigFuelLoopRank = 0)
 {
     ShipModule result;
     result.id = std::move(id);
@@ -42,6 +45,9 @@ ShipModule module(
     result.provingTier = provingTier;
     result.launchUpgradeKind = launchUpgradeKind;
     result.launchUpgradeRank = launchUpgradeRank;
+    result.surfaceDepthUpgradeKind = surfaceDepthUpgradeKind;
+    result.surfaceDepthUpgradeRank = surfaceDepthUpgradeRank;
+    result.rigFuelLoopRank = rigFuelLoopRank;
     return result;
 }
 
@@ -290,6 +296,15 @@ ContentCatalog createDefaultContent()
         module(content::module::hullPlating1, "Hull Plating I", SlotType::Hull, Rarity::Common, {}, content::unlock::starter, {"launch", "hull"}, {}, RefitTrack::Recovery, 1, "", true, LaunchUpgradeKind::Hull, 1),
         module(content::module::hullPlating2, "Hull Plating II", SlotType::Hull, Rarity::Common, {}, content::unlock::starter, {"launch", "hull"}, {}, RefitTrack::Recovery, 2, content::module::hullPlating1, true, LaunchUpgradeKind::Hull, 2),
         module(content::module::hullPlating3, "Hull Plating III", SlotType::Hull, Rarity::Common, {}, content::unlock::starter, {"launch", "hull"}, {}, RefitTrack::Recovery, 3, content::module::hullPlating2, true, LaunchUpgradeKind::Hull, 3),
+        module(content::module::surveyArray1, "Survey Array I", SlotType::Sensors, Rarity::Common, {}, content::unlock::surfaceProbes, {"surface", "survey", "permanent"}, {}, RefitTrack::Control, 1, "", false, LaunchUpgradeKind::None, 0, SurfaceDepthUpgradeKind::SurveyArray, 1),
+        module(content::module::surveyArray2, "Survey Array II", SlotType::Sensors, Rarity::Uncommon, {}, content::unlock::surfaceProbes, {"surface", "survey", "permanent"}, {}, RefitTrack::Control, 2, content::module::surveyArray1, false, LaunchUpgradeKind::None, 0, SurfaceDepthUpgradeKind::SurveyArray, 2),
+        module(content::module::surveyArray3, "Survey Array III", SlotType::Sensors, Rarity::Rare, {}, content::unlock::surfaceProbes, {"surface", "survey", "permanent"}, {}, RefitTrack::Control, 3, content::module::surveyArray2, false, LaunchUpgradeKind::None, 0, SurfaceDepthUpgradeKind::SurveyArray, 3),
+        module(content::module::boreSystem1, "Bore System I", SlotType::Engine, Rarity::Common, {}, content::unlock::surfaceDrills, {"surface", "dig", "permanent"}, {}, RefitTrack::Reach, 1, "", false, LaunchUpgradeKind::None, 0, SurfaceDepthUpgradeKind::BoreSystem, 1),
+        module(content::module::boreSystem2, "Bore System II", SlotType::Engine, Rarity::Uncommon, {}, content::unlock::surfaceDrills, {"surface", "dig", "permanent"}, {}, RefitTrack::Reach, 2, content::module::boreSystem1, false, LaunchUpgradeKind::None, 0, SurfaceDepthUpgradeKind::BoreSystem, 2),
+        module(content::module::boreSystem3, "Bore System III", SlotType::Engine, Rarity::Rare, {}, content::unlock::surfaceDrills, {"surface", "dig", "permanent"}, {}, RefitTrack::Reach, 3, content::module::boreSystem2, false, LaunchUpgradeKind::None, 0, SurfaceDepthUpgradeKind::BoreSystem, 3),
+        module(content::module::rigFuelLoop1, "Rig Fuel Loop I", SlotType::Fuel, Rarity::Common, {}, content::unlock::surfaceDrills, {"surface", "mining", "fuel", "permanent"}, {}, RefitTrack::Recovery, 1, "", false, LaunchUpgradeKind::None, 0, SurfaceDepthUpgradeKind::None, 0, 1),
+        module(content::module::rigFuelLoop2, "Rig Fuel Loop II", SlotType::Fuel, Rarity::Uncommon, {}, content::unlock::surfaceDrills, {"surface", "mining", "fuel", "permanent"}, {}, RefitTrack::Recovery, 2, content::module::rigFuelLoop1, false, LaunchUpgradeKind::None, 0, SurfaceDepthUpgradeKind::None, 0, 2),
+        module(content::module::rigFuelLoop3, "Rig Fuel Loop III", SlotType::Fuel, Rarity::Rare, {}, content::unlock::surfaceDrills, {"surface", "mining", "fuel", "permanent"}, {}, RefitTrack::Recovery, 3, content::module::rigFuelLoop2, false, LaunchUpgradeKind::None, 0, SurfaceDepthUpgradeKind::None, 0, 3),
 
         module(content::module::sparrowEngine, "Sparrow Engine", SlotType::Engine, Rarity::Common, {.thrust = 2.0, .volatility = 0.2}, content::unlock::starter, {"steady", content::unlock::starter}),
         module(content::module::kestrelEngine, "Kestrel Engine", SlotType::Engine, Rarity::Uncommon, {.thrust = 1.6, .fuel = -0.4, .volatility = 0.25, .payout = 0.4}, content::unlock::deepSpace, {"fast", "hungry"}, {}, RefitTrack::Reach, 1, content::module::sparrowEngine),
@@ -611,7 +626,9 @@ ContentCatalog createDefaultContent()
                     "REWARD // HAZARD DRONE MK I", "Commission Hazard Drone", {},
                     ScenarioEventKind::ManualAction, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::BeginActivity, {},
-                    {{ScenarioRewardKind::UnlockKey, content::unlock::ioHazardDrone, 0, false},
+                    {{ScenarioRewardKind::UnlockKey, content::unlock::droneBay, 0, false},
+                     {ScenarioRewardKind::DroneBaySlots, {}, 1, false},
+                     {ScenarioRewardKind::UnlockKey, content::unlock::ioHazardDrone, 0, false},
                      {ScenarioRewardKind::SupportDrone, content::drone::hazardDrone, 1, true}}},
                 {"recovery", {"commission"}, "IO // JUPITER SYSTEM", "Layered Recovery",
                     "Discover the outer seal, cool and excavate every segment, then reveal, tether, and extract the protected objective.",
@@ -885,6 +902,16 @@ std::string_view toString(LaunchUpgradeKind kind)
     case LaunchUpgradeKind::FlightControls: return "Flight Controls";
     case LaunchUpgradeKind::Cooling: return "Engine Cooling";
     case LaunchUpgradeKind::Hull: return "Hull Plating";
+    }
+    return "None";
+}
+
+std::string_view toString(SurfaceDepthUpgradeKind kind)
+{
+    switch (kind) {
+    case SurfaceDepthUpgradeKind::None: return "None";
+    case SurfaceDepthUpgradeKind::SurveyArray: return "Survey Array";
+    case SurfaceDepthUpgradeKind::BoreSystem: return "Bore System";
     }
     return "None";
 }

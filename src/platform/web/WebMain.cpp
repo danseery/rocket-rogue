@@ -872,7 +872,15 @@ void rr_debug_swarm_arena()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void rr_debug_mining_arena(int act, int difficulty, double seed, int loadoutMode, int gateOverride)
+void rr_debug_mining_arena(
+    int act,
+    int difficulty,
+    double seed,
+    int loadoutMode,
+    int gateOverride,
+    int destinationTierOverride,
+    int postSolarSystemOverride,
+    int bodyIndex)
 {
     if (g_app) {
         g_app->debugStartMiningArena(
@@ -880,8 +888,25 @@ void rr_debug_mining_arena(int act, int difficulty, double seed, int loadoutMode
             difficulty,
             static_cast<std::uint64_t>(std::max(1.0, seed)),
             loadoutMode,
-            gateOverride);
+            gateOverride,
+            destinationTierOverride,
+            postSolarSystemOverride,
+            bodyIndex);
     }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+const char* rr_debug_post_solar_body_preview(int systemOverride, int bodyIndex, double seed)
+{
+    g_debugMiningPreview = g_app
+        ? g_app->debugPostSolarBodyPreview(
+            systemOverride,
+            bodyIndex,
+            static_cast<std::uint64_t>(std::max(1.0, seed)))
+        : std::string {};
+    return g_debugMiningPreview.c_str();
 }
 
 #ifdef __EMSCRIPTEN__

@@ -4,6 +4,7 @@
 #include "core/GameText.h"
 #include "core/GameUi.h"
 #include "core/MiningProgression.h"
+#include "core/MiningSystem.h"
 #include "core/ScenarioSystem.h"
 #include "core/Tuning.h"
 
@@ -874,6 +875,63 @@ double flybySpeedScale(const FlybyRunState& flyby)
     return 1.0 + fastShare * (tuning::flyby::slingshotMaxSpeedScale - 1.0);
 }
 
+double flybySpeedBoost(const FlybyRunState& flyby, double maximumBaseBoost)
+{
+    const double speed = std::hypot(flyby.velocityX, flyby.velocityY);
+    const double range = std::max(
+        0.001,
+        tuning::flyby::maxSpeed - tuning::flyby::minSpeed);
+    const double speedShare = std::clamp(
+        (speed - tuning::flyby::minSpeed) / range,
+        0.0,
+        1.0);
+    return std::max(0.0, maximumBaseBoost) *
+        tuning::flyby::slingshotMaxSpeedScale * speedShare;
+}
+
+double flybyExitCourseOffset(const FlybyRunState& flyby)
+{
+    if (flyby.pathProgress + 0.000001 < tuning::flyby::finishProgress) {
+        return 0.0;
+    }
+
+    const auto [tangentX, tangentY] = flybyEndTangent();
+    // Launch course offset is positive toward the route's right-hand normal.
+    // Preserve that same local side at the Flyby finish rather than using
+    // absolute screen X, since both authored routes curve independently.
+    const double rightX = tangentY;
+    const double rightY = -tangentX;
+    const double signedDistance =
+        (flyby.shipX - tuning::flyby::endX) * rightX +
+        (flyby.shipY - tuning::flyby::endY) * rightY;
+    const double distance = std::abs(signedDistance);
+    const double perfectBand = std::max(0.001, flyby.perfectBand);
+    const double goodBand = std::max(perfectBand + 0.001, flyby.goodBand);
+
+    double courseMagnitude = 0.0;
+    if (distance <= perfectBand) {
+        courseMagnitude = tuning::launch::pilotingCourseSafe *
+            distance / perfectBand;
+    } else if (distance <= goodBand) {
+        const double share = (distance - perfectBand) / (goodBand - perfectBand);
+        courseMagnitude = tuning::launch::pilotingCourseSafe +
+            (tuning::launch::pilotingCourseCaution -
+                tuning::launch::pilotingCourseSafe) * share;
+    } else {
+        const double share = std::clamp(
+            (distance - goodBand) /
+                std::max(0.001, tuning::flyby::boundaryPadding),
+            0.0,
+            1.0);
+        courseMagnitude = tuning::launch::pilotingCourseCaution +
+            (tuning::launch::pilotingCourseLost -
+                tuning::launch::pilotingCourseCaution) * share;
+    }
+    return std::copysign(
+        std::min(courseMagnitude, tuning::launch::pilotingCourseLost),
+        signedDistance);
+}
+
 double flybyCompletionBonusScale(const FlybyRunState& flyby)
 {
     const double completionWindow = std::max(0.01, flyby.durationSeconds - tuning::flyby::minimumFinishSeconds);
@@ -906,7 +964,9 @@ void populateFlybyRewardPreview(FlybyRunState& flyby, const Destination* destina
         } else {
             flyby.slingshotSpeedScale = flybySpeedScale(flyby);
             flyby.slingshotFuelSavings = tuning::flyby::slingshotFuelBoost * flyby.slingshotSpeedScale;
-            flyby.slingshotSpeedBoost = tuning::flyby::slingshotSpeedBoost * flyby.slingshotSpeedScale;
+            flyby.slingshotSpeedBoost = flybySpeedBoost(
+                flyby,
+                tuning::flyby::slingshotSpeedBoost);
         }
     }
 
@@ -1974,7 +2034,9 @@ bool armTransferAssist(GameState& state, const ContentCatalog& catalog)
     flyby.slingshotAwarded = true;
     flyby.slingshotSpeedScale = flybySpeedScale(flyby);
     flyby.slingshotFuelSavings = definition->fuelSavings;
-    flyby.slingshotSpeedBoost = definition->speedBoostBase * flyby.slingshotSpeedScale;
+    flyby.slingshotSpeedBoost = flybySpeedBoost(
+        flyby,
+        definition->speedBoostBase);
     flyby.rewardCredits = 0.0;
     flyby.blueprintGain = 0;
     state.run.pendingTransferAssist = {
@@ -1984,7 +2046,8 @@ bool armTransferAssist(GameState& state, const ContentCatalog& catalog)
         grade,
         flyby.slingshotFuelSavings,
         flyby.slingshotSpeedBoost,
-        grade == FlybyGrade::Good ? definition->goodInstabilityPenalty : 0.0
+        grade == FlybyGrade::Good ? definition->goodInstabilityPenalty : 0.0,
+        flybyExitCourseOffset(flyby)
     };
     return true;
 }
@@ -3891,17 +3954,6 @@ bool hasPendingSurfacePayload(const MaterialInventory& materials, const std::vec
     return cargo > 0 || materials.common > 0 || materials.rare > 0 || materials.exotic > 0 || !artifacts.empty();
 }
 
-int surfaceDepthEnvelopeBonus(const SurfaceUpgradeEffects& upgrades, const MiniDroneLoadoutEffects& drones)
-{
-    const double scannerReach = std::max(0.0, upgrades.scannerRadius + drones.scannerRadius);
-    const int scannerBonus = std::clamp(static_cast<int>(std::floor(scannerReach / 2.5)), 0, 2);
-    const int structureBonus = std::clamp(
-        static_cast<int>(std::floor((upgrades.drillDurability + upgrades.drillCooling + drones.hardRockBounceRelief * 5.0) / 4.0)),
-        0,
-        2);
-    return std::clamp(std::max(scannerBonus, structureBonus), 0, 2);
-}
-
 struct SurfaceScanSupport {
     double signalBonus = 0.0;
     double riskRelief = 0.0;
@@ -3909,7 +3961,6 @@ struct SurfaceScanSupport {
     double exoticChanceBonus = 0.0;
     double artifactChanceBonus = 0.0;
     double hazardRelief = 0.0;
-    int reachablePushSteps = tuning::research::pushMaxSteps;
 };
 
 SurfaceScanSupport surfaceScanSupport(const GameState& state)
@@ -3926,7 +3977,6 @@ SurfaceScanSupport surfaceScanSupport(const GameState& state)
     support.exoticChanceBonus = std::clamp(upgrades.oreYieldChance * 0.35 + scannerReach * 0.006, 0.0, 0.10);
     support.artifactChanceBonus = std::clamp(scannerReach * 0.010, 0.0, 0.09);
     support.hazardRelief = std::clamp(upgrades.hazardRelief, 0.0, 0.06);
-    support.reachablePushSteps = tuning::research::pushMaxSteps + surfaceDepthEnvelopeBonus(upgrades, drones);
     return support;
 }
 
@@ -3936,7 +3986,6 @@ struct SurfacePushSupport {
     double richChanceBonus = 0.0;
     double artifactChanceBonus = 0.0;
     double hazardRelief = 0.0;
-    int maxStepBonus = 0;
 };
 
 SurfacePushSupport surfacePushSupport(const GameState& state)
@@ -3958,7 +4007,6 @@ SurfacePushSupport surfacePushSupport(const GameState& state)
     support.richChanceBonus = std::clamp(upgrades.oreYieldChance + upgrades.hardRockBounceRelief * 0.15 + drones.hardRockBounceRelief * 0.10, 0.0, 0.22);
     support.artifactChanceBonus = std::clamp(upgrades.hardRockBounceRelief * 0.10 + drones.drillIntegrityRelief * 0.12, 0.0, 0.08);
     support.hazardRelief = std::clamp(upgrades.hazardRelief + structureSupport * 0.20, 0.0, 0.08);
-    support.maxStepBonus = surfaceDepthEnvelopeBonus(upgrades, drones);
     return support;
 }
 
@@ -3988,6 +4036,206 @@ const SurfaceDepthProspect* findSurfaceDepthProspect(const SurfaceExpeditionStat
         return prospect.absoluteDepth == absoluteDepth;
     });
     return found == expedition.depthProspects.end() ? nullptr : &(*found);
+}
+
+SurfaceReturnSafetyAssessment surfaceReturnSafetyAssessment(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    int absoluteDepth)
+{
+    SurfaceReturnSafetyAssessment assessment;
+    assessment.depth = std::max(0, absoluteDepth);
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const int completedHostileSorties = destinationHistoryValue(
+        state.meta.destinationSuccesses,
+        catalog,
+        expedition.destinationId);
+    const int landingOrdinal = destinationHistoryValue(
+        state.meta.destinationLandings,
+        catalog,
+        expedition.destinationId);
+    MiningArenaRequest request = campaignMiningArenaRequest(
+        state.meta.chapter,
+        expedition.destinationId,
+        assessment.depth,
+        completedHostileSorties,
+        state.seed,
+        landingOrdinal);
+    MiningArenaRules rules;
+    if (!expedition.pendingMiningSiteDefinitionId.empty()) {
+        if (const MiningSiteDefinition* site = catalog.findMiningSite(
+                expedition.pendingMiningSiteDefinitionId)) {
+            MiningArenaRequest siteRequest = site->arena;
+            if (siteRequest.seed == 0) {
+                siteRequest.seed = request.seed;
+            }
+            rules = resolveMiningSiteArenaRules(siteRequest, *site);
+        } else {
+            rules = resolveMiningArenaRules(request);
+        }
+    } else if (const MiningSiteProgress* site = pendingCompatibilityMiningSite(
+                   state.meta,
+                   expedition.destinationId)) {
+        request.act = site->act;
+        request.difficulty = site->difficulty;
+        request.seed = site->seed;
+        request.gateOverrideEnabled = true;
+        request.gateOverride = site->gateType;
+        rules = resolveMiningArenaRules(request);
+    } else {
+        rules = resolveMiningArenaRules(request);
+    }
+
+    if (!rules.mechanics.oxygenAndFuel || assessment.depth <= 0) {
+        return assessment;
+    }
+
+    const MiningDrillStats stats = miningDrillStats(state, catalog);
+    assessment.oxygenSeconds = static_cast<int>(std::floor(stats.oxygenSeconds));
+    const double verticalCells = std::max(1, stats.terrainHeight - 7);
+    const double idealLayerSeconds = verticalCells / std::max(0.1, stats.speed);
+    const double safeLayerSeconds =
+        (idealLayerSeconds + 0.65) *
+        tuning::mining::returnEnduranceTraversalScale;
+    const double estimatedSeconds =
+        tuning::mining::returnEnduranceDockingSeconds +
+        static_cast<double>(assessment.depth) * safeLayerSeconds;
+    assessment.estimatedReturnSeconds =
+        static_cast<int>(std::ceil(estimatedSeconds));
+    assessment.fuelCycleSeconds = miningRigFuelCycleSeconds(state);
+    assessment.fuelNeededAfterDeployment = static_cast<int>(std::ceil(
+        estimatedSeconds * miningRigFuelConsumptionPerSecond(state)));
+    assessment.fuelAvailableAfterDeployment = static_cast<int>(std::floor(std::max(
+        0.0,
+        expedition.rigFuel - 1.0)));
+
+    const int oxygenMargin =
+        assessment.oxygenSeconds - assessment.estimatedReturnSeconds;
+    const int fuelMargin =
+        assessment.fuelAvailableAfterDeployment -
+        assessment.fuelNeededAfterDeployment;
+    assessment.oxygenCritical = oxygenMargin < 0;
+    assessment.fuelCritical = fuelMargin < 0;
+    if (assessment.oxygenCritical || assessment.fuelCritical) {
+        assessment.severity = SurfaceReturnSafetySeverity::Critical;
+    } else if (
+        oxygenMargin <= tuning::mining::returnEnduranceCautionSeconds ||
+        fuelMargin == 0) {
+        assessment.severity = SurfaceReturnSafetySeverity::Caution;
+    }
+    return assessment;
+}
+
+int deepestContiguousSurveyedDepth(const GameState& state)
+{
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const int surveyRating = surfaceDepthRating(
+        state,
+        SurfaceDepthUpgradeKind::SurveyArray);
+    int depth = std::max(0, expedition.depth);
+    while (depth < surveyRating &&
+           findSurfaceDepthProspect(expedition, depth + 1) != nullptr) {
+        ++depth;
+    }
+    return depth;
+}
+
+bool surfaceSurveyLimitReached(const GameState& state)
+{
+    return deepestContiguousSurveyedDepth(state) >= surfaceSurveyDepthLimit(state);
+}
+
+int surfaceSurveyDepthLimit(const GameState& state)
+{
+    return std::min(
+        surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray),
+        surfaceDepthRating(state, SurfaceDepthUpgradeKind::BoreSystem));
+}
+
+SurfaceDepthCapability surfaceDepthCapability(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    int targetDepth)
+{
+    SurfaceDepthCapability capability;
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    capability.targetDepth = std::max(0, targetDepth);
+    capability.surveyRating = surfaceDepthRating(
+        state,
+        SurfaceDepthUpgradeKind::SurveyArray);
+    capability.boreRating = surfaceDepthRating(
+        state,
+        SurfaceDepthUpgradeKind::BoreSystem);
+    capability.surveyedThroughDepth = deepestContiguousSurveyedDepth(state);
+    capability.usableDepth = std::max(0, expedition.depth);
+
+    const int physicalSurveyLimit = std::min(
+        capability.surveyedThroughDepth,
+        capability.boreRating);
+    for (int depth = expedition.depth + 1; depth <= physicalSurveyLimit; ++depth) {
+        const SurfaceReturnSafetyAssessment safety =
+            surfaceReturnSafetyAssessment(state, catalog, depth);
+        if (safety.severity == SurfaceReturnSafetySeverity::Critical) {
+            break;
+        }
+        capability.usableDepth = depth;
+    }
+
+    if (capability.targetDepth <= expedition.depth) {
+        return capability;
+    }
+    if (capability.targetDepth > capability.surveyRating) {
+        capability.blocker = SurfaceDepthBlocker::SurveyRating;
+        return capability;
+    }
+    if (capability.targetDepth > capability.boreRating) {
+        capability.blocker = SurfaceDepthBlocker::BoreRating;
+        return capability;
+    }
+    if (findSurfaceDepthProspect(expedition, capability.targetDepth) == nullptr) {
+        capability.blocker = SurfaceDepthBlocker::Unsurveyed;
+        return capability;
+    }
+    capability.returnSafety = surfaceReturnSafetyAssessment(
+        state,
+        catalog,
+        capability.targetDepth);
+    if (capability.returnSafety.severity == SurfaceReturnSafetySeverity::Critical) {
+        capability.blocker = SurfaceDepthBlocker::ReturnCritical;
+        return capability;
+    }
+    capability.canDig = true;
+    return capability;
+}
+
+std::string surfaceDepthBlockerMessage(const SurfaceDepthCapability& capability)
+{
+    switch (capability.blocker) {
+    case SurfaceDepthBlocker::SurveyRating:
+        return "Survey Array limit +" + std::to_string(capability.surveyRating) +
+            ". Install the next permanent rank in Refit.";
+    case SurfaceDepthBlocker::Unsurveyed:
+        return "Survey level +" + std::to_string(capability.targetDepth) +
+            " before digging there.";
+    case SurfaceDepthBlocker::BoreRating:
+        return "Bore System limit +" + std::to_string(capability.boreRating) +
+            ". Install the next permanent rank in Refit.";
+    case SurfaceDepthBlocker::ReturnCritical: {
+        std::string reason;
+        if (capability.returnSafety.oxygenCritical) {
+            reason = "oxygen";
+        }
+        if (capability.returnSafety.fuelCritical) {
+            reason += reason.empty() ? "fuel" : " and fuel";
+        }
+        return "Return range critical at depth +" +
+            std::to_string(capability.targetDepth) + ": " + reason +
+            " endurance is insufficient.";
+    }
+    case SurfaceDepthBlocker::None:
+        break;
+    }
+    return {};
 }
 
 MaterialInventory maxMaterials(const MaterialInventory& left, const MaterialInventory& right)
@@ -4211,6 +4459,20 @@ SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random&)
         outcome.message = "Mining run is complete. Extract before surveying again.";
         return outcome;
     }
+    if (surfaceSurveyLimitReached(state)) {
+        const int surveyRating = surfaceDepthRating(
+            state,
+            SurfaceDepthUpgradeKind::SurveyArray);
+        const int boreRating = surfaceDepthRating(
+            state,
+            SurfaceDepthUpgradeKind::BoreSystem);
+        outcome.message = boreRating < surveyRating
+            ? "Bore System limit +" + std::to_string(boreRating) +
+                " reached. Install the next Bore System upgrade to survey and dig deeper layers."
+            : "Survey Array limit +" + std::to_string(surveyRating) +
+                " reached. Install the next Survey Array upgrade to map deeper layers.";
+        return outcome;
+    }
     outcome = spendSupply(expedition, tuning::research::surveySupplyCost);
     if (!outcome.applied) {
         outcome.message = "Need an action kit to run a surface scan.";
@@ -4221,7 +4483,9 @@ SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random&)
     const SurfaceScanSupport support = surfaceScanSupport(state);
     scan.active = true;
     scan.destinationId = expedition.destinationId;
-    scan.maxPulses = support.reachablePushSteps + 1;
+    scan.maxPulses = std::max(
+        1,
+        surfaceSurveyDepthLimit(state) - state.run.surfaceExpedition.depth + 1);
     scan.elapsedSeconds = tuning::research::scanWindowCenterRadians /
         tuning::research::scanSweepRadiansPerSecond;
     scan.signal = std::clamp(0.12 + support.signalBonus, 0.0, 0.42);
@@ -4241,7 +4505,12 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
 {
     SurfaceScanRunState& scan = state.run.surfaceScan;
     SurfaceActionOutcome outcome;
-    if (!scan.active || scan.completed) {
+    if (scan.completed) {
+        outcome.message = "Survey scan limit reached. Log the survey to continue.";
+        scan.message = outcome.message;
+        return outcome;
+    }
+    if (!scan.active) {
         outcome.message = "Surface scan is not active.";
         return outcome;
     }
@@ -4269,7 +4538,7 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
         scan.successFanfareSeconds = 0.0;
         scan.missFanfareSeconds = tuning::research::scanMissFanfareSeconds;
         outcome.message = scan.pulses >= scan.maxPulses
-            ? "Sweep missed. The final pulse returned no data; log the survey you have."
+            ? "Sweep missed. Survey scan limit reached; log the survey you have."
             : "Sweep missed. Pulse spent; no data recorded. Try level +" + std::to_string(depthOffset) + " again.";
         scan.message = surfaceActionSummary(outcome);
         if (scan.pulses >= scan.maxPulses) {
@@ -4306,7 +4575,7 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
         ? "Perfect pulse: all data mapped"
         : "Good pulse: 80% data mapped";
     outcome.message = scan.pulses >= scan.maxPulses
-        ? quality + ". Scan complete; log the survey."
+        ? quality + ". Survey scan limit reached; log the survey."
         : quality + " for level +" + std::to_string(depthOffset) + ".";
     scan.message = surfaceActionSummary(outcome);
     if (scan.pulses >= scan.maxPulses) {
@@ -4329,7 +4598,6 @@ SurfaceActionOutcome bankSurfaceScan(GameState& state)
     if (scan.busted) {
         outcome.message = "Scan window closed. No survey logged.";
     } else {
-        const bool tutorialSurveyCompleted = scan.pulses > 0;
         for (const SurfaceDepthProspect& prospect : scan.depthProspects) {
             const SurfaceDepthProspect* existing = findSurfaceDepthProspect(expedition, prospect.absoluteDepth);
             const MaterialInventory existingMaterials = existing == nullptr ? MaterialInventory{} : existing->possibleMaterials;
@@ -4340,6 +4608,8 @@ SurfaceActionOutcome bankSurfaceScan(GameState& state)
             }
             mergeSurfaceDepthProspect(expedition, prospect);
         }
+        const bool tutorialSurveyCompleted =
+            findSurfaceDepthProspect(expedition, expedition.depth + 1) != nullptr;
         expedition.hazard += scan.hazardDelta;
         expedition.miningSitePrepared = true;
         if (tutorialSurveyCompleted) {
@@ -4382,6 +4652,17 @@ SurfaceActionOutcome startSurfacePushRun(GameState& state, Random&)
         return outcome;
     }
 
+
+    const ContentCatalog catalog = createDefaultContent();
+    const SurfaceDepthCapability capability = surfaceDepthCapability(
+        state,
+        catalog,
+        expedition.depth + 1);
+    if (!capability.canDig) {
+        outcome.message = surfaceDepthBlockerMessage(capability);
+        return outcome;
+    }
+
     outcome = spendSupply(expedition, tuning::research::pushSupplyCost);
     if (!outcome.applied) {
         outcome.message = "Need two action kits to Dig.";
@@ -4392,16 +4673,16 @@ SurfaceActionOutcome startSurfacePushRun(GameState& state, Random&)
     const SurfacePushSupport support = surfacePushSupport(state);
     push.active = true;
     push.destinationId = expedition.destinationId;
-    push.maxSteps = tuning::research::pushMaxSteps + support.maxStepBonus;
+    push.maxSteps = std::max(1, capability.usableDepth - expedition.depth);
     push.pressure = std::clamp(expedition.hazard * 0.35 - support.pressureRelief, 0.0, 0.45);
     push.collapseRisk = std::clamp(
         tuning::research::pushBaseCollapseRisk + expedition.hazard * tuning::research::pushRiskHazardScale - support.collapseRelief,
         0.04,
         0.42);
-    push.message = "Descent lane armed. Layer +1 is guaranteed; collapse risk begins on the next push.";
+    push.message = "Descent lane armed. Every reachable layer is surveyed; collapse risk begins on the second push.";
     state.run.surfacePush = push;
     state.screen = Screen::SurfacePush;
-    outcome.message = "Deep route armed. The first layer is safe; later pushes risk the unfinished tunnel.";
+    outcome.message = "Deep route armed. Survey, Bore rating, and return range now bound this tunnel.";
     return outcome;
 }
 
@@ -4412,6 +4693,20 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
     SurfaceActionOutcome outcome;
     if (!push.active || push.completed) {
         outcome.message = "Dig is not active.";
+        return outcome;
+    }
+
+
+    const ContentCatalog catalog = createDefaultContent();
+    const int targetDepth = expedition.depth + push.steps + 1;
+    const SurfaceDepthCapability capability = surfaceDepthCapability(
+        state,
+        catalog,
+        targetDepth);
+    if (!capability.canDig) {
+        push.completed = true;
+        outcome.message = surfaceDepthBlockerMessage(capability);
+        push.message = outcome.message;
         return outcome;
     }
 
@@ -4446,7 +4741,6 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
         0.04,
         0.84);
 
-    const int targetDepth = expedition.depth + push.steps;
     const SurfaceDepthProspect* forecast = findSurfaceDepthProspect(expedition, targetDepth);
     MaterialInventory gain = actualizePushMaterials(expedition, push.steps, forecast, support, rng);
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
@@ -4476,13 +4770,19 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
     outcome.materialDelta = gain;
     outcome.cargoDelta += cargoGain;
     outcome.hazardDelta = pushHazardDelta;
-    outcome.message = thermalSurface
-        ? "Thermal seam confirmed. Its mapped resources will require Hazard treatment in the mining layer."
-        : push.steps >= push.maxSteps
-            ? "Maximum depth reached. Set the start depth."
-            : (forecast != nullptr
-                ? "Layer +" + std::to_string(push.steps) + " confirmed. Set the start depth now or risk it on the next push."
-                : "Blind layer +" + std::to_string(push.steps) + " confirmed. Set the start depth now or risk it on the next push.");
+    if (thermalSurface) {
+        outcome.message = "Thermal seam confirmed. Its mapped resources will require Hazard treatment in the mining layer.";
+    } else if (push.steps >= push.maxSteps) {
+        const SurfaceDepthCapability nextCapability = surfaceDepthCapability(
+            state,
+            catalog,
+            targetDepth + 1);
+        outcome.message = "Surveyed depth +" + std::to_string(targetDepth) +
+            " confirmed. " + surfaceDepthBlockerMessage(nextCapability);
+    } else {
+        outcome.message = "Surveyed layer +" + std::to_string(push.steps) +
+            " confirmed. Set the start depth now or risk it on the next push.";
+    }
     push.message = surfaceActionSummary(outcome);
     if (push.steps >= push.maxSteps) {
         push.completed = true;
@@ -4499,6 +4799,10 @@ SurfaceActionOutcome bankSurfacePush(GameState& state)
         outcome.message = "No start depth is ready to set.";
         return outcome;
     }
+    if (!push.busted && push.depthGain <= 0) {
+        outcome.message = "Dig at least one surveyed layer before setting a new start depth.";
+        return outcome;
+    }
 
     outcome.applied = true;
     if (push.busted) {
@@ -4509,7 +4813,7 @@ SurfaceActionOutcome bankSurfacePush(GameState& state)
         expedition.prospectArtifacts = 0;
         addMaterials(expedition.prospectMaterials, push.temporaryMaterials);
         expedition.prospectArtifacts += static_cast<int>(push.temporaryArtifacts.size());
-        expedition.depth += std::max(1, push.depthGain);
+        expedition.depth += push.depthGain;
         expedition.hazard += push.hazardDelta;
         expedition.miningSitePrepared = true;
         if (tutorialDigCompleted) {

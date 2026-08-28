@@ -45,12 +45,6 @@ struct PhaseAdvisoryPresentation {
     std::string cssClass;
 };
 
-enum class SurfaceReturnSafetySeverity {
-    Safe,
-    Caution,
-    Critical
-};
-
 struct SurfaceReturnSafetyPresentation {
     SurfaceReturnSafetySeverity severity = SurfaceReturnSafetySeverity::Safe;
     int depth = 0;
@@ -58,6 +52,7 @@ struct SurfaceReturnSafetyPresentation {
     int oxygenSeconds = 0;
     int fuelNeededAfterDeployment = 0;
     int fuelAvailableAfterDeployment = 0;
+    double fuelCycleSeconds = tuning::rigFuelLoopProgression::baseCycleSeconds;
     std::string title;
     std::string detail;
     std::string cssClass;
@@ -1570,10 +1565,39 @@ inline std::string miningSurfaceActionAvailability(const GameState& state)
     return text::fuel::availability(arkDiscovered(state));
 }
 
-inline PanelButtonPresentation pushSurfaceActionButton(const GameState& state)
+inline std::string surfaceDepthBlockerLabel(const SurfaceDepthCapability& capability)
+{
+    switch (capability.blocker) {
+    case SurfaceDepthBlocker::SurveyRating:
+        return "Survey limit +" + std::to_string(capability.surveyRating) + " reached";
+    case SurfaceDepthBlocker::Unsurveyed:
+        return "Survey +" + std::to_string(capability.targetDepth) + " first";
+    case SurfaceDepthBlocker::BoreRating:
+        return "Bore limit +" + std::to_string(capability.boreRating) + " reached";
+    case SurfaceDepthBlocker::ReturnCritical:
+        return "Return range critical";
+    case SurfaceDepthBlocker::None:
+        break;
+    }
+    return std::string(text::buttons::unavailable);
+}
+
+inline PanelButtonPresentation pushSurfaceActionButton(
+    const GameState& state,
+    const ContentCatalog& catalog)
 {
     if (!surfaceOpsTutorialDigUnlocked(state)) {
         return {"Survey First", {}, "warn", false};
+    }
+    if (state.run.surfaceExpedition.miningRunUsed) {
+        return disabledPanelButton(text::buttons::unavailable);
+    }
+    const SurfaceDepthCapability capability = surfaceDepthCapability(
+        state,
+        catalog,
+        state.run.surfaceExpedition.depth + 1);
+    if (!capability.canDig) {
+        return disabledPanelButton(surfaceDepthBlockerLabel(capability));
     }
     return fieldSurfaceActionButton(
         state,
@@ -1583,10 +1607,22 @@ inline PanelButtonPresentation pushSurfaceActionButton(const GameState& state)
         "warn");
 }
 
-inline std::string pushSurfaceActionAvailability(const GameState& state)
+inline std::string pushSurfaceActionAvailability(
+    const GameState& state,
+    const ContentCatalog& catalog)
 {
     if (!surfaceOpsTutorialDigUnlocked(state)) {
         return "Log a Survey to unlock";
+    }
+    if (state.run.surfaceExpedition.miningRunUsed) {
+        return std::string(text::panel::messages::surfaceFieldworkClosed);
+    }
+    const SurfaceDepthCapability capability = surfaceDepthCapability(
+        state,
+        catalog,
+        state.run.surfaceExpedition.depth + 1);
+    if (!capability.canDig) {
+        return surfaceDepthBlockerMessage(capability);
     }
     return fieldSurfaceActionAvailability(state, tuning::research::pushSupplyCost);
 }
@@ -1646,7 +1682,11 @@ inline std::vector<PanelMetricPresentation> surveyPayoffChips(const GameState& s
 {
     std::vector<PanelMetricPresentation> chips;
     chips.push_back(panelMetric("Mining layer", "Current"));
-    chips.push_back(panelMetric("More scans", "Reveal deeper layers"));
+    chips.push_back(panelMetric(
+        "Survey rating",
+        "+" + std::to_string(surfaceDepthRating(
+            state,
+            SurfaceDepthUpgradeKind::SurveyArray))));
     addPositiveChip(chips, text::labels::commonMaterials, tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus);
     return chips;
 }
@@ -1820,67 +1860,32 @@ inline SurfaceReturnSafetyPresentation surfaceReturnSafetyPresentation(
     int absoluteDepth)
 {
     SurfaceReturnSafetyPresentation presentation;
-    presentation.depth = std::max(0, absoluteDepth);
-    const MiningArenaRules rules = upcomingMiningArenaRules(
-        state,
-        catalog,
-        presentation.depth - state.run.surfaceExpedition.depth);
-    if (!rules.mechanics.oxygenAndFuel || presentation.depth <= 0) {
+    const SurfaceReturnSafetyAssessment assessment =
+        surfaceReturnSafetyAssessment(state, catalog, absoluteDepth);
+    presentation.severity = assessment.severity;
+    presentation.depth = assessment.depth;
+    presentation.estimatedReturnSeconds = assessment.estimatedReturnSeconds;
+    presentation.oxygenSeconds = assessment.oxygenSeconds;
+    presentation.fuelNeededAfterDeployment = assessment.fuelNeededAfterDeployment;
+    presentation.fuelAvailableAfterDeployment = assessment.fuelAvailableAfterDeployment;
+    presentation.fuelCycleSeconds = assessment.fuelCycleSeconds;
+    if (presentation.severity == SurfaceReturnSafetySeverity::Safe) {
         return presentation;
     }
-
-    const MiningDrillStats stats = miningDrillStats(state, catalog);
-    presentation.oxygenSeconds = static_cast<int>(std::floor(stats.oxygenSeconds));
-
-    // Returning to the surface means crossing every intervening arena. Start
-    // with the unobstructed vertical distance, then reserve time for
-    // acceleration, gravity, each layer transition, and docking. This is a
-    // safe-return estimate, not a promise that an obstructed route is faster.
-    const double verticalCells = std::max(1, stats.terrainHeight - 7);
-    const double idealLayerSeconds = verticalCells / std::max(0.1, stats.speed);
-    const double safeLayerSeconds =
-        (idealLayerSeconds + 0.65) *
-        tuning::mining::returnEnduranceTraversalScale;
-    const double estimatedSeconds =
-        tuning::mining::returnEnduranceDockingSeconds +
-        static_cast<double>(presentation.depth) * safeLayerSeconds;
-    presentation.estimatedReturnSeconds =
-        static_cast<int>(std::ceil(estimatedSeconds));
-    presentation.fuelNeededAfterDeployment = static_cast<int>(std::ceil(
-        estimatedSeconds * tuning::mining::fuelCycleProgressPerSecond));
-    presentation.fuelAvailableAfterDeployment = static_cast<int>(std::floor(std::max(
-        0.0,
-        state.run.surfaceExpedition.rigFuel - 1.0)));
-
-    const int oxygenMargin =
-        presentation.oxygenSeconds - presentation.estimatedReturnSeconds;
-    const int fuelMargin =
-        presentation.fuelAvailableAfterDeployment -
-        presentation.fuelNeededAfterDeployment;
-    const bool oxygenCritical = oxygenMargin < 0;
-    const bool fuelCritical = fuelMargin < 0;
-    const bool oxygenCaution =
-        oxygenMargin <= tuning::mining::returnEnduranceCautionSeconds;
-    const bool fuelCaution = fuelMargin == 0;
-
-    if (oxygenCritical || fuelCritical) {
-        presentation.severity = SurfaceReturnSafetySeverity::Critical;
-        presentation.title = "RETURN RANGE CRITICAL";
-        presentation.cssClass = "danger dig-endurance-warning";
-    } else if (oxygenCaution || fuelCaution) {
-        presentation.severity = SurfaceReturnSafetySeverity::Caution;
-        presentation.title = "RETURN MARGIN LOW";
-        presentation.cssClass = "caution dig-endurance-warning";
-    } else {
-        return presentation;
-    }
+    presentation.title = presentation.severity == SurfaceReturnSafetySeverity::Critical
+        ? "RETURN RANGE CRITICAL"
+        : "RETURN MARGIN LOW";
+    presentation.cssClass = presentation.severity == SurfaceReturnSafetySeverity::Critical
+        ? "danger dig-endurance-warning"
+        : "caution dig-endurance-warning";
 
     presentation.detail =
         "DEPTH +" + std::to_string(presentation.depth) +
         " RETURN: ~" + std::to_string(presentation.estimatedReturnSeconds) + "s\n" +
         "OXYGEN: " + std::to_string(presentation.oxygenSeconds) + "s\n" +
         "FUEL: " + std::to_string(presentation.fuelAvailableAfterDeployment) +
-        " available / " + std::to_string(presentation.fuelNeededAfterDeployment) + " needed\n\n";
+        " available / " + std::to_string(presentation.fuelNeededAfterDeployment) + " needed\n" +
+        "FUEL LOOP: 1 / " + display::fixed(presentation.fuelCycleSeconds, 0) + "s\n\n";
     presentation.detail += presentation.severity == SurfaceReturnSafetySeverity::Critical
         ? "DO NOT MINE HERE.\nUpgrade endurance first."
         : "MINE BRIEFLY.\nReturn as soon as the first payload is secured.";
@@ -1950,9 +1955,9 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
         detailPresentationRow(text::labels::returnStage, std::string("RESERVED")),
         detailPresentationRow(text::labels::hazard, display::percent(expedition.hazard)),
         detailPresentationHeader(text::panel::details::fieldRules),
-        detailPresentationRow(text::panel::details::surveyRisk, std::string("Survey forecasts one level per pulse: the current level first, then deeper levels. Dust can still burn extra action kits.")),
+        detailPresentationRow(text::panel::details::surveyRisk, std::string("Survey maps the current level first, then deeper levels up to the permanent Survey Array rating. A missed level must be scanned again.")),
         detailPresentationRow(text::panel::details::miningRisk, std::string("Mine puts you in direct control of the Mining Rig drone at the selected start depth to recover ore and artifacts.")),
-        detailPresentationRow(text::panel::details::depthRisk, std::string("Dig tunnels to a deeper starting level. Level +1 is guaranteed; collapse risk begins when gambling on level +2.")),
+        detailPresentationRow(text::panel::details::depthRisk, std::string("Dig only enters surveyed levels within the permanent Bore System rating and a non-critical return range. The first step is stable; later steps can collapse.")),
         detailPresentationRow(text::panel::details::extraction, std::string("Normal return recovers every material and artifact loaded onto the Ship.")),
         detailPresentationRow(
             text::panel::details::toolMitigation,
@@ -2006,6 +2011,10 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         gateType,
         false);
     const MiningCapabilityProfile capability = miningCapabilityProfile(state, catalog);
+    const SurfaceDepthCapability depthCapability = surfaceDepthCapability(
+        state,
+        catalog,
+        expedition.depth + 1);
     SurfaceExpeditionPresentation presentation = surfacePosturePresentation(
         expedition,
         arkKnown,
@@ -2070,6 +2079,13 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         panelMetric(text::labels::returnStage, "RESERVED"),
         panelMetric(text::labels::cargo, std::to_string(expedition.cargo)),
         panelMetric("Start depth", "+" + std::to_string(expedition.depth)),
+        panelMetric("Survey rating", "+" + std::to_string(depthCapability.surveyRating)),
+        panelMetric("Bore rating", "+" + std::to_string(depthCapability.boreRating)),
+        panelMetric("Surveyed through", "+" + std::to_string(depthCapability.surveyedThroughDepth)),
+        panelMetric("Usable depth", "+" + std::to_string(depthCapability.usableDepth)),
+        panelMetric(
+            "Fuel loop",
+            "1 / " + display::fixed(miningRigFuelCycleSeconds(state), 0) + "s"),
         panelMetric(text::labels::commonMaterials, std::to_string(expedition.temporaryMaterials.common)),
         panelMetric(text::labels::rareMaterials, std::to_string(expedition.temporaryMaterials.rare)),
         panelMetric(text::labels::exoticMaterials, std::to_string(expedition.temporaryMaterials.exotic)),
@@ -2092,6 +2108,17 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         tuning::research::surveyHazardChanceScale,
         (tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0) +
             crew.hazardRelief + upgrades.hazardRelief);
+    const int surveyRating = surfaceDepthRating(
+        state,
+        SurfaceDepthUpgradeKind::SurveyArray);
+    const int boreRating = surfaceDepthRating(
+        state,
+        SurfaceDepthUpgradeKind::BoreSystem);
+    const bool surveyLimitReached = surfaceSurveyLimitReached(state);
+    const bool boreLimitsSurvey = boreRating < surveyRating;
+    const std::string surveyLimitLabel = boreLimitsSurvey
+        ? "Bore limit +" + std::to_string(boreRating) + " reached"
+        : "Survey limit +" + std::to_string(surveyRating) + " reached";
     SurfaceActionPreviewPresentation surveyPreview = surfaceActionPreview(
         text::buttons::surveySite,
         std::string(text::panel::messages::surfaceSurveyDetail),
@@ -2100,13 +2127,17 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         surveyHazardRisk,
         std::string(text::labels::hazard),
         surveyPayoffChips(state, tools, crew, site),
-        fieldSurfaceActionButton(
-            state,
-            text::buttons::surveySite,
-            ui::actions::surveySurface,
-            tuning::research::surveySupplyCost,
-            "ok"),
-        "Maps current mining layer");
+        surveyLimitReached
+            ? disabledPanelButton(surveyLimitLabel)
+            : fieldSurfaceActionButton(
+                  state,
+                  text::buttons::surveySite,
+                  ui::actions::surveySurface,
+                  tuning::research::surveySupplyCost,
+                  "ok"),
+        surveyLimitReached
+            ? "All diggable layers mapped"
+            : "Maps current mining layer");
     surveyPreview.payoffChips.push_back(panelMetric("Arena", std::string(miningActName(arenaRules.request.act)) + " L" + std::to_string(arenaRules.request.difficulty)));
     if (swarmPreview.available) {
         surveyPreview.risk = "SWARM NEST +" + std::to_string(swarmPreview.depthZone) + " • Artifact " + display::percent(swarmPreview.artifactChance);
@@ -2116,7 +2147,11 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         surveyPreview.payoffChips.push_back(panelMetric("Artifact", display::percent(swarmPreview.artifactChance)));
     }
     presentation.actions.push_back(std::move(surveyPreview));
-    presentation.actions.back().availability = fieldSurfaceActionAvailability(state, tuning::research::surveySupplyCost);
+    presentation.actions.back().availability = surveyLimitReached
+        ? (boreLimitsSurvey
+              ? "Upgrade Bore System to survey and dig deeper"
+              : "Upgrade Survey Array to survey and dig deeper")
+        : fieldSurfaceActionAvailability(state, tuning::research::surveySupplyCost);
 
     const std::string pushCollapseRisk = surfaceHazardRisk(
         expedition.hazard,
@@ -2130,10 +2165,11 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
         pushCollapseRisk,
         std::string(text::labels::hazard),
         pushPayoffChips(state, crew, site),
-        pushSurfaceActionButton(state),
-        "Mine one layer deeper • " + pushCollapseRisk + " collapse chance");
-    pushPreview.availability = pushSurfaceActionAvailability(state);
-    pushPreview.payoffChips.push_back(panelMetric("Mining start", "Guaranteed next layer"));
+        pushSurfaceActionButton(state, catalog),
+        "Surveyed layers only • " + pushCollapseRisk + " collapse chance");
+    pushPreview.availability = pushSurfaceActionAvailability(state, catalog);
+    pushPreview.payoffChips.push_back(panelMetric("Surveyed through", "+" + std::to_string(depthCapability.surveyedThroughDepth)));
+    pushPreview.payoffChips.push_back(panelMetric("Bore rating", "+" + std::to_string(depthCapability.boreRating)));
     const MiningArenaRules deeperArenaRules = upcomingMiningArenaRules(state, catalog, 1);
     pushPreview.payoffChips.push_back(panelMetric("Next arena", std::string(miningActName(deeperArenaRules.request.act)) + " L" + std::to_string(deeperArenaRules.request.difficulty)));
     if (swarmPreview.available) {

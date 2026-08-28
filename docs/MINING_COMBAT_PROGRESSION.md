@@ -148,7 +148,7 @@ The stable shared types live in `GameTypes.h`:
 
 The stable resolver and query API lives in `MiningProgression.h`. Consumers should use the whitelist helpers instead of indexing the fixed arrays directly.
 
-Active version-13 saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies, and restore never rerolls serialized terrain. The same payload persists in-progress XP, pending choices, run ranks, grafts, synergies, and each Support Drone's haul provenance. Version 12 and older saves are rejected at the fresh-start boundary instead of being migrated.
+Active version-14 saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies, and restore never rerolls serialized terrain. The same payload persists in-progress XP, pending choices, run ranks, grafts, synergies, permanent Survey/Bore ranks, and each Support Drone's haul provenance. Version 13 and older saves are rejected at the fresh-start boundary instead of being migrated.
 
 The current `miningArenaRulesVersion` is `3`. Increment it only when a rule change can alter deterministic generation or reward allocation, and preserve old serialized active arenas during migration.
 

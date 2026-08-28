@@ -807,6 +807,7 @@ bool samePanelStructure(
         && left.runtime.titleScreen == right.runtime.titleScreen
         && left.runtime.responsiveViewport == right.runtime.responsiveViewport
         && left.runtime.gameplayInputHelper == right.runtime.gameplayInputHelper
+        && left.runtime.sceneTransitionActive == right.runtime.sceneTransitionActive
         && left.runtime.preflightReady == right.runtime.preflightReady
         && left.runtime.miningEvaActive == right.runtime.miningEvaActive;
 }
@@ -3100,6 +3101,7 @@ void GameRmlUi::render()
     });
     Rml::Rectanglei rootClip;
     if (!openModalId_.empty() || controllerPresentationActive_ || presentation_.runtime.gameplayInputHelper
+        || presentation_.runtime.sceneTransitionActive
         || performanceStatsVisible_ || presentation_.metadata.overlay != PanelOverlayKind::None) {
         rootClip = Rml::Rectanglei::FromSize({viewportWidth, viewportHeight});
     } else {

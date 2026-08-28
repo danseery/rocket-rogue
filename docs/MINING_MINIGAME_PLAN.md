@@ -44,7 +44,7 @@ Mining exists to make surface greed compete with route-home safety:
 
 - Surface expeditions start with a 3-unit isolated rig pack plus the transfer fuel remaining at touchdown. Ark-era expeditions load up to 3 pack units from the Ark reserve.
 - Mining spends 1 fuel on deployment.
-- While oxygen remains, mining advances a normalized fuel-consumption cycle and spends another fuel when that cycle completes. Load and future efficiency modifiers change the authoritative cycle rate; the HUD shows percentage remaining rather than seconds.
+- While oxygen remains, mining advances a normalized fuel-consumption cycle and spends another fuel when that cycle completes. The permanent Rig Fuel Loop uses a 15-second base and adds 3 seconds per rank, reaching `18 / 21 / 24` seconds at Rank I / II / III. The authoritative draw rate is the current load multiplier divided by that cycle duration. Hauler Thrusters and Vector Nozzles reduce only the heavy-load surcharge; they never change the base cycle or deployment cost. The HUD shows both the concrete cadence and percentage remaining.
 - Returning rig cargo, Support Drone haul, loose chunks, or a physically delivered artifact to the shuttle stows that payload and replenishes oxygen to the current upgraded capacity. Entering the shuttle zone empty does not refill oxygen.
 - The baseline oxygen tank is `tuning::mining::oxygenSeconds`, currently 30 seconds.
 - Oxygen can improve through crew class, Resource Support Drone coverage, and surface upgrades such as Emergency Winch.
@@ -219,6 +219,6 @@ The player's operator sidearm is a vulnerable recovery tool rather than the prim
 - `src/core/ScenarioSystem.*` owns scenario actions/events, claims, rewards, route requirements, and state-derived objective presentation. Mining receives a generic scenario/site context and reports typed results; it does not branch on campaign, destination, or narrative IDs.
 - `src/game/RocketGameApp.*` owns screen transitions and platform-neutral routed aim, fire, drill, scan, tether, operator-toggle, and stow/leave actions.
 - `src/render/SceneComposer.*` turns mining snapshots into backend-neutral scene packets consumed by native Vulkan and browser WebGL2, including the parked rig, static operator, independently moving Support Drones, reticle, tracer, tether, thrust, and active-actor-centered shield/scanner effects. Rendering must not decide gameplay outcomes.
-- Save version 13 persists current Mining runtime plus Expedition XP, pending choices, run ranks, grafts, and selected synergies. Version 12 and older saves are rejected and require New Game; no legacy progression migration runs.
+- Save version 14 persists current Mining runtime plus Expedition XP, pending choices, run ranks, grafts, selected synergies, and permanent Survey/Bore ranks. Version 13 and older saves are rejected and require New Game; no legacy progression migration runs.
 
 When changing mining, keep the fuel/oxygen tradeoff visible and test both Surface Ops availability and direct mining outcomes.

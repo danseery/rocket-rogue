@@ -83,6 +83,48 @@ class SceneAtlasTests(unittest.TestCase):
                 self.assertEqual(source_rect["height"], generated["frameHeight"])
         self.assertEqual(self.metadata["frameCount"], frame_count)
 
+    def test_mining_tile_variants_have_compatible_opposing_edges(self) -> None:
+        mining_directory = REPO_ROOT / "assets/art/mining"
+        for path in sorted(mining_directory.glob("mining-tiles-*.png")):
+            with self.subTest(sheet=path.name), Image.open(path) as opened:
+                sheet = opened.convert("RGB")
+                row_count = 32 if path.name == "mining-tiles-post-solar.png" else 1
+                self.assertEqual(sheet.size, (19 * 64, row_count * 64))
+
+                def edge(frame: Image.Image, side: str) -> list[tuple[int, int, int]]:
+                    pixels = frame.load()
+                    if side == "left":
+                        return [pixels[0, coordinate] for coordinate in range(64)]
+                    if side == "right":
+                        return [pixels[63, coordinate] for coordinate in range(64)]
+                    if side == "top":
+                        return [pixels[coordinate, 0] for coordinate in range(64)]
+                    return [pixels[coordinate, 63] for coordinate in range(64)]
+
+                for row in range(row_count):
+                    frames = [
+                        sheet.crop((index * 64, row * 64, (index + 1) * 64, (row + 1) * 64))
+                        for index in range(19)
+                    ]
+                    for group in ((0, 1, 2), (3, 4, 5), (6, 7, 8)):
+                        horizontal = edge(frames[group[0]], "left")
+                        vertical = edge(frames[group[0]], "top")
+                        for frame_index in group:
+                            self.assertEqual(edge(frames[frame_index], "left"), horizontal)
+                            self.assertEqual(edge(frames[frame_index], "right"), horizontal)
+                            self.assertEqual(edge(frames[frame_index], "top"), vertical)
+                            self.assertEqual(edge(frames[frame_index], "bottom"), vertical)
+
+                    # Every semantic cell is composited over one of the compatible
+                    # Hard Rock variants and must keep that shared border untouched.
+                    hard_rock_horizontal = edge(frames[3], "left")
+                    hard_rock_vertical = edge(frames[3], "top")
+                    for frame_index in range(9, 19):
+                        self.assertEqual(edge(frames[frame_index], "left"), hard_rock_horizontal)
+                        self.assertEqual(edge(frames[frame_index], "right"), hard_rock_horizontal)
+                        self.assertEqual(edge(frames[frame_index], "top"), hard_rock_vertical)
+                        self.assertEqual(edge(frames[frame_index], "bottom"), hard_rock_vertical)
+
     def test_asteroid_sprite_is_clean_transparent_art(self) -> None:
         with Image.open(REPO_ROOT / "assets/art/asteroid.png") as opened:
             asteroid = opened.convert("RGBA")

@@ -38,6 +38,9 @@ int moduleOfferCost(Rarity rarity);
 int moduleOfferCost(const ShipModule& module);
 int crewUpgradeCost(const CrewUpgrade& upgrade);
 int launchUpgradeRank(const GameState& state, LaunchUpgradeKind kind);
+int surfaceDepthUpgradeRank(const GameState& state, SurfaceDepthUpgradeKind kind);
+int surfaceDepthRating(const GameState& state, SurfaceDepthUpgradeKind kind);
+int installedRigFuelLoopRank(const GameState& state);
 double launchFuelCapacity(const GameState& state);
 double pendingLaunchFuelSavings(const GameState& state);
 double pendingLaunchInstabilityPenalty(const GameState& state);
@@ -74,6 +77,32 @@ const ShipModule* nextLaunchUpgrade(const GameState& state, const ContentCatalog
 bool launchUpgradeUnlocked(const GameState& state, LaunchUpgradeKind kind, int rank);
 bool canInstallLaunchUpgrade(const GameState& state, const ContentCatalog& catalog, LaunchUpgradeKind kind);
 bool installLaunchUpgrade(GameState& state, const ContentCatalog& catalog, LaunchUpgradeKind kind);
+const ShipModule* nextSurfaceDepthUpgrade(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    SurfaceDepthUpgradeKind kind);
+bool surfaceDepthUpgradeUnlocked(
+    const GameState& state,
+    SurfaceDepthUpgradeKind kind,
+    int rank);
+bool canInstallSurfaceDepthUpgrade(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    SurfaceDepthUpgradeKind kind);
+bool installSurfaceDepthUpgrade(
+    GameState& state,
+    const ContentCatalog& catalog,
+    SurfaceDepthUpgradeKind kind);
+const ShipModule* nextRigFuelLoopUpgrade(
+    const GameState& state,
+    const ContentCatalog& catalog);
+bool rigFuelLoopUpgradeUnlocked(const GameState& state, int rank);
+bool canInstallRigFuelLoopUpgrade(
+    const GameState& state,
+    const ContentCatalog& catalog);
+bool installRigFuelLoopUpgrade(
+    GameState& state,
+    const ContentCatalog& catalog);
 bool launchTutorialComplete(const GameState& state);
 bool launchMissionReady(const GameState& state);
 bool launchMissionReady(const GameState& state, const ContentCatalog& catalog);
@@ -94,6 +123,7 @@ void startNewExpedition(GameState& state, const ContentCatalog& catalog);
 void syncLaunchConfig(GameState& state, const ContentCatalog& catalog);
 bool curatedProvingRefitsActive(const GameState& state);
 void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Random& rng);
+void beginRefitVisit(GameState& state);
 double offerRerollCost(const GameState& state);
 bool rerollOffers(GameState& state, const ContentCatalog& catalog, Random& rng);
 bool buyOffer(GameState& state, const ContentCatalog& catalog, int index);

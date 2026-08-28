@@ -479,6 +479,62 @@ void applyStepRewards(
     }
 }
 
+void repairClaimedPersistentRewards(GameState& state, const ContentCatalog& catalog)
+{
+    for (ScenarioInstance& instance : state.meta.scenarios) {
+        const ScenarioDefinition* definition = definitionForInstance(catalog, instance);
+        if (definition == nullptr) {
+            continue;
+        }
+        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
+        for (const ScenarioStepDefinition& step : resolved.steps) {
+            const ScenarioStepProgress* progress = findScenarioStepProgress(instance, step.id);
+            if (progress == nullptr || !progress->claimed) {
+                continue;
+            }
+            for (const ScenarioReward& reward : step.rewards) {
+                switch (reward.kind) {
+                case ScenarioRewardKind::UnlockKey:
+                    appendUniqueId(state.meta.unlockKeys, reward.id);
+                    break;
+                case ScenarioRewardKind::DroneBaySlots:
+                    state.meta.droneBaySlots = std::max(
+                        state.meta.droneBaySlots,
+                        std::max(0, reward.amount));
+                    ensureDroneBayState(state, catalog);
+                    break;
+                case ScenarioRewardKind::SupportDrone: {
+                    const bool alreadyOwned = containsId(state.meta.ownedDroneIds, reward.id);
+                    appendUniqueId(state.meta.ownedDroneIds, reward.id);
+                    ensureDroneBayState(state, catalog);
+                    const bool repairedOwnership = !alreadyOwned &&
+                        containsId(state.meta.ownedDroneIds, reward.id);
+                    if (repairedOwnership && reward.equipIfSlotAvailable &&
+                        state.meta.equippedDroneIds.size() <
+                            static_cast<std::size_t>(state.meta.droneBaySlots)) {
+                        state.meta.equippedDroneIds.emplace_back(reward.id);
+                    }
+                    break;
+                }
+                case ScenarioRewardKind::RouteAccess: {
+                    const Destination* destination = catalog.findDestination(reward.id);
+                    if (destination != nullptr) {
+                        for (const std::string& key : destination->routeRequirementKeys) {
+                            appendUniqueId(state.meta.unlockKeys, key);
+                        }
+                    }
+                    break;
+                }
+                case ScenarioRewardKind::FrontierReadiness:
+                case ScenarioRewardKind::InventoryResources:
+                    // Consumable rewards and run-state refills are never replayed.
+                    break;
+                }
+            }
+        }
+    }
+}
+
 void refreshScenarioCompletion(const ScenarioDefinition& definition, ScenarioInstance& instance)
 {
     instance.completed = std::all_of(
@@ -816,6 +872,13 @@ void ensureScenarioInstances(GameState& state, const ContentCatalog& catalog)
             (void)ensureStepProgress(*instance, step.id);
         }
     }
+
+    // Claimed steps are authoritative evidence that their permanent unlocks
+    // were earned. Reconcile those idempotent rewards so content evolution or
+    // an older partial save cannot leave a later scenario activity impossible.
+    // Do not replay resources, readiness refills, or automatic assignment for
+    // a frame the player already owns.
+    repairClaimedPersistentRewards(state, catalog);
 }
 
 ScenarioStepState scenarioStepState(

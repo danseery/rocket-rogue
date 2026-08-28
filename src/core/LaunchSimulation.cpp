@@ -255,6 +255,24 @@ void populateAsteroidField(PreparedLaunch& launch, const Destination& destinatio
     }
 }
 
+double poweredLaunchTargetVelocity(
+    const PreparedLaunch& launch,
+    const Destination& destination,
+    double throttle)
+{
+    const double tierFactor = 1.0 +
+        static_cast<double>(std::max(0, destination.tier)) *
+            tuning::launch::pilotingTierDurationScale;
+    const double poweredDrive = tuning::launch::pilotingPoweredSteeringBase +
+        std::clamp(throttle, tuning::launch::pilotingMinimumPoweredThrottle, 1.0);
+    const double lessonSpeedScale =
+        launch.config.missionKind == LaunchMissionKind::FuelCalibration
+        ? tuning::launchProgression::fuelSurveyProgressRateScale
+        : 1.0;
+    return tuning::launch::pilotingBaseProgressRate * poweredDrive / tierFactor *
+        std::max(0.25, 1.0 + launch.slingshotSpeedBoost) * lessonSpeedScale;
+}
+
 } // namespace
 
 double launchFuelCapacityForRank(int rank)
@@ -382,6 +400,10 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     launch.slingshotInstabilityPenalty = pendingLaunchInstabilityPenaltyForDestination(state, destination.id);
     if (const PendingTransferAssist* assist = pendingTransferAssistForDestination(state, destination.id)) {
         launch.transferAssistId = assist->definitionId;
+        launch.slingshotCourseOffset = std::clamp(
+            assist->exitCourseOffset,
+            -tuning::launch::pilotingCourseLost,
+            tuning::launch::pilotingCourseLost);
     }
     launch.config.frameId = state.run.frameId;
     launch.config.equippedModuleIds = state.run.equippedModuleIds;
@@ -449,12 +471,29 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     return launch;
 }
 
-LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destination&)
+LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destination& destination)
 {
     LaunchFlightState flight;
     flight.active = true;
     flight.selectedThrottle = tuning::launch::pilotingInitialThrottle;
     flight.throttleAtLastKick = flight.selectedThrottle;
+    flight.courseOffset = std::clamp(
+        launch.slingshotCourseOffset,
+        -launchCourseLimit(launch),
+        launchCourseLimit(launch));
+    if (!launch.transferAssistId.empty() || launch.slingshotSpeedBoost > 0.0) {
+        // The assist starts the next leg already moving at its earned boosted
+        // rate. Without this, the earned +0-40% award only changed the eventual
+        // target velocity while every transfer visibly launched from rest.
+        flight.travelVelocity = poweredLaunchTargetVelocity(
+            launch,
+            destination,
+            flight.selectedThrottle);
+        const double targetSpan = std::max(
+            tuning::session::minTravelDenominator,
+            destination.targetMultiplier - 1.0);
+        flight.burnRatePerSecond = flight.travelVelocity * targetSpan;
+    }
     if (launch.manualControlsEnabled && launch.controlChaos > 0.0 &&
         launch.controlKickCount > 0) {
         flight.courseVelocity =
@@ -462,6 +501,12 @@ LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destinat
             launch.controlChaos;
         flight.nextControlKickIndex = 1;
         flight.throttleKickCooldownSeconds = tuning::launch::controlThrottleKickCooldown;
+    }
+    if (!launch.transferAssistId.empty()) {
+        flight.courseVelocity +=
+            flight.courseOffset /
+                std::max(0.01, launchCourseLimit(launch)) *
+            tuning::launch::slingshotExitCourseDrift;
     }
     flight.fuelCapacity = launch.fuelCapacity;
     flight.fuelRemaining = launch.fuelCapacity;
@@ -585,17 +630,10 @@ LaunchFlightStep updateLaunchFlight(
     const double targetSpan = std::max(
         tuning::session::minTravelDenominator,
         destination.targetMultiplier - 1.0);
-    const double tierFactor = 1.0 +
-        static_cast<double>(std::max(0, destination.tier)) * tuning::launch::pilotingTierDurationScale;
-    const double poweredDrive = tuning::launch::pilotingPoweredSteeringBase +
-        flight.selectedThrottle;
-    const double lessonSpeedScale =
-        launch.config.missionKind == LaunchMissionKind::FuelCalibration
-        ? tuning::launchProgression::fuelSurveyProgressRateScale
-        : 1.0;
-    const double targetVelocity =
-        tuning::launch::pilotingBaseProgressRate * poweredDrive / tierFactor *
-        std::max(0.25, 1.0 + launch.slingshotSpeedBoost) * lessonSpeedScale;
+    const double targetVelocity = poweredLaunchTargetVelocity(
+        launch,
+        destination,
+        flight.selectedThrottle);
 
     if (enginesCut) {
         flight.travelVelocity = std::max(

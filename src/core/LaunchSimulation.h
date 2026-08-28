@@ -30,6 +30,7 @@ struct PreparedLaunch {
     double slingshotFuelSavings = 0.0;
     double slingshotSpeedBoost = 0.0;
     double slingshotInstabilityPenalty = 0.0;
+    double slingshotCourseOffset = 0.0;
     std::string transferAssistId;
     // A recovery leg still uses the forward link's encounter/heat profile
     // even though its physical target is the prior staging body.

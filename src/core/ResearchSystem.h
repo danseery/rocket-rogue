@@ -3,6 +3,7 @@
 #include "core/Content.h"
 #include "core/GameState.h"
 #include "core/Random.h"
+#include "core/Tuning.h"
 
 #include <string>
 #include <string_view>
@@ -122,6 +123,43 @@ struct SurfaceActionOutcome {
     bool enemyEncounter = false;
     bool cargoRecovered = false;
     bool prospectorUnlocked = false;
+};
+
+enum class SurfaceReturnSafetySeverity {
+    Safe,
+    Caution,
+    Critical
+};
+
+struct SurfaceReturnSafetyAssessment {
+    SurfaceReturnSafetySeverity severity = SurfaceReturnSafetySeverity::Safe;
+    int depth = 0;
+    int estimatedReturnSeconds = 0;
+    int oxygenSeconds = 0;
+    int fuelNeededAfterDeployment = 0;
+    int fuelAvailableAfterDeployment = 0;
+    double fuelCycleSeconds = tuning::rigFuelLoopProgression::baseCycleSeconds;
+    bool oxygenCritical = false;
+    bool fuelCritical = false;
+};
+
+enum class SurfaceDepthBlocker {
+    None,
+    SurveyRating,
+    Unsurveyed,
+    BoreRating,
+    ReturnCritical
+};
+
+struct SurfaceDepthCapability {
+    int targetDepth = 0;
+    int surveyRating = tuning::surfaceDepthProgression::baseDepthRating;
+    int boreRating = tuning::surfaceDepthProgression::baseDepthRating;
+    int surveyedThroughDepth = 0;
+    int usableDepth = 0;
+    SurfaceDepthBlocker blocker = SurfaceDepthBlocker::None;
+    SurfaceReturnSafetyAssessment returnSafety;
+    bool canDig = false;
 };
 
 struct ExpeditionExperienceAward {
@@ -300,6 +338,18 @@ double surfaceEnemyEncounterChance(const GameState& state);
 SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng);
 SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng);
 SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng);
+SurfaceReturnSafetyAssessment surfaceReturnSafetyAssessment(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    int absoluteDepth);
+int deepestContiguousSurveyedDepth(const GameState& state);
+int surfaceSurveyDepthLimit(const GameState& state);
+bool surfaceSurveyLimitReached(const GameState& state);
+SurfaceDepthCapability surfaceDepthCapability(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    int targetDepth);
+std::string surfaceDepthBlockerMessage(const SurfaceDepthCapability& capability);
 SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random& rng);
 SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng);
 SurfaceActionOutcome bankSurfaceScan(GameState& state);

@@ -18,22 +18,22 @@ Every successful surface-destination arrival opens a committed approach decision
 
 This gives Mars a distinct role: it is where the game stops being only "can we get there?" and starts asking "what do we dare do now that we made it?"
 
-Arrival choices explain their exact progression value before commitment. Good or Perfect Pass Through banks one Research Data plus credits and closes Orbit/Landing; Perfect also stores `1.5-3.0` powered-fuel savings and `+20-40%` velocity for the next launch. It does not enlarge the tank. Orbit banks its tiered Research Data and credits, removes the unmapped descent penalty for that visit, and then offers Land or Depart. Misses and aborts do not commit. Campaign-critical mining beats use mandatory saved briefings and explicit claim actions. Moon, Mars, and Io may be skipped for a visit, but their objective remains incomplete and the authored onward route stays locked.
+Arrival choices explain their exact progression value before commitment. Good or Perfect Pass Through banks one Research Data plus credits and closes Orbit/Landing; Perfect also stores `1.5-3.0` powered-fuel savings and up to `+40%` velocity from its actual finish speed for the next launch. It does not enlarge the tank. Orbit banks its tiered Research Data and credits, removes the unmapped descent penalty for that visit, and then offers Land or Depart. Misses and aborts do not commit. Campaign-critical mining beats use mandatory saved briefings and explicit claim actions. Moon, Mars, and Io may be skipped for a visit, but their objective remains incomplete and the authored onward route stays locked.
 
 ## Jupiter Transfer Window
 
 The Mars Bay Expansion opens `THE JUPITER WINDOW`, an informational saved beat rather than a branch selection. Jupiter needs five fuel of calibrated transfer margin. The player may create it permanently with Fuel Tanks III, physically take it from Mars gravity with a Good-or-better departure Flyby, or stack both. Reviewing one option never locks, hides, or disables the other.
 
-At calibrated `0.60` throttle, Jupiter's route burn is `20`. Fuel Tanks III costs `92` credits and raises permanent capacity from `20` to `25`. The Mars slingshot requires Good or Perfect, saves a fixed `5` powered fuel for one Jupiter attempt, and retains the achieved `+20-40%` travel rate. Good also adds `+0.35` flight instability for that attempt, capped at the existing `1.00` maximum; it affects the normal seeded startup drift, steering variance, oversteer, throttle kicks, damping, and auto-trim. Perfect grants the same momentum with no instability penalty. The dedicated departure pass pays no credits or Research Data; Miss and abort remain retryable, while impact still deals `18` hull damage.
+At calibrated `0.60` throttle, Jupiter's route burn is `20`. Fuel Tanks III costs `92` credits and raises permanent capacity from `20` to `25`. The Mars slingshot requires Good or Perfect, saves a fixed `5` powered fuel for one Jupiter attempt, and maps actual finish speed to a `+0-40%` travel rate; minimum-speed exits get `+0%` and maximum-speed exits get `+40%`. Grade is independent of speed, so Green can still be breakneck. Good also adds `+0.35` flight instability for that attempt, capped at the existing `1.00` maximum; it affects the normal seeded startup drift, steering variance, oversteer, throttle kicks, damping, and auto-trim. The finish side and zone-relative distance from center carry into the launch corridor, where greater distance adds stronger outward initial course velocity. Perfect avoids the Good grade penalty but does not erase that physical lateral handoff. The dedicated departure pass pays no credits or Research Data; Miss and abort remain retryable, while impact still deals `18` hull damage.
 
 | Configuration | Tank | Powered burn | Arrival margin | Velocity |
 |---|---:|---:|---:|---:|
 | Neither | 20 | 20 | 0; Jupiter locked | Normal |
 | Fuel Tanks III | 25 | 20 | +5 | Normal |
-| Good Mars slingshot | 20 | 15 | +5 | +20-40%; +35% flight instability |
-| Perfect Mars slingshot | 20 | 15 | +5 | +20-40%; normal stability |
-| Tanks + Good slingshot | 25 | 15 | +10 | +20-40%; +35% flight instability |
-| Tanks + Perfect slingshot | 25 | 15 | +10 | +20-40%; normal stability |
+| Good Mars slingshot | 20 | 15 | +5 | +0-40% from finish speed; +35% flight instability |
+| Perfect Mars slingshot | 20 | 15 | +5 | +0-40% from finish speed; normal grade stability |
+| Tanks + Good slingshot | 25 | 15 | +10 | +0-40% from finish speed; +35% flight instability |
+| Tanks + Perfect slingshot | 25 | 15 | +10 | +0-40% from finish speed; normal grade stability |
 
 The powered-fuel equation is `max(0, route burn * throttle multiplier - slingshot savings)`. Savings are subtracted after throttle scaling, so high throttle can still exceed the available fuel. Good instability is `clamp(base Flight Controls instability + 0.35, 0, 1)`; Perfect adds zero. Gravity-provided movement consumes no propellant and produces no engine heat. Beginning the Jupiter segment consumes the active slingshot and its optional instability penalty; a failed Jupiter attempt returns without momentum and requires another Good-or-better Mars pass. Fuel Tanks III remains installed permanently.
 
@@ -47,7 +47,7 @@ The Jupiter travel node lands on Io. Io's regolith is inert and only Thermal lav
 
 ## Research Data And Deferred Research Board
 
-The player-facing progression currency is `Research Data`; the internal/save field remains `blueprintProgress` for version-13 compatibility. It is not spendable. At `2/8/12/18/24`, it automatically adds Thermal, Recovery, Deep-Space, Predictive Guidance, and Exotic families to future Refit offers. It does not grant or install an item. The UI always shows current/next milestone and uses saved `RESEARCH BREAKTHROUGH` reviews when a threshold is crossed.
+The player-facing progression currency is `Research Data`; the internal/save field remains `blueprintProgress` in version 14. It is not spendable. At `2/8/12/18/24`, it automatically adds Thermal, Recovery, Deep-Space, Predictive Guidance, and Exotic families to future Refit offers. It does not grant or install an item. The UI always shows current/next milestone and uses saved `RESEARCH BREAKTHROUGH` reviews when a threshold is crossed.
 
 The generated Research board is currently debug-only: normal campaign play neither generates its projects nor enters its screen. Its prototype projects spend recovered materials and grant additional Research Data. Orbit does not open the board. Restoring and redesigning it is deferred as a separate feature.
 
@@ -91,7 +91,7 @@ Core resources:
 
 - Site profile: each expedition rolls a site such as Survey Basin, Ore Shelf, or Fracture Field. The site changes action yield, hazard, extraction pressure, or artifact odds.
 - Action kits: the surface action clock. Surveying, pushing deeper, and hazard responses spend it.
-- Rig fuel: a protected 3-unit expedition pack plus transfer fuel preserved at touchdown. Mining spends 1 fuel on deploy and then 1 fuel per 15 seconds while oxygen remains. The separate return stage is always reserved; Ark-era expeditions load up to 3 pack units from Ark fuel.
+- Rig fuel: a protected 3-unit expedition pack plus transfer fuel preserved at touchdown. Mining always spends exactly 1 fuel on deploy. While oxygen remains, operating draw is the current load multiplier divided by the permanent Rig Fuel Loop cycle: `15 / 18 / 21 / 24` seconds at Base / Rank I / II / III. The separate return stage is always reserved; Ark-era expeditions load up to 3 pack units from Ark fuel.
 - Cargo: increases reward and is guaranteed once loaded onto the Ship.
 - Hazard: destination difficulty plus depth pressure.
 - Materials: normal departure returns every material on the Rig, intact Support Drones, and the Ship; Emergency Recall and disabled-rig recovery retain only Ship cargo.

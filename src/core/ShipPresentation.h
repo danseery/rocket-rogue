@@ -84,10 +84,31 @@ inline std::vector<DetailPresentationRow> shipDetailsPresentation(const GameStat
             (rank > 0 ? "RANK " + std::to_string(rank) : std::string("BASE")) +
                 " / " + launchUpgradeEffect(kind, rank)));
     }
+    rows.push_back(detailPresentationHeader("Surface systems"));
+    for (const SurfaceDepthUpgradeKind kind : {
+             SurfaceDepthUpgradeKind::SurveyArray,
+             SurfaceDepthUpgradeKind::BoreSystem}) {
+        const int rank = surfaceDepthUpgradeRank(state, kind);
+        rows.push_back(detailPresentationRow(
+            std::string(toString(kind)),
+            (rank > 0 ? "RANK " + std::to_string(rank) : std::string("BASE")) +
+                " / depth +" + std::to_string(surfaceDepthRating(state, kind))));
+    }
+    const int fuelLoopRank = installedRigFuelLoopRank(state);
+    rows.push_back(detailPresentationRow(
+        "Rig Fuel Loop",
+        (fuelLoopRank > 0
+             ? "RANK " + std::to_string(fuelLoopRank)
+             : std::string("BASE")) +
+            " / 1 fuel / " +
+            display::fixed(rigFuelLoopCycleSecondsForRank(fuelLoopRank), 0) +
+            "s"));
     rows.push_back(detailPresentationHeader("Installed ship systems"));
     for (const std::string& moduleId : state.meta.ownedModuleIds) {
         if (const ShipModule* module = catalog.findModule(moduleId)) {
-            if (module->launchUpgradeKind != LaunchUpgradeKind::None) {
+            if (module->launchUpgradeKind != LaunchUpgradeKind::None ||
+                module->surfaceDepthUpgradeKind != SurfaceDepthUpgradeKind::None ||
+                module->rigFuelLoopRank > 0) {
                 continue;
             }
             const bool operational = std::find(state.run.equippedModuleIds.begin(), state.run.equippedModuleIds.end(), moduleId) != state.run.equippedModuleIds.end();

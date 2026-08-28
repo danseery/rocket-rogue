@@ -280,7 +280,7 @@ void progressionSaveFieldsRoundTripAndLegacyDefault()
 
     const std::string legacy = std::string(save_schema::header) + "\nversion=1\nseed=44\n";
     const std::optional<SaveData> legacySave = deserializeSaveData(legacy);
-    require(!legacySave.has_value(), "pre-v13 saves must be rejected at the fresh-start boundary");
+    require(!legacySave.has_value(), "pre-v14 saves must be rejected at the fresh-start boundary");
 
     const ContentCatalog catalog = createDefaultContent();
     SaveData activeLegacy;

@@ -71,6 +71,15 @@
     { "textureId": "EnemySpawnerLava", "key": "enemy_spawner_lava", "source": "assets/art/enemies/enemy-spawner-lava-sheet.png", "columns": 20, "rows": 1 },
     { "textureId": "EnemySpawnerIce", "key": "enemy_spawner_ice", "source": "assets/art/enemies/enemy-spawner-ice-sheet.png", "columns": 20, "rows": 1 },
     { "textureId": "EnemySpawnerRadioactive", "key": "enemy_spawner_radioactive", "source": "assets/art/enemies/enemy-spawner-radioactive-sheet.png", "columns": 20, "rows": 1 },
-    { "textureId": "EnemySpawnerToxic", "key": "enemy_spawner_toxic", "source": "assets/art/enemies/enemy-spawner-toxic-sheet.png", "columns": 20, "rows": 1 }
+    { "textureId": "EnemySpawnerToxic", "key": "enemy_spawner_toxic", "source": "assets/art/enemies/enemy-spawner-toxic-sheet.png", "columns": 20, "rows": 1 },
+    { "textureId": "MiningTilesMoon", "key": "mining_tiles_moon", "source": "assets/art/mining/mining-tiles-moon.png", "columns": 1, "rows": 1 },
+    { "textureId": "MiningTilesMars", "key": "mining_tiles_mars", "source": "assets/art/mining/mining-tiles-mars.png", "columns": 1, "rows": 1 },
+    { "textureId": "MiningTilesIo", "key": "mining_tiles_io", "source": "assets/art/mining/mining-tiles-io.png", "columns": 1, "rows": 1 },
+    { "textureId": "MiningTilesSaturn", "key": "mining_tiles_saturn", "source": "assets/art/mining/mining-tiles-saturn.png", "columns": 1, "rows": 1 },
+    { "textureId": "MiningTilesUranus", "key": "mining_tiles_uranus", "source": "assets/art/mining/mining-tiles-uranus.png", "columns": 1, "rows": 1 },
+    { "textureId": "MiningTilesNeptune", "key": "mining_tiles_neptune", "source": "assets/art/mining/mining-tiles-neptune.png", "columns": 1, "rows": 1 },
+    { "textureId": "MiningTilesKhepriPrime", "key": "mining_tiles_khepri_prime", "source": "assets/art/mining/mining-tiles-khepri-prime.png", "columns": 1, "rows": 1 },
+    { "textureId": "MiningTilesRiftBelt", "key": "mining_tiles_rift_belt", "source": "assets/art/mining/mining-tiles-rift-belt.png", "columns": 1, "rows": 1 },
+    { "textureId": "MiningTilesPostSolarLibrary", "key": "mining_tiles_post_solar_library", "source": "assets/art/mining/mining-tiles-post-solar.png", "columns": 1, "rows": 1 }
   ]
 }

@@ -393,6 +393,30 @@
         <label class="debug-mining-field">Level
           <input id="debug-mining-level" type="number" min="1" max="10" step="1" value="1">
         </label>
+        <label class="debug-mining-field is-wide">Destination
+          <select id="debug-mining-destination">
+            <option value="-1">Act default</option>
+            <option value="1">Moon</option>
+            <option value="2">Mars</option>
+            <option value="3">Io / Jupiter</option>
+            <option value="4">Saturn</option>
+            <option value="5">Uranus</option>
+            <option value="6">Neptune</option>
+            <option value="7">Khepri Prime</option>
+            <option value="8">Rift Belt</option>
+          </select>
+        </label>
+        <label class="debug-mining-field is-wide">Post-solar system
+          <select id="debug-mining-system">
+            <option value="0">Destination default</option>
+            <option value="1">Aaru Vale</option>
+            <option value="2">Khepri Prime</option>
+            <option value="3">Rift Belt</option>
+          </select>
+        </label>
+        <label class="debug-mining-field">Mineable body
+          <input id="debug-mining-body" type="number" min="1" max="16" step="1" value="1">
+        </label>
         <label class="debug-mining-field is-wide">Seed
           <input id="debug-mining-seed" type="number" min="1" max="4294967295" step="1" value="1">
         </label>
@@ -513,6 +537,9 @@
     const debugActOneNext = debugTools.querySelector("[data-debug-act-one-next]");
     const debugMiningAct = document.getElementById("debug-mining-act");
     const debugMiningLevel = document.getElementById("debug-mining-level");
+    const debugMiningDestination = document.getElementById("debug-mining-destination");
+    const debugMiningSystem = document.getElementById("debug-mining-system");
+    const debugMiningBody = document.getElementById("debug-mining-body");
     const debugMiningSeed = document.getElementById("debug-mining-seed");
     const debugMiningLoadout = document.getElementById("debug-mining-loadout");
     const debugMiningGate = document.getElementById("debug-mining-gate");
@@ -868,10 +895,15 @@
       miningOperatorToggle: () => rrCall("rr_mining_operator_toggle"),
       miningStow: () => rrCall("rr_mining_stow"),
       miningAbort: () => rrCall("rr_mining_abort"),
-      debugMiningArena: (act, difficulty, seed, loadoutMode, gateOverride) => rrCall(
+      debugMiningArena: (act, difficulty, seed, loadoutMode, gateOverride, destinationTierOverride, systemOverride, bodyIndex) => rrCall(
         "rr_debug_mining_arena",
-        [act, difficulty, seed, loadoutMode, gateOverride],
-        ["number", "number", "number", "number", "number"]),
+        [act, difficulty, seed, loadoutMode, gateOverride, destinationTierOverride, systemOverride, bodyIndex],
+        ["number", "number", "number", "number", "number", "number", "number", "number"]),
+      debugPostSolarBodyPreview: (systemOverride, bodyIndex, seed) => rrCall(
+        "rr_debug_post_solar_body_preview",
+        [systemOverride, bodyIndex, seed],
+        ["number", "number", "number"],
+        "string"),
       debugMiningPreview: (act, difficulty, gateOverride) => rrCall(
         "rr_debug_mining_preview",
         [act, difficulty, gateOverride],
@@ -935,16 +967,26 @@
     function normalizedDebugMiningValues() {
       const act = Math.min(3, Math.max(1, Math.trunc(Number(debugMiningAct.value) || 1)));
       const difficulty = Math.min(10, Math.max(1, Math.trunc(Number(debugMiningLevel.value) || 1)));
+      const parsedDestination = Number(debugMiningDestination.value);
+      const destinationTierOverride = Number.isFinite(parsedDestination)
+        ? Math.min(8, Math.max(-1, Math.trunc(parsedDestination)))
+        : -1;
       const seed = Math.min(4294967295, Math.max(1, Math.trunc(Number(debugMiningSeed.value) || 1)));
       const loadoutMode = Math.min(2, Math.max(0, Math.trunc(Number(debugMiningLoadout.value) || 0)));
+      const systemOverride = Math.min(3, Math.max(0, Math.trunc(Number(debugMiningSystem.value) || 0)));
+      const bodyOrdinal = Math.min(16, Math.max(1, Math.trunc(Number(debugMiningBody.value) || 1)));
+      const bodyIndex = bodyOrdinal - 1;
       const parsedGate = Number(debugMiningGate.value);
       const gateOverride = Number.isFinite(parsedGate) ? Math.min(9, Math.max(-1, Math.trunc(parsedGate))) : -1;
       debugMiningAct.value = String(act);
       debugMiningLevel.value = String(difficulty);
+      debugMiningDestination.value = String(destinationTierOverride);
       debugMiningSeed.value = String(seed);
       debugMiningLoadout.value = String(loadoutMode);
+      debugMiningSystem.value = String(systemOverride);
+      debugMiningBody.value = String(bodyOrdinal);
       debugMiningGate.value = String(gateOverride);
-      return { act, difficulty, seed, loadoutMode, gateOverride };
+      return { act, difficulty, destinationTierOverride, seed, loadoutMode, gateOverride, systemOverride, bodyIndex };
     }
 
     function randomizeDebugMiningSeed() {
@@ -958,16 +1000,20 @@
     }
 
     function refreshDebugMiningPreview() {
-      const { act, difficulty, gateOverride } = normalizedDebugMiningValues();
+      const { act, difficulty, gateOverride, systemOverride, bodyIndex, seed } = normalizedDebugMiningValues();
       const preview = rr.debugMiningPreview(act, difficulty, gateOverride);
-      debugMiningPreview.textContent = typeof preview === "string" && preview.length > 0
+      const bodyPreview = systemOverride > 0
+        ? rr.debugPostSolarBodyPreview(systemOverride, bodyIndex, seed)
+        : "";
+      const rulesPreview = typeof preview === "string" && preview.length > 0
         ? preview
         : `Act ${act} • Level ${difficulty}\nRules preview becomes available when the game runtime is ready.`;
+      debugMiningPreview.textContent = bodyPreview ? `${bodyPreview}\n${rulesPreview}` : rulesPreview;
     }
 
     function launchDebugMiningArena() {
-      const { act, difficulty, seed, loadoutMode, gateOverride } = normalizedDebugMiningValues();
-      rr.debugMiningArena(act, difficulty, seed, loadoutMode, gateOverride);
+      const { act, difficulty, destinationTierOverride, seed, loadoutMode, gateOverride, systemOverride, bodyIndex } = normalizedDebugMiningValues();
+      rr.debugMiningArena(act, difficulty, seed, loadoutMode, gateOverride, destinationTierOverride, systemOverride, bodyIndex);
     }
 
     function returnKeyboardToGame() {
@@ -1027,7 +1073,7 @@
       navigation: () => rr.debugNavigation()
     });
 
-    [debugMiningAct, debugMiningLevel, debugMiningSeed, debugMiningLoadout, debugMiningGate]
+    [debugMiningAct, debugMiningLevel, debugMiningDestination, debugMiningSystem, debugMiningBody, debugMiningSeed, debugMiningLoadout, debugMiningGate]
       .forEach((control) => control.addEventListener("change", refreshDebugMiningPreview));
 
     function controllerDebugJson(exportName) {
@@ -1403,14 +1449,15 @@
         event.preventDefault();
         return;
       }
-      if (!event.repeat && currentUiHostContext.realtimeActivityActive
-          && screen === rrScreen.surfaceScan && event.key === " ") {
+      // Space belongs to Survey for the whole minigame screen, including its
+      // exhausted result state. Letting it fall through to generic UI confirm
+      // can activate a utility control after the final pulse rebuilds focus.
+      if (!event.repeat && screen === rrScreen.surfaceScan && event.key === " ") {
         rr.surfaceScanPulse();
         event.preventDefault();
         return;
       }
-      if (!event.repeat && currentUiHostContext.realtimeActivityActive
-          && screen === rrScreen.surfaceScan
+      if (!event.repeat && screen === rrScreen.surfaceScan
           && (event.key.toLowerCase() === "b" || event.key === "Escape")) {
         rr.surfaceScanBank();
         event.preventDefault();

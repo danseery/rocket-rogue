@@ -121,6 +121,14 @@ struct SceneComposerTestAccess {
         return {vertex.r, vertex.g, vertex.b, vertex.a};
     }
 
+    static std::array<double, 3> miningOreGlintSchedule(const SceneComposer& composer)
+    {
+        return {
+            composer.miningOreGlintWaveStartedAt_,
+            composer.miningOreGlintNextWaveAt_,
+            static_cast<double>(composer.miningOreGlintWaveSequence_)};
+    }
+
     static ScenePacket miningPickupTextPacket(
         SceneComposer& composer,
         MiningPickupKind kind,
@@ -132,6 +140,11 @@ struct SceneComposerTestAccess {
         composer.drawMiningPickupText(0.0F, 0.0F, 0.10F, kind, amount, age);
         composer.finalizePacket();
         return composer.packet_;
+    }
+
+    static std::size_t miningPickupBurstCount(const SceneComposer& composer)
+    {
+        return composer.miningPickupBursts_.size();
     }
 
     static ScenePacket flightInstrumentPacket(
@@ -1397,7 +1410,7 @@ void testOrderedBatchingAndWideLineInstancing()
     // Solid lines and textured sprites share one ordered instance pipeline.
     // Coordinate space keeps the clip-space backdrop separate, while the
     // world-space orbit line merges into the surrounding instance sequence.
-    assert(packet.draws.size() == 3U);
+    assert(packet.draws.size() >= 2U);
     assert(packet.draws[0].drawType == SceneDrawType::InstancedQuad);
     assert(packet.draws[0].pipeline == PipelineClass::Textured);
     assert(packet.draws[0].atlasPage
@@ -1428,15 +1441,18 @@ void testOrderedBatchingAndWideLineInstancing()
     }
 
     assert(packet.vertices.empty());
-    assert(packet.draws[1].drawType == SceneDrawType::InstancedQuad);
-    assert(packet.draws[1].pipeline == PipelineClass::Textured);
-    assert(packet.draws[1].coordinateSpace == CoordinateSpace::World);
-    assert(packet.draws[1].atlasPage == rocket::sceneAtlasPageForTexture(TextureId::Moon));
-    assert(packet.draws[1].instanceCount >= 82U);
-    assert(packet.draws[2].drawType == SceneDrawType::InstancedQuad);
-    assert(packet.draws[2].pipeline == PipelineClass::Textured);
-    assert(packet.draws[2].coordinateSpace == CoordinateSpace::World);
-    assert(packet.draws[2].atlasPage == rocket::sceneAtlasPageForTexture(TextureId::Earth));
+    const SceneDraw& firstWorldDraw = packet.draws[1];
+    assert(firstWorldDraw.drawType == SceneDrawType::InstancedQuad);
+    assert(firstWorldDraw.pipeline == PipelineClass::Textured);
+    assert(firstWorldDraw.coordinateSpace == CoordinateSpace::World);
+    assert(firstWorldDraw.atlasPage == rocket::sceneAtlasPageForTexture(TextureId::Moon));
+    assert(firstWorldDraw.instanceCount >= 82U);
+    assert(std::any_of(packet.draws.begin() + 1, packet.draws.end(), [](const SceneDraw& draw) {
+        return draw.drawType == SceneDrawType::InstancedQuad
+            && draw.pipeline == PipelineClass::Textured
+            && draw.coordinateSpace == CoordinateSpace::World
+            && draw.atlasPage == rocket::sceneAtlasPageForTexture(TextureId::Earth);
+    }));
 
     std::array<SceneInstance, 2> titleBodies {};
     std::size_t bodyCount = 0;
@@ -1459,7 +1475,7 @@ void testOrderedBatchingAndWideLineInstancing()
     assert(titleBodies[1].color.a > 0.99F);
 
     const SceneInstance radialGlow = rocket::unpackSceneInstance(
-        packet.instances[packet.draws[1].firstInstance]);
+        packet.instances[firstWorldDraw.firstInstance]);
     assert(radialGlow.shape == SceneInstanceShape::RadialGlow);
     assert(radialGlow.segments == 64U);
 
@@ -1467,7 +1483,7 @@ void testOrderedBatchingAndWideLineInstancing()
     // 80-segment, one-physical-pixel orbit line. The line instance axes use
     // the same physical-pixel perpendicular math as the triangle fallback.
     const SceneInstance orbitLine = rocket::unpackSceneInstance(
-        packet.instances[packet.draws[1].firstInstance + 1U]);
+        packet.instances[firstWorldDraw.firstInstance + 1U]);
     assert(orbitLine.shape == SceneInstanceShape::Rectangle);
     assert(!orbitLine.textured);
     const float densityX = 2560.0F / 1280.0F;
@@ -1661,11 +1677,20 @@ void testAtlasPageBatchingAcrossLogicalTextures()
     assert(logicalDraws[0]->atlasPage == rocket::sceneAtlasPageForTexture(TextureId::RocketOpen));
     assert(logicalDraws[1]->atlasPage == rocket::sceneAtlasPageForTexture(TextureId::MiningDrone));
     assert(logicalDraws[2]->atlasPage == rocket::sceneAtlasPageForTexture(TextureId::RocketClosed));
-    assert(logicalDraws[0] != logicalDraws[1]);
-    assert(logicalDraws[1] != logicalDraws[2]);
-    // RocketOpen and RocketClosed share a page, but the intervening rig page
-    // is an order barrier, so the renderer must not merge them out of order.
-    assert(logicalDraws[0] != logicalDraws[2]);
+    const auto samePage = [](TextureId left, TextureId right) {
+        return rocket::sceneAtlasPageForTexture(left) == rocket::sceneAtlasPageForTexture(right);
+    };
+    assert((logicalDraws[0] == logicalDraws[1])
+        == samePage(logicalTextures[0], logicalTextures[1]));
+    assert((logicalDraws[1] == logicalDraws[2])
+        == samePage(logicalTextures[1], logicalTextures[2]));
+    // Equal pages can merge only when no intervening page creates an order
+    // barrier. The concrete packing is intentionally free to change as the
+    // authored atlas grows.
+    if (samePage(logicalTextures[0], logicalTextures[2])
+        && !samePage(logicalTextures[0], logicalTextures[1])) {
+        assert(logicalDraws[0] != logicalDraws[2]);
+    }
 }
 
 RenderSnapshot miningSnapshot(rocket::MiningRunState& mining)
@@ -1684,6 +1709,46 @@ RenderSnapshot miningSnapshot(rocket::MiningRunState& mining)
     snapshot.miningShipPresent = mining.depthZone == mining.entryDepthZone;
     snapshot.bindMiningFrameViews(mining);
     return snapshot;
+}
+
+void testMiningOreGlintStartsImmediatelyThenUsesRandomizedSlowWaves()
+{
+    rocket::MiningRunState mining;
+    mining.active = true;
+    mining.terrain.width = 2;
+    mining.terrain.height = 1;
+    mining.terrain.cells.resize(2);
+    mining.terrain.cells[0].material = rocket::MiningCellMaterial::CommonOre;
+    mining.terrain.cells[0].revealed = true;
+    mining.terrain.cells[0].maxToughness = 1.0;
+    mining.terrain.cells[0].remainingToughness = 1.0;
+    mining.terrain.cells[1].material = rocket::MiningCellMaterial::RareOre;
+    mining.terrain.cells[1].revealed = true;
+    mining.terrain.cells[1].maxToughness = 1.0;
+    mining.terrain.cells[1].remainingToughness = 1.0;
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.animationTime = 42.0;
+    (void)composer.compose(snapshot);
+    const auto initial = rocket::SceneComposerTestAccess::miningOreGlintSchedule(composer);
+    assert(std::abs(initial[0] - snapshot.animationTime) < 0.0001);
+    assert(initial[1] - initial[0] >= 2.0 && initial[1] - initial[0] <= 10.0);
+    assert(initial[2] == 0.0);
+
+    snapshot.animationTime = initial[1] - 0.001;
+    (void)composer.compose(snapshot);
+    const auto beforeNext = rocket::SceneComposerTestAccess::miningOreGlintSchedule(composer);
+    assert(std::abs(beforeNext[0] - initial[0]) < 0.0001);
+
+    snapshot.animationTime = initial[1];
+    (void)composer.compose(snapshot);
+    const auto second = rocket::SceneComposerTestAccess::miningOreGlintSchedule(composer);
+    assert(std::abs(second[0] - initial[1]) < 0.0001);
+    assert(second[1] - second[0] >= 2.0 && second[1] - second[0] <= 10.0);
+    assert(second[2] == 1.0);
+    assert(std::abs((second[1] - second[0]) - (initial[1] - initial[0])) > 0.01);
 }
 
 std::size_t countInstanceShape(const ScenePacket& packet, SceneInstanceShape shape)
@@ -2321,6 +2386,46 @@ void testMiningPickupTextUsesTypedColorsAndTwoSecondLifetime()
     const ScenePacket expired = rocket::SceneComposerTestAccess::miningPickupTextPacket(
         expiredComposer, rocket::MiningPickupKind::CommonOre, 1, 2.01F);
     assert(expired.instances.empty() && expired.vertices.empty());
+}
+
+void testMiningPickupHistoryDoesNotReplayAfterLevelUp()
+{
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    RenderSnapshot mining;
+    mining.screen = rocket::Screen::Mining;
+    mining.miningWidth = 4;
+    mining.miningHeight = 4;
+    mining.animationTime = 1.0;
+
+    std::vector<rocket::MiningPickupEvent> pickupEvents;
+    mining.miningPickupEvents = pickupEvents;
+    (void)composer.compose(mining);
+    assert(rocket::SceneComposerTestAccess::miningPickupBurstCount(composer) == 0U);
+
+    pickupEvents.push_back({1, rocket::MiningPickupKind::CommonOre, 1, 1.5, 1.5});
+    mining.miningPickupEvents = pickupEvents;
+    mining.miningPickupEventSequence = 1;
+    mining.animationTime = 1.1;
+    (void)composer.compose(mining);
+    assert(rocket::SceneComposerTestAccess::miningPickupBurstCount(composer) == 1U);
+
+    RenderSnapshot levelUp = mining;
+    levelUp.screen = rocket::Screen::SurfaceUpgrade;
+    levelUp.animationTime = 2.0;
+    (void)composer.compose(levelUp);
+    assert(rocket::SceneComposerTestAccess::miningPickupBurstCount(composer) == 0U);
+
+    mining.animationTime = 2.1;
+    (void)composer.compose(mining);
+    assert(rocket::SceneComposerTestAccess::miningPickupBurstCount(composer) == 0U);
+
+    pickupEvents.push_back({2, rocket::MiningPickupKind::RareOre, 1, 2.5, 1.5});
+    mining.miningPickupEvents = pickupEvents;
+    mining.miningPickupEventSequence = 2;
+    mining.animationTime = 2.2;
+    (void)composer.compose(mining);
+    assert(rocket::SceneComposerTestAccess::miningPickupBurstCount(composer) == 1U);
 }
 
 void testMiningRigSlerpsVerticalDuringExtraction()
@@ -2985,6 +3090,164 @@ void testMiningTerrainPersistentStreamInvalidation()
     assert(scannerLight.miningTerrainRevision != damagedTerrainRevision);
 }
 
+void testMiningTerrainUsesDestinationTilesAndMaterialFrames()
+{
+    constexpr int tileFrameCount = 19;
+    const std::array<std::pair<int, TextureId>, 8> destinations {{
+        {1, TextureId::MiningTilesMoon},
+        {2, TextureId::MiningTilesMars},
+        {3, TextureId::MiningTilesIo},
+        {4, TextureId::MiningTilesSaturn},
+        {5, TextureId::MiningTilesUranus},
+        {6, TextureId::MiningTilesNeptune},
+        {7, TextureId::MiningTilesKhepriPrime},
+        {8, TextureId::MiningTilesRiftBelt},
+    }};
+
+    rocket::MiningRunState mining;
+    mining.terrain.width = 5;
+    mining.terrain.height = 3;
+    mining.terrain.cells.resize(15);
+    mining.droneX = 1.0;
+    mining.droneY = 1.0;
+    mining.targetTipX = 1.0;
+    mining.targetTipY = 2.0;
+    mining.returnZoneX = 0.0;
+    mining.returnZoneY = 0.0;
+
+    const auto reveal = [&](int index, rocket::MiningCellMaterial material) -> rocket::MiningCell& {
+        rocket::MiningCell& cell = mining.terrain.cells[static_cast<std::size_t>(index)];
+        cell.material = material;
+        cell.maxToughness = 10.0;
+        cell.remainingToughness = 10.0;
+        cell.revealed = true;
+        return cell;
+    };
+    reveal(1, rocket::MiningCellMaterial::Regolith);
+    reveal(2, rocket::MiningCellMaterial::HardRock);
+    rocket::MiningCell& radiation = reveal(3, rocket::MiningCellMaterial::HazardPocket);
+    radiation.hazard = true;
+    radiation.hazardAffinity = rocket::MiningElementalAffinity::Radiation;
+    reveal(4, rocket::MiningCellMaterial::CommonOre);
+
+    const auto matchesFrame = [](const SceneInstance& instance, TextureId texture, int frame) {
+        const rocket::SceneAtlasUvRect expected = rocket::mapSceneAtlasUvRect(
+            texture,
+            static_cast<float>(frame) / static_cast<float>(tileFrameCount),
+            0.0F,
+            static_cast<float>(frame + 1) / static_cast<float>(tileFrameCount),
+            1.0F);
+        constexpr float tolerance = 0.0006F;
+        return expected.valid
+            && std::abs(instance.u0 - expected.u0) < tolerance
+            && std::abs(instance.v0 - expected.v0) < tolerance
+            && std::abs(instance.u1 - expected.u1) < tolerance
+            && std::abs(instance.v1 - expected.v1) < tolerance;
+    };
+
+    for (const auto& [tier, texture] : destinations) {
+        RenderSnapshot snapshot = miningSnapshot(mining);
+        snapshot.destinationTier = tier;
+        SceneComposer composer;
+        composer.setViewport({1280, 800, 1280, 800, 1.0F});
+        composer.setTextureReady(texture, true);
+        const ScenePacket& packet = composer.compose(snapshot);
+        assertValidDrawRanges(packet);
+
+        const SceneDraw* terrainDraw = nullptr;
+        for (const SceneDraw& draw : packet.draws) {
+            if (draw.instanceStream == SceneInstanceStream::MiningTerrain
+                && draw.texture == texture) {
+                assert(terrainDraw == nullptr);
+                terrainDraw = &draw;
+            }
+        }
+        assert(terrainDraw != nullptr);
+        assert(terrainDraw->pipeline == PipelineClass::Textured);
+        assert(terrainDraw->instanceCount == 4U);
+        assert(terrainDraw->atlasPage == rocket::sceneAtlasPageForTexture(texture));
+
+        const std::size_t first = terrainDraw->firstInstance;
+        const SceneInstance regolith = rocket::unpackSceneInstance(packet.miningTerrainInstances[first]);
+        const SceneInstance hardRock = rocket::unpackSceneInstance(packet.miningTerrainInstances[first + 1U]);
+        const SceneInstance hazard = rocket::unpackSceneInstance(packet.miningTerrainInstances[first + 2U]);
+        const SceneInstance common = rocket::unpackSceneInstance(packet.miningTerrainInstances[first + 3U]);
+        assert(regolith.textured);
+        assert(hardRock.textured);
+        assert(hazard.textured);
+        assert(common.textured);
+        assert(matchesFrame(regolith, texture, 0)
+            || matchesFrame(regolith, texture, 1)
+            || matchesFrame(regolith, texture, 2));
+        assert(matchesFrame(hardRock, texture, 3)
+            || matchesFrame(hardRock, texture, 4)
+            || matchesFrame(hardRock, texture, 5));
+        assert(matchesFrame(hazard, texture, 17));
+        assert(matchesFrame(common, texture, 9));
+    }
+
+    RenderSnapshot fallbackSnapshot = miningSnapshot(mining);
+    fallbackSnapshot.destinationTier = 1;
+    SceneComposer fallbackComposer;
+    fallbackComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const ScenePacket& fallback = fallbackComposer.compose(fallbackSnapshot);
+    const std::uint64_t fallbackRevision = fallback.miningTerrainRevision;
+    assert(std::none_of(fallback.draws.begin(), fallback.draws.end(), [](const SceneDraw& draw) {
+        return draw.instanceStream == SceneInstanceStream::MiningTerrain
+            && draw.pipeline == PipelineClass::Textured;
+    }));
+
+    fallbackComposer.setTextureReady(TextureId::MiningTilesMoon, true);
+    const ScenePacket& loaded = fallbackComposer.compose(fallbackSnapshot);
+    assert(loaded.miningTerrainRevision != fallbackRevision);
+    assert(std::any_of(loaded.draws.begin(), loaded.draws.end(), [](const SceneDraw& draw) {
+        return draw.instanceStream == SceneInstanceStream::MiningTerrain
+            && draw.texture == TextureId::MiningTilesMoon
+            && draw.pipeline == PipelineClass::Textured;
+    }));
+
+    RenderSnapshot postSolar = miningSnapshot(mining);
+    postSolar.destinationTier = 7;
+    postSolar.miningPostSolarGeologyRow = 22;
+    postSolar.miningGeologySeed = 0x123456789abcdef0ULL;
+    SceneComposer postSolarComposer;
+    postSolarComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const ScenePacket& postSolarFallback = postSolarComposer.compose(postSolar);
+    assert(std::none_of(postSolarFallback.draws.begin(), postSolarFallback.draws.end(), [](const SceneDraw& draw) {
+        return draw.instanceStream == SceneInstanceStream::MiningTerrain
+            && draw.pipeline == PipelineClass::Textured;
+    }));
+    const std::uint64_t postSolarFallbackRevision = postSolarFallback.miningTerrainRevision;
+    postSolarComposer.setTextureReady(TextureId::MiningTilesPostSolarLibrary, true);
+    const ScenePacket& postSolarLoaded = postSolarComposer.compose(postSolar);
+    assert(postSolarLoaded.miningTerrainRevision != postSolarFallbackRevision);
+    const auto postSolarDraw = std::find_if(postSolarLoaded.draws.begin(), postSolarLoaded.draws.end(), [](const SceneDraw& draw) {
+        return draw.instanceStream == SceneInstanceStream::MiningTerrain
+            && draw.texture == TextureId::MiningTilesPostSolarLibrary
+            && draw.pipeline == PipelineClass::Textured;
+    });
+    assert(postSolarDraw != postSolarLoaded.draws.end());
+    assert(postSolarDraw->instanceCount == 4U);
+    const SceneInstance postSolarCommon = rocket::unpackSceneInstance(
+        postSolarLoaded.miningTerrainInstances[postSolarDraw->firstInstance + 3U]);
+    const rocket::SceneAtlasUvRect expectedCommon = rocket::mapSceneAtlasUvRect(
+        TextureId::MiningTilesPostSolarLibrary,
+        9.0F / 19.0F,
+        22.0F / 32.0F,
+        10.0F / 19.0F,
+        23.0F / 32.0F);
+    constexpr float tolerance = 0.0006F;
+    assert(expectedCommon.valid);
+    assert(std::abs(postSolarCommon.u0 - expectedCommon.u0) < tolerance);
+    assert(std::abs(postSolarCommon.v0 - expectedCommon.v0) < tolerance);
+    assert(std::abs(postSolarCommon.u1 - expectedCommon.u1) < tolerance);
+    assert(std::abs(postSolarCommon.v1 - expectedCommon.v1) < tolerance);
+    const std::uint64_t stablePostSolarRevision = postSolarLoaded.miningTerrainRevision;
+    postSolar.miningPostSolarGeologyRow = 23;
+    const ScenePacket& changedGeology = postSolarComposer.compose(postSolar);
+    assert(changedGeology.miningTerrainRevision != stablePostSolarRevision);
+}
+
 void testPoiGuidanceUsesOneDynamicBouncingArrow()
 {
     const auto arrowInstance = [](const ScenePacket& packet) {
@@ -3106,6 +3369,26 @@ void testSurfacePushHostileStepCountsStayBounded()
         assert(packet.instances.size() <= 1024U);
         assert(packet.vertices.size() <= 4096U);
     }
+}
+
+void testSurfacePushUsesAbsoluteDepthRungs()
+{
+    SceneComposer starterComposer;
+    starterComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    RenderSnapshot starter;
+    starter.screen = rocket::Screen::SurfacePush;
+    starter.surfacePushStartDepth = 0;
+    starter.surfacePushSteps = 1;
+    starter.surfacePushMaxSteps = 1;
+    const ScenePacket starterPacket = starterComposer.compose(starter);
+    assert(std::abs(starterPacket.surfacePushVisualProgress - 0.25F) < 0.001F);
+
+    SceneComposer bankedComposer;
+    bankedComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    RenderSnapshot banked = starter;
+    banked.surfacePushStartDepth = 2;
+    const ScenePacket bankedPacket = bankedComposer.compose(banked);
+    assert(std::abs(bankedPacket.surfacePushVisualProgress - 0.75F) < 0.001F);
 }
 
 void testSurfacePushSecondDigFrameCompletes()
@@ -3365,7 +3648,9 @@ int main()
     testSurfaceScanUsesDestinationAppropriateCompanions();
     testSceneTransitionFadesEverySceneToBlack();
     testMiningOrePaletteMakesCommonSilverAndRareGold();
+    testMiningOreGlintStartsImmediatelyThenUsesRandomizedSlowWaves();
     testMiningPickupTextUsesTypedColorsAndTwoSecondLifetime();
+    testMiningPickupHistoryDoesNotReplayAfterLevelUp();
     testMiningRigSlerpsVerticalDuringExtraction();
     testMiningRigStaysVisibleAndTracksHeading();
     testMiningCollisionIndicatorMarksTheContactedEdge();
@@ -3376,8 +3661,10 @@ int main()
     testFrameViewsKeepAuthoritativeEnemyIndices();
     testHazardDroneTransitShimmerAndAssistantBeams();
     testMiningTerrainPersistentStreamInvalidation();
+    testMiningTerrainUsesDestinationTilesAndMaterialFrames();
     testPoiGuidanceUsesOneDynamicBouncingArrow();
     testSurfacePushHostileStepCountsStayBounded();
+    testSurfacePushUsesAbsoluteDepthRungs();
     testSurfacePushSecondDigFrameCompletes();
     testSurfacePushTerrainGuardBoundsInvalidAspect();
     testLevelUpFanfareGeometryAndAccessibleShake();

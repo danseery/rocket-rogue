@@ -45,7 +45,9 @@ struct RefitPresentation {
 enum class RefitOfferPresentationKind {
     ShipModule,
     CrewUpgrade,
-    LaunchUpgrade
+    LaunchUpgrade,
+    SurfaceDepthUpgrade,
+    RigFuelLoopUpgrade
 };
 
 struct RefitOfferPresentation {
@@ -153,10 +155,50 @@ inline std::string launchUpgradeDetail(const ShipModule& module)
     return {};
 }
 
+inline std::string surfaceDepthUpgradeDetail(const ShipModule& module)
+{
+    const int rating = tuning::surfaceDepthProgression::baseDepthRating +
+        module.surfaceDepthUpgradeRank;
+    switch (module.surfaceDepthUpgradeKind) {
+    case SurfaceDepthUpgradeKind::SurveyArray:
+        return "Permanently maps surface levels through depth +" +
+            std::to_string(rating) + ". Dig still requires a matching Bore rating.";
+    case SurfaceDepthUpgradeKind::BoreSystem:
+        return "Permanently lets the Mining Rig tunnel through depth +" +
+            std::to_string(rating) + ". Every target level must be surveyed first.";
+    case SurfaceDepthUpgradeKind::None:
+        break;
+    }
+    return {};
+}
+
+inline double rigFuelLoopCycleSecondsForRank(int rank)
+{
+    return tuning::rigFuelLoopProgression::baseCycleSeconds +
+        tuning::rigFuelLoopProgression::secondsPerRank *
+            static_cast<double>(std::clamp(
+                rank,
+                0,
+                tuning::rigFuelLoopProgression::maximumUpgradeRank));
+}
+
+inline std::string rigFuelLoopUpgradeDetail(const ShipModule& module)
+{
+    return "Permanently extends operating burn to 1 fuel / " +
+        display::fixed(rigFuelLoopCycleSecondsForRank(module.rigFuelLoopRank), 0) +
+        "s before load modifiers. Deployment still costs exactly 1 fuel.";
+}
+
 inline std::string moduleThreat(const ShipModule& module)
 {
     if (module.launchUpgradeKind != LaunchUpgradeKind::None) {
         return launchUpgradeDetail(module);
+    }
+    if (module.surfaceDepthUpgradeKind != SurfaceDepthUpgradeKind::None) {
+        return surfaceDepthUpgradeDetail(module);
+    }
+    if (module.rigFuelLoopRank > 0) {
+        return rigFuelLoopUpgradeDetail(module);
     }
     if (module.stats.miningPower > 0.0) {
         return std::string(text::moduleThreats::cutsTougherRock);
@@ -202,6 +244,19 @@ inline std::string moduleThreat(const ShipModule& module)
 
 inline std::string modulePrimaryImpact(const ShipModule& module)
 {
+    if (module.surfaceDepthUpgradeKind != SurfaceDepthUpgradeKind::None) {
+        return std::string(toString(module.surfaceDepthUpgradeKind)) + " depth \xE2\x86\x92 +" +
+            std::to_string(
+                tuning::surfaceDepthProgression::baseDepthRating +
+                module.surfaceDepthUpgradeRank);
+    }
+    if (module.rigFuelLoopRank > 0) {
+        return "Fuel cadence \xE2\x86\x92 1 fuel / " +
+            display::fixed(
+                rigFuelLoopCycleSecondsForRank(module.rigFuelLoopRank),
+                0) +
+            "s";
+    }
     switch (module.launchUpgradeKind) {
     case LaunchUpgradeKind::FuelTanks:
         return "+5 fuel";
@@ -249,6 +304,24 @@ inline void addBeneficialReductionChip(std::vector<RefitStatChip>& chips, std::s
 
 inline std::vector<RefitStatChip> moduleStatChips(const ShipModule& module)
 {
+    if (module.surfaceDepthUpgradeKind != SurfaceDepthUpgradeKind::None) {
+        return {{
+            module.surfaceDepthUpgradeKind == SurfaceDepthUpgradeKind::SurveyArray
+                ? "SURVEY"
+                : "BORE",
+            "+" + std::to_string(
+                tuning::surfaceDepthProgression::baseDepthRating +
+                module.surfaceDepthUpgradeRank),
+            true}};
+    }
+    if (module.rigFuelLoopRank > 0) {
+        return {{
+            "FUEL LOOP",
+            "1 / " + display::fixed(
+                rigFuelLoopCycleSecondsForRank(module.rigFuelLoopRank),
+                0) + "s",
+            true}};
+    }
     switch (module.launchUpgradeKind) {
     case LaunchUpgradeKind::FuelTanks:
         return {{"FUEL", "+5", true}};
@@ -460,6 +533,66 @@ inline RefitOfferPresentation launchUpgradeOfferPresentation(
     };
 }
 
+inline RefitOfferPresentation surfaceDepthUpgradeOfferPresentation(
+    const ShipModule& module,
+    int index,
+    const GameState& state,
+    const ContentCatalog& catalog)
+{
+    const int cost = moduleOfferCost(module);
+    const ShipModule* next = nextSurfaceDepthUpgrade(
+        state,
+        catalog,
+        module.surfaceDepthUpgradeKind);
+    const bool affordable = next != nullptr && next->id == module.id &&
+        canInstallSurfaceDepthUpgrade(
+            state,
+            catalog,
+            module.surfaceDepthUpgradeKind);
+    return {
+        RefitOfferPresentationKind::SurfaceDepthUpgrade,
+        index,
+        cost,
+        display::credits(cost),
+        display::credits(cost),
+        affordable,
+        moduleRefitPresentation(module),
+        affordable
+            ? panelActionButton(
+                text::buttons::installPermanently,
+                ui::actions::buyOffer(index),
+                "ok")
+            : disabledPanelButton(text::needCredits(cost))
+    };
+}
+
+inline RefitOfferPresentation rigFuelLoopUpgradeOfferPresentation(
+    const ShipModule& module,
+    int index,
+    const GameState& state,
+    const ContentCatalog& catalog)
+{
+    const int cost = moduleOfferCost(module);
+    const ShipModule* next = nextRigFuelLoopUpgrade(state, catalog);
+    const bool affordable = next != nullptr && next->id == module.id &&
+        canInstallRigFuelLoopUpgrade(state, catalog);
+    return {
+        RefitOfferPresentationKind::RigFuelLoopUpgrade,
+        index,
+        cost,
+        display::credits(cost),
+        display::credits(cost),
+        affordable,
+        moduleRefitPresentation(module),
+        affordable
+            ? panelActionButton(
+                text::buttons::installPermanently,
+                ui::actions::buyOffer(index),
+                "ok")
+            : disabledPanelButton(text::needCredits(cost))
+    };
+}
+
 inline RefitOfferPresentation crewUpgradeOfferPresentation(const CrewUpgrade& upgrade, int index, double credits)
 {
     const int cost = crewUpgradeCost(upgrade);
@@ -490,6 +623,19 @@ inline RefitWindowPresentation refitWindowPresentation(const GameState& state, c
         if (const ShipModule* module = catalog.findModule(state.run.offerModuleIds[i])) {
             if (module->launchUpgradeKind != LaunchUpgradeKind::None) {
                 presentation.offers.push_back(launchUpgradeOfferPresentation(
+                    *module,
+                    index,
+                    state,
+                    catalog));
+            } else if (
+                module->surfaceDepthUpgradeKind != SurfaceDepthUpgradeKind::None) {
+                presentation.offers.push_back(surfaceDepthUpgradeOfferPresentation(
+                    *module,
+                    index,
+                    state,
+                    catalog));
+            } else if (module->rigFuelLoopRank > 0) {
+                presentation.offers.push_back(rigFuelLoopUpgradeOfferPresentation(
                     *module,
                     index,
                     state,

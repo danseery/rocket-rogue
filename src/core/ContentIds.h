@@ -49,6 +49,12 @@ namespace miningSite {
 inline constexpr const char* thermalLayeredRecovery = "thermal_layered_recovery";
 } // namespace miningSite
 
+namespace postSolarSystem {
+inline constexpr const char* aaruVale = "aaru_vale";
+inline constexpr const char* khepriPrime = "khepri_prime";
+inline constexpr const char* riftBelt = "rift_belt";
+} // namespace postSolarSystem
+
 namespace protectedObjective {
 inline constexpr const char* ioMinorArtifact = "io_minor_artifact";
 } // namespace protectedObjective
@@ -66,6 +72,15 @@ inline constexpr const char* coolingSystem3 = "cooling_system_3";
 inline constexpr const char* hullPlating1 = "hull_plating_1";
 inline constexpr const char* hullPlating2 = "hull_plating_2";
 inline constexpr const char* hullPlating3 = "hull_plating_3";
+inline constexpr const char* surveyArray1 = "survey_array_1";
+inline constexpr const char* surveyArray2 = "survey_array_2";
+inline constexpr const char* surveyArray3 = "survey_array_3";
+inline constexpr const char* boreSystem1 = "bore_system_1";
+inline constexpr const char* boreSystem2 = "bore_system_2";
+inline constexpr const char* boreSystem3 = "bore_system_3";
+inline constexpr const char* rigFuelLoop1 = "rig_fuel_loop_1";
+inline constexpr const char* rigFuelLoop2 = "rig_fuel_loop_2";
+inline constexpr const char* rigFuelLoop3 = "rig_fuel_loop_3";
 // Version-nine launch refit ids remain available only for save migration.
 inline constexpr const char* sparrowInjectorTune = "sparrow_injector_tune";
 inline constexpr const char* reserveFeedManifold = "reserve_feed_manifold";

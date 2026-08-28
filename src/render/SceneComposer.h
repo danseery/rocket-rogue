@@ -42,6 +42,7 @@ private:
     void drawMiningMaterialMarker(float cx, float cy, float radius, int material, Color color, bool worldSpace = true);
     void drawMiningOreSparkle(float cx, float cy, float unitSize, int material, float animationTime, float phaseSeed, float alphaScale = 1.0F);
     void drawMiningOreSparkleColor(float cx, float cy, float unitSize, Color glow, float animationTime, float phaseSeed, float alphaScale = 1.0F);
+    void updateMiningOreGlintWave(double animationTime, int width, int height, bool restart);
     void drawMiningPickupText(float cx, float cy, float unitSize, MiningPickupKind kind, int amount, float age);
     void drawMiningCombatText(float cx, float cy, float unitSize, int amount, float age, bool allied, bool critical, bool rigDamage, int kind);
     void drawMiningStowedText(float cx, float cy, float unitSize, float age);
@@ -54,6 +55,7 @@ private:
     void appendRect(std::vector<SceneVertex>& vertices, float cx, float cy, float w, float h, Color color);
     void appendLine(std::vector<SceneVertex>& vertices, float ax, float ay, float bx, float by, Color color);
     bool textureReady(int assetIndex) const noexcept;
+    bool textureReady(TextureId texture) const noexcept;
     void drawTelemetry(const RenderSnapshot& snapshot);
     void drawFlightInstruments(const RenderSnapshot& snapshot);
     void drawRocket(const RenderSnapshot& snapshot);
@@ -94,7 +96,12 @@ private:
         CoordinateSpace coordinateSpace = CoordinateSpace::World,
         PipelineClass pipeline = PipelineClass::Solid,
         bool fullViewport = false);
-    void submitMiningTerrainInstanceRange(std::uint32_t firstInstance, std::uint32_t instanceCount);
+    void submitMiningTerrainInstanceRange(
+        std::uint32_t firstInstance,
+        std::uint32_t instanceCount,
+        TextureId texture = TextureId::None,
+        std::uint8_t atlasPage = kNoSceneAtlasPage,
+        PipelineClass pipeline = PipelineClass::Solid);
     void appendDrawCommand(SceneDraw draw);
     void submitLines(const std::vector<SceneVertex>& vertices, float width, bool worldSpace = true);
     bool makeUniformLineInstance(
@@ -156,12 +163,15 @@ private:
         int width = 0;
         int height = 0;
         int destinationTier = 0;
+        int postSolarGeologyRow = -1;
+        std::uint64_t geologySeed = 0;
         float sceneAspect = 0.0F;
         double droneX = 0.0;
         double droneY = 0.0;
         float scannerPulse = 0.0F;
         float scannerRevealRadius = 0.0F;
         float scannerSweepRadius = 0.0F;
+        bool texturedTiles = false;
 
         bool operator==(const MiningTerrainPresentationKey&) const = default;
     };
@@ -185,6 +195,8 @@ private:
     MiningTerrainPresentationKey miningTerrainPresentationKey_;
     std::uint32_t miningBackdropFogInstanceCount_ = 0;
     std::uint32_t miningBaseTerrainInstanceCount_ = 0;
+    TextureId miningBaseTerrainTexture_ = TextureId::None;
+    std::uint8_t miningBaseTerrainAtlasPage_ = kNoSceneAtlasPage;
     std::uint64_t miningTerrainRevision_ = 0;
     std::size_t droppedFrameInstances_ = 0;
     bool miningTerrainCacheValid_ = false;
@@ -200,6 +212,9 @@ private:
     int previousMiningWidth_ = 0;
     int previousMiningHeight_ = 0;
     bool previousMiningActive_ = false;
+    double miningOreGlintWaveStartedAt_ = -1.0;
+    double miningOreGlintNextWaveAt_ = -1.0;
+    std::uint32_t miningOreGlintWaveSequence_ = 0;
     float miningVisualHeadingX_ = 0.0F;
     float miningVisualHeadingY_ = -1.0F;
     float miningVisualRecoilX_ = 0.0F;

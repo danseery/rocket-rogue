@@ -179,6 +179,49 @@ int& launchUpgradeRankRef(LaunchUpgradeRanks& ranks, LaunchUpgradeKind kind)
     return unused;
 }
 
+int& surfaceDepthUpgradeRankRef(
+    SurfaceDepthUpgradeRanks& ranks,
+    SurfaceDepthUpgradeKind kind)
+{
+    switch (kind) {
+    case SurfaceDepthUpgradeKind::SurveyArray: return ranks.surveyArray;
+    case SurfaceDepthUpgradeKind::BoreSystem: return ranks.boreSystem;
+    case SurfaceDepthUpgradeKind::None: break;
+    }
+    static int unused = 0;
+    unused = 0;
+    return unused;
+}
+
+bool& surfaceDepthPurchasedThisRefitRef(
+    SurfaceRefitPurchaseState& purchases,
+    SurfaceDepthUpgradeKind kind)
+{
+    switch (kind) {
+    case SurfaceDepthUpgradeKind::SurveyArray: return purchases.surveyArray;
+    case SurfaceDepthUpgradeKind::BoreSystem: return purchases.boreSystem;
+    case SurfaceDepthUpgradeKind::None: break;
+    }
+    static bool unused = false;
+    unused = false;
+    return unused;
+}
+
+bool surfaceDepthPurchasedThisRefit(
+    const GameState& state,
+    SurfaceDepthUpgradeKind kind)
+{
+    switch (kind) {
+    case SurfaceDepthUpgradeKind::SurveyArray:
+        return state.run.surfaceRefitPurchases.surveyArray;
+    case SurfaceDepthUpgradeKind::BoreSystem:
+        return state.run.surfaceRefitPurchases.boreSystem;
+    case SurfaceDepthUpgradeKind::None:
+        return false;
+    }
+    return false;
+}
+
 int launchTrainingStageOrdinal(LaunchTrainingStage stage)
 {
     return static_cast<int>(stage);
@@ -216,6 +259,85 @@ const std::array<const char*, 3>& launchUpgradeIds(LaunchUpgradeKind kind)
     case LaunchUpgradeKind::None: return none;
     }
     return none;
+}
+
+const std::array<const char*, 3>& surfaceDepthUpgradeIds(
+    SurfaceDepthUpgradeKind kind)
+{
+    static constexpr std::array<const char*, 3> survey {
+        content::module::surveyArray1,
+        content::module::surveyArray2,
+        content::module::surveyArray3};
+    static constexpr std::array<const char*, 3> bore {
+        content::module::boreSystem1,
+        content::module::boreSystem2,
+        content::module::boreSystem3};
+    static constexpr std::array<const char*, 3> none {"", "", ""};
+    switch (kind) {
+    case SurfaceDepthUpgradeKind::SurveyArray: return survey;
+    case SurfaceDepthUpgradeKind::BoreSystem: return bore;
+    case SurfaceDepthUpgradeKind::None: return none;
+    }
+    return none;
+}
+
+const std::array<const char*, 3>& rigFuelLoopUpgradeIds()
+{
+    static constexpr std::array<const char*, 3> ids {
+        content::module::rigFuelLoop1,
+        content::module::rigFuelLoop2,
+        content::module::rigFuelLoop3};
+    return ids;
+}
+
+void syncSurfaceDepthUpgradeProgress(GameState& state, const ContentCatalog& catalog)
+{
+    for (const SurfaceDepthUpgradeKind kind : {
+             SurfaceDepthUpgradeKind::SurveyArray,
+             SurfaceDepthUpgradeKind::BoreSystem}) {
+        int& rank = surfaceDepthUpgradeRankRef(state.meta.surfaceDepthUpgrades, kind);
+        rank = std::clamp(
+            rank,
+            0,
+            tuning::surfaceDepthProgression::maximumUpgradeRank);
+        const auto& ids = surfaceDepthUpgradeIds(kind);
+        for (int index = 0;
+             index < tuning::surfaceDepthProgression::maximumUpgradeRank;
+             ++index) {
+            const ShipModule* module = catalog.findModule(ids[static_cast<std::size_t>(index)]);
+            if (module != nullptr && containsId(state.meta.ownedModuleIds, module->id)) {
+                rank = std::max(rank, index + 1);
+            }
+        }
+        for (int index = 0; index < rank; ++index) {
+            const std::string id = ids[static_cast<std::size_t>(index)];
+            if (catalog.findModule(id) != nullptr) {
+                addUniqueId(state.meta.ownedModuleIds, id);
+            }
+        }
+    }
+
+    int& fuelLoopRank = state.meta.rigFuelLoop.rank;
+    fuelLoopRank = std::clamp(
+        fuelLoopRank,
+        0,
+        tuning::rigFuelLoopProgression::maximumUpgradeRank);
+    const auto& fuelLoopIds = rigFuelLoopUpgradeIds();
+    for (int index = 0;
+         index < tuning::rigFuelLoopProgression::maximumUpgradeRank;
+         ++index) {
+        const ShipModule* module = catalog.findModule(
+            fuelLoopIds[static_cast<std::size_t>(index)]);
+        if (module != nullptr && containsId(state.meta.ownedModuleIds, module->id)) {
+            fuelLoopRank = std::max(fuelLoopRank, index + 1);
+        }
+    }
+    for (int index = 0; index < fuelLoopRank; ++index) {
+        const std::string id = fuelLoopIds[static_cast<std::size_t>(index)];
+        if (catalog.findModule(id) != nullptr) {
+            addUniqueId(state.meta.ownedModuleIds, id);
+        }
+    }
 }
 
 const Destination* launchTrainingDestination(const GameState& state, const ContentCatalog& catalog)
@@ -357,6 +479,38 @@ int launchUpgradeRank(const GameState& state, LaunchUpgradeKind kind)
     case LaunchUpgradeKind::None: return 0;
     }
     return 0;
+}
+
+int surfaceDepthUpgradeRank(
+    const GameState& state,
+    SurfaceDepthUpgradeKind kind)
+{
+    switch (kind) {
+    case SurfaceDepthUpgradeKind::SurveyArray:
+        return state.meta.surfaceDepthUpgrades.surveyArray;
+    case SurfaceDepthUpgradeKind::BoreSystem:
+        return state.meta.surfaceDepthUpgrades.boreSystem;
+    case SurfaceDepthUpgradeKind::None:
+        return 0;
+    }
+    return 0;
+}
+
+int surfaceDepthRating(const GameState& state, SurfaceDepthUpgradeKind kind)
+{
+    return tuning::surfaceDepthProgression::baseDepthRating +
+        std::clamp(
+            surfaceDepthUpgradeRank(state, kind),
+            0,
+            tuning::surfaceDepthProgression::maximumUpgradeRank);
+}
+
+int installedRigFuelLoopRank(const GameState& state)
+{
+    return std::clamp(
+        state.meta.rigFuelLoop.rank,
+        0,
+        tuning::rigFuelLoopProgression::maximumUpgradeRank);
 }
 
 double launchFuelCapacity(const GameState& state)
@@ -594,6 +748,154 @@ bool installLaunchUpgrade(GameState& state, const ContentCatalog& catalog, Launc
     state.run.offerCrewUpgradeIds = {};
     state.statusLine = text::refitInstalled(module->name);
     syncLaunchConfig(state, catalog);
+    return true;
+}
+
+const ShipModule* nextSurfaceDepthUpgrade(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    SurfaceDepthUpgradeKind kind)
+{
+    if (kind == SurfaceDepthUpgradeKind::None) {
+        return nullptr;
+    }
+    const int nextRank = surfaceDepthUpgradeRank(state, kind) + 1;
+    if (nextRank > tuning::surfaceDepthProgression::maximumUpgradeRank) {
+        return nullptr;
+    }
+    const auto found = std::find_if(
+        catalog.modules.begin(),
+        catalog.modules.end(),
+        [&](const ShipModule& module) {
+            return module.surfaceDepthUpgradeKind == kind &&
+                module.surfaceDepthUpgradeRank == nextRank;
+        });
+    return found == catalog.modules.end() ? nullptr : &*found;
+}
+
+bool surfaceDepthUpgradeUnlocked(
+    const GameState& state,
+    SurfaceDepthUpgradeKind kind,
+    int rank)
+{
+    if (kind == SurfaceDepthUpgradeKind::None || rank < 1 ||
+        rank > tuning::surfaceDepthProgression::maximumUpgradeRank) {
+        return false;
+    }
+    if (rank <= surfaceDepthUpgradeRank(state, kind)) {
+        return true;
+    }
+    if (rank != surfaceDepthUpgradeRank(state, kind) + 1) {
+        return false;
+    }
+    return hasUnlock(
+        state.meta,
+        kind == SurfaceDepthUpgradeKind::SurveyArray
+            ? content::unlock::surfaceProbes
+            : content::unlock::surfaceDrills);
+}
+
+bool canInstallSurfaceDepthUpgrade(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    SurfaceDepthUpgradeKind kind)
+{
+    const ShipModule* module = nextSurfaceDepthUpgrade(state, catalog, kind);
+    return module != nullptr &&
+        !surfaceDepthPurchasedThisRefit(state, kind) &&
+        surfaceDepthUpgradeUnlocked(state, kind, module->surfaceDepthUpgradeRank) &&
+        state.run.credits >= static_cast<double>(moduleOfferCost(*module));
+}
+
+bool installSurfaceDepthUpgrade(
+    GameState& state,
+    const ContentCatalog& catalog,
+    SurfaceDepthUpgradeKind kind)
+{
+    const ShipModule* module = nextSurfaceDepthUpgrade(state, catalog, kind);
+    if (module == nullptr ||
+        surfaceDepthPurchasedThisRefit(state, kind) ||
+        !surfaceDepthUpgradeUnlocked(state, kind, module->surfaceDepthUpgradeRank)) {
+        return false;
+    }
+    const int cost = moduleOfferCost(*module);
+    if (state.run.credits < static_cast<double>(cost)) {
+        state.statusLine = text::insufficientCreditsFor(module->name);
+        return false;
+    }
+
+    state.run.credits -= static_cast<double>(cost);
+    surfaceDepthUpgradeRankRef(state.meta.surfaceDepthUpgrades, kind) =
+        module->surfaceDepthUpgradeRank;
+    surfaceDepthPurchasedThisRefitRef(
+        state.run.surfaceRefitPurchases,
+        kind) = true;
+    addUniqueId(state.meta.ownedModuleIds, module->id);
+    state.statusLine = text::refitInstalled(module->name);
+    return true;
+}
+
+const ShipModule* nextRigFuelLoopUpgrade(
+    const GameState& state,
+    const ContentCatalog& catalog)
+{
+    const int nextRank = installedRigFuelLoopRank(state) + 1;
+    if (nextRank > tuning::rigFuelLoopProgression::maximumUpgradeRank) {
+        return nullptr;
+    }
+    const auto found = std::find_if(
+        catalog.modules.begin(),
+        catalog.modules.end(),
+        [&](const ShipModule& module) {
+            return module.rigFuelLoopRank == nextRank;
+        });
+    return found == catalog.modules.end() ? nullptr : &*found;
+}
+
+bool rigFuelLoopUpgradeUnlocked(const GameState& state, int rank)
+{
+    if (rank < 1 || rank > tuning::rigFuelLoopProgression::maximumUpgradeRank) {
+        return false;
+    }
+    if (rank <= installedRigFuelLoopRank(state)) {
+        return true;
+    }
+    return rank == installedRigFuelLoopRank(state) + 1 &&
+        hasUnlock(state.meta, content::unlock::surfaceDrills);
+}
+
+bool canInstallRigFuelLoopUpgrade(
+    const GameState& state,
+    const ContentCatalog& catalog)
+{
+    const ShipModule* module = nextRigFuelLoopUpgrade(state, catalog);
+    return module != nullptr &&
+        !state.run.surfaceRefitPurchases.rigFuelLoop &&
+        rigFuelLoopUpgradeUnlocked(state, module->rigFuelLoopRank) &&
+        state.run.credits >= static_cast<double>(moduleOfferCost(*module));
+}
+
+bool installRigFuelLoopUpgrade(
+    GameState& state,
+    const ContentCatalog& catalog)
+{
+    const ShipModule* module = nextRigFuelLoopUpgrade(state, catalog);
+    if (module == nullptr ||
+        state.run.surfaceRefitPurchases.rigFuelLoop ||
+        !rigFuelLoopUpgradeUnlocked(state, module->rigFuelLoopRank)) {
+        return false;
+    }
+    const int cost = moduleOfferCost(*module);
+    if (state.run.credits < static_cast<double>(cost)) {
+        state.statusLine = text::insufficientCreditsFor(module->name);
+        return false;
+    }
+
+    state.run.credits -= static_cast<double>(cost);
+    state.meta.rigFuelLoop.rank = module->rigFuelLoopRank;
+    state.run.surfaceRefitPurchases.rigFuelLoop = true;
+    addUniqueId(state.meta.ownedModuleIds, module->id);
+    state.statusLine = text::refitInstalled(module->name);
     return true;
 }
 
@@ -917,6 +1219,7 @@ void syncLaunchConfig(GameState& state, const ContentCatalog& catalog)
 {
     ensureDestinationHistory(state, catalog);
     syncLaunchTrainingProgress(state, catalog);
+    syncSurfaceDepthUpgradeProgress(state, catalog);
     const Destination* destination = launchTrainingDestination(state, catalog);
     if (destination != nullptr) {
         state.launchConfig.destinationId = destination->id;
@@ -1052,6 +1355,24 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
              !launchUpgradeUnlocked(state, module->launchUpgradeKind, module->launchUpgradeRank))) {
             continue;
         }
+        if (module->surfaceDepthUpgradeKind != SurfaceDepthUpgradeKind::None &&
+            (module->surfaceDepthUpgradeRank !=
+                 surfaceDepthUpgradeRank(state, module->surfaceDepthUpgradeKind) + 1 ||
+             surfaceDepthPurchasedThisRefit(
+                 state,
+                 module->surfaceDepthUpgradeKind) ||
+             !surfaceDepthUpgradeUnlocked(
+                 state,
+                 module->surfaceDepthUpgradeKind,
+                 module->surfaceDepthUpgradeRank))) {
+            continue;
+        }
+        if (module->rigFuelLoopRank > 0 &&
+            (module->rigFuelLoopRank != installedRigFuelLoopRank(state) + 1 ||
+             state.run.surfaceRefitPurchases.rigFuelLoop ||
+             !rigFuelLoopUpgradeUnlocked(state, module->rigFuelLoopRank))) {
+            continue;
+        }
         if (!materialRefitsAvailable(state) && hasMaterialCost(module->materialCost)) {
             continue;
         }
@@ -1081,6 +1402,48 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
     std::vector<RefitCandidate> remaining = candidates;
     std::vector<RefitCandidate> pickedIds;
     pickedIds.reserve(state.run.offerModuleIds.size());
+    for (const SurfaceDepthUpgradeKind kind : {
+             SurfaceDepthUpgradeKind::SurveyArray,
+             SurfaceDepthUpgradeKind::BoreSystem}) {
+        if (pickedIds.size() >= state.run.offerModuleIds.size()) {
+            break;
+        }
+        const ShipModule* next = nextSurfaceDepthUpgrade(state, catalog, kind);
+        if (next == nullptr ||
+            surfaceDepthPurchasedThisRefit(state, kind) ||
+            !surfaceDepthUpgradeUnlocked(state, kind, next->surfaceDepthUpgradeRank)) {
+            continue;
+        }
+        const auto pinned = std::find_if(
+            remaining.begin(),
+            remaining.end(),
+            [&](const RefitCandidate& candidate) {
+                return candidate.kind == RefitOfferKind::ShipModule &&
+                    candidate.id == next->id;
+            });
+        if (pinned != remaining.end()) {
+            pickedIds.push_back(*pinned);
+            remaining.erase(pinned);
+        }
+    }
+    if (pickedIds.size() < state.run.offerModuleIds.size()) {
+        const ShipModule* next = nextRigFuelLoopUpgrade(state, catalog);
+        if (next != nullptr &&
+            !state.run.surfaceRefitPurchases.rigFuelLoop &&
+            rigFuelLoopUpgradeUnlocked(state, next->rigFuelLoopRank)) {
+            const auto pinned = std::find_if(
+                remaining.begin(),
+                remaining.end(),
+                [&](const RefitCandidate& candidate) {
+                    return candidate.kind == RefitOfferKind::ShipModule &&
+                        candidate.id == next->id;
+                });
+            if (pinned != remaining.end()) {
+                pickedIds.push_back(*pinned);
+                remaining.erase(pinned);
+            }
+        }
+    }
     const auto pinnedFuelTanksThree = std::find_if(
         remaining.begin(),
         remaining.end(),
@@ -1088,7 +1451,8 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
             return candidate.kind == RefitOfferKind::ShipModule &&
                 candidate.id == content::module::fuelTanks3;
         });
-    if (pinnedFuelTanksThree != remaining.end()) {
+    if (pinnedFuelTanksThree != remaining.end() &&
+        pickedIds.size() < state.run.offerModuleIds.size()) {
         pickedIds.push_back(*pinnedFuelTanksThree);
         remaining.erase(pinnedFuelTanksThree);
     }
@@ -1129,8 +1493,14 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
             }
             return lhs.cost < rhs.cost;
         });
+        const ShipModule* lastModule = catalog.findModule(pickedIds.back().id);
+        const bool lastOfferIsGuaranteed =
+            pickedIds.back().id == content::module::fuelTanks3 ||
+            (lastModule != nullptr &&
+             (lastModule->surfaceDepthUpgradeKind != SurfaceDepthUpgradeKind::None ||
+              lastModule->rigFuelLoopRank > 0));
         if (cheapestAffordable != remaining.end() && candidateAffordable(*cheapestAffordable) &&
-            pickedIds.back().id != content::module::fuelTanks3) {
+            !lastOfferIsGuaranteed) {
             pickedIds.back() = *cheapestAffordable;
         }
     }
@@ -1142,6 +1512,11 @@ void generateModuleOffers(GameState& state, const ContentCatalog& catalog, Rando
             state.run.offerCrewUpgradeIds[i] = pickedIds[i].id;
         }
     }
+}
+
+void beginRefitVisit(GameState& state)
+{
+    state.run.surfaceRefitPurchases = {};
 }
 
 double offerRerollCost(const GameState& state)
@@ -1186,6 +1561,39 @@ bool buyOffer(GameState& state, const ContentCatalog& catalog, int index)
             return false;
         }
         return installLaunchUpgrade(state, catalog, module->launchUpgradeKind);
+    }
+
+    if (module != nullptr &&
+        module->surfaceDepthUpgradeKind != SurfaceDepthUpgradeKind::None) {
+        const ShipModule* next = nextSurfaceDepthUpgrade(
+            state,
+            catalog,
+            module->surfaceDepthUpgradeKind);
+        if (next == nullptr || next->id != module->id) {
+            return false;
+        }
+        const bool installed = installSurfaceDepthUpgrade(
+            state,
+            catalog,
+            module->surfaceDepthUpgradeKind);
+        if (installed) {
+            state.run.offerModuleIds[offerIndex].clear();
+            state.run.offerCrewUpgradeIds[offerIndex].clear();
+        }
+        return installed;
+    }
+
+    if (module != nullptr && module->rigFuelLoopRank > 0) {
+        const ShipModule* next = nextRigFuelLoopUpgrade(state, catalog);
+        if (next == nullptr || next->id != module->id) {
+            return false;
+        }
+        const bool installed = installRigFuelLoopUpgrade(state, catalog);
+        if (installed) {
+            state.run.offerModuleIds[offerIndex].clear();
+            state.run.offerCrewUpgradeIds[offerIndex].clear();
+        }
+        return installed;
     }
 
     const int cost = module != nullptr ? moduleOfferCost(*module) : crewUpgradeCost(*crewUpgrade);
@@ -1831,6 +2239,42 @@ FrontierGateStatus frontierGateStatusForDestination(
         status.blockerText = "Install Fuel Tanks I and Flight Controls I before the Moon transfer.";
         return status;
     }
+
+    // Authored route requirements describe whether the destination exists as
+    // a player choice at all. Resolve them before hardware and generic flight
+    // gates so a story-locked route cannot leak a clickable ship-readiness
+    // details path. Once the authored requirement is satisfied, the normal
+    // hardware checks below still decide whether the route is ready to fly.
+    const ScenarioRouteRequirementStatus scenarioRequirement = scenarioRouteRequirementStatus(
+        state,
+        catalog,
+        *destination);
+    if (!scenarioRequirement.satisfied) {
+        status.kind = FrontierGateKind::ScenarioRequirement;
+        status.scenarioId = scenarioRequirement.scenarioId;
+        status.scenarioStepId = scenarioRequirement.stepId;
+        status.current = scenarioRequirement.current;
+        status.required = scenarioRequirement.required;
+        status.satisfied = false;
+        const ScenarioInstance* instance = findScenarioInstance(state.meta, status.scenarioId);
+        const std::string_view definitionId = instance == nullptr || instance->definitionId.empty()
+            ? std::string_view(status.scenarioId)
+            : std::string_view(instance->definitionId);
+        const ScenarioDefinition* definition = findScenarioDefinition(catalog, definitionId);
+        const ScenarioDefinition resolved = definition != nullptr && instance != nullptr
+            ? resolveScenarioDefinition(*definition, *instance)
+            : ScenarioDefinition {};
+        const ScenarioStepDefinition* step = definition == nullptr
+            ? nullptr
+            : (instance == nullptr
+                   ? findScenarioStepDefinition(*definition, status.scenarioStepId)
+                   : findScenarioStepDefinition(resolved, status.scenarioStepId));
+        status.blockerText = step == nullptr
+            ? "Complete the required route objective."
+            : (step->actionLabel.empty() ? step->detail : step->actionLabel);
+        return status;
+    }
+
     if (destination->tier == 2 &&
         !launchTrainingAtLeast(state, LaunchTrainingStage::HullIntegrity)) {
         status.kind = FrontierGateKind::FlightData;
@@ -1862,36 +2306,6 @@ FrontierGateStatus frontierGateStatusForDestination(
         if (!status.satisfied) {
             return status;
         }
-    }
-
-    const ScenarioRouteRequirementStatus scenarioRequirement = scenarioRouteRequirementStatus(
-        state,
-        catalog,
-        *destination);
-    if (!scenarioRequirement.satisfied) {
-        status.kind = FrontierGateKind::ScenarioRequirement;
-        status.scenarioId = scenarioRequirement.scenarioId;
-        status.scenarioStepId = scenarioRequirement.stepId;
-        status.current = scenarioRequirement.current;
-        status.required = scenarioRequirement.required;
-        status.satisfied = false;
-        const ScenarioInstance* instance = findScenarioInstance(state.meta, status.scenarioId);
-        const std::string_view definitionId = instance == nullptr || instance->definitionId.empty()
-            ? std::string_view(status.scenarioId)
-            : std::string_view(instance->definitionId);
-        const ScenarioDefinition* definition = findScenarioDefinition(catalog, definitionId);
-        const ScenarioDefinition resolved = definition != nullptr && instance != nullptr
-            ? resolveScenarioDefinition(*definition, *instance)
-            : ScenarioDefinition {};
-        const ScenarioStepDefinition* step = definition == nullptr
-            ? nullptr
-            : (instance == nullptr
-                   ? findScenarioStepDefinition(*definition, status.scenarioStepId)
-                   : findScenarioStepDefinition(resolved, status.scenarioStepId));
-        status.blockerText = step == nullptr
-            ? "Complete the required route objective."
-            : (step->actionLabel.empty() ? step->detail : step->actionLabel);
-        return status;
     }
 
     // A destination with authored route keys is governed entirely by those

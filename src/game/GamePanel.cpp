@@ -1184,6 +1184,7 @@ bool jupiterWindowAvailable(const GameState& state, const ContentCatalog& catalo
     return definition != nullptr && next != nullptr &&
         currentDestination(state, catalog).id == definition->sourceDestinationId &&
         next->id == definition->targetDestinationId &&
+        scenarioRouteRequirementStatus(state, catalog, *next).satisfied &&
         (definition->allowedLaunchStages.empty() ||
          std::find(
              definition->allowedLaunchStages.begin(),
@@ -1230,12 +1231,12 @@ std::string jupiterWindowModal(const GameState& state, const ContentCatalog& cat
         << "<p>A Good pass supplies enough momentum. Perfect keeps the Jupiter transfer stable; Good adds +35% flight instability for that attempt.</p>"
         << "<strong>" << (activeAssist != nullptr
             ? "ACTIVE // " + display::fixed(slingshotBurn, 0) + " powered burn // +" +
-                display::percent(activeAssist->speedBoost) + " velocity // " +
+                display::percent(activeAssist->speedBoost) + " velocity from finish // " +
                 (instabilityPenalty > 0.0
                     ? "+" + display::percent(instabilityPenalty) + " instability"
                     : "Perfect: stable")
             : "Good required // " + display::fixed(slingshotBurn, 0) +
-                " powered burn // +20–40% velocity // Perfect: stable")
+                " powered burn // +0–40% velocity from finish speed // Perfect: stable")
         << "</strong></article>"
         << "</div><div class=\"jupiter-combined-preview\"><span>STACK BOTH</span><strong>25 tank // 15 burn // 10 margin // +slingshot velocity</strong>"
         << "<p>Good is enough to depart but adds +35% flight instability. Perfect preserves the same transfer benefit without the penalty.</p>"
@@ -1246,7 +1247,11 @@ std::string jupiterWindowModal(const GameState& state, const ContentCatalog& cat
         << button("Open Refit", ui::actions::openJupiterRefit, "ok", true)
         << (activeAssist != nullptr
             ? button("Continue to Jupiter", ui::actions::continueTransferAssist, "warn")
-            : button("Begin Mars Slingshot", ui::actions::beginTransferAssist(content::transferAssist::marsJupiter), "warn"))
+            : (!reviewed
+                  ? button("Review Options", ui::actions::acknowledgeJupiterWindow, "warn")
+                  : (canStartJupiterSlingshot(state, catalog)
+                        ? button("Begin Mars Slingshot", ui::actions::beginTransferAssist(content::transferAssist::marsJupiter), "warn")
+                        : disabledButton("Mars Slingshot Unavailable"))))
         << button("Return to Hangar", ui::actions::acknowledgeJupiterWindow, "ghost")
         << "</div></section>";
     return reviewed
@@ -1276,13 +1281,13 @@ std::string jupiterSlingshotActiveModal(const GameState& state, const ContentCat
         << (instabilityPenalty > 0.0 ? " // WILD RIDE" : " // STABLE") << "</span>"
         << "<p class=\"activity-introduction-setup\">"
         << (instabilityPenalty > 0.0
-            ? "The Good pass supplied enough " + source->name + " momentum, but the shallow exit makes the " + target->name + " flight harder to control."
-            : "The Perfect pass supplied " + source->name + " momentum without disturbing the ship's normal flight stability.")
+            ? "The Good pass supplied enough " + source->name + " momentum. Its recorded finish lane and outward drift carry into the " + target->name + " flight, and Good adds extra control instability."
+            : "The Perfect pass carries its recorded finish lane and actual " + source->name + " exit velocity into launch without adding grade instability.")
         << "</p>"
         << "<div class=\"activity-introduction-payoff\"><span>Transfer underway</span><strong>"
         << display::fixed(tank, 0) << " tank // " << display::fixed(poweredBurn, 0)
         << " powered burn // " << display::fixed(margin, 0) << " margin // +"
-        << display::percent(activeAssist->speedBoost) << " velocity // "
+        << display::percent(activeAssist->speedBoost) << " velocity from finish // "
         << (instabilityPenalty > 0.0
             ? "+" + display::percent(instabilityPenalty) + " flight instability"
             : "stable flight")
@@ -1992,6 +1997,22 @@ double flybySlingshotScale(const FlybyRunState& flyby)
     const double range = std::max(0.001, tuning::flyby::maxSpeed - baselineSpeed);
     const double fastShare = std::clamp((speed - baselineSpeed) / range, 0.0, 1.0);
     return 1.0 + fastShare * (tuning::flyby::slingshotMaxSpeedScale - 1.0);
+}
+
+double flybySlingshotSpeedBoost(
+    const FlybyRunState& flyby,
+    double maximumBaseBoost)
+{
+    const double speed = std::hypot(flyby.velocityX, flyby.velocityY);
+    const double range = std::max(
+        0.001,
+        tuning::flyby::maxSpeed - tuning::flyby::minSpeed);
+    const double speedShare = std::clamp(
+        (speed - tuning::flyby::minSpeed) / range,
+        0.0,
+        1.0);
+    return std::max(0.0, maximumBaseBoost) *
+        tuning::flyby::slingshotMaxSpeedScale * speedShare;
 }
 
 std::string flybySpeedLabel(const FlybyRunState& flyby)
@@ -3382,12 +3403,9 @@ std::string buildGamePanelMarkup(
         const bool clearsGenericRoute = !scenarioChallenge && flybyClearsGenericNextRoute(state, catalog);
 
         if (flyby.completed && transferAssistRun) {
-            const double speedScale = flyby.slingshotAwarded
-                ? flyby.slingshotSpeedScale
-                : flybySlingshotScale(flyby);
             const double speedBoost = flyby.slingshotAwarded
                 ? flyby.slingshotSpeedBoost
-                : transferAssist->speedBoostBase * speedScale;
+                : flybySlingshotSpeedBoost(flyby, transferAssist->speedBoostBase);
             const double tank = launchFuelCapacity(state);
             const Destination* target = catalog.findDestination(transferAssist->targetDestinationId);
             const Destination* source = catalog.findDestination(transferAssist->sourceDestinationId);
@@ -3408,9 +3426,9 @@ std::string buildGamePanelMarkup(
                       ? "SLINGSHOT ACTIVE — WILD RIDE"
                       : (flyby.collidedWithBody ? sourceName + " IMPACT" : "SLINGSHOT LOST"));
             const std::string body = perfect
-                ? sourceName + "'s gravity has already sent the ship toward " + targetName + ". The Perfect pass supplies propellant-free velocity without changing normal flight stability."
+                ? sourceName + "'s gravity has already sent the ship toward " + targetName + ". The Perfect pass supplies propellant-free velocity without changing normal flight stability. Its finish lane and outward drift carry into launch."
                 : (good
-                      ? sourceName + "'s gravity supplies the same " + display::fixed(transferAssist->fuelSavings, 0) + "-fuel saving and achieved velocity. The Good exit adds " + display::signedPercent(transferAssist->goodInstabilityPenalty) + " flight instability to the " + targetName + " attempt: more drift, oversteer, and throttle kick."
+                      ? sourceName + "'s gravity supplies the same " + display::fixed(transferAssist->fuelSavings, 0) + "-fuel saving and achieved velocity. The finish lane carries into launch, and the Good exit adds " + display::signedPercent(transferAssist->goodInstabilityPenalty) + " flight instability: more drift, oversteer, and throttle kick."
                       : (flyby.collidedWithBody
                             ? "The ship clipped " + sourceName + ". Hull damage applies, " + targetName + " departure did not occur, and the assist remains retryable."
                             : "The pass missed the departure corridor. Retry the Flyby or build more permanent margin."));
@@ -3422,10 +3440,8 @@ std::string buildGamePanelMarkup(
                 departing ? display::fixed(tank, 0) + " tank" : "NO DEPARTURE",
                 departing ? display::fixed(poweredBurn, 0) + " powered burn" : "GOOD REQUIRED",
                 departing
-                    ? "+" + display::percent(speedBoost) + " velocity // " +
-                        (instabilityPenalty > 0.0
-                            ? "+" + display::percent(instabilityPenalty) + " instability"
-                            : "stable")
+                    ? flybySpeedLabel(flyby) + " finish // +" +
+                        display::percent(speedBoost) + " launch velocity"
                     : (flyby.collidedWithBody
                           ? "Hull +" + std::to_string(flyby.impactHullDamage) + "%"
                           : "RETRY OR REFIT"),
@@ -3464,7 +3480,9 @@ std::string buildGamePanelMarkup(
                             : flybyGradeLabel(grade)));
             const double flybySpeedScale = flyby.slingshotAwarded ? flyby.slingshotSpeedScale : flybySlingshotScale(flyby);
             const double flybyFuelSavings = flyby.slingshotAwarded ? flyby.slingshotFuelSavings : tuning::flyby::slingshotFuelBoost * flybySpeedScale;
-            const double flybySpeedBoost = flyby.slingshotAwarded ? flyby.slingshotSpeedBoost : tuning::flyby::slingshotSpeedBoost * flybySpeedScale;
+            const double flybySpeedBoost = flyby.slingshotAwarded
+                ? flyby.slingshotSpeedBoost
+                : flybySlingshotSpeedBoost(flyby, tuning::flyby::slingshotSpeedBoost);
             const std::string resultBody = scenarioChallenge
                 ? (grade == FlybyGrade::Perfect
                       ? "Required flight grade reached. Claim the configured reward explicitly."
@@ -3885,7 +3903,7 @@ std::string buildGamePanelMarkup(
                 + display::money(flybyCreditRewardMinimum(*arrivalDestination, FlybyGrade::Perfect)) + "–"
                 + display::money(flybyCreditRewardMaximum(*arrivalDestination, FlybyGrade::Perfect))
                 + ". " + routeStatus
-                + ". Perfect also stores +1.5–3.0 fuel and +0.20–0.40 speed for the next launch. Closes Orbit and Landing.";
+                + ". Perfect also stores +1.5–3.0 fuel and +0.00–0.40 speed from the actual finish velocity for the next launch. Closes Orbit and Landing.";
             orbitRewardDetail = "Good +" + std::to_string(orbitResearchDataReward(*arrivalDestination, OrbitGrade::Good))
                 + " Research Data and " + display::money(orbitCreditReward(*arrivalDestination, OrbitGrade::Good))
                 + " credits; Perfect +" + std::to_string(orbitResearchDataReward(*arrivalDestination, OrbitGrade::Perfect))
@@ -4463,20 +4481,22 @@ std::string buildGamePanelMarkup(
             !state.run.surfaceExpedition.pendingMiningSiteDefinitionId.empty());
         out << phaseBoardOpen("phase-board-surface phase-board-surface-minigame phase-board-push", state.statusLine);
         const int nextDepthOffset = push.steps + 1;
-        const bool nextLayerScanned = std::any_of(
-            state.run.surfaceExpedition.depthProspects.begin(),
-            state.run.surfaceExpedition.depthProspects.end(),
-            [&](const SurfaceDepthProspect& prospect) {
-                return prospect.absoluteDepth == state.run.surfaceExpedition.depth + nextDepthOffset;
-            });
+        const SurfaceDepthCapability nextDepthCapability = surfaceDepthCapability(
+            state,
+            catalog,
+            state.run.surfaceExpedition.depth + nextDepthOffset);
         const std::vector<PanelMetricPresentation> pushMetrics {
             panelMetric("Steps", std::to_string(push.steps) + "/" + std::to_string(std::max(1, push.maxSteps))),
             panelMetric("Start depth", "+" + std::to_string(state.run.surfaceExpedition.depth + push.depthGain)),
             panelMetric(
                 "Next push risk",
-                push.steps == 0
+                push.busted
+                    ? "ROUTE COLLAPSED"
+                    : push.completed
+                    ? surfaceDepthBlockerLabel(nextDepthCapability)
+                    : push.steps == 0
                     ? "SAFE FIRST LAYER"
-                    : display::percent(push.collapseRisk) + (nextLayerScanned ? " / mapped" : " / blind"))
+                    : display::percent(push.collapseRisk) + " / surveyed")
         };
         const int selectedDepth =
             state.run.surfaceExpedition.depth + push.depthGain;
@@ -4505,16 +4525,18 @@ std::string buildGamePanelMarkup(
             actions.push_back(push.completed
                 ? disabledPanelButton("Route limit reached")
                 : panelActionButton(text::buttons::pushDeeper, ui::actions::surfacePushStep, "warn"));
-            actions.push_back(panelActionButton("Return", ui::actions::surfacePushBank, "ok"));
+            actions.push_back(push.depthGain > 0
+                ? panelActionButton("Set Start Depth", ui::actions::surfacePushBank, "ok")
+                : disabledPanelButton("Dig one layer first"));
         }
         out << surfaceMiniGamePanel(
             "push-minigame",
             text::buttons::pushDeeper,
-            "Tunnel to a deeper Mining Rig start point. Level +1 is guaranteed; digging farther risks collapse.",
+            "Tunnel through surveyed levels within Bore rating and safe return range. The first step is stable; later steps risk collapse.",
             pushMetrics,
             materialRewardChips(push.temporaryMaterials, static_cast<int>(push.temporaryArtifacts.size()), push.cargo),
             push.busted ? "Route Collapse" : (push.completed ? "Deep Route Locked" : "Descent Window"),
-            push.message.empty() ? "Dig the safe first level, then secure that start depth or gamble on a deeper tunnel." : push.message,
+            push.message.empty() ? "Dig the first surveyed level, then set that start depth or risk a deeper surveyed tunnel." : push.message,
             actions);
         if (returnSafety.severity != SurfaceReturnSafetySeverity::Safe) {
             out << phaseAdvisory({
@@ -4656,7 +4678,7 @@ std::string buildGamePanelMarkup(
                 ui::modals::surfaceSurveyIntroduction,
                 "SURVEY THE SITE",
                 "Survey scans each reachable level for resources and artifacts before you commit to digging.",
-                "Pulse the scanner to reveal what may be waiting below. Log at least one survey to unlock Dig.",
+                "Map the current level and level +1, then log the survey. Dig unlocks only after the first deeper level is successfully recorded.",
                 "Begin Survey",
                 ui::actions::surveySurface,
                 "ok");
@@ -4666,7 +4688,7 @@ std::string buildGamePanelMarkup(
                 ui::modals::surfaceDigIntroduction,
                 "DIG THE TUNNEL",
                 "Dig opens a tunnel to the depth you choose. Your Mining Rig begins at the deepest start depth you set.",
-                "The first layer is stable. Pushing farther can collapse the unfinished tunnel, and deeper starts may leave too little oxygen or fuel to return to the ship. Check the return-range warning before setting your start depth.",
+                "Every step must be surveyed, within the permanent Bore System rating, and inside a non-critical return range. The first step is stable; later steps can collapse.",
                 "Begin Dig",
                 ui::actions::pushSurface,
                 "warn");
@@ -4779,7 +4801,9 @@ std::string buildGamePanelMarkup(
             out << "<div class=\"utility-row compact-tools utility-actions\">"
                 << modalButton("Compare", "refit_compare", "ghost") << "</div>";
         }
-        out << "</div><div class=\"pilot-card-grid draft-card-grid controller-choice-row\">";
+        out << "</div><div class=\"pilot-card-grid draft-card-grid controller-choice-row "
+            << (singleLaunchLessonOffer ? "single-refit-offer" : "multi-refit-offers")
+            << "\">";
         // Ordinary Refit purchases spend credits and need deliberate focus.
         // A single curated tutorial offer is the sole safe default.
         const auto defaultRefit = singleLaunchLessonOffer
@@ -4890,6 +4914,9 @@ std::string buildGamePanelMarkup(
         out << hangarFuelChip(metric);
     }
     out << "</div>";
+    const FrontierGateStatus nextFrontierGate = next == nullptr
+        ? FrontierGateStatus {}
+        : frontierGateStatus(state, catalog);
     const bool showJupiterOptions = jupiterWindowAvailable(state, catalog);
     if (showJupiterOptions) {
         const double tank = launchFuelCapacity(state);
@@ -4920,12 +4947,12 @@ std::string buildGamePanelMarkup(
             << "<div><span>MARS SLINGSHOT</span><strong>";
         if (activeAssist != nullptr) {
             out << display::fixed(poweredBurn, 0) << " powered burn</strong><small>ACTIVE // +"
-                << display::percent(activeAssist->speedBoost) << " velocity // "
+                << display::percent(activeAssist->speedBoost) << " velocity from finish // "
                 << (instabilityPenalty > 0.0
                     ? "+" + display::percent(instabilityPenalty) + " instability"
                     : "Perfect: stable");
         } else {
-            out << "Good-or-better Flyby</strong><small>-5 powered fuel // +20–40% velocity // Good: +35% instability";
+            out << "Good-or-better Flyby</strong><small>-5 powered fuel // +0–40% from finish speed // Good: +35% instability";
         }
         out << "</small></div></div><div class=\"hangar-frontier-meter\" aria-hidden=\"true\">";
         for (int segment = 0; segment < 10; ++segment) {
@@ -5018,7 +5045,9 @@ std::string buildGamePanelMarkup(
         }
     } else if (next != nullptr && !navigationAvailable(state) && !currentFrontier.hiddenFromProgression &&
                pendingTransferAssistForDestination(state, next == nullptr ? std::string_view{} : next->id) == nullptr) {
-        if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
+        if (!nextFrontierGate.satisfied) {
+            out << disabledButton(next->name + ": " + std::string(text::buttons::unavailable));
+        } else if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
             out << (launchHardwareBlocked
                 ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")
                 : button(text::panel::attemptFrontier(next->name), ui::actions::attemptFrontier, "danger"));
@@ -5029,12 +5058,6 @@ std::string buildGamePanelMarkup(
                 : (oneWayCommit
                       ? modalButton("Commit to " + next->name, "one_way_launch_confirm", "danger")
                       : button(text::panel::attemptFrontier(next->name), ui::actions::attemptFrontier, "danger")));
-        } else {
-            const FrontierGateStatus gate = frontierGateStatus(state, catalog);
-            out << disabledButton(
-                gate.kind == FrontierGateKind::FlightData
-                    ? std::string(text::buttons::needFlightData)
-                    : "Complete story objective");
         }
     }
     out << "</div>";
@@ -5369,6 +5392,7 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
     }
 
     result.contentMarkup = buildGamePanelMarkup(context, result.modals);
+    result.runtime.sceneTransitionActive = context.sceneFadeToBlack > 0.0;
     if (context.sceneFadeToBlack > 0.0) {
         std::ostringstream opacity;
         opacity << std::fixed << std::setprecision(3)

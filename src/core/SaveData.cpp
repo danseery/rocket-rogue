@@ -29,6 +29,15 @@ inline constexpr std::string_view hullRank = "launchHullRank";
 inline constexpr std::string_view trainingStage = "launchTrainingStage";
 } // namespace launchSaveField
 
+namespace surfaceDepthSaveField {
+inline constexpr std::string_view surveyArrayRank = "surfaceSurveyArrayRank";
+inline constexpr std::string_view boreSystemRank = "surfaceBoreSystemRank";
+inline constexpr std::string_view rigFuelLoopRank = "rigFuelLoopRank";
+inline constexpr std::string_view surveyPurchasedThisRefit = "surfaceSurveyPurchasedThisRefit";
+inline constexpr std::string_view borePurchasedThisRefit = "surfaceBorePurchasedThisRefit";
+inline constexpr std::string_view fuelLoopPurchasedThisRefit = "rigFuelLoopPurchasedThisRefit";
+} // namespace surfaceDepthSaveField
+
 std::vector<std::string> split(std::string_view text, char delimiter)
 {
     std::vector<std::string> values;
@@ -995,6 +1004,89 @@ std::vector<MiningSiteProgress> parseMiningSites(std::string_view text)
         sites.push_back(std::move(site));
     }
     return sites;
+}
+
+std::string serializePostSolarSystemRosters(const std::vector<PostSolarSystemRoster>& rosters)
+{
+    std::ostringstream out;
+    for (std::size_t rosterIndex = 0; rosterIndex < rosters.size(); ++rosterIndex) {
+        if (rosterIndex > 0) out << save_schema::crewRecordDelimiter;
+        const PostSolarSystemRoster& roster = rosters[rosterIndex];
+        std::ostringstream bodies;
+        for (std::size_t bodyIndex = 0; bodyIndex < roster.bodies.size(); ++bodyIndex) {
+            if (bodyIndex > 0) bodies << '|';
+            const PostSolarBodyProfile& body = roster.bodies[bodyIndex];
+            bodies << encodeSaveBlob(body.id) << ','
+                << encodeSaveBlob(body.name) << ','
+                << encodeSaveBlob(body.parentId) << ','
+                << static_cast<int>(body.kind) << ','
+                << body.visualArchetype << ','
+                << encodeSaveBlob(body.surfaceGeologyId) << ','
+                << encodeSaveBlob(body.deepGeologyId) << ','
+                << static_cast<int>(body.hazardBias) << ','
+                << body.seed << ','
+                << (body.mineable ? 1 : 0);
+        }
+        out << encodeSaveBlob(roster.systemId) << save_schema::crewFieldDelimiter
+            << roster.generatorVersion << save_schema::crewFieldDelimiter
+            << roster.seed << save_schema::crewFieldDelimiter
+            << encodeSaveBlob(roster.primaryBodyId) << save_schema::crewFieldDelimiter
+            << encodeSaveBlob(bodies.str());
+    }
+    return out.str();
+}
+
+std::vector<PostSolarSystemRoster> parsePostSolarSystemRosters(std::string_view text)
+{
+    std::vector<PostSolarSystemRoster> rosters;
+    for (const std::string& record : split(text, save_schema::crewRecordDelimiter)) {
+        const std::vector<std::string> fields = split(record, save_schema::crewFieldDelimiter);
+        if (fields.size() < 5 || fields[0].empty()) continue;
+        PostSolarSystemRoster roster;
+        roster.systemId = decodeSaveBlob(fields[0]);
+        roster.generatorVersion = std::max(1, parseInt(fields[1], 1));
+        roster.seed = parseU64(fields[2], 0);
+        roster.primaryBodyId = decodeSaveBlob(fields[3]);
+        for (const std::string& bodyRecord : split(decodeSaveBlob(fields[4]), '|')) {
+            const std::vector<std::string> bodyFields = split(bodyRecord, ',');
+            if (bodyFields.size() < 10 || bodyFields[0].empty()) continue;
+            PostSolarBodyProfile body;
+            body.id = decodeSaveBlob(bodyFields[0]);
+            body.name = decodeSaveBlob(bodyFields[1]);
+            body.parentId = decodeSaveBlob(bodyFields[2]);
+            body.kind = static_cast<PostSolarBodyKind>(std::clamp(parseInt(bodyFields[3], 0), 0, 3));
+            body.visualArchetype = std::clamp(parseInt(bodyFields[4], 1), 1, 9);
+            body.surfaceGeologyId = decodeSaveBlob(bodyFields[5]);
+            body.deepGeologyId = decodeSaveBlob(bodyFields[6]);
+            body.hazardBias = static_cast<MiningElementalAffinity>(std::clamp(parseInt(bodyFields[7], 0), 0, 4));
+            body.seed = parseU64(bodyFields[8], 0);
+            body.mineable = parseInt(bodyFields[9], 1) != 0;
+            roster.bodies.push_back(std::move(body));
+        }
+        rosters.push_back(std::move(roster));
+    }
+    return rosters;
+}
+
+bool parsePostSolarSaveField(SaveData& save, std::string_view key, std::string_view value)
+{
+    if (key == save_schema::field::postSolarSystemRosters) {
+        save.postSolarSystemRosters = parsePostSolarSystemRosters(value);
+    } else if (key == save_schema::field::surfacePostSolarSystem) {
+        save.surfaceExpedition.postSolarSystemId = std::string(value);
+    } else if (key == save_schema::field::surfaceBody) {
+        save.surfaceExpedition.bodyId = std::string(value);
+    } else if (key == save_schema::field::miningPostSolarContext) {
+        const std::vector<std::string> fields = split(value, '^');
+        if (!fields.empty()) save.mining.postSolarSystemId = decodeSaveBlob(fields[0]);
+        if (fields.size() > 1) save.mining.bodyId = decodeSaveBlob(fields[1]);
+        if (fields.size() > 2) save.mining.surfaceGeologyId = decodeSaveBlob(fields[2]);
+        if (fields.size() > 3) save.mining.deepGeologyId = decodeSaveBlob(fields[3]);
+        if (fields.size() > 4) save.mining.geologySeed = parseU64(fields[4], 0);
+    } else {
+        return false;
+    }
+    return true;
 }
 
 std::string serializeMiningFirstClearProgress(
@@ -2638,6 +2730,7 @@ SaveData captureSaveData(const GameState& state)
     save.destinationIndex = state.run.destinationIndex;
     save.frontierReadiness = state.run.frontierReadiness;
     save.refitEntitled = state.run.refitEntitled;
+    save.surfaceRefitPurchases = state.run.surfaceRefitPurchases;
     save.shipDamage = state.run.shipDamage;
     save.frameId = state.run.frameId;
     save.offerRerollsThisExpedition = state.run.offerRerollsThisExpedition;
@@ -2668,7 +2761,10 @@ SaveData captureSaveData(const GameState& state)
     save.chapter = state.meta.chapter;
     save.ark = state.meta.ark;
     save.navigation = state.meta.navigation;
+    save.postSolarSystemRosters = state.meta.postSolarSystemRosters;
     save.launchUpgrades = state.meta.launchUpgrades;
+    save.surfaceDepthUpgrades = state.meta.surfaceDepthUpgrades;
+    save.rigFuelLoop = state.meta.rigFuelLoop;
     save.launchLessons = state.meta.launchLessons;
     save.storyBriefing = state.storyBriefing;
     save.acknowledgedActivityBriefingIds = state.meta.acknowledgedActivityBriefingIds;
@@ -2755,6 +2851,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         static_cast<int>(catalog.destinations.size()) - 1);
     state.run.frontierReadiness = std::max(0, save.frontierReadiness);
     state.run.refitEntitled = save.refitEntitled;
+    state.run.surfaceRefitPurchases = save.surfaceRefitPurchases;
     state.run.shipDamage = std::clamp(save.shipDamage, 0, 100);
     state.run.frameId = catalog.findFrame(save.frameId) == nullptr ? catalog.frames.front().id : save.frameId;
     state.run.offerRerollsThisExpedition = std::max(0, save.offerRerollsThisExpedition);
@@ -2770,6 +2867,10 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         0.0,
         1.0);
     state.run.pendingTransferAssist = save.pendingTransferAssist;
+    state.run.pendingTransferAssist.exitCourseOffset = std::clamp(
+        state.run.pendingTransferAssist.exitCourseOffset,
+        -tuning::launch::pilotingCourseLost,
+        tuning::launch::pilotingCourseLost);
     state.run.routeTransit = save.routeTransit;
     if (!state.run.pendingTransferAssist.active() && save.jupiterSlingshotActive) {
         state.run.pendingTransferAssist = {
@@ -2851,7 +2952,9 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         // Version-13 saves can contain the retired rig-to-ship tether. Keep
         // parsing its field for compatibility, then discard it unconditionally.
         mining.rigTethered = false;
-        if (mining.rigDisabled || mining.rigDepthZone != mining.depthZone) {
+        // A disabled rig can be actively recovered by EVA, so only discard a
+        // line that cannot exist on the operator's current depth.
+        if (mining.rigDepthZone != mining.depthZone) {
             mining.operatorRigTethered = false;
         }
         if (mining.operatorMode != MiningOperatorMode::Jetpack || !mining.operatorPresent) {
@@ -3016,7 +3119,10 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.chapter = save.chapter;
     state.meta.ark = save.ark;
     state.meta.navigation = save.navigation;
+    state.meta.postSolarSystemRosters = save.postSolarSystemRosters;
     state.meta.launchUpgrades = save.launchUpgrades;
+    state.meta.surfaceDepthUpgrades = save.surfaceDepthUpgrades;
+    state.meta.rigFuelLoop = save.rigFuelLoop;
     state.meta.launchLessons = save.launchLessons;
     state.storyBriefing = save.storyBriefing;
     state.meta.campaignIntroductionAcknowledged = save.campaignIntroductionAcknowledged;
@@ -3163,6 +3269,9 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::destinationIndex, save.destinationIndex);
     writeField(out, save_schema::field::frontierReadiness, save.frontierReadiness);
     writeField(out, save_schema::field::refitEntitled, save.refitEntitled ? 1 : 0);
+    writeField(out, surfaceDepthSaveField::surveyPurchasedThisRefit, save.surfaceRefitPurchases.surveyArray ? 1 : 0);
+    writeField(out, surfaceDepthSaveField::borePurchasedThisRefit, save.surfaceRefitPurchases.boreSystem ? 1 : 0);
+    writeField(out, surfaceDepthSaveField::fuelLoopPurchasedThisRefit, save.surfaceRefitPurchases.rigFuelLoop ? 1 : 0);
     writeField(out, save_schema::field::shipDamage, save.shipDamage);
     writeField(out, save_schema::field::frameId, save.frameId);
     writeField(out, save_schema::field::offerRerolls, save.offerRerollsThisExpedition);
@@ -3182,6 +3291,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::pendingTransferAssistFuelSavings, save.pendingTransferAssist.fuelSavings);
     writeField(out, save_schema::field::pendingTransferAssistSpeedBoost, save.pendingTransferAssist.speedBoost);
     writeField(out, save_schema::field::pendingTransferAssistInstability, save.pendingTransferAssist.instabilityPenalty);
+    writeField(out, save_schema::field::pendingTransferAssistExitCourseOffset, save.pendingTransferAssist.exitCourseOffset);
     writeField(out, save_schema::field::routeTransitId, save.routeTransit.routeLinkId);
     writeField(out, save_schema::field::routeTransitOrigin, save.routeTransit.originDestinationId);
     writeField(out, save_schema::field::routeTransitTarget, save.routeTransit.targetDestinationId);
@@ -3200,10 +3310,14 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::navigationArkLocation, save.navigation.arkLocationId);
     writeField(out, save_schema::field::navigationSelectedDestination, save.navigation.selectedDestinationId);
     writeField(out, save_schema::field::navigationDiscoveredDestinations, join(save.navigation.discoveredDestinationIds, save_schema::listDelimiter));
+    writeField(out, save_schema::field::postSolarSystemRosters, serializePostSolarSystemRosters(save.postSolarSystemRosters));
     writeField(out, launchSaveField::fuelTanksRank, save.launchUpgrades.fuelTanks);
     writeField(out, launchSaveField::flightControlsRank, save.launchUpgrades.flightControls);
     writeField(out, launchSaveField::coolingRank, save.launchUpgrades.cooling);
     writeField(out, launchSaveField::hullRank, save.launchUpgrades.hull);
+    writeField(out, surfaceDepthSaveField::surveyArrayRank, save.surfaceDepthUpgrades.surveyArray);
+    writeField(out, surfaceDepthSaveField::boreSystemRank, save.surfaceDepthUpgrades.boreSystem);
+    writeField(out, surfaceDepthSaveField::rigFuelLoopRank, save.rigFuelLoop.rank);
     writeField(out, launchSaveField::trainingStage, launchTrainingStageToInt(save.launchLessons.stage));
     writeField(out, save_schema::field::storyPending, storyBriefingToInt(save.storyBriefing.pending));
     writeField(out, save_schema::field::storyContinuation, screenToInt(save.storyBriefing.continuation));
@@ -3229,6 +3343,8 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::arrivalRouteIntent, static_cast<int>(save.arrivalOps.incomingRoute.intent));
     writeField(out, save_schema::field::surfaceActive, save.surfaceExpedition.active ? 1 : 0);
     writeField(out, save_schema::field::surfaceDestination, save.surfaceExpedition.destinationId);
+    writeField(out, save_schema::field::surfacePostSolarSystem, save.surfaceExpedition.postSolarSystemId);
+    writeField(out, save_schema::field::surfaceBody, save.surfaceExpedition.bodyId);
     writeField(out, save_schema::field::surfaceSite, surfaceSiteProfileToInt(save.surfaceExpedition.siteProfile));
     writeField(out, save_schema::field::surfaceSupply, save.surfaceExpedition.supply);
     writeField(out, save_schema::field::surfaceRigFuel, save.surfaceExpedition.rigFuel);
@@ -3274,6 +3390,14 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningRewardLedger, serializeMiningRewardLedger(save.mining));
     writeField(out, save_schema::field::miningGateRuntime, serializeMiningGateRuntime(save.mining.gate));
     writeField(out, save_schema::field::miningDestination, save.mining.destinationId);
+    writeField(
+        out,
+        save_schema::field::miningPostSolarContext,
+        encodeSaveBlob(save.mining.postSolarSystemId) + "^" +
+            encodeSaveBlob(save.mining.bodyId) + "^" +
+            encodeSaveBlob(save.mining.surfaceGeologyId) + "^" +
+            encodeSaveBlob(save.mining.deepGeologyId) + "^" +
+            std::to_string(save.mining.geologySeed));
     writeField(out, save_schema::field::miningSite, surfaceSiteProfileToInt(save.mining.siteProfile));
     writeField(
         out,
@@ -3422,6 +3546,9 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
         if (parseDroneModuleSaveField(save, key, value)) {
             continue;
         }
+        if (parsePostSolarSaveField(save, key, value)) {
+            continue;
+        }
         if (key == save_schema::field::arrivalTransferFuelRemaining) {
             save.arrivalOps.transferFuelRemaining = parseDouble(value, save.arrivalOps.transferFuelRemaining);
             continue;
@@ -3484,6 +3611,34 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.surfaceExpedition.expeditionPackFuel = parseDouble(value, save.surfaceExpedition.expeditionPackFuel);
             continue;
         }
+        if (key == surfaceDepthSaveField::surveyArrayRank) {
+            save.surfaceDepthUpgrades.surveyArray = parseInt(
+                value,
+                save.surfaceDepthUpgrades.surveyArray);
+            continue;
+        }
+        if (key == surfaceDepthSaveField::boreSystemRank) {
+            save.surfaceDepthUpgrades.boreSystem = parseInt(
+                value,
+                save.surfaceDepthUpgrades.boreSystem);
+            continue;
+        }
+        if (key == surfaceDepthSaveField::rigFuelLoopRank) {
+            save.rigFuelLoop.rank = parseInt(value, save.rigFuelLoop.rank);
+            continue;
+        }
+        if (key == surfaceDepthSaveField::surveyPurchasedThisRefit) {
+            save.surfaceRefitPurchases.surveyArray = parseInt(value, 0) != 0;
+            continue;
+        }
+        if (key == surfaceDepthSaveField::borePurchasedThisRefit) {
+            save.surfaceRefitPurchases.boreSystem = parseInt(value, 0) != 0;
+            continue;
+        }
+        if (key == surfaceDepthSaveField::fuelLoopPurchasedThisRefit) {
+            save.surfaceRefitPurchases.rigFuelLoop = parseInt(value, 0) != 0;
+            continue;
+        }
 
         if (key == save_schema::field::version) {
             save.version = parseInt(value, save.version);
@@ -3535,6 +3690,11 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.pendingTransferAssist.speedBoost = std::max(0.0, parseDouble(value, 0.0));
         } else if (key == save_schema::field::pendingTransferAssistInstability) {
             save.pendingTransferAssist.instabilityPenalty = std::clamp(parseDouble(value, 0.0), 0.0, 1.0);
+        } else if (key == save_schema::field::pendingTransferAssistExitCourseOffset) {
+            save.pendingTransferAssist.exitCourseOffset = std::clamp(
+                parseDouble(value, 0.0),
+                -tuning::launch::pilotingCourseLost,
+                tuning::launch::pilotingCourseLost);
         } else if (key == save_schema::field::screen) {
             save.screen = screenFromInt(parseInt(value, screenToInt(save.screen)));
         } else if (key == save_schema::field::campaignMilestone) {

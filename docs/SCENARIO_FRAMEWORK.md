@@ -101,13 +101,13 @@ The Io mining-site configuration happens to use a Thermal biome, an inert Regoli
 
 Native RmlUi and WebAssembly use the same `assets/ui` templates and RCSS. A scenario action is emitted with semantic scenario-instance ID, step ID, and `ScenarioActionKind` attributes. Templates may choose layout and visual family, but must not infer a claim, route gate, or mandatory-modal behavior from text, a route name, or a markup query. See [RmlUi Template and Component System](RMLUI_TEMPLATE_COMPONENT_SYSTEM.md) for the shared template/focus rules.
 
-## Save version 13 boundary
+## Save version 14 boundary
 
-Save version 13 is the only accepted schema. It persists scenario instances, launch-upgrade ranks, lesson completion, mining-site provenance, protected-objective state, expedition fuel, Expedition XP, queued Level Up choices, persisted offers, Rig and Drone ranks, slot grafts, and selected synergies.
+Save version 14 is the only accepted schema. It persists scenario instances, launch-upgrade ranks, permanent Survey Array, Bore System, and Rig Fuel Loop ranks, per-chain purchases for an open Refit visit, lesson completion, mining-site provenance, protected-objective state, expedition fuel, Expedition XP, queued Level Up choices, persisted offers, Rig and Drone ranks, slot grafts, and selected synergies.
 
-Version 12 and older payloads are rejected before any field is restored. Continue remains disabled with `Progression update requires a new game.` The old file is left untouched until New Game confirmation replaces it; there is no partial scenario or progression migration.
+Version 13 and older payloads are rejected before any field is restored. Continue remains disabled with `Progression update requires a new game.` The old file is left untouched until New Game confirmation replaces it; there is no partial scenario or progression migration.
 
-`SaveSchema.h` and `SaveData.*` are authoritative for wire keys and defaults. Test strict version rejection plus v13 round trips for active Arrival, Surface, Mining, protected-objective, and open post-extraction Level Up states whenever scenario, site, cocoon, launch-progression, expedition-fuel, or Expedition XP fields change.
+`SaveSchema.h` and `SaveData.*` are authoritative for wire keys and defaults. Test strict version rejection plus v14 round trips for active Arrival, Surface, Mining, protected-objective, and open post-extraction Level Up states whenever scenario, site, cocoon, launch-progression, expedition-fuel, or Expedition XP fields change.
 
 ## Authoring checklist
 
@@ -118,7 +118,7 @@ Version 12 and older payloads are rejected before any field is restored. Continu
 5. Use a `MiningSiteDefinition` and `MiningCocoonDefinition` for protected mining rather than adding encounter flags to generic terrain or drone code.
 6. Route every player action through the scenario dispatcher and every result through a typed event.
 7. Render from `ScenarioObjectivePresentation` on native and web; keep semantic action and focus IDs stable.
-8. Add authored, procedural, event/claim, route, cocoon-layer, strict-v13 save, and native/web presentation coverage as applicable.
+8. Add authored, procedural, event/claim, route, cocoon-layer, strict-v14 save, and native/web presentation coverage as applicable.
 9. Run catalog validation, `node tools/check-scenario-boundaries.mjs`, relevant core/mining/UI tests, and `git diff --check`.
 
 If a proposed feature requires a code comparison against a campaign ID, destination ID, title, or reward copy outside content/migration code, stop and express the needed capability in a typed definition instead.

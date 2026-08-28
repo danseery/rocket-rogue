@@ -89,14 +89,20 @@ inline SurfaceScanRailPresentation surfaceScanRailPresentation(const GameState& 
         constexpr double degreesPerRadian = 57.2957795130823208768;
         return static_cast<int>(std::round(halfAngle * 2.0 * degreesPerRadian));
     };
-    presentation.objective = "LAYER +" + std::to_string(currentDepthOffset)
-        + " // GOLD "
-        + std::to_string(fullWindowDegrees(
-            tuning::research::surfaceScanPerfectWindowHalfAngleForDepth(currentDepthOffset)))
-        + " DEG // GREEN "
-        + std::to_string(fullWindowDegrees(
-            tuning::research::surfaceScanGoodWindowHalfAngleForDepth(currentDepthOffset)))
-        + " DEG // TIGHTENS WITH DEPTH.";
+    presentation.objective = scan.completed
+        ? "SURVEY SCAN LIMIT REACHED // LOG SURVEY TO CONTINUE."
+        : "LAYER +" + std::to_string(currentDepthOffset)
+            + " // GOLD "
+            + std::to_string(fullWindowDegrees(
+                tuning::research::surfaceScanPerfectWindowHalfAngleForDepth(currentDepthOffset)))
+            + " DEG // GREEN "
+            + std::to_string(fullWindowDegrees(
+                tuning::research::surfaceScanGoodWindowHalfAngleForDepth(currentDepthOffset)))
+            + " DEG // SURVEY LIMIT +"
+            + std::to_string(surfaceDepthRating(
+                state,
+                SurfaceDepthUpgradeKind::SurveyArray))
+            + ".";
     presentation.metrics = {{
         panelMetric("PULSES", std::to_string(scan.pulses) + "/" + std::to_string(std::max(1, scan.maxPulses))),
         panelMetric("FORECAST", scan.cargo > 0 ? "+" + std::to_string(scan.cargo) : "0"),
@@ -137,7 +143,10 @@ inline SurfaceScanRailPresentation surfaceScanRailPresentation(const GameState& 
     }
 
     presentation.actions.push_back(scan.completed
-        ? disabledPanelButton("PULSE COMPLETE")
+        ? panelActionButton(
+            "SURVEY SCAN LIMIT REACHED",
+            ui::actions::surfaceScanPulse,
+            "disabled scan-limit-action")
         : panelActionButton("PULSE SCANNER", ui::actions::surfaceScanPulse, "warn scan-pulse-action"));
     presentation.actions.push_back(panelActionButton(
         "LOG SURVEY",

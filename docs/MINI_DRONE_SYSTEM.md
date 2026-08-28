@@ -94,7 +94,7 @@ Dedicated Mining, Resource, Survey, Hazard, Attack, and Defense Support Drone sp
 
 ## Hazard Support Drone Ladder
 
-Hazard treatment is a spatial world task rather than an always-on rig buff. `MiningCell::revealed` is the hard targeting gate: line-of-sight discovery, the Mining Rig scanner, and Survey Support Drone pulses can make work eligible, while Hazard Support Drones never reveal terrain themselves. Revealed active cocoon-layer segments are valid across the active arena and outrank ordinary hazards; ordinary hazards remain limited to the `8.35`-cell operating radius and are ordered closest to the controlled actor, then by intensity and stable terrain index. Hidden later cocoon layers remain ineligible until their authored prerequisites are met.
+Hazard treatment is a spatial world task rather than an always-on rig buff. `MiningCell::revealed` is the hard targeting gate: line-of-sight discovery, the Mining Rig scanner, and Survey Support Drone pulses can make work eligible, while Hazard Support Drones never reveal terrain themselves. Revealed active cocoon-layer segments are valid across the active arena and outrank ordinary hazards; ordinary hazards remain limited to the `8.35`-cell operating radius when new work is acquired and are ordered closest to the controlled actor, then by intensity and stable terrain index. Once a target is reserved, moving the controlled actor outside that radius does not cancel treatment: the drone finishes that one conversion, returns to the moved actor, and only then acquires more work. Hidden later cocoon layers remain ineligible until their authored prerequisites are met.
 
 The Hazard squad assigns all equipped frames together. Drones split across distinct eligible targets when possible; surplus frames assist the highest-priority target from separate approach positions. Shared treatment advances once per target at an exact linear rate—two active workers provide `2x`, three provide `3x`—and all workers reacquire on the first update after conversion. Stable role indices retain identity and partial treatment ownership across saves.
 
@@ -110,6 +110,6 @@ Io is the current deliberate exception and tutorial: its soil never pays, it gen
 
 ## Future Hooks
 
-Save version 13 is an intentional fresh-start boundary. It persists permanent Drone ownership and slots separately from Transport-run XP, temporary Mk ranks, slot grafts, selected synergies, and active Mining-agent runtime. Version 12 and older saves are rejected without partial restoration or migration.
+Save version 14 is an intentional fresh-start boundary. It persists permanent Survey/Bore ranks and Drone ownership and slots separately from Transport-run XP, temporary Mk ranks, slot grafts, selected synergies, and active Mining-agent runtime. Version 13 and older saves are rejected without partial restoration or migration.
 
 Future passes can add branching per-unit upgrade trees, Support Drone repair, rarity-specific visual treatments, and more signature-specific effects. Keep enemy combat post-solar and swarm execution autonomous: the EVA sidearm protects the vulnerable operator, while buildcraft remains the source of sustained combat strength.

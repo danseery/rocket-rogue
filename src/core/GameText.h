@@ -231,7 +231,7 @@ inline constexpr std::string_view offline = "Mining Rig offline";
 
 inline std::string drawDetail(bool arkKnown)
 {
-    const std::string cadence = "Deploying costs 1 rig fuel. The rig consumes 1 fuel whenever its 15-second operating cycle completes while oxygen remains.";
+    const std::string cadence = "Deploying costs 1 rig fuel. The rig consumes 1 fuel whenever its operating cycle completes while oxygen remains.";
     if (arkKnown) {
         return cadence + " The return stage is reserved and cannot be spent by the rig.";
     }

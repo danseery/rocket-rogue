@@ -14,6 +14,7 @@ struct SaveData {
     int destinationIndex = 0;
     int frontierReadiness = 0;
     bool refitEntitled = false;
+    SurfaceRefitPurchaseState surfaceRefitPurchases;
     int shipDamage = 0;
     std::string frameId = "pathfinder";
     int offerRerollsThisExpedition = 0;
@@ -27,14 +28,17 @@ struct SaveData {
     double nextLaunchInstabilityPenalty = 0.0;
     PendingTransferAssist pendingTransferAssist;
     RouteTransitState routeTransit;
-    // Compatibility projection for pre-transfer-assist version-13 saves.
+    // Compatibility projection retained in the version-14 payload.
     bool jupiterSlingshotActive = false;
     Screen screen = Screen::Hangar;
     CampaignMilestone campaignMilestone = CampaignMilestone::SolarTutorial;
     GameChapter chapter = GameChapter::ProvingGround;
     ArkState ark;
     NavigationState navigation;
+    std::vector<PostSolarSystemRoster> postSolarSystemRosters;
     LaunchUpgradeRanks launchUpgrades;
+    SurfaceDepthUpgradeRanks surfaceDepthUpgrades;
+    RigFuelLoopRank rigFuelLoop;
     LaunchLessonState launchLessons;
     StoryBriefingState storyBriefing;
     std::vector<std::string> acknowledgedActivityBriefingIds;

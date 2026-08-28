@@ -4,7 +4,7 @@ The committed PNGs are 90s arcade-style proof-of-concept sprites derived from pr
 
 ## Registered runtime textures
 
-`scene-textures.json` declares all 68 runtime textures in this section. A missing or corrupt declared texture fails atlas verification before packaging.
+`scene-textures.json` declares all 77 runtime textures in this section. A missing or corrupt declared texture fails atlas verification before packaging.
 
 | Files | Dimensions | Runtime use |
 |---|---:|---|
@@ -25,6 +25,8 @@ The committed PNGs are 90s arcade-style proof-of-concept sprites derived from pr
 | `flight-instrument-cluster.png` | 1821x864 | Generated transparent cockpit bezel shared by Launch, Flyby, and Orbit; needles and text are rendered dynamically. |
 | `outer-system-planet-01.png` through `outer-system-planet-09.png` | 1254x1254 each | Post-solar destination variants selected by destination tier. |
 | `enemies/enemy-{archetype}-{theme}-sheet.png` | 2560x128 each | Thirty side-view enemy sheets; twenty horizontal 128x128 animation frames per sheet. |
+| `mining/mining-tiles-{destination}.png` | 1216x64 each | Eight destination geology sheets. Each stores nineteen internal 64x64 tile frames; the renderer selects them with source UVs so the entire sheet stays on one atlas page and in one terrain batch. |
+| `mining/mining-tiles-post-solar.png` | 1216x2048 | Thirty-two body-owned post-solar geology rows, each using the same nineteen-frame contract. A generated Aaru Vale, Khepri Prime, or Rift body selects its saved row and seed; Sol remains destination-authored. |
 
 ## Not registered by the renderer
 
@@ -52,9 +54,17 @@ tools/import-chroma-sprite.py source.png destination.png --preserve-layout
 
 When adding or replacing a runtime texture, update this inventory and `scene-textures.json`, regenerate the atlas, and verify both the web asynchronous loader and native PNG decoder paths.
 
+The original destination sheets are assembled from selected ImageGen source boards with
+`tools/assemble-mining-tiles.py`. The post-solar library and its 32 inspectable source
+sheets are built with `tools/build-post-solar-mining-library.py` from
+`mining/post-solar-geology-profiles.json`. Geology variants in each
+material family share pixel-identical opposing edge profiles, so any sibling variant
+tiles seamlessly against another. See `docs/MINING_TILE_PROMPT_MANIFEST.md` for the
+prompt contract and the fixed nineteen-frame order.
+
 ## Generated scene atlas
 
-`scene-textures.json` is the canonical offline atlas manifest for the 68 registered
+`scene-textures.json` is the canonical offline atlas manifest for the 77 registered
 scene textures. `tools/build-scene-atlas.py` splits the registered sprite sheets on their
 declared frame grids, preserves every source pixel, extrudes each frame edge by two
 pixels, and packs the frames into WebGL2-safe pages no larger than 4096 pixels on

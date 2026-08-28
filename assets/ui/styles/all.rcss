@@ -9633,6 +9633,20 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     padding: 16px;
     overflow: hidden;
 }
+/* Mixed permanent-refit boards must distribute the lane evenly. Launch
+   upgrades use a fixed 420px width only when they are the single tutorial
+   offer; otherwise that fixed track forces ordinary offers to absorb all
+   viewport compression. */
+#rr-panel.selection-family-panel .phase-board-refit .multi-refit-offers > .refit-offer-card {
+    flex: 1 1 0px;
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0px;
+    margin: 0px 10px 0px 0px;
+}
+#rr-panel.selection-family-panel .phase-board-refit .multi-refit-offers > .refit-offer-card:last-child {
+    margin-right: 0px;
+}
 #rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .pilot-card-top,
 #rr-panel.selection-family-panel .phase-board-refit .launch-upgrade-row .card-title {
     width: 100%;
@@ -10695,15 +10709,6 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 }
 .title-screen.is-launching .title-menu {
     pointer-events: none;
-}
-.title-screen.is-launching .title-action {
-    color: #ffd166;
-    background-color: #155d78;
-    border-width: 2px;
-    border-color: #ffffff;
-}
-.title-screen.is-launching .title-action .rr-button-label {
-    color: #ffd166;
 }
 @keyframes title-action-engage {
     from { transform: translateY(0px) scale(1.0); }

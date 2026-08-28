@@ -100,6 +100,27 @@ struct LaunchUpgradeRanks {
     int hull = 0;
 };
 
+enum class SurfaceDepthUpgradeKind {
+    None,
+    SurveyArray,
+    BoreSystem
+};
+
+struct SurfaceDepthUpgradeRanks {
+    int surveyArray = 0;
+    int boreSystem = 0;
+};
+
+struct RigFuelLoopRank {
+    int rank = 0;
+};
+
+struct SurfaceRefitPurchaseState {
+    bool surveyArray = false;
+    bool boreSystem = false;
+    bool rigFuelLoop = false;
+};
+
 enum class LaunchTrainingStage {
     FuelCalibration,
     FlightControlsCalibration,
@@ -333,6 +354,36 @@ enum class MiningElementalAffinity {
     Cryo,
     Radiation,
     Toxic
+};
+
+// Post-solar systems are navigation/story containers. Mineable presentation
+// belongs to the generated planet or moon selected inside that system.
+enum class PostSolarBodyKind {
+    Terrestrial,
+    Moon,
+    Giant,
+    MinorBody
+};
+
+struct PostSolarBodyProfile {
+    std::string id;
+    std::string name;
+    std::string parentId;
+    PostSolarBodyKind kind = PostSolarBodyKind::Terrestrial;
+    int visualArchetype = 1;
+    std::string surfaceGeologyId;
+    std::string deepGeologyId;
+    MiningElementalAffinity hazardBias = MiningElementalAffinity::None;
+    std::uint64_t seed = 0;
+    bool mineable = true;
+};
+
+struct PostSolarSystemRoster {
+    std::string systemId;
+    int generatorVersion = 1;
+    std::uint64_t seed = 0;
+    std::string primaryBodyId;
+    std::vector<PostSolarBodyProfile> bodies;
 };
 
 // Site-wide enemy art direction. Ordinary enemies use this cosmetically;
@@ -893,6 +944,9 @@ struct ShipModule {
     bool provingTier = false;
     LaunchUpgradeKind launchUpgradeKind = LaunchUpgradeKind::None;
     int launchUpgradeRank = 0;
+    SurfaceDepthUpgradeKind surfaceDepthUpgradeKind = SurfaceDepthUpgradeKind::None;
+    int surfaceDepthUpgradeRank = 0;
+    int rigFuelLoopRank = 0;
     // Retained so old saves can still resolve, equip, and display the module.
     // Compatibility modules must never enter newly generated Refit offers.
     bool compatibilityOnly = false;
@@ -1281,6 +1335,8 @@ struct MetaProgress {
     ArkState ark;
     NavigationState navigation;
     LaunchUpgradeRanks launchUpgrades;
+    SurfaceDepthUpgradeRanks surfaceDepthUpgrades;
+    RigFuelLoopRank rigFuelLoop;
     LaunchLessonState launchLessons;
     std::vector<std::string> unlockKeys;
     int blueprintProgress = 0;
@@ -1331,6 +1387,7 @@ struct MetaProgress {
     std::vector<std::string> memorials;
     std::vector<std::string> famousLaunches;
     std::vector<std::string> acknowledgedActivityBriefingIds;
+    std::vector<PostSolarSystemRoster> postSolarSystemRosters;
     bool campaignIntroductionAcknowledged = false;
     bool straylightDiscoveryAcknowledged = false;
 };
@@ -1420,6 +1477,10 @@ struct PendingTransferAssist {
     double fuelSavings = 0.0;
     double speedBoost = 0.0;
     double instabilityPenalty = 0.0;
+    // Signed launch-corridor position inherited from the completed assist.
+    // Negative and positive values preserve which side of center the ship
+    // occupied; the magnitude uses the Launch course-offset scale.
+    double exitCourseOffset = 0.0;
 
     bool active() const { return !definitionId.empty() && !targetDestinationId.empty(); }
 };
@@ -1463,6 +1524,8 @@ struct OrbitRunState {
 struct SurfaceExpeditionState {
     bool active = false;
     std::string destinationId;
+    std::string postSolarSystemId;
+    std::string bodyId;
     SurfaceSiteProfile siteProfile = SurfaceSiteProfile::SurveyBasin;
     int supply = 0;
     double rigFuel = 0.0;
@@ -1787,6 +1850,11 @@ struct MiningRunState {
     MaterialInventory richRewardsAwarded;
     bool progressionCreditEligible = true;
     std::string destinationId;
+    std::string postSolarSystemId;
+    std::string bodyId;
+    std::string surfaceGeologyId;
+    std::string deepGeologyId;
+    std::uint64_t geologySeed = 0;
     std::string scenarioId;
     std::string scenarioStepId;
     std::string miningSiteDefinitionId;
@@ -1915,6 +1983,7 @@ struct RunState {
     int destinationIndex = 0;
     int frontierReadiness = 0;
     bool refitEntitled = false;
+    SurfaceRefitPurchaseState surfaceRefitPurchases;
     int shipDamage = 0;
     double credits = 0.0;
     std::string frameId;
@@ -1964,6 +2033,7 @@ struct GameState {
 std::string_view toString(SlotType slot);
 std::string_view toString(RefitTrack track);
 std::string_view toString(LaunchUpgradeKind kind);
+std::string_view toString(SurfaceDepthUpgradeKind kind);
 std::string_view toString(LaunchTrainingStage stage);
 std::string_view toString(LaunchMissionKind kind);
 std::string_view toString(Rarity rarity);

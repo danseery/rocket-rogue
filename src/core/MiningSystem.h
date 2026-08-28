@@ -115,6 +115,10 @@ MiningSwarmPreview miningSwarmPreview(
 MiningCapabilityProfile miningCapabilityProfile(const GameState& state, const ContentCatalog& catalog);
 bool miningCapabilityReadyForGate(const MiningCapabilityProfile& profile, const MiningGateDefinition& gate);
 std::string miningGateCapabilityStatus(const MiningCapabilityProfile& profile, const MiningGateDefinition& gate);
+double miningRigFuelCycleSeconds(const GameState& state);
+double miningRigFuelConsumptionPerSecond(
+    const GameState& state,
+    double loadMultiplier = 1.0);
 int miningCarriedCargo(const MiningRunState& mining);
 int miningBankedCargo(const MiningRunState& mining);
 bool miningAtReturnZone(const MiningRunState& mining);

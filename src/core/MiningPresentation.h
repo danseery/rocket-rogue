@@ -291,6 +291,9 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
     const MiningArenaRules arenaRules = resolveMiningArenaRules({arena.act, arena.difficulty, arena.seed});
     const bool arkKnown = arkDiscovered(state);
     const MiningLoadStats load = miningLoadStats(state, catalog);
+    const double fuelCycleSeconds = miningRigFuelCycleSeconds(state);
+    const double effectiveFuelCycleSeconds = fuelCycleSeconds /
+        std::max(1.0, load.fuelConsumptionMultiplier);
     const bool evaActive =
         mining.operatorMode == MiningOperatorMode::Jetpack &&
         mining.operatorPresent;
@@ -331,6 +334,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         // value fractional for simulation compatibility, but the compact HUD
         // must not overflow its tile with unnecessary decimal places.
         panelMetric(text::fuel::reserveLabel(arkKnown), display::fixed(surface.rigFuel, 0) + "/" + display::fixed(std::max(0.0, surface.rigFuelCapacity), 0)),
+        panelMetric("Fuel cadence", "1 / " + display::fixed(effectiveFuelCycleSeconds, 1) + "s"),
         panelMetric("Next fuel", miningFuelCycleValue(mining.fuelCycleProgress)),
         panelMetric(text::labels::depth, std::to_string(mining.depthZone)),
         panelMetric("Arena", std::string(miningActName(arena.act)) + " L" + std::to_string(arena.difficulty)),
@@ -422,7 +426,18 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         detailPresentationRow("Expedition rig pack", display::fixed(surface.expeditionPackFuel, 1)),
         detailPresentationRow(text::labels::returnStage, std::string("RESERVED")),
         detailPresentationRow("Fuel spent this dig", std::to_string(mining.fuelSpent)),
-        detailPresentationRow("Fuel draw", text::fuel::drawDetail(arkKnown) + " Consumption rate " + display::fixed(load.fuelConsumptionMultiplier, 2) + "x."),
+        detailPresentationRow(
+            "Rig Fuel Loop",
+            (installedRigFuelLoopRank(state) > 0
+                 ? "RANK " + std::to_string(installedRigFuelLoopRank(state))
+                 : std::string("BASE")) +
+                " / 1 fuel / " + display::fixed(fuelCycleSeconds, 0) + "s"),
+        detailPresentationRow(
+            "Fuel draw",
+            text::fuel::drawDetail(arkKnown) + " Load " +
+                display::fixed(load.fuelConsumptionMultiplier, 2) +
+                "x / effective 1 fuel per " +
+                display::fixed(effectiveFuelCycleSeconds, 1) + "s."),
         detailPresentationRow("Load burden", display::fixed(load.currentLoad, 1) + " load; " + display::fixed(load.freeBuffer, 1) + " free carry; speed " + display::percent(load.speedMultiplier)),
         detailPresentationRow("Support Drone loadout", miningDroneSummary(drones)),
         detailPresentationRow("Build signature", drones.signatureName.empty() ? "None" : drones.signatureName),

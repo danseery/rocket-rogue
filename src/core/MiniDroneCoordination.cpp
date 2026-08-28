@@ -634,7 +634,7 @@ void HazardDroneCoordinator::synchronizeAssignments()
     });
     for (MiningMiniDroneAgent* agent : hazardDrones_) {
         if (!agentAnchor(mining_, *agent).valid ||
-            !isEligibleTarget(*agent, agent->targetCellX, agent->targetCellY)) {
+            !isCandidateCell(*agent, agent->targetCellX, agent->targetCellY)) {
             clearAssignment(*agent);
             continue;
         }
@@ -647,7 +647,7 @@ bool HazardDroneCoordinator::hasAssignment(const MiningMiniDroneAgent& agent) co
 {
     if (agent.role != MiniDroneRole::Hazard ||
         !agentAnchor(mining_, agent).valid ||
-        !isEligibleTarget(agent, agent.targetCellX, agent.targetCellY)) {
+        !isCandidateCell(agent, agent.targetCellX, agent.targetCellY)) {
         return false;
     }
     const auto reservation = reservations_.find(cellKey(agent.targetCellX, agent.targetCellY));
@@ -740,7 +740,9 @@ void HazardDroneCoordinator::assignAvailableDrones()
     // first duplicate in loadout order from completing a tile and repeatedly
     // taking the next reservation before its wingmate gets a job.
     for (MiningMiniDroneAgent* agent : hazardDrones_) {
-        if (agent->actionCooldownSeconds <= 0.0 && !hasAssignment(*agent)) {
+        if (agent->actionCooldownSeconds <= 0.0 &&
+            !agent->finishTargetBeforeReturn &&
+            !hasAssignment(*agent)) {
             if (!acquireAssignment(*agent)) {
                 acquireAssistAssignment(*agent);
             }

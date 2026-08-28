@@ -60,6 +60,10 @@ constexpr float kMiningScannerFadeSeconds = 0.30F;
 constexpr float kMiningScannerWavefrontCells = 0.65F;
 constexpr float kMiningPickupTextLifetimeSeconds = 2.0F;
 constexpr float kMiningPickupTextScale = 2.25F;
+constexpr float kMiningOreGlintMinIntervalSeconds = 2.0F;
+constexpr float kMiningOreGlintMaxIntervalSeconds = 10.0F;
+constexpr float kMiningOreGlintActiveSeconds = 0.31F;
+constexpr float kMiningOreGlintWaveSpreadSeconds = 0.36F;
 // Core gameplay permits four base Dig steps plus at most two depth-envelope
 // bonuses. Treat renderer snapshots as untrusted at this boundary: a damaged
 // native value must never control a packet-growth loop.
@@ -431,13 +435,83 @@ Color miningHazardColor(int affinity)
     case MiningElementalAffinity::Cryo:
         return {0.24F, 0.78F, 1.0F, 1.0F};
     case MiningElementalAffinity::Toxic:
-        return {0.34F, 1.0F, 0.42F, 1.0F};
+        return {0.82F, 0.24F, 1.0F, 1.0F};
     case MiningElementalAffinity::Radiation:
-        return {0.94F, 0.28F, 0.88F, 1.0F};
+        return {0.72F, 1.0F, 0.16F, 1.0F};
     case MiningElementalAffinity::None:
         break;
     }
     return {1.0F, 0.38F, 0.16F, 1.0F};
+}
+
+constexpr int kMiningTileFrameCount = 19;
+constexpr int kPostSolarMiningGeologyRows = 32;
+
+TextureId miningTileTexture(int destinationTier) noexcept
+{
+    switch (destinationTier) {
+    case 1: return TextureId::MiningTilesMoon;
+    case 2: return TextureId::MiningTilesMars;
+    case 3: return TextureId::MiningTilesIo;
+    case 4: return TextureId::MiningTilesSaturn;
+    case 5: return TextureId::MiningTilesUranus;
+    case 6: return TextureId::MiningTilesNeptune;
+    case 7: return TextureId::MiningTilesKhepriPrime;
+    default:
+        return destinationTier >= 8 ? TextureId::MiningTilesRiftBelt : TextureId::None;
+    }
+}
+
+int miningTileVariant(
+    int x,
+    int y,
+    int material,
+    int destinationTier,
+    std::uint64_t geologySeed) noexcept
+{
+    std::uint32_t hash = static_cast<std::uint32_t>(x) * 0x9e3779b9U;
+    hash ^= static_cast<std::uint32_t>(y) * 0x85ebca6bU;
+    hash ^= static_cast<std::uint32_t>(material) * 0x27d4eb2fU;
+    hash ^= static_cast<std::uint32_t>(destinationTier) * 0xc2b2ae35U;
+    hash ^= static_cast<std::uint32_t>(geologySeed);
+    hash ^= static_cast<std::uint32_t>(geologySeed >> 32U) * 0x165667b1U;
+    hash ^= hash >> 16U;
+    return static_cast<int>(hash % 3U);
+}
+
+int miningTileFrame(
+    MiningCellMaterial material,
+    MiningElementalAffinity affinity,
+    int x,
+    int y,
+    int destinationTier,
+    std::uint64_t geologySeed) noexcept
+{
+    const int variant = miningTileVariant(
+        x, y, static_cast<int>(material), destinationTier, geologySeed);
+    switch (material) {
+    case MiningCellMaterial::Regolith: return variant;
+    case MiningCellMaterial::HardRock: return 3 + variant;
+    case MiningCellMaterial::Bedrock: return 6 + variant;
+    case MiningCellMaterial::CommonOre: return 9;
+    case MiningCellMaterial::RareOre: return 10;
+    case MiningCellMaterial::ExoticVein: return 11;
+    case MiningCellMaterial::ArtifactCache: return 12;
+    case MiningCellMaterial::FuelPocket: return 13;
+    case MiningCellMaterial::OxygenPocket: return 14;
+    case MiningCellMaterial::HazardPocket:
+        switch (affinity) {
+        case MiningElementalAffinity::Thermal: return 15;
+        case MiningElementalAffinity::Cryo: return 16;
+        case MiningElementalAffinity::Radiation: return 17;
+        case MiningElementalAffinity::Toxic: return 18;
+        case MiningElementalAffinity::None: return 15;
+        }
+        break;
+    case MiningCellMaterial::Empty:
+        break;
+    }
+    return 0;
 }
 
 Color miningMaterialColor(int material, float integrity, bool revealed, bool hazard, int hazardAffinity, int destinationTier, float light)
@@ -944,6 +1018,9 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
         previousMiningActive_ = false;
         previousMiningWidth_ = 0;
         previousMiningHeight_ = 0;
+        miningOreGlintWaveStartedAt_ = -1.0;
+        miningOreGlintNextWaveAt_ = -1.0;
+        miningOreGlintWaveSequence_ = 0;
         currentMiningMaterials_.clear();
         previousMiningMaterials_.clear();
         previousMiningStowedInventory_ = {};
@@ -1458,6 +1535,51 @@ void SceneComposer::drawMiningOreSparkleColor(float cx, float cy, float unitSize
     drawLine(cx, cy - length, cx, cy + length, {glow.r, glow.g, glow.b, alpha}, 1.4F);
 }
 
+void SceneComposer::updateMiningOreGlintWave(
+    double animationTime,
+    int width,
+    int height,
+    bool restart)
+{
+    const double now = std::max(0.0, animationTime);
+    const auto intervalForSequence = [&](std::uint32_t sequence) {
+        const int boundedSequence = static_cast<int>(sequence % 1'000'003U);
+        const float noise = miningCellNoise(
+            width + boundedSequence * 97,
+            height + boundedSequence * 53,
+            941);
+        return static_cast<double>(
+            kMiningOreGlintMinIntervalSeconds +
+            noise * (kMiningOreGlintMaxIntervalSeconds - kMiningOreGlintMinIntervalSeconds));
+    };
+
+    if (restart || miningOreGlintWaveStartedAt_ < 0.0 ||
+        miningOreGlintNextWaveAt_ <= miningOreGlintWaveStartedAt_ ||
+        now < miningOreGlintWaveStartedAt_) {
+        miningOreGlintWaveSequence_ = 0;
+        miningOreGlintWaveStartedAt_ = now;
+        miningOreGlintNextWaveAt_ = now + intervalForSequence(miningOreGlintWaveSequence_);
+        return;
+    }
+
+    // Advance from scheduled wave time rather than the current frame so a
+    // hitch cannot permanently shift the cadence. The guard is only for a
+    // malformed or extremely stale presentation timestamp.
+    int catchUpWaves = 0;
+    while (now >= miningOreGlintNextWaveAt_ && catchUpWaves < 64) {
+        miningOreGlintWaveStartedAt_ = miningOreGlintNextWaveAt_;
+        ++miningOreGlintWaveSequence_;
+        miningOreGlintNextWaveAt_ =
+            miningOreGlintWaveStartedAt_ + intervalForSequence(miningOreGlintWaveSequence_);
+        ++catchUpWaves;
+    }
+    if (catchUpWaves == 64 && now >= miningOreGlintNextWaveAt_) {
+        miningOreGlintWaveStartedAt_ = now;
+        ++miningOreGlintWaveSequence_;
+        miningOreGlintNextWaveAt_ = now + intervalForSequence(miningOreGlintWaveSequence_);
+    }
+}
+
 void SceneComposer::drawMiningPickupText(float cx, float cy, float unitSize, MiningPickupKind kind, int amount, float age)
 {
     if (amount <= 0 || age < 0.0F || age > kMiningPickupTextLifetimeSeconds) {
@@ -1950,7 +2072,11 @@ void SceneComposer::appendLine(std::vector<SceneVertex>& vertices, float ax, flo
 
 bool SceneComposer::textureReady(int assetIndex) const noexcept
 {
-    const TextureId texture = textureForAsset(assetIndex);
+    return textureReady(textureForAsset(assetIndex));
+}
+
+bool SceneComposer::textureReady(TextureId texture) const noexcept
+{
     const std::size_t index = textureIndex(texture);
     if (texture == TextureId::None || index >= textureReady_.size()) {
         return false;
@@ -2553,6 +2679,14 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     const std::size_t renderedCellCount = std::min(
         snapshot.miningCells.size(),
         static_cast<std::size_t>(std::max(0, cellCount)));
+    const bool restartOreGlintWave = !previousMiningActive_ ||
+        previousMiningWidth_ != snapshot.miningWidth ||
+        previousMiningHeight_ != snapshot.miningHeight;
+    updateMiningOreGlintWave(
+        snapshot.animationTime,
+        snapshot.miningWidth,
+        snapshot.miningHeight,
+        restartOreGlintWave);
     const bool scannerPulseStarted = scannerPulse > 0.0F && previousMiningScannerPulse_ <= 0.0F;
     if (scannerPulseStarted) {
         miningPulseNewlyRevealedCells_.assign(renderedCellCount, 0U);
@@ -2604,7 +2738,13 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             miningPickupBursts_.erase(miningPickupBursts_.begin(), miningPickupBursts_.begin() + static_cast<std::ptrdiff_t>(miningPickupBursts_.size() - 44U));
         }
     };
-    if (snapshot.miningPickupEventSequence < lastMiningPickupEventSequence_) {
+    // Pickup history lives in the mining run so saves and short presentation
+    // detours retain authoritative state. On first entry or re-entry, adopt
+    // the current sequence as the baseline instead of replaying that history
+    // as fresh +1 text after a level-up screen.
+    if (!previousMiningActive_) {
+        lastMiningPickupEventSequence_ = snapshot.miningPickupEventSequence;
+    } else if (snapshot.miningPickupEventSequence < lastMiningPickupEventSequence_) {
         lastMiningPickupEventSequence_ = 0;
     }
     for (const MiningPickupEvent& event : snapshot.miningPickupEvents) {
@@ -2676,6 +2816,15 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         : (snapshot.destinationTier == 1
                   ? Color {0.13F, 0.14F, 0.15F, 0.68F}
                   : Color {0.095F, 0.12F, 0.135F, 0.68F});
+    const bool postSolarTiles = snapshot.miningPostSolarGeologyRow >= 0
+        && snapshot.miningPostSolarGeologyRow < kPostSolarMiningGeologyRows;
+    const TextureId tileTexture = postSolarTiles
+        ? TextureId::MiningTilesPostSolarLibrary
+        : miningTileTexture(snapshot.destinationTier);
+    const SceneAtlasUvRect tileAtlas = textureReady(tileTexture)
+        ? mapSceneAtlasUvRect(tileTexture, 0.0F, 0.0F, 1.0F, 1.0F)
+        : SceneAtlasUvRect {};
+    const bool texturedTiles = tileAtlas.valid;
 
     // The base terrain is exact-frame presentation data: cell colors include
     // moving rig light and scanner light. Cache it only while every input to
@@ -2685,12 +2834,15 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         snapshot.miningWidth,
         snapshot.miningHeight,
         snapshot.destinationTier,
+        snapshot.miningPostSolarGeologyRow,
+        snapshot.miningGeologySeed,
         sceneAspect_,
         activeActorX,
         activeActorY,
         scannerPulse,
         scannerRevealRadiusCells,
-        scannerSweepRadiusCells
+        scannerSweepRadiusCells,
+        texturedTiles
     };
     bool terrainCacheMatches = miningTerrainCacheValid_
         && terrainKey == miningTerrainPresentationKey_
@@ -2730,15 +2882,21 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         miningTerrainScannerStates_.resize(miningSurveyDrones_.size());
         packedMiningTerrainInstances_.clear();
         packedMiningTerrainInstances_.reserve(renderedCellCount + 1U);
-        const auto appendTerrainRect = [&](float cx, float cy, float width, float height, Color color) {
+        miningBaseTerrainTexture_ = texturedTiles ? tileTexture : TextureId::None;
+        miningBaseTerrainAtlasPage_ = texturedTiles ? tileAtlas.page : kNoSceneAtlasPage;
+        const auto appendTerrainRect = [&](float cx, float cy, float width, float height, Color color,
+                                           float u0 = 0.0F, float v0 = 0.0F,
+                                           float u1 = 1.0F, float v1 = 1.0F,
+                                           bool textured = false) {
             packedMiningTerrainInstances_.push_back(packSceneInstance({
                 cx, cy,
                 width * 0.5F, 0.0F,
                 0.0F, height * 0.5F,
                 color,
-                0.0F, 0.0F, 1.0F, 1.0F,
+                u0, v0, u1, v1,
                 SceneInstanceShape::Rectangle,
-                4
+                4,
+                textured
             }));
         };
         appendTerrainRect(
@@ -2798,6 +2956,48 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             const float scannerDistanceCells = nearestScannerDistanceCells(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5);
             float localLight = std::clamp(1.0F - mainDistanceCells / kMiningLightRadiusCells, 0.0F, 1.0F) * 0.20F;
             localLight = std::max(localLight, scannerSweepBoost(scannerDistanceCells, 0.85F) * 0.032F);
+            if (texturedTiles) {
+                const float integrity = static_cast<float>(cellIntegrity(cell));
+                const float breakGlow = 1.0F + (1.0F - integrity) * 0.14F;
+                const float brightness = std::min(1.0F, (0.66F + localLight * 0.58F) * breakGlow);
+                const int frame = miningTileFrame(
+                    cell.material,
+                    cell.hazardAffinity,
+                    x,
+                    y,
+                    snapshot.destinationTier,
+                    snapshot.miningGeologySeed);
+                const float sourceU0 = static_cast<float>(frame) / static_cast<float>(kMiningTileFrameCount);
+                const float sourceU1 = static_cast<float>(frame + 1) / static_cast<float>(kMiningTileFrameCount);
+                const float sourceV0 = postSolarTiles
+                    ? static_cast<float>(snapshot.miningPostSolarGeologyRow) /
+                        static_cast<float>(kPostSolarMiningGeologyRows)
+                    : 0.0F;
+                const float sourceV1 = postSolarTiles
+                    ? static_cast<float>(snapshot.miningPostSolarGeologyRow + 1) /
+                        static_cast<float>(kPostSolarMiningGeologyRows)
+                    : 1.0F;
+                const SceneAtlasUvRect atlasUv = mapSceneAtlasUvRect(
+                    tileTexture,
+                    sourceU0,
+                    sourceV0,
+                    sourceU1,
+                    sourceV1);
+                if (atlasUv.valid && atlasUv.page == tileAtlas.page) {
+                    appendTerrainRect(
+                        center.x,
+                        center.y,
+                        cellW * 1.002F,
+                        cellH * 1.002F,
+                        {brightness, brightness, brightness, revealFraction},
+                        atlasUv.u0,
+                        atlasUv.v0,
+                        atlasUv.u1,
+                        atlasUv.v1,
+                        true);
+                    continue;
+                }
+            }
             Color color = miningMaterialColor(
                 material,
                 static_cast<float>(cellIntegrity(cell)),
@@ -2926,7 +3126,10 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
 
     submitMiningTerrainInstanceRange(
         miningBackdropFogInstanceCount_,
-        miningBaseTerrainInstanceCount_);
+        miningBaseTerrainInstanceCount_,
+        miningBaseTerrainTexture_,
+        miningBaseTerrainAtlasPage_,
+        miningBaseTerrainTexture_ == TextureId::None ? PipelineClass::Solid : PipelineClass::Textured);
 
     const float gatePulse = 0.55F + 0.35F * std::sin(static_cast<float>(snapshot.animationTime) * 4.2F);
     for (std::size_t index = 0; index < renderedCellCount; ++index) {
@@ -3035,6 +3238,22 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         }
     }
 
+    float oreGlintAnchorPhase = 0.0F;
+    bool oreGlintAnchorFound = false;
+    for (std::size_t index = 0; index < renderedCellCount; ++index) {
+        const MiningCell& cell = snapshot.miningCells[index];
+        if (!cell.revealed || !miningRewardMaterial(static_cast<int>(cell.material))) {
+            continue;
+        }
+        const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
+        const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
+        oreGlintAnchorPhase = std::fmod(
+            static_cast<float>(x) * 0.17F + static_cast<float>(y) * 0.11F,
+            1.0F);
+        oreGlintAnchorFound = true;
+        break;
+    }
+
     std::vector<SceneVertex>& oreSparkVertices = scratchVertices(snapshot.miningCells.size() * 32U);
     for (std::size_t index = 0; index < renderedCellCount; ++index) {
         const MiningCell& cell = snapshot.miningCells[index];
@@ -3058,15 +3277,33 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         if (!rewardCell && !scannerPing && !hazardCell) {
             continue;
         }
-        const float phase = std::fmod(
-            static_cast<float>(snapshot.animationTime) * 1.35F + static_cast<float>(x) * 0.17F + static_cast<float>(y) * 0.11F,
-            1.0F);
-        const float activeWindow = scannerPing || hazardCell ? 0.72F : 0.42F;
-        if (phase > activeWindow) {
-            continue;
+        float flare = 0.0F;
+        if (rewardCell) {
+            const float coordinatePhase = std::fmod(
+                static_cast<float>(x) * 0.17F + static_cast<float>(y) * 0.11F -
+                    (oreGlintAnchorFound ? oreGlintAnchorPhase : 0.0F) + 1.0F,
+                1.0F);
+            const double localWaveAge =
+                snapshot.animationTime - miningOreGlintWaveStartedAt_ -
+                static_cast<double>(coordinatePhase * kMiningOreGlintWaveSpreadSeconds);
+            if (localWaveAge < 0.0 || localWaveAge > kMiningOreGlintActiveSeconds) {
+                continue;
+            }
+            flare = 1.0F - static_cast<float>(localWaveAge) / kMiningOreGlintActiveSeconds;
+        } else {
+            const float phase = std::fmod(
+                static_cast<float>(snapshot.animationTime) * 1.35F +
+                    static_cast<float>(x) * 0.17F + static_cast<float>(y) * 0.11F,
+                1.0F);
+            constexpr float activeWindow = 0.72F;
+            if (phase > activeWindow) {
+                continue;
+            }
+            flare = std::max(
+                1.0F - phase / activeWindow,
+                scannerPing ? scannerBoost : 0.0F);
         }
         const Color glow = rewardCell ? miningRewardGlowColor(material) : miningScannerPingColor(material, affinity);
-        const float flare = std::max(1.0F - phase / activeWindow, scannerPing ? scannerBoost : 0.0F);
         const float length = cellSize * ((rewardCell ? 0.34F : 0.24F) + flare * 0.44F);
         const float alpha = ((rewardCell ? 0.20F : 0.08F) + flare * (rewardCell ? 0.44F : 0.34F)) * revealFraction;
         appendLine(oreSparkVertices, center.x - length, center.y, center.x + length, center.y, {glow.r, glow.g, glow.b, alpha});
@@ -4896,12 +5133,24 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
     const float time = static_cast<float>(snapshot.animationTime);
     const int safeSteps = boundedSurfacePushMaxSteps(snapshot.surfacePushMaxSteps);
     const int displayedSteps = boundedSurfacePushSteps(snapshot.surfacePushSteps, safeSteps);
+    const int safeStartDepth = std::clamp(
+        snapshot.surfacePushStartDepth,
+        0,
+        kMaxSurfacePushRenderableSteps);
+    // Keep every Dig on the same absolute progression ladder. Using the
+    // currently reachable step count as the denominator made the starter
+    // 1/1 route look like a plunge from the surface to the planet's bottom.
+    const int visualDepthCapacity = std::max(
+        tuning::surfaceDepthProgression::maximumDepthRating,
+        safeStartDepth + safeSteps);
     // The destination catalog uses tiers 0..8. Bound renderer-only seed math
     // before multiplication so a damaged snapshot cannot reintroduce UB.
     const int visualTier = std::clamp(snapshot.destinationTier, 0, 8);
+    packet_.surfacePushRawStartDepth = snapshot.surfacePushStartDepth;
     packet_.surfacePushRawSteps = snapshot.surfacePushSteps;
     packet_.surfacePushRawMaxSteps = snapshot.surfacePushMaxSteps;
-    packet_.surfacePushInputClamped = snapshot.surfacePushSteps != displayedSteps
+    packet_.surfacePushInputClamped = snapshot.surfacePushStartDepth != safeStartDepth
+        || snapshot.surfacePushSteps != displayedSteps
         || snapshot.surfacePushMaxSteps != safeSteps;
     const float pressure = static_cast<float>(std::clamp(snapshot.surfacePushPressure, 0.0, 1.0));
     const float risk = static_cast<float>(std::clamp(snapshot.surfacePushCollapseRisk, 0.0, 1.0));
@@ -5002,7 +5251,12 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
         animatedSteps = static_cast<float>(std::max(0, displayedSteps - 1)) + easedCut;
         digBurst = 1.0F - std::clamp(age / 0.88F, 0.0F, 1.0F);
     }
-    const float progress = std::clamp(animatedSteps / static_cast<float>(safeSteps), 0.0F, 1.0F);
+    const float animatedDepth = static_cast<float>(safeStartDepth) + animatedSteps;
+    const float progress = std::clamp(
+        animatedDepth / static_cast<float>(visualDepthCapacity),
+        0.0F,
+        1.0F);
+    packet_.surfacePushVisualProgress = progress;
     const float probeY = shaftTop + (shaftBottom - shaftTop) * progress;
 
     const float excavatedHeight = std::max(0.035F, shaftMouthTop - probeY + 0.035F);
@@ -5012,7 +5266,11 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
         shaftWidth,
         excavatedHeight,
         {0.003F, 0.006F, 0.008F, 0.98F});
-    const int notchCount = displayedSteps * 3 + 2;
+    const int displayedDepth = std::clamp(
+        safeStartDepth + displayedSteps,
+        0,
+        visualDepthCapacity);
+    const int notchCount = displayedDepth * 3 + 2;
     for (int notch = 0; notch < notchCount; ++notch) {
         const float seed = miningCellNoise(notch, visualTier * 9, 227);
         const float notchProgress = std::clamp(
@@ -5037,11 +5295,11 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
         {1.0F, 0.72F, 0.22F, 0.58F},
         {0.28F, 0.76F, 0.95F, 0.22F}
     }};
-    const std::size_t rungCount = static_cast<std::size_t>(safeSteps) + 1U;
+    const std::size_t rungCount = static_cast<std::size_t>(visualDepthCapacity) + 1U;
     for (std::size_t rung = 0; rung < rungCount; ++rung) {
-        const float t = static_cast<float>(rung) / static_cast<float>(safeSteps);
+        const float t = static_cast<float>(rung) / static_cast<float>(visualDepthCapacity);
         const float y = shaftTop + (shaftBottom - shaftTop) * t;
-        const std::size_t colorIndex = rung <= static_cast<std::size_t>(displayedSteps) ? 0U : 1U;
+        const std::size_t colorIndex = rung <= static_cast<std::size_t>(displayedDepth) ? 0U : 1U;
         drawLine(shaftX - 0.22F, y, shaftX + 0.22F, y, rungColors[colorIndex], 1.5F);
     }
 
@@ -5101,7 +5359,12 @@ void SceneComposer::drawSurfacePush(const RenderSnapshot& snapshot)
 
     auto markerPosition = [&](int index, int depthOffset, float lateralScale) {
         const int clampedOffset = std::clamp(depthOffset, 0, safeSteps);
-        const float layerT = static_cast<float>(clampedOffset) / static_cast<float>(safeSteps);
+        const int absoluteDepth = std::clamp(
+            safeStartDepth + clampedOffset,
+            0,
+            visualDepthCapacity);
+        const float layerT = static_cast<float>(absoluteDepth) /
+            static_cast<float>(visualDepthCapacity);
         const float seed = miningCellNoise(index, visualTier + clampedOffset * 7, 151);
         const float y = shaftTop + (shaftBottom - shaftTop) * std::clamp(layerT + std::sin(static_cast<float>(snapshot.animationTime) * 0.18F + seed * kPi) * 0.006F, 0.0F, 1.0F);
         const float side = index % 2 == 0 ? -1.0F : 1.0F;
@@ -6320,7 +6583,10 @@ void SceneComposer::submitInstance(
 
 void SceneComposer::submitMiningTerrainInstanceRange(
     std::uint32_t firstInstance,
-    std::uint32_t instanceCount)
+    std::uint32_t instanceCount,
+    TextureId texture,
+    std::uint8_t atlasPage,
+    PipelineClass pipeline)
 {
     if (instanceCount == 0) {
         return;
@@ -6329,14 +6595,15 @@ void SceneComposer::submitMiningTerrainInstanceRange(
     SceneDraw draw;
     draw.firstVertex = 0;
     draw.vertexCount = 6;
-    draw.texture = TextureId::None;
+    draw.texture = texture;
     draw.blend = BlendMode::Alpha;
-    draw.pipeline = PipelineClass::Solid;
+    draw.pipeline = pipeline;
     draw.coordinateSpace = CoordinateSpace::World;
     draw.drawType = SceneDrawType::InstancedQuad;
     draw.firstInstance = firstInstance;
     draw.instanceCount = instanceCount;
     draw.instanceStream = SceneInstanceStream::MiningTerrain;
+    draw.atlasPage = atlasPage;
     appendDrawCommand(draw);
 }
 
@@ -6554,6 +6821,8 @@ void SceneComposer::reset()
     miningTerrainPresentationKey_ = {};
     miningBackdropFogInstanceCount_ = 0;
     miningBaseTerrainInstanceCount_ = 0;
+    miningBaseTerrainTexture_ = TextureId::None;
+    miningBaseTerrainAtlasPage_ = kNoSceneAtlasPage;
     miningTerrainRevision_ = 0;
     droppedFrameInstances_ = 0;
     miningTerrainCacheValid_ = false;
@@ -6569,6 +6838,9 @@ void SceneComposer::reset()
     previousMiningWidth_ = 0;
     previousMiningHeight_ = 0;
     previousMiningActive_ = false;
+    miningOreGlintWaveStartedAt_ = -1.0;
+    miningOreGlintNextWaveAt_ = -1.0;
+    miningOreGlintWaveSequence_ = 0;
     miningVisualHeadingInitialized_ = false;
     miningOperatorModeInitialized_ = false;
     previousMiningOperatorActive_ = false;

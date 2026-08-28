@@ -5,7 +5,7 @@
 namespace rocket::save_schema {
 
 inline constexpr std::string_view header = "RR_SAVE_V1";
-inline constexpr int currentVersion = 13;
+inline constexpr int currentVersion = 14;
 inline constexpr char keyValueDelimiter = '=';
 inline constexpr char listDelimiter = ',';
 inline constexpr char textListDelimiter = '|';
@@ -41,6 +41,7 @@ inline constexpr std::string_view pendingTransferAssistGrade = "pendingTransferA
 inline constexpr std::string_view pendingTransferAssistFuelSavings = "pendingTransferAssistFuelSavings";
 inline constexpr std::string_view pendingTransferAssistSpeedBoost = "pendingTransferAssistSpeedBoost";
 inline constexpr std::string_view pendingTransferAssistInstability = "pendingTransferAssistInstability";
+inline constexpr std::string_view pendingTransferAssistExitCourseOffset = "pendingTransferAssistExitCourseOffset";
 inline constexpr std::string_view routeTransitId = "routeTransitId";
 inline constexpr std::string_view routeTransitOrigin = "routeTransitOrigin";
 inline constexpr std::string_view routeTransitTarget = "routeTransitTarget";
@@ -59,6 +60,7 @@ inline constexpr std::string_view navigationSystem = "navigationSystem";
 inline constexpr std::string_view navigationArkLocation = "navigationArkLocation";
 inline constexpr std::string_view navigationSelectedDestination = "navigationSelectedDestination";
 inline constexpr std::string_view navigationDiscoveredDestinations = "navigationDiscoveredDestinations";
+inline constexpr std::string_view postSolarSystemRosters = "postSolarSystemRosters";
 inline constexpr std::string_view storyPending = "storyPending";
 inline constexpr std::string_view storyContinuation = "storyContinuation";
 inline constexpr std::string_view acknowledgedActivityBriefings = "acknowledgedActivityBriefings";
@@ -83,6 +85,8 @@ inline constexpr std::string_view arrivalRouteTarget = "arrivalRouteTarget";
 inline constexpr std::string_view arrivalRouteIntent = "arrivalRouteIntent";
 inline constexpr std::string_view surfaceActive = "surfaceActive";
 inline constexpr std::string_view surfaceDestination = "surfaceDestination";
+inline constexpr std::string_view surfacePostSolarSystem = "surfacePostSolarSystem";
+inline constexpr std::string_view surfaceBody = "surfaceBody";
 inline constexpr std::string_view surfaceSite = "surfaceSite";
 inline constexpr std::string_view surfaceSupply = "surfaceSupply";
 inline constexpr std::string_view surfaceSharedFuel = "surfaceSharedFuel";
@@ -122,6 +126,7 @@ inline constexpr std::string_view miningArenaMetadata = "miningArenaMetadata";
 inline constexpr std::string_view miningRewardLedger = "miningRewardLedger";
 inline constexpr std::string_view miningGateRuntime = "miningGateRuntime";
 inline constexpr std::string_view miningDestination = "miningDestination";
+inline constexpr std::string_view miningPostSolarContext = "miningPostSolarContext";
 inline constexpr std::string_view miningSite = "miningSite";
 inline constexpr std::string_view miningElapsed = "miningElapsed";
 inline constexpr std::string_view miningOxygen = "miningOxygen";

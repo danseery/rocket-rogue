@@ -143,6 +143,7 @@ public:
         sceneFadeToBlack = snapshot.sceneFadeToBlack;
         shipDamage = snapshot.shipDamage;
         miningHeat = snapshot.miningHeat;
+        miningOperatorRigTethered = snapshot.miningOperatorRigTethered;
         flybyInputY = snapshot.flybyInputY;
         launchCourseOffset = snapshot.launchCourseOffset;
         launchCourseVelocity = snapshot.launchCourseVelocity;
@@ -259,6 +260,7 @@ public:
     bool miningViewsValid = false;
     bool miningSwarmActive = false;
     bool miningSwarmAlert = false;
+    bool miningOperatorRigTethered = false;
 };
 
 class FakeUi final : public rocket::IGameUi {
@@ -542,6 +544,23 @@ std::string activeMiningSave(double drillHeat)
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
+std::string disabledRigEvaTowSave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0xE7A70FULL);
+    state.run.destinationIndex = 2;
+    rocket::startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.miningSitePrepared = true;
+    assert(rocket::startMiningRun(state, catalog).applied);
+    rocket::MiningRunState& mining = state.run.mining;
+    mining.operatorMode = rocket::MiningOperatorMode::Jetpack;
+    mining.operatorPresent = true;
+    mining.rigDisabled = true;
+    mining.rigDepthZone = mining.depthZone;
+    mining.operatorRigTethered = true;
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
 std::string levelUpExpeditionSave()
 {
     const rocket::ContentCatalog catalog = rocket::createDefaultContent();
@@ -622,6 +641,42 @@ std::string activeDroneBaySurfaceExpeditionSave()
     rocket::ui::briefings::acknowledge(
         state.meta.acknowledgedActivityBriefingIds,
         rocket::ui::briefings::miniDrones);
+    state.screen = rocket::Screen::SurfaceExpedition;
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
+std::string partialIoRecoverySave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0x10BADULL);
+    state.meta.unlockKeys.push_back(rocket::content::unlock::routeJupiter);
+    assert(rocket::performScenarioAction(
+               state,
+               catalog,
+               rocket::content::scenario::volcanicDescent,
+               "commission",
+               rocket::ScenarioActionKind::BeginActivity)
+               .applied);
+
+    // Recreate the partial progression state that previously stranded an Io
+    // recovery: the commission is claimed and its type unlock survived, but
+    // the permanent bay/frame reward did not.
+    state.meta.unlockKeys.erase(
+        std::remove(
+            state.meta.unlockKeys.begin(),
+            state.meta.unlockKeys.end(),
+            rocket::content::unlock::droneBay),
+        state.meta.unlockKeys.end());
+    state.meta.droneBaySlots = 0;
+    state.meta.ownedDroneIds.clear();
+    state.meta.equippedDroneIds.clear();
+    state.run.destinationIndex = 3;
+    state.meta.furthestTier = 3;
+    rocket::startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.miningSitePrepared = true;
+    rocket::ui::briefings::acknowledge(
+        state.meta.acknowledgedActivityBriefingIds,
+        rocket::ui::briefings::mining);
     state.screen = rocket::Screen::SurfaceExpedition;
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
@@ -727,6 +782,46 @@ std::string activeJupiterSlingshotSave()
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
+void ioRecoveryEntryActionsRepairPartialSaves()
+{
+    // A claimed Io commission is enough to enter Layered Recovery even when
+    // an older partial save lost its bay/frame state. Mine and the named
+    // scenario action must converge on the same authored mining site.
+    for (const bool useNamedRecoveryAction : {false, true}) {
+        AppFixture fixture;
+        fixture.saves.value = partialIoRecoverySave();
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+
+        if (useNamedRecoveryAction) {
+            fixture.ui.dispatchAction(
+                std::string(rocket::ui::actions::scenarioActionPrefix) +
+                rocket::content::scenario::volcanicDescent + "|recovery|" +
+                std::to_string(static_cast<int>(rocket::ScenarioActionKind::BeginActivity)));
+        } else {
+            fixture.ui.dispatchAction("mine_surface");
+        }
+        advanceSceneHandoff(fixture);
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
+        const std::optional<rocket::SaveData> mining = rocket::deserializeSaveData(fixture.saves.value);
+        assert(mining.has_value());
+        assert(mining->mining.active);
+        assert(mining->mining.miningSiteDefinitionId == rocket::content::miningSite::thermalLayeredRecovery);
+        assert(mining->droneBaySlots >= 1);
+        assert(std::find(
+                   mining->ownedDroneIds.begin(),
+                   mining->ownedDroneIds.end(),
+                   rocket::content::drone::hazardDrone) != mining->ownedDroneIds.end());
+        assert(std::find(
+                   mining->equippedDroneIds.begin(),
+                   mining->equippedDroneIds.end(),
+                   rocket::content::drone::hazardDrone) != mining->equippedDroneIds.end());
+        fixture.runner.shutdown();
+    }
+}
+
 } // namespace
 
 int main()
@@ -736,6 +831,8 @@ int main()
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #endif
+
+    ioRecoveryEntryActionsRepairPartialSaves();
 
 #if !defined(__EMSCRIPTEN__)
     // The packaged document shell is loaded once. Changing screen-family
@@ -1195,6 +1292,7 @@ int main()
             state.meta.acknowledgedActivityBriefingIds,
             rocket::ui::briefings::mining);
         state.run.surfaceExpedition.miningSitePrepared = true;
+        state.run.surfaceExpedition.depthProspects.push_back({1, 1});
         state.screen = rocket::Screen::SurfaceExpedition;
         rocket::Random rng(0x5A7FACEULL);
         const rocket::PreparedLaunch launch = rocket::prepareLaunch(state, catalog, rng);
@@ -1746,6 +1844,7 @@ int main()
         }
         assert(fixture.renderer.titleScreen);
         assert(fixture.renderer.sceneFadeToBlack > 0.0 && fixture.renderer.sceneFadeToBlack < 1.0);
+        assert(fixture.ui.presentation.runtime.sceneTransitionActive);
         assert(fixture.ui.html.find("title-screen is-launching") != std::string::npos);
         assert(fixture.ui.html.find("rr-scene-transition") != std::string::npos);
         for (int frame = 0; frame < 4 && fixture.renderer.titleScreen; ++frame) {
@@ -1763,7 +1862,22 @@ int main()
         fixture.host.now += 0.25;
         fixture.runner.frame();
         assert(fixture.renderer.sceneFadeToBlack == 0.0);
+        assert(!fixture.ui.presentation.runtime.sceneTransitionActive);
         assert(fixture.ui.html.find("rr-scene-transition") == std::string::npos);
+        fixture.runner.shutdown();
+    }
+
+    // Disabled Mining Rigs are valid EVA tow targets. The render snapshot
+    // must retain that active line so the player can see what the suit is
+    // recovering after a save/restore cycle.
+    {
+        AppFixture fixture;
+        fixture.saves.value = disabledRigEvaTowSave();
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
+        assert(fixture.renderer.screen == rocket::Screen::Mining);
+        assert(fixture.renderer.miningOperatorRigTethered);
         fixture.runner.shutdown();
     }
 
@@ -2044,6 +2158,7 @@ int main()
             saved->acknowledgedActivityBriefingIds,
             rocket::ui::briefings::surfaceSurveyIntroduction));
 
+        fixture.ui.dispatchAction("surface_scan_pulse");
         fixture.ui.dispatchAction("surface_scan_pulse");
         fixture.ui.dispatchAction("surface_scan_bank");
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
@@ -2690,14 +2805,14 @@ int main()
         levelUpFixture.runner.shutdown();
     }
 
-    // An older v12 payload is rejected at the title boundary with Continue
+    // An older v13 payload is rejected at the title boundary with Continue
     // unavailable and the exact fresh-start notice.
     {
         AppFixture oldSaveFixture;
         oldSaveFixture.saves.value = levelUpExpeditionSave();
-        const std::size_t versionOffset = oldSaveFixture.saves.value.find("version=13");
+        const std::size_t versionOffset = oldSaveFixture.saves.value.find("version=14");
         assert(versionOffset != std::string::npos);
-        oldSaveFixture.saves.value.replace(versionOffset, 10, "version=12");
+        oldSaveFixture.saves.value.replace(versionOffset, 10, "version=13");
         assert(oldSaveFixture.runner.initialize());
         assert(oldSaveFixture.ui.html.find("data-rr-action=\"continue_game\"") == std::string::npos);
         assert(oldSaveFixture.ui.html.find("Progression update requires a new game.") != std::string::npos);

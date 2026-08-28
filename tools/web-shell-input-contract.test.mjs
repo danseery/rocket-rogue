@@ -72,20 +72,26 @@ test("realtime input cannot bypass explicit RmlUi actions", () => {
   assert.match(functionBody("releaseRealtimeInputs"), /launchKeys\.clear\(\)[\s\S]*updateLaunchMove\(\)/);
 });
 
-test("surface shortcuts yield to result actions and shutdown clears input ownership", () => {
+test("surface shortcuts preserve Survey limits and yield Push results to RmlUi", () => {
   const globalKeyDown = shell.match(
     /window\.addEventListener\("keydown",[\s\S]*?\n    \}\);/,
   );
   assert.ok(globalKeyDown, "web shell should define global keyboard routing");
-  for (const screen of ["surfaceScan", "surfacePush"]) {
-    assert.match(
-      globalKeyDown[0],
-      new RegExp(
-        `currentUiHostContext\\.realtimeActivityActive[\\s\\S]*screen === rrScreen\\.${screen}`,
-      ),
-      `${screen} Space shortcut must only own input during active play`,
-    );
-  }
+  assert.match(
+    globalKeyDown[0],
+    /screen === rrScreen\.surfaceScan && event\.key === " "[\s\S]*rr\.surfaceScanPulse\(\)/,
+    "Survey must retain Space after its last pulse so focus cannot fall through to a utility action",
+  );
+  assert.doesNotMatch(
+    globalKeyDown[0],
+    /currentUiHostContext\.realtimeActivityActive\s*&&\s*screen === rrScreen\.surfaceScan/,
+    "Survey's exhausted state must still consume its dedicated Space and bank shortcuts",
+  );
+  assert.match(
+    globalKeyDown[0],
+    /currentUiHostContext\.realtimeActivityActive[\s\S]*screen === rrScreen\.surfacePush/,
+    "Surface Push Space shortcut must only own input during active play",
+  );
 
   const availability = functionBody("setRmlUiEnabled");
   assert.match(availability, /realtimeActivityActive:\s*false/);
