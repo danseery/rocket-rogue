@@ -618,6 +618,7 @@ inline constexpr double postContactMinSpeedScale = 0.55;
 inline constexpr double postContactSpeedRecoverySeconds = 0.55;
 inline constexpr int drillRepairCommonAtFullDamage = 4;
 inline constexpr int droneRepairCommonAtFullDamage = 6;
+inline constexpr double emergencyRigRecoveryIntegrity = 0.35;
 inline constexpr double repairDamageEpsilon = 0.001;
 inline constexpr double passiveLightRadius = 2.15;
 inline constexpr double drillRangeCells = 2.05;

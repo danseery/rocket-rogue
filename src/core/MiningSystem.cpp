@@ -1031,9 +1031,7 @@ bool canOccupy(const MiningTerrain& terrain, double x, double y)
     const int cellX = static_cast<int>(std::floor(x));
     const int cellY = static_cast<int>(std::floor(y));
     const MiningCell* cell = miningCellAt(terrain, cellX, cellY);
-    return cell != nullptr &&
-        !miningMaterialSolid(cell->material) &&
-        !cell->suitOnlyPassage;
+    return cell != nullptr && !miningMaterialSolid(cell->material);
 }
 
 bool canOccupyActor(
@@ -1041,7 +1039,7 @@ bool canOccupyActor(
     double x,
     double y,
     double colliderRadius,
-    bool allowSuitOnlyPassage)
+    bool /*allowSuitOnlyPassage*/)
 {
     constexpr std::array<std::pair<double, double>, 9> samples {{
         {0.0, 0.0},
@@ -1058,8 +1056,11 @@ bool canOccupyActor(
         const int cellX = static_cast<int>(std::floor(x + sampleX * colliderRadius));
         const int cellY = static_cast<int>(std::floor(y + sampleY * colliderRadius));
         const MiningCell* cell = miningCellAt(terrain, cellX, cellY);
-        if (cell == nullptr || miningMaterialSolid(cell->material) ||
-            (cell->suitOnlyPassage && !allowSuitOnlyPassage)) {
+        // Occupancy must agree with the visible cell material. Older saves can
+        // retain suitOnlyPassage metadata from the former generated EVA
+        // network; treating an Empty cell as solid created a large invisible
+        // wall for the rig with no renderer geometry to explain the contact.
+        if (cell == nullptr || miningMaterialSolid(cell->material)) {
             return false;
         }
     }
@@ -5474,74 +5475,6 @@ void updateMiningSwarm(
     }
 }
 
-void applySuitOnlyPassageNetwork(
-    MiningTerrain& terrain,
-    std::uint64_t seed,
-    int depthZone)
-{
-    if (terrain.width < 16 || terrain.height < 14) {
-        return;
-    }
-
-    const double laneHash = unitHash(seed, terrain.width, terrain.height, depthZone, 0xE7A5ULL);
-    const int targetY = std::clamp(
-        terrain.height / 3 +
-            static_cast<int>(laneHash * static_cast<double>(std::max(1, terrain.height / 3))),
-        5,
-        terrain.height - 6);
-    int entranceX = terrain.width / 2;
-    int bestDistance = terrain.width;
-    for (int x = 3; x < terrain.width - 3; ++x) {
-        const MiningCell* cell = miningCellAt(terrain, x, targetY);
-        if (cell == nullptr || miningMaterialSolid(cell->material)) {
-            continue;
-        }
-        const int centerDistance = std::abs(x - terrain.width / 2);
-        if (centerDistance < bestDistance) {
-            entranceX = x;
-            bestDistance = centerDistance;
-        }
-    }
-
-    if (bestDistance == terrain.width) {
-        if (MiningCell* entrance = miningCellAt(terrain, entranceX, targetY)) {
-            *entrance = makeCell(MiningCellMaterial::Empty, depthZone);
-            entrance->feature = MiningCellFeature::MainTunnel;
-        }
-    }
-
-    const bool carveRight =
-        unitHash(seed, entranceX, targetY, depthZone, 0x5A17ULL) >= 0.5;
-    const int direction = carveRight ? 1 : -1;
-    const int passageLength = std::clamp(terrain.width / 9, 4, 7);
-    const int pocketCenterX = std::clamp(
-        entranceX + direction * passageLength,
-        3,
-        terrain.width - 4);
-
-    auto carveSuitCell = [&](int x, int y) {
-        MiningCell* cell = miningCellAt(terrain, x, y);
-        if (cell == nullptr) {
-            return;
-        }
-        *cell = makeCell(MiningCellMaterial::Empty, depthZone);
-        cell->revealed = false;
-        cell->feature = MiningCellFeature::MainTunnel;
-        cell->suitOnlyPassage = true;
-    };
-
-    for (int step = 1; step <= passageLength; ++step) {
-        carveSuitCell(
-            std::clamp(entranceX + direction * step, 2, terrain.width - 3),
-            targetY);
-    }
-    for (int y = targetY - 1; y <= targetY + 1; ++y) {
-        for (int x = pocketCenterX - 1; x <= pocketCenterX + 1; ++x) {
-            carveSuitCell(x, y);
-        }
-    }
-}
-
 void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int direction)
 {
     MiningRunState& mining = state.run.mining;
@@ -5559,23 +5492,12 @@ void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int di
         mining.rigDepthZone == mining.depthZone;
     const double transitionX = controlledActorX(mining);
     MiningArtifactObject travelingArtifact;
-    const MiningCell* artifactCell = mining.artifact.present
-        ? miningCellAt(
-              mining.terrain,
-              static_cast<int>(std::floor(mining.artifact.x)),
-              static_cast<int>(std::floor(mining.artifact.y)))
-        : nullptr;
     const bool artifactTravels =
         mining.artifact.present &&
-        mining.artifact.tethered &&
-        (artifactCell == nullptr || !artifactCell->suitOnlyPassage);
+        mining.artifact.tethered;
     if (artifactTravels) {
         travelingArtifact = std::move(mining.artifact);
         mining.artifact = {};
-    } else if (mining.artifact.present && mining.artifact.tethered) {
-        mining.artifact.tethered = false;
-        state.statusLine =
-            "The artifact cannot pass through the suit-only aperture; tether released.";
     }
     if (direction > 0) {
         mining.downwardTransitionX = transitionX;
@@ -6639,12 +6561,31 @@ bool repairMiningDrone(GameState& state)
 {
     MiningRunState& mining = state.run.mining;
     const MiningArenaRules arenaRules = activeMiningArenaRules(mining);
-    const int cost = miningDroneRepairCost(mining);
+    const bool recoveringDisabledRig = mining.rigDisabled;
     if (!mining.active ||
-        mining.rigDisabled ||
-        !arenaRules.mechanics.fieldRepairs ||
         !rigAtReturnZone(mining) ||
-        !spendMiningRepairMaterials(mining, cost)) {
+        (recoveringDisabledRig && !operatorAtReturnZone(mining)) ||
+        (!recoveringDisabledRig && !arenaRules.mechanics.fieldRepairs)) {
+        return false;
+    }
+    if (recoveringDisabledRig) {
+        // A wreck cannot be entered, so its dockside recovery must be
+        // performable externally and cannot depend on ore trapped inside it.
+        // The free patch restores only enough integrity to reboard; normal
+        // paid ship service remains available afterward for a full repair.
+        mining.droneHealth = tuning::mining::emergencyRigRecoveryIntegrity;
+        mining.rigDisabled = false;
+        mining.droneX = mining.returnZoneX;
+        mining.droneY = mining.returnZoneY;
+        mining.rigDepthZone = mining.entryDepthZone;
+        mining.rigVelocityX = 0.0;
+        mining.rigVelocityY = 0.0;
+        mining.rigTethered = false;
+        mining.operatorRigTethered = false;
+        return true;
+    }
+    const int cost = miningDroneRepairCost(mining);
+    if (!spendMiningRepairMaterials(mining, cost)) {
         return false;
     }
     mining.droneHealth = 1.0;
@@ -6668,6 +6609,11 @@ bool repairMiningOperator(GameState& state)
 bool miningAtReturnZone(const MiningRunState& mining)
 {
     return controlledActorAtReturnZone(mining);
+}
+
+bool miningRigAtReturnZone(const MiningRunState& mining)
+{
+    return rigAtReturnZone(mining);
 }
 
 double miningRigFuelCycleSeconds(const GameState& state)
@@ -6835,10 +6781,6 @@ MiningTerrain generateMiningTerrainForRules(
         }
     }
     applyHostileTunnelNetwork(terrain, state, destination, profile, rules);
-    applySuitOnlyPassageNetwork(
-        terrain,
-        rules.request.seed,
-        terrain.depthZone);
     const int chunksX = (terrain.width + tuning::mining::chunkSize - 1) / tuning::mining::chunkSize;
     const int chunksY = (terrain.height + tuning::mining::chunkSize - 1) / tuning::mining::chunkSize;
     terrain.dirtyChunks.assign(static_cast<std::size_t>(chunksX * chunksY), 1);
@@ -7726,6 +7668,18 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
         : miningDrillStats(state, catalog).scannerRadius;
     const double originX = controlledActorX(mining);
     const double originY = controlledActorY(mining);
+    // A campaign cocoon is a declared objective, not a random buried cache.
+    // The first pulse must establish that its outer seal exists even if the
+    // player has not yet walked close enough for the local reveal radius.
+    // Keep deeper layers and the artifact itself hidden until their authored
+    // discovery/completion rules allow them.
+    bool protectedObjectiveSignal = false;
+    if (hasLayeredCocoon(mining) && !cocoonComplete(mining) &&
+        mining.gate.activeCocoonLayer == 0 &&
+        !cocoonLayerRevealed(mining, 0)) {
+        revealCocoonLayer(mining, 0);
+        protectedObjectiveSignal = true;
+    }
     revealAround(mining, originX, originY, scannerRadius);
     bool gateStateChanged = false;
     auto activateGateMarkers = [&](double originX, double originY, double radius) {
@@ -7857,7 +7811,11 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog)
     const int signalsRevealed = !artifactRevealedBefore && mining.artifact.revealed ? 1 : 0;
     const std::string revealReport = "Scanner revealed " + std::to_string(terrainRevealed) + " terrain cells and "
         + std::to_string(signalsRevealed) + (signalsRevealed == 1 ? " signal." : " signals.");
-    state.statusLine = contextualGateMessage ? state.statusLine + " " + revealReport : revealReport;
+    if (protectedObjectiveSignal) {
+        state.statusLine = "THERMAL OBJECTIVE SIGNAL DETECTED — outer seal mapped. " + revealReport;
+    } else {
+        state.statusLine = contextualGateMessage ? state.statusLine + " " + revealReport : revealReport;
+    }
     mining.scannerPulseSeconds = tuning::mining::scannerPulseSeconds;
     state.run.surfaceExpedition.scannerCooldownSeconds = tuning::mining::scannerCooldownSeconds;
 }
@@ -7925,8 +7883,7 @@ void updateMiningArtifact(GameState& state, double dt)
         const int cellX = std::clamp(static_cast<int>(std::floor(x)), 0, mining.terrain.width - 1);
         const int cellY = std::clamp(static_cast<int>(std::floor(y)), 0, mining.terrain.height - 1);
         const MiningCell* cell = miningCellAt(mining.terrain, cellX, cellY);
-        return cell != nullptr &&
-            (miningMaterialSolid(cell->material) || cell->suitOnlyPassage);
+        return cell != nullptr && miningMaterialSolid(cell->material);
     };
     auto impactDamage = [&]() {
         const double speed = std::sqrt(artifact.velocityX * artifact.velocityX + artifact.velocityY * artifact.velocityY);
@@ -7992,6 +7949,11 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     const MiningArenaRules arenaRules = activeMiningArenaRules(mining);
     MiningLoadStats loadStats = miningLoadStats(state, catalog);
     auto finishAtReturnZone = [&]() {
+        // Returning a wreck opens ship service. Only the player's explicit
+        // Stow / Leave command may abandon or extract a disabled rig.
+        if (mining.rigDisabled) {
+            return false;
+        }
         if (!miningExtractionReady(mining)) {
             return false;
         }
@@ -8001,8 +7963,30 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         }
         return outcome.applied;
     };
+    const bool disabledRigDocked =
+        mining.rigDisabled &&
+        operatorAtReturnZone(mining) &&
+        rigAtReturnZone(mining);
+    if (disabledRigDocked) {
+        const bool justSecured = mining.operatorRigTethered;
+        mining.droneX = mining.returnZoneX;
+        mining.droneY = mining.returnZoneY;
+        mining.rigDepthZone = mining.entryDepthZone;
+        mining.rigVelocityX = 0.0;
+        mining.rigVelocityY = 0.0;
+        mining.rigTethered = false;
+        mining.operatorRigTethered = false;
+        mining.oxygenSeconds = std::max(
+            stats.oxygenSeconds,
+            std::max(0.0, mining.siteBaselineOxygenSeconds));
+        mining.oxygenDepletedNotified = false;
+        if (justSecured) {
+            state.statusLine =
+                "Disabled Mining Rig secured. Repair it at ship service or stow and leave.";
+        }
+    }
     mining.elapsedSeconds += dt;
-    if (arenaRules.mechanics.oxygenAndFuel) {
+    if (arenaRules.mechanics.oxygenAndFuel && !disabledRigDocked) {
         mining.oxygenSeconds = std::max(0.0, mining.oxygenSeconds - dt);
     }
     if (arenaRules.mechanics.oxygenAndFuel && mining.oxygenSeconds <= 0.0) {
@@ -8042,13 +8026,15 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         return;
     }
     loadStats = miningLoadStats(state, catalog);
-    if (arenaRules.mechanics.oxygenAndFuel) {
+    if (arenaRules.mechanics.oxygenAndFuel && !mining.rigDisabled) {
         mining.fuelCycleProgress +=
             dt * miningRigFuelConsumptionPerSecond(
                 state,
                 loadStats.fuelConsumptionMultiplier);
     }
-    if (arenaRules.mechanics.oxygenAndFuel && mining.oxygenSeconds > 0.0) {
+    if (arenaRules.mechanics.oxygenAndFuel &&
+        !mining.rigDisabled &&
+        mining.oxygenSeconds > 0.0) {
         while (mining.fuelCycleProgress >= 1.0) {
             if (state.run.surfaceExpedition.rigFuel < 1.0) {
                 if (finishAtReturnZone()) {

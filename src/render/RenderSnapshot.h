@@ -246,6 +246,8 @@ struct RenderSnapshot {
     double miningScannerRechargeProgress = -1.0;
     double miningScannerRadius = 5.5;
     double miningFailurePulse = 0.0;
+    bool miningEvaDeathActive = false;
+    double miningEvaDeathProgress = 0.0;
     double miningRecoilX = 0.0;
     double miningRecoilY = 0.0;
     double miningMoveX = 0.0;

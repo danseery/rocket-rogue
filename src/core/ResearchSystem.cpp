@@ -255,6 +255,20 @@ bool surfaceUsesThermalOnlyRegolith(const GameState& state)
     return site != nullptr && site->biome == MiningSiteBiome::ThermalLava;
 }
 
+bool surfaceHasAuthoredArtifactSignalAtDepth(
+    const GameState& state,
+    int depthOffset)
+{
+    const MiningSiteDefinition* site = miningSiteForSurface(
+        state,
+        legacyCampaignCatalog());
+    return site != nullptr &&
+        site->cocoon.protectedObjective.kind == ProtectedObjectiveKind::Artifact &&
+        !site->cocoon.protectedObjective.id.empty() &&
+        std::max(0, depthOffset) ==
+            std::max(0, site->cocoon.surveySignalDepthOffset);
+}
+
 ArtifactRecord* firstUnidentifiedArtifact(GameState& state)
 {
     auto artifact = std::find_if(state.meta.artifacts.begin(), state.meta.artifacts.end(), [](const ArtifactRecord& record) {
@@ -4286,6 +4300,8 @@ SurfaceDepthProspect rollSurfaceDepthProspect(
     prospect.depthOffset = std::max(0, depthOffset);
     prospect.absoluteDepth = std::max(0, expedition.depth + prospect.depthOffset);
     const bool thermalSurface = surfaceUsesThermalOnlyRegolith(state);
+    const bool authoredArtifactSignal =
+        surfaceHasAuthoredArtifactSignalAtDepth(state, prospect.depthOffset);
 
     prospect.possibleMaterials.common = prospect.depthOffset == 0 || rng.chance(0.62 + signal * 0.18) ? 1 : 0;
     if (prospect.depthOffset > 0 || rng.chance(0.12 + signal * 0.30 + site.mineRareChanceBonus + support.rareChanceBonus)) {
@@ -4297,7 +4313,9 @@ SurfaceDepthProspect rollSurfaceDepthProspect(
     if (prospect.depthOffset >= 3 && rng.chance(0.08 + signal * 0.10 + support.exoticChanceBonus)) {
         prospect.possibleMaterials.exotic += 1;
     }
-    if (!thermalSurface
+    if (authoredArtifactSignal) {
+        prospect.possibleArtifacts = 1;
+    } else if (!thermalSurface
         && prospect.depthOffset >= 2
         && rng.chance(std::min(0.70, 0.05 + signal * 0.18 + crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus))) {
         prospect.possibleArtifacts = 1;
@@ -4397,7 +4415,10 @@ SurfaceScanPulseGrade surfaceScanPulseGrade(const SurfaceScanRunState& scan)
     return SurfaceScanPulseGrade::Miss;
 }
 
-SurfaceDepthProspect partialSurfaceDepthProspect(const SurfaceDepthProspect& complete, Random& rng)
+SurfaceDepthProspect partialSurfaceDepthProspect(
+    const SurfaceDepthProspect& complete,
+    Random& rng,
+    bool preserveAuthoredArtifactSignal)
 {
     SurfaceDepthProspect partial = complete;
     partial.possibleMaterials = {};
@@ -4409,7 +4430,11 @@ SurfaceDepthProspect partialSurfaceDepthProspect(const SurfaceDepthProspect& com
     for (const MiningCellMaterial marker : markers) {
         const bool revealGuaranteedCurrentLayerMarker =
             partial.depthOffset == 0 && marker == MiningCellMaterial::CommonOre;
+        const bool revealGuaranteedObjectiveMarker =
+            preserveAuthoredArtifactSignal &&
+            marker == MiningCellMaterial::ArtifactCache;
         if (revealGuaranteedCurrentLayerMarker ||
+            revealGuaranteedObjectiveMarker ||
             rng.chance(static_cast<double>(tuning::research::scanGoodInformationPercent) / 100.0)) {
             addSurfaceScanMarker(partial, marker);
             revealedMarker = true;
@@ -4550,7 +4575,10 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
     scan.missFanfareSeconds = 0.0;
     SurfaceDepthProspect prospect = rollSurfaceDepthProspect(state, depthOffset, scan.signal, support, rng);
     if (scan.lastPulseGrade == SurfaceScanPulseGrade::Good) {
-        prospect = partialSurfaceDepthProspect(prospect, rng);
+        prospect = partialSurfaceDepthProspect(
+            prospect,
+            rng,
+            surfaceHasAuthoredArtifactSignalAtDepth(state, depthOffset));
     } else {
         prospect.informationPercent = tuning::research::scanPerfectInformationPercent;
     }
@@ -4652,6 +4680,18 @@ SurfaceActionOutcome startSurfacePushRun(GameState& state, Random&)
         return outcome;
     }
 
+    // Repair forecasts stored by builds that suppressed authored objectives
+    // under the Thermal random-artifact rule. Only an already-surveyed layer
+    // is upgraded, so Dig still cannot reveal an unscanned route for free.
+    for (SurfaceDepthProspect& prospect : expedition.depthProspects) {
+        if (surfaceHasAuthoredArtifactSignalAtDepth(
+                state,
+                prospect.depthOffset)) {
+            prospect.possibleArtifacts = std::max(
+                1,
+                prospect.possibleArtifacts);
+        }
+    }
 
     const ContentCatalog catalog = createDefaultContent();
     const SurfaceDepthCapability capability = surfaceDepthCapability(

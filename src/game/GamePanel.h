@@ -42,6 +42,7 @@ struct PanelRenderContext {
     bool levelUpActivationLocked = false;
     int levelUpResolvingOfferIndex = -1;
     bool expeditionXpPulse = false;
+    bool miningFailureModalReady = true;
 };
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);

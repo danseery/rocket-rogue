@@ -485,27 +485,36 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         const bool atShip = miningAtReturnZone(mining);
         if (atShip) {
             const int drillRepairCost = miningDrillRepairCost(mining);
-            const int actorRepairCost = evaActive
+            const bool disabledRigAtShip =
+                mining.rigDisabled && miningRigAtReturnZone(mining);
+            const int actorRepairCost = disabledRigAtShip
+                ? miningDroneRepairCost(mining)
+                : (evaActive
                 ? (mining.operatorIntegrity < 1.0
                         ? static_cast<int>(tuning::mining::operatorIntegrityRepairCommonCost)
                         : 0)
-                : miningDroneRepairCost(mining);
-            const std::string actorName = evaActive ? "suit" : "Mining Rig";
+                : miningDroneRepairCost(mining));
+            const std::string actorName =
+                disabledRigAtShip ? "Mining Rig" : (evaActive ? "suit" : "Mining Rig");
             presentation.commandTitle = "Ship service";
-            presentation.commandDetail = arenaRules.mechanics.fogAndScanner
-                ? "Repair, scan the site, then leave"
-                : "Repair the rig, then leave";
+            presentation.commandDetail = disabledRigAtShip
+                ? "Shuttle umbilical patch restores 35% rig integrity; reboard or leave"
+                : (arenaRules.mechanics.fogAndScanner
+                        ? "Repair, scan the site, then leave"
+                        : "Repair the rig, then leave");
             presentation.actions = {
                 drillRepairCost <= 0
                     ? disabledPanelButton("Bit ready")
                     : (mining.stowedMaterials.common >= drillRepairCost
                               ? panelActionButton("Repair bit (" + std::to_string(drillRepairCost) + " common)", ui::actions::miningRepairDrill, "ok")
                               : disabledPanelButton("Need " + std::to_string(drillRepairCost) + " common for bit")),
-                actorRepairCost <= 0
-                    ? disabledPanelButton(evaActive ? "Suit ready" : "Rig ready")
+                disabledRigAtShip
+                    ? panelActionButton("Shuttle patch Mining Rig (35% integrity)", ui::actions::miningRepairDrone, "ok")
+                    : (actorRepairCost <= 0
+                    ? disabledPanelButton(disabledRigAtShip || !evaActive ? "Rig ready" : "Suit ready")
                     : (mining.stowedMaterials.common >= actorRepairCost
                               ? panelActionButton("Repair " + actorName + " (" + std::to_string(actorRepairCost) + " common)", ui::actions::miningRepairDrone, "ok")
-                              : disabledPanelButton("Need " + std::to_string(actorRepairCost) + " common for " + actorName))
+                              : disabledPanelButton("Need " + std::to_string(actorRepairCost) + " common for " + actorName)))
             };
             if (arenaRules.mechanics.fogAndScanner) {
                 presentation.actions.push_back(
@@ -696,18 +705,24 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
                 presentation.actions.push_back(disabledPanelButton("REPAIR DRILL"));
             }
         }
-        const bool actorNeedsRepair = evaActive
-            ? mining.operatorIntegrity < 1.0
-            : miningDroneRepairCost(mining) > 0;
+        const bool disabledRigAtShip =
+            mining.rigDisabled && miningRigAtReturnZone(mining);
+        const bool actorNeedsRepair = disabledRigAtShip
+            ? miningDroneRepairCost(mining) > 0
+            : (evaActive
+                    ? mining.operatorIntegrity < 1.0
+                    : miningDroneRepairCost(mining) > 0);
         if (actorNeedsRepair) {
             if (const PanelButtonPresentation* repair = findAction(ui::actions::miningRepairDrone)) {
                 presentation.actions.push_back(copyAction(
                     *repair,
-                    evaActive ? "REPAIR SUIT" : "REPAIR RIG",
+                    disabledRigAtShip
+                        ? "SHUTTLE PATCH RIG // 35%"
+                        : (!evaActive ? "REPAIR RIG" : "REPAIR SUIT"),
                     "mining-repair-action"));
             } else {
                 presentation.actions.push_back(disabledPanelButton(
-                    evaActive ? "REPAIR SUIT" : "REPAIR RIG"));
+                    disabledRigAtShip || !evaActive ? "REPAIR RIG" : "REPAIR SUIT"));
             }
         }
         if (const PanelButtonPresentation* scanner = findAction(ui::actions::miningScanner)) {

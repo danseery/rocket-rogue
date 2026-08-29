@@ -430,13 +430,20 @@ void oxygenCapacityHasAHardCeiling()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 606);
+    const MiningDrillStats baseline = miningDrillStats(state, catalog);
+    state.run.surfaceExpedition.runRigUpgradeRanks.push_back(
+        {content::surfaceUpgrade::emergencyWinch, 3});
+    const MiningDrillStats winch = miningDrillStats(state, catalog);
+    require(
+        std::abs(winch.oxygenSeconds - baseline.oxygenSeconds) < 0.000001 &&
+            std::abs(winch.artifactTowEfficiency - 0.75) < 0.000001,
+        "Artifact Winch ranks should reduce artifact towing burden without changing mining oxygen");
+
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     state.meta.droneBaySlots = 6;
     state.meta.ownedDroneIds.assign(6, content::drone::resourceDrone);
     state.meta.equippedDroneIds.assign(6, content::drone::resourceDrone);
-    state.run.surfaceExpedition.runRigUpgradeRanks.push_back(
-        {content::surfaceUpgrade::emergencyWinch, 3});
     state.run.surfaceExpedition.runDroneRanks.push_back(
         {content::drone::resourceDrone, 3});
     const MiningDrillStats stats = miningDrillStats(state, catalog);

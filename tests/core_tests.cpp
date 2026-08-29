@@ -3200,6 +3200,8 @@ void arrivalFlybyMinigameRewardsProgressionAndSlingshot()
         "completed flyby should use the centered RmlUi stamp mode");
     require(perfectFlybyHtml.find("class=\"arrival-fanfare-panel\"") != std::string::npos,
         "completed flyby should render its mission stamp inside RmlUi");
+    require(perfectFlybyHtml.find("class=\"arrival-stamp-content\"") != std::string::npos,
+        "completed flyby should keep stamp copy in a scrollable lane above the continue action");
     require(perfectFlybyHtml.find("data-flyby-stamp") == std::string::npos,
         "completed flyby should not emit the legacy browser-shell stamp marker");
     require(perfectFlybyHtml.find("data-rr-action=\"flyby_continue\"") != std::string::npos,
@@ -6862,13 +6864,29 @@ void thermalSurfacePushStillMapsResourceLayers()
     require(mapped.common > 0 || mapped.rare > 0 || mapped.exotic > 0,
         "thermal scan should display the resources sealed behind Hazard treatment");
     state.run.surfaceScan.bustRisk = 0.0;
+    const double goodOffset =
+        (tuning::research::surfaceScanPerfectWindowHalfAngleForDepth(1) +
+         tuning::research::surfaceScanGoodWindowHalfAngleForDepth(1)) *
+        0.5;
+    state.run.surfaceScan.elapsedSeconds =
+        (tuning::research::scanWindowCenterRadians + goodOffset) /
+        tuning::research::scanSweepRadiansPerSecond;
     require(pulseSurfaceScan(state, rng).applied,
         "thermal scan should map the first diggable layer before Dig unlocks");
+    require(
+        state.run.surfaceScan.lastPulseGrade == SurfaceScanPulseGrade::Good &&
+            state.run.surfaceScan.depthProspects.size() >= 2 &&
+            state.run.surfaceScan.depthProspects[1].possibleArtifacts == 1,
+        "a good Thermal survey must preserve the authored protected-objective signal at its +1 depth");
     require(bankSurfaceScan(state).applied,
         "thermal resource forecast should remain available to Push Deeper");
 
+    state.run.surfaceExpedition.depthProspects[1].possibleArtifacts = 0;
     require(startSurfacePushRun(state, rng).applied,
         "thermal Push Deeper route should start");
+    require(
+        state.run.surfaceExpedition.depthProspects[1].possibleArtifacts == 1,
+        "starting Dig should repair an already-surveyed authored objective forecast from an older save");
     state.run.surfacePush.collapseRisk = 0.0;
     require(pushSurfaceDepthStep(state, rng).applied,
         "thermal route should resolve its guaranteed first layer");
@@ -9483,7 +9501,6 @@ void miningUsesRigFuelReserve()
     GameState state = createNewGame(catalog, 92934);
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
-    state.run.surfaceExpedition.runRigUpgradeRanks = {{content::surfaceUpgrade::emergencyWinch, 1}};
     prepareMiningSiteForTest(state);
     state.run.surfaceExpedition.rigFuel = 1.0;
     require(
@@ -9492,7 +9509,7 @@ void miningUsesRigFuelReserve()
     require(nearlyEqual(state.run.surfaceExpedition.rigFuel, 0.0), "deployment should spend the available rig fuel");
     require(
         state.run.mining.oxygenSeconds * tuning::mining::fuelCycleProgressPerSecond > 1.0,
-        "oxygen upgrades should allow runs long enough to complete another fuel cycle");
+        "baseline oxygen should allow runs long enough to complete another fuel cycle");
 
     for (int i = 0; i < 190 && !state.run.mining.failurePending; ++i) {
         updateMiningRun(state, catalog, 0.08);
@@ -9982,7 +9999,7 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
     state.run.mining.cargo = 2;
     state.run.mining.oxygenSeconds = 3.0;
     state.run.mining.oxygenDepletedNotified = true;
-    const double upgradedOxygenCapacity = miningDrillStats(state, catalog).oxygenSeconds;
+    const double oxygenCapacity = miningDrillStats(state, catalog).oxygenSeconds;
     state.run.mining.droneX = state.run.mining.returnZoneX;
     state.run.mining.droneY = state.run.mining.returnZoneY;
     updateMiningRun(state, catalog, 0.08);
@@ -9991,8 +10008,8 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
     require(state.run.mining.stowedMaterials.common == 2, "ship zone should stow carried materials");
     require(state.run.mining.stowedCargo == 2, "ship zone should stow carried cargo");
     require(
-        std::abs(state.run.mining.oxygenSeconds - upgradedOxygenCapacity) < 0.000001,
-        "banking payload at the ship should refill the current upgraded oxygen capacity");
+        std::abs(state.run.mining.oxygenSeconds - oxygenCapacity) < 0.000001,
+        "banking payload at the ship should refill the current oxygen capacity");
     require(!state.run.mining.oxygenDepletedNotified, "oxygen refill should reset the depletion warning latch");
 
     state.run.mining.oxygenSeconds = 3.0;
@@ -11050,10 +11067,10 @@ void miningDestinationGravityAndEvaMotionUsePhysicalProfiles()
         "vector-gravity EVA test should start mining");
     MiningRunState& mining = state.run.mining;
     require(
-        std::any_of(mining.terrain.cells.begin(), mining.terrain.cells.end(), [](const MiningCell& cell) {
+        std::none_of(mining.terrain.cells.begin(), mining.terrain.cells.end(), [](const MiningCell& cell) {
             return cell.suitOnlyPassage;
         }),
-        "generated mining layers should include an explicit suit-only passage network");
+        "generated mining layers should not add invisible rig-only collision cells");
     require(
         std::abs(mining.gravityDirectionX - 0.60) < 0.000001 &&
             std::abs(mining.gravityDirectionY - 0.80) < 0.000001,
@@ -11163,11 +11180,15 @@ void miningEvaTogglePassagesAndExtractionRulesAreSafe()
         updateMiningRun(state, catalog, 0.08);
     }
     require(
-        mining.droneX < 20.65,
-        "the rig collider should be blocked by a suit-only passage marker");
+        mining.droneX > 21.25,
+        "legacy suit-only metadata on an Empty cell must not create an invisible wall for the rig");
 
     setMiningMove(state, 0.0, 0.0);
-    require(toggleMiningOperator(state), "the blocked rig should still permit an adjacent EVA exit");
+    mining.droneX = 20.30;
+    mining.droneY = 20.50;
+    mining.rigVelocityX = 0.0;
+    mining.rigVelocityY = 0.0;
+    require(toggleMiningOperator(state), "legacy passage metadata should still permit an adjacent EVA exit");
     mining.operatorX = 20.30;
     mining.operatorY = 20.50;
     mining.operatorVelocityX = 0.0;
@@ -11520,8 +11541,67 @@ void miningEmergencyEvaFailureAndRecoveryRulesHold()
         "an attached disabled rig must reach the shuttle with its EVA operator");
     disabledRig.droneX = disabledRig.returnZoneX;
     disabledRig.droneY = disabledRig.returnZoneY;
-    require(finishMiningRun(towedWreck, catalog, false).applied,
-        "EVA should complete recovery after towing the disabled rig to the shuttle");
+    disabledRig.oxygenSeconds = 0.0;
+    disabledRig.stowedMaterials.common = 3;
+    disabledRig.stowedCargo = disabledRig.stowedMaterials.common;
+    updateMiningRun(towedWreck, catalog, 0.01);
+    require(
+        towedWreck.screen == Screen::Mining &&
+            disabledRig.active &&
+            disabledRig.rigDisabled &&
+            disabledRig.oxygenSeconds > 0.0 &&
+            !disabledRig.operatorRigTethered,
+        "towing a disabled rig to the shuttle should dock for service, restore life support, and keep the run active");
+    const MiningRunPresentation disabledRigService =
+        miningRunPresentation(towedWreck, catalog);
+    const auto disabledRigRepair = std::find_if(
+        disabledRigService.actions.begin(),
+        disabledRigService.actions.end(),
+        [](const PanelButtonPresentation& action) {
+            return action.actionId == ui::actions::miningRepairDrone;
+        });
+    require(
+        disabledRigRepair != disabledRigService.actions.end() &&
+            disabledRigRepair->enabled &&
+            disabledRigRepair->label.find("Shuttle patch") != std::string::npos &&
+            disabledRigRepair->label.find("35%") != std::string::npos,
+        "ship service should explain the external 35% shuttle patch instead of presenting a hidden ore cost");
+    const int shipCommonBeforeRecovery = disabledRig.stowedMaterials.common;
+    require(repairMiningDrone(towedWreck),
+        "ship service should repair a disabled rig after it is towed home");
+    require(
+        disabledRig.active &&
+            !disabledRig.rigDisabled &&
+            nearlyEqual(
+                disabledRig.droneHealth,
+                tuning::mining::emergencyRigRecoveryIntegrity) &&
+            disabledRig.stowedMaterials.common == shipCommonBeforeRecovery,
+        "external recovery should patch a disabled rig without spending ship ore or ending the run");
+    const PreparedLaunch emergencyRepairPanelLaunch {};
+    const std::string evaRepairPanel = buildGamePanelHtml({
+        towedWreck,
+        catalog,
+        emergencyRepairPanelLaunch,
+        emergencyRepairPanelLaunch});
+    require(
+        evaRepairPanel.find("id=\"rr-hud-mining-actor-integrity-label\">SUIT INTEGRITY") != std::string::npos &&
+            evaRepairPanel.find("id=\"rr-hud-mining-actor-integrity\">100%") != std::string::npos,
+        "the active-actor readout should continue reporting suit integrity while the operator remains in EVA");
+    require(toggleMiningOperator(towedWreck),
+        "the EVA operator should be able to re-enter the repaired rig and keep mining");
+    require(
+        disabledRig.operatorMode == MiningOperatorMode::Rig &&
+            disabledRig.active,
+        "re-entering the repaired rig should retain the active expedition");
+    const std::string repairedRigPanel = buildGamePanelHtml({
+        towedWreck,
+        catalog,
+        emergencyRepairPanelLaunch,
+        emergencyRepairPanelLaunch});
+    require(
+        repairedRigPanel.find("id=\"rr-hud-mining-actor-integrity-label\">RIG INTEGRITY") != std::string::npos &&
+            repairedRigPanel.find("id=\"rr-hud-mining-actor-integrity\">35%") != std::string::npos,
+        "re-entering after roadside assistance should report the rig's actual 35% integrity instead of the full EVA suit value");
 
     GameState failed = activeMiningStateForEvaTest(catalog, 0xE7A106);
     MiningRunState& mining = failed.run.mining;

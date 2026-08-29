@@ -203,6 +203,19 @@ private:
         double elapsed = 0.0;
     };
 
+    struct MiningEvaDeathPresentationState {
+        enum class Phase {
+            None,
+            Impact,
+            FadingOut,
+            FadingIn,
+            Complete
+        };
+
+        Phase phase = Phase::None;
+        double elapsed = 0.0;
+    };
+
     enum class MiningSceneHandoff {
         None,
         EnterMining,
@@ -276,6 +289,9 @@ private:
     void queueMiningSceneHandoff(MiningSceneHandoff handoff);
     bool advanceMiningSceneHandoff(double deltaSeconds);
     void completeMiningSceneHandoff();
+    void beginMiningEvaDeathPresentation();
+    bool advanceMiningEvaDeathPresentation(double deltaSeconds);
+    bool miningEvaDeathModalReady() const noexcept;
     void startMiningRunAfterFade();
     void startNewGame();
     PanelRenderContext panelRenderContext(const PreparedLaunch& flightModel) const;
@@ -328,6 +344,7 @@ private:
     InputSource activeInputSource_ = InputSource::None;
     LaunchSessionState session_;
     MiningExtractionState miningExtraction_;
+    MiningEvaDeathPresentationState miningEvaDeathPresentation_;
     MiningSceneHandoff miningSceneHandoff_ = MiningSceneHandoff::None;
     bool miningSceneHandoffCommitted_ = false;
     LevelUpSessionState levelUp_;

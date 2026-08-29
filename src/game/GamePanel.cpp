@@ -310,6 +310,7 @@ std::string missionStamp(
 {
     std::ostringstream out;
     out << "<section class=\"arrival-fanfare-panel\">"
+        << "<div class=\"arrival-stamp-content\">"
         << "<span class=\"arrival-stamp-kicker\">" << htmlEscape(kicker) << "</span>"
         << "<h2 class=\"arrival-stamp-title\">" << htmlEscape(title) << "</h2>"
         << "<strong class=\"arrival-stamp-destination\">" << htmlEscape(detail) << "</strong>"
@@ -318,7 +319,7 @@ std::string missionStamp(
     if (!tagThree.empty()) {
         out << "<span class=\"gold\">" << htmlEscape(tagThree) << "</span>";
     }
-    out << "</div>";
+    out << "</div></div>";
     if (scenarioObjective != nullptr) {
         ScenarioObjectivePresentation actionObjective = *scenarioObjective;
         actionObjective.actionLabel = std::string(continueLabel);
@@ -521,6 +522,16 @@ std::string miningOperatorModeLabel(const MiningRunState& mining)
         return "JETPACK EVA";
     }
     return mining.rigDisabled ? "RIG DISABLED" : "MINING RIG";
+}
+
+std::string_view miningActorIntegrityLabel(const MiningRunState& mining)
+{
+    return miningOperatorIsEva(mining) ? "SUIT INTEGRITY" : "RIG INTEGRITY";
+}
+
+double miningActorIntegrity(const MiningRunState& mining)
+{
+    return miningOperatorIsEva(mining) ? mining.operatorIntegrity : mining.droneHealth;
 }
 
 std::string miningGravityLabel(const MiningRunState& mining)
@@ -1790,8 +1801,6 @@ std::string miningCocoonLayerValue(const MiningGateRuntime& gate, std::size_t la
 std::string compactMiningScenarioObjective(const GameState& state, const ContentCatalog& catalog)
 {
     const ScenarioObjectivePresentation presentation = scenarioObjectiveForMining(state, catalog);
-    const int onShip = std::max(0, state.run.mining.stowedMaterials.common);
-    const int onRig = std::max(0, state.run.mining.temporaryMaterials.common);
     const MiningGateRuntime& gate = state.run.mining.gate;
     if (!gate.cocoonLayers.empty()) {
         std::ostringstream out;
@@ -1819,15 +1828,13 @@ std::string compactMiningScenarioObjective(const GameState& state, const Content
         return out.str();
     }
     if (!presentation.available) {
-        return "MINING // RIG " + std::to_string(onRig) + " // SHIP " + std::to_string(onShip);
+        return "MINING";
     }
     const std::string targetLabel = scenarioProgressTargetLabel(presentation);
     const std::string locationAndTarget = presentation.location +
         (targetLabel.empty() ? std::string {} : " " + targetLabel);
     return locationAndTarget + " // DELIVERED " +
-        std::to_string(presentation.current) + "/" + std::to_string(presentation.required) +
-        " // SHIP " + std::to_string(onShip) +
-        " // RIG " + std::to_string(onRig);
+        std::to_string(presentation.current) + "/" + std::to_string(presentation.required);
 }
 
 std::string miningCocoonObjectiveState(const MiningRunState& mining)
@@ -4189,8 +4196,10 @@ std::string buildGamePanelMarkup(
             << "<div class=\"mining-eva-status-grid\">"
             << "<span><i>GRAVITY</i><b id=\"rr-hud-mining-gravity\">"
             << htmlEscape(miningGravityLabel(mining)) << "</b></span>"
-            << "<span><i>SUIT INTEGRITY</i><b id=\"rr-hud-mining-suit-integrity\">"
-            << htmlEscape(display::percent(mining.operatorIntegrity)) << "</b></span>"
+            << "<span><i id=\"rr-hud-mining-actor-integrity-label\">"
+            << htmlEscape(miningActorIntegrityLabel(mining))
+            << "</i><b id=\"rr-hud-mining-actor-integrity\">"
+            << htmlEscape(display::percent(miningActorIntegrity(mining))) << "</b></span>"
             << "<span><i>DRILL HEAT</i><b id=\"rr-hud-mining-drill-heat\">"
             << htmlEscape(display::percent(mining.drillHeat)) << "</b></span>"
             << "<span><i>TETHER BURDEN</i><b id=\"rr-hud-mining-tether-burden\">"
@@ -4256,9 +4265,13 @@ std::string buildGamePanelMarkup(
         });
         if (miningHud.atShip && drillRepair != miningRun.actions.end() && droneRepair != miningRun.actions.end()) {
             const bool drillVisible = miningDrillRepairCost(mining) > 0;
-            const bool droneVisible = evaActive
-                ? mining.operatorIntegrity < 1.0
-                : miningDroneRepairCost(mining) > 0;
+            const bool disabledRigAtShip =
+                mining.rigDisabled && miningRigAtReturnZone(mining);
+            const bool droneVisible = disabledRigAtShip
+                ? miningDroneRepairCost(mining) > 0
+                : (evaActive
+                        ? mining.operatorIntegrity < 1.0
+                        : miningDroneRepairCost(mining) > 0);
             out << "<div class=\"mining-ship-service-marker\" data-mining-ship-service=\"1\""
                 << " data-mining-width=\"" << mining.terrain.width << "\""
                 << " data-mining-height=\"" << mining.terrain.height << "\""
@@ -4272,7 +4285,7 @@ std::string buildGamePanelMarkup(
                 << " data-drone-label=\"" << htmlEscape(droneRepair->label) << "\"></div>";
         }
         out << "</section>";
-        if (miningHud.failurePending) {
+        if (miningHud.failurePending && context.miningFailureModalReady) {
             std::ostringstream failureBody;
             failureBody << "<div class=\"phase-advisory danger mining-failure-callout\"><strong>" << htmlEscape(miningHud.failureTitle)
                 << "</strong><span>" << htmlEscape(miningHud.failureBody) << "</span></div>";
@@ -5394,11 +5407,13 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
     result.contentMarkup = buildGamePanelMarkup(context, result.modals);
     result.runtime.sceneTransitionActive = context.sceneFadeToBlack > 0.0;
     if (context.sceneFadeToBlack > 0.0) {
-        std::ostringstream opacity;
-        opacity << std::fixed << std::setprecision(3)
-            << std::clamp(context.sceneFadeToBlack, 0.0, 1.0);
-        result.contentMarkup += "<div class=\"rr-scene-transition\" aria-hidden=\"true\" style=\"opacity: "
-            + opacity.str() + "\"></div>";
+        // The renderer owns a full-frame clip-space blackout pass. Do not
+        // imitate it with an RmlUi rectangle: its document viewport can be
+        // smaller than the actual native/Deck framebuffer after a resize.
+        // Removing panel content during the handoff leaves the camera fade as
+        // the sole transition surface, above no stale HUD or control rail.
+        result.contentMarkup.clear();
+        result.modals.clear();
     }
     const bool canReviewResearchBreakthrough = !context.titleScreenActive
         && (context.state.screen == Screen::ArrivalOps
@@ -5683,7 +5698,8 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
     appendHudText(result, "rr-hud-mining-payload-artifact", miningHud.payload[1].value);
     appendHudText(result, "rr-hud-mining-operator-mode", miningOperatorModeLabel(mining));
     appendHudText(result, "rr-hud-mining-gravity", miningGravityLabel(mining));
-    appendHudText(result, "rr-hud-mining-suit-integrity", display::percent(mining.operatorIntegrity));
+    appendHudText(result, "rr-hud-mining-actor-integrity-label", std::string(miningActorIntegrityLabel(mining)));
+    appendHudText(result, "rr-hud-mining-actor-integrity", display::percent(miningActorIntegrity(mining)));
     appendHudText(result, "rr-hud-mining-drill-heat", display::percent(mining.drillHeat));
     appendHudText(result, "rr-hud-mining-tether-burden", miningTetherBurdenLabel(mining, miningLoad));
     appendHudText(result, "rr-hud-mining-loose-chunks", std::to_string(activeMiningLooseChunkCount(mining)));
@@ -5747,7 +5763,8 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
         key << state.run.orbit.completed;
     } else if (state.screen == Screen::Mining) {
         const MiningRunPresentation panel = miningRunPresentation(state, context.catalog);
-        key << panel.failurePending << '|' << miningAtReturnZone(state.run.mining) << '|'
+        key << panel.failurePending << '|' << context.miningFailureModalReady << '|'
+            << miningAtReturnZone(state.run.mining) << '|'
             << state.run.mining.progressionCreditEligible << '|' << state.run.mining.artifact.present << '|'
             << static_cast<int>(state.run.mining.artifact.state) << '|' << state.run.mining.miniDrones.size() << '|'
             << static_cast<int>(state.run.mining.operatorMode) << '|' << state.run.mining.operatorPresent << '|'

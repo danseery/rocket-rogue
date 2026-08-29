@@ -38,6 +38,11 @@ constexpr float kFlightPathTrailWidth = 2.4F;
 constexpr float kManeuverBoosterHalfWidth = 0.007F;
 constexpr float kManeuverBoosterBaseLength = 0.013F;
 constexpr float kManeuverBoosterLengthRange = 0.016F;
+// Orbit's side-burn nozzle sits inside the transparent edge of the square
+// rocket frame, where the flame visibly meets the hull. Launch uses this same
+// authored proportion even though its rocket is scaled dynamically.
+constexpr float kManeuverBoosterNozzleOffset = 0.028F;
+constexpr float kOrbitRocketSize = 0.11F;
 constexpr float kFlightThrustWidth = 0.054F;
 constexpr float kFlightThrustHeight = 0.104F;
 // Keep the leading edge of the animated sheet at the nozzle while letting the
@@ -1348,7 +1353,11 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
     if (cameraShakeEnabled && snapshot.screen == Screen::Mining) {
         const float contactShake = static_cast<float>(std::clamp(snapshot.miningContactIntensity, 0.0, 1.0)) * (snapshot.miningDrilling ? 1.0F : 0.35F);
         const float failureShake = static_cast<float>(std::clamp(snapshot.miningFailurePulse, 0.0, 1.0));
-        const float shake = contactShake * 1.8F + failureShake * 4.5F;
+        const float evaDeathProgress = static_cast<float>(std::clamp(snapshot.miningEvaDeathProgress, 0.0, 1.0));
+        const float evaDeathImpact = snapshot.miningEvaDeathActive
+            ? std::sin(std::min(1.0F, evaDeathProgress / 0.34F) * kPi)
+            : 0.0F;
+        const float shake = contactShake * 1.8F + failureShake * 4.5F + evaDeathImpact * 5.8F;
         scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 97.0F) * shake;
         scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 83.0F) * shake;
     }
@@ -1533,6 +1542,34 @@ void SceneComposer::drawMiningOreSparkleColor(float cx, float cy, float unitSize
     const float alpha = ((0.20F + flare * 0.44F) * alphaScale);
     drawLine(cx - length, cy, cx + length, cy, {glow.r, glow.g, glow.b, alpha}, 1.4F);
     drawLine(cx, cy - length, cx, cy + length, {glow.r, glow.g, glow.b, alpha}, 1.4F);
+}
+
+float SceneComposer::miningHazardHeartbeat(double animationTime, int x, int y) noexcept
+{
+    constexpr float periodSeconds = 2.6F;
+    constexpr float firstBeatSeconds = 0.11F;
+    constexpr float secondBeatSeconds = firstBeatSeconds + 0.18F;
+    constexpr float firstHalfWidthSeconds = 0.11F;
+    constexpr float secondHalfWidthSeconds = 0.09F;
+
+    std::uint32_t hash = static_cast<std::uint32_t>(x) * 0x9e3779b9U;
+    hash ^= static_cast<std::uint32_t>(y) * 0x85ebca6bU;
+    hash ^= hash >> 16U;
+    const float coordinateOffset = static_cast<float>(hash & 0xffffU)
+        / static_cast<float>(0xffffU) * periodSeconds;
+    const float phase = std::fmod(
+        static_cast<float>(std::max(0.0, animationTime)) + coordinateOffset,
+        periodSeconds);
+    const auto beat = [phase](float center, float halfWidth) {
+        const float linear = std::clamp(
+            1.0F - std::abs(phase - center) / halfWidth,
+            0.0F,
+            1.0F);
+        return linear * linear * (3.0F - 2.0F * linear);
+    };
+    return std::max(
+        beat(firstBeatSeconds, firstHalfWidthSeconds),
+        beat(secondBeatSeconds, secondHalfWidthSeconds) * 0.78F);
 }
 
 void SceneComposer::updateMiningOreGlintWave(
@@ -2538,7 +2575,10 @@ void SceneComposer::drawOrbit(const RenderSnapshot& snapshot)
                 : velocity;
             const Vec2 exhaust {-burnDirection.x, -burnDirection.y};
             const Vec2 side {-exhaust.y, exhaust.x};
-            const Vec2 nozzle {shipX + exhaust.x * 0.028F, shipY + exhaust.y * 0.028F};
+            const Vec2 nozzle {
+                shipX + exhaust.x * kManeuverBoosterNozzleOffset,
+                shipY + exhaust.y * kManeuverBoosterNozzleOffset
+            };
             const float halfWidth = kManeuverBoosterHalfWidth;
             const float burnStrength = std::max(throttle, inputMagnitude);
             const float length = kManeuverBoosterBaseLength
@@ -3144,8 +3184,13 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             continue;
         }
         const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
-        Color gateColor = cell.material == MiningCellMaterial::HazardPocket
-            ? Color {1.0F, 0.52F, 0.18F, 0.62F + gatePulse * 0.22F}
+        const bool hazardGate = cell.material == MiningCellMaterial::HazardPocket;
+        const float hazardHeartbeat = hazardGate
+            ? miningHazardHeartbeat(snapshot.animationTime, x, y)
+            : 0.0F;
+        const Color hazardColor = miningHazardColor(static_cast<int>(cell.hazardAffinity));
+        Color gateColor = hazardGate
+            ? Color {hazardColor.r, hazardColor.g, hazardColor.b, 0.42F + hazardHeartbeat * 0.26F}
             : Color {0.78F, 0.54F, 1.0F, 0.50F + gatePulse * 0.18F};
         gateColor.a *= revealFraction;
         const float halfW = cellW * 0.47F;
@@ -3217,13 +3262,28 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         const Color glow = rewardCell ? miningRewardGlowColor(material) : miningScannerPingColor(material, affinity);
         const float integrity = static_cast<float>(cellIntegrity(cell));
         const float cracked = 1.0F - integrity;
+        const float hazardHeartbeat = hazardCell
+            ? miningHazardHeartbeat(snapshot.animationTime, x, y)
+            : 0.0F;
         const float shimmer = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 5.8F + static_cast<float>(x * 13 + y * 7));
         const float baseSize = rewardCell ? 0.34F : 0.24F;
         const float size = cellSize * (baseSize + cracked * 0.22F + scannerBoost * 0.42F);
         const float baseAlpha = rewardCell
             ? 0.18F + shimmer * 0.18F
-            : (hazardCell ? 0.10F + shimmer * 0.16F : 0.04F);
+            : (hazardCell ? 0.18F + hazardHeartbeat * 0.14F : 0.04F);
         const float alpha = baseAlpha + (rewardCell ? cracked * 0.16F : 0.0F) + scannerBoost * (rewardCell ? 0.34F : 0.42F);
+        if (hazardCell) {
+            const float hazardGlowRadius = cellSize * (0.50F + hazardHeartbeat * 0.28F);
+            const float hazardGlowAlpha = std::min(
+                0.08F + hazardHeartbeat * 0.16F + scannerBoost * 0.10F,
+                0.34F);
+            drawRadialGlow(
+                center.x,
+                center.y,
+                hazardGlowRadius,
+                {glow.r, glow.g, glow.b, hazardGlowAlpha * revealFraction},
+                20);
+        }
         drawMiningMaterialMarker(
             center.x,
             center.y,
@@ -3275,6 +3335,11 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         const bool hazardCell = cell.material == MiningCellMaterial::HazardPocket;
         const bool scannerPing = scannerBoost > 0.18F && miningScannerPingMaterial(material);
         if (!rewardCell && !scannerPing && !hazardCell) {
+            continue;
+        }
+        // Hazards use a continuous, affinity-colored heartbeat aura. Never
+        // send them through the cross-shaped glint reserved for valuables.
+        if (hazardCell) {
             continue;
         }
         float flare = 0.0F;
@@ -3559,7 +3624,21 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     Vec2 drone = gridPoint(snapshot.miningDroneX, snapshot.miningDroneY);
     drone.x += miningVisualRecoilX_ * cellW;
     drone.y -= miningVisualRecoilY_ * cellH;
-    const Vec2 operatorPosition = gridPoint(snapshot.miningOperatorX, snapshot.miningOperatorY);
+    Vec2 operatorPosition = gridPoint(snapshot.miningOperatorX, snapshot.miningOperatorY);
+    const float evaDeathProgress = static_cast<float>(
+        std::clamp(snapshot.miningEvaDeathProgress, 0.0, 1.0));
+    if (snapshot.miningEvaDeathActive) {
+        const float drift =
+            evaDeathProgress * evaDeathProgress *
+            (3.0F - 2.0F * evaDeathProgress);
+        operatorPosition.x +=
+            static_cast<float>(snapshot.miningOperatorVelocityX) * cellW * 0.20F * drift +
+            std::sin(evaDeathProgress * kPi * 5.0F) * cellW * 0.12F *
+                (1.0F - evaDeathProgress);
+        operatorPosition.y -=
+            static_cast<float>(snapshot.miningOperatorVelocityY) * cellH * 0.20F * drift +
+            cellH * 0.58F * drift;
+    }
     const Vec2 activeActor = gridPoint(activeActorX, activeActorY);
     if (snapshot.miningOperatorRigTethered && snapshot.miningRigPresent && snapshot.miningOperatorActive) {
         const float pulse = 0.78F + 0.14F * std::sin(static_cast<float>(snapshot.animationTime) * 6.0F);
@@ -3722,7 +3801,9 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         drone.x + drillDirection.x * droneSize * 0.18F,
         drone.y + drillDirection.y * droneSize * 0.18F
     };
-    Vec2 particleAnchor = target;
+    Vec2 particleAnchor = snapshot.miningEvaDeathActive
+        ? operatorPosition
+        : target;
     const Color heatTint = miningHeatSpriteTint(snapshot.miningHeat, snapshot.animationTime);
     const float droneHealth = static_cast<float>(std::clamp(snapshot.miningDroneHealth, 0.0, 1.0));
     const float operatorIntegrity = static_cast<float>(std::clamp(snapshot.miningOperatorIntegrity, 0.0, 1.0));
@@ -4311,7 +4392,10 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             {1.0F, 0.22F, 0.14F, 0.58F + disabledPulse * 0.24F},
             2.2F);
     }
-    if (!snapshot.miningExtractionActive && snapshot.miningScannerPulse <= 0.0 && snapshot.miningScannerRechargeProgress >= 0.0) {
+    if (!snapshot.miningExtractionActive &&
+        !snapshot.miningEvaDeathActive &&
+        snapshot.miningScannerPulse <= 0.0 &&
+        snapshot.miningScannerRechargeProgress >= 0.0) {
         const float rechargeProgress = static_cast<float>(
             std::clamp(snapshot.miningScannerRechargeProgress, 0.0, 1.0));
         const bool operatorActive = snapshot.miningOperatorPresent && snapshot.miningOperatorActive;
@@ -4385,21 +4469,70 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         // The static suit artwork presents both tools toward its lower-right
         // diagonal. Rotate that authored diagonal onto the independent aim
         // vector without requiring animation frames.
-        const Vec2 operatorSpriteForward = normalize({
+        Vec2 operatorSpriteForward = normalize({
             -operatorAimDirection.x - operatorAimDirection.y,
             operatorAimDirection.x - operatorAimDirection.y
         });
+        float operatorDrawSize = operatorSize;
+        Color operatorDrawTint {operatorTint.r, operatorTint.g, operatorTint.b, 1.0F};
+        if (snapshot.miningEvaDeathActive) {
+            const float impact = std::sin(
+                std::min(1.0F, evaDeathProgress / 0.30F) * kPi);
+            const float tumbleAngle =
+                evaDeathProgress * kPi * 2.35F + impact * 0.32F;
+            operatorSpriteForward = {
+                operatorSpriteForward.x * std::cos(tumbleAngle) -
+                    operatorSpriteForward.y * std::sin(tumbleAngle),
+                operatorSpriteForward.x * std::sin(tumbleAngle) +
+                    operatorSpriteForward.y * std::cos(tumbleAngle)
+            };
+            operatorDrawSize = operatorSize *
+                (1.0F + impact * 0.16F - evaDeathProgress * 0.08F);
+            operatorDrawTint = mix(
+                {operatorTint.r, operatorTint.g, operatorTint.b, 1.0F},
+                {0.72F, 0.10F, 0.07F, 0.74F},
+                std::clamp(evaDeathProgress * 0.82F + impact * 0.28F, 0.0F, 1.0F));
+            const float collapse =
+                evaDeathProgress * evaDeathProgress *
+                (3.0F - 2.0F * evaDeathProgress);
+            drawRadialGlow(
+                operatorPosition.x,
+                operatorPosition.y,
+                operatorSize * (0.80F + impact * 0.52F),
+                {1.0F, 0.12F, 0.06F, 0.10F + impact * 0.20F},
+                24);
+            drawEllipseLine(
+                operatorPosition.x,
+                operatorPosition.y,
+                operatorSize * (0.46F + collapse * 0.86F),
+                operatorSize * (0.46F + collapse * 0.86F),
+                {1.0F, 0.24F, 0.12F, (1.0F - collapse) * 0.82F},
+                36,
+                0.0F,
+                kPi * 2.0F);
+            drawEllipseLine(
+                operatorPosition.x,
+                operatorPosition.y,
+                operatorSize * (0.72F + collapse * 1.28F),
+                operatorSize * (0.72F + collapse * 1.28F),
+                {0.34F, 0.90F, 1.0F, (1.0F - collapse) * 0.42F},
+                36,
+                0.0F,
+                kPi * 2.0F);
+        }
         drawSpriteRotated(
             operatorPosition.x,
             operatorPosition.y,
-            operatorSize,
-            operatorSize,
+            operatorDrawSize,
+            operatorDrawSize,
             operatorSpriteForward.x,
             operatorSpriteForward.y,
-            {operatorTint.r, operatorTint.g, operatorTint.b, 1.0F},
+            operatorDrawTint,
             JetpackCapybaraAsset);
     }
-    if (!snapshot.miningExtractionActive && snapshot.miningOperatorActive) {
+    if (!snapshot.miningExtractionActive &&
+        snapshot.miningOperatorActive &&
+        !snapshot.miningEvaDeathActive) {
         const float reticleRadius = cellSize * 0.34F;
         const float reticleGap = cellSize * 0.18F;
         const float reticleArm = cellSize * 0.34F;
@@ -4613,47 +4746,66 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             drawRadialGlow(shipBay.x, shipSpriteY, shipSpriteSize * (0.72F + extractionLaunch * 0.55F), {0.34F, 0.92F, 1.0F, flash}, 36);
         }
     }
+    const auto drawIntegrityGauge = [&](float cx, float cy, float width, float height, float integrity) {
+        constexpr int segmentCount = 10;
+        const float clampedIntegrity = std::clamp(integrity, 0.0F, 1.0F);
+        const float gap = cellW * 0.055F;
+        const float segmentWidth =
+            (width - gap * static_cast<float>(segmentCount - 1)) /
+            static_cast<float>(segmentCount);
+        const float left = cx - width * 0.5F;
+        const Color fillColor {
+            0.22F + (1.0F - clampedIntegrity) * 0.78F,
+            0.92F * clampedIntegrity + 0.16F,
+            1.0F * clampedIntegrity + 0.08F,
+            0.95F
+        };
+        drawRect(cx, cy, width + cellW * 0.22F, height + cellH * 0.16F, {0.02F, 0.05F, 0.07F, 0.94F});
+        for (int segment = 0; segment < segmentCount; ++segment) {
+            const float segmentX =
+                left + static_cast<float>(segment) * (segmentWidth + gap);
+            drawRect(
+                segmentX + segmentWidth * 0.5F,
+                cy,
+                segmentWidth,
+                height,
+                {0.07F, 0.025F, 0.025F, 0.92F});
+            const float segmentFill = std::clamp(
+                clampedIntegrity * static_cast<float>(segmentCount) -
+                    static_cast<float>(segment),
+                0.0F,
+                1.0F);
+            if (segmentFill > 0.001F) {
+                drawRect(
+                    segmentX + segmentWidth * segmentFill * 0.5F,
+                    cy,
+                    segmentWidth * segmentFill,
+                    height,
+                    fillColor);
+            }
+        }
+    };
     if (!snapshot.miningExtractionActive &&
         snapshot.miningRigPresent &&
         !snapshot.miningOperatorActive &&
         (droneHealth < 0.995F || activeEnemyPresent)) {
-        const float healthGaugeY = drone.y - droneSize * 0.62F;
-        const float healthGaugeW = cellW * 3.4F;
-        const float healthFillW = cellW * 3.1F;
-        drawRect(drone.x, healthGaugeY, healthGaugeW, cellH * 0.34F, {0.02F, 0.05F, 0.07F, 0.92F});
-        drawRect(
-            drone.x - healthFillW * 0.5F * (1.0F - droneHealth),
-            healthGaugeY,
-            healthFillW * droneHealth,
+        drawIntegrityGauge(
+            drone.x,
+            drone.y - droneSize * 0.62F,
+            cellW * 3.1F,
             cellH * 0.18F,
-            {0.22F + (1.0F - droneHealth) * 0.78F, 0.92F * droneHealth + 0.16F, 1.0F * droneHealth + 0.08F, 0.95F});
-        for (int segment = 1; segment < 4; ++segment) {
-            drawRect(
-                drone.x - healthFillW * 0.5F + healthFillW * static_cast<float>(segment) / 4.0F,
-                healthGaugeY,
-                cellW * 0.045F,
-                cellH * 0.18F,
-                {0.02F, 0.05F, 0.07F, 0.72F});
-        }
+            droneHealth);
     }
     if (!snapshot.miningExtractionActive &&
         snapshot.miningOperatorActive &&
         (operatorIntegrity < 0.995F || activeEnemyPresent)) {
         const float gaugeY = operatorPosition.y - operatorSize * 0.64F;
-        const float gaugeW = cellW * 2.45F;
-        const float fillW = cellW * 2.20F;
-        drawRect(operatorPosition.x, gaugeY, gaugeW, cellH * 0.30F, {0.02F, 0.05F, 0.07F, 0.92F});
-        drawRect(
-            operatorPosition.x - fillW * 0.5F * (1.0F - operatorIntegrity),
+        drawIntegrityGauge(
+            operatorPosition.x,
             gaugeY,
-            fillW * operatorIntegrity,
+            cellW * 2.20F,
             cellH * 0.16F,
-            {
-                0.22F + (1.0F - operatorIntegrity) * 0.78F,
-                0.92F * operatorIntegrity + 0.16F,
-                1.0F * operatorIntegrity + 0.08F,
-                0.95F
-            });
+            operatorIntegrity);
     }
 
     if (!snapshot.miningExtractionActive &&
@@ -6048,23 +6200,33 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
     if (snapshot.screen == Screen::Launch
         && !snapshot.preflightActive
         && std::abs(launchSteering) > 0.05F) {
-        const float direction = launchSteering < 0.0F ? -1.0F : 1.0F;
-        const Vec2 turnSide {right.x * direction, right.y * direction};
+        const float movementDirection = launchSteering < 0.0F ? -1.0F : 1.0F;
+        // Steering moves the ship toward movementSide, so the maneuvering
+        // exhaust belongs on the opposite side of the hull.
+        const Vec2 exhaustSide {
+            -right.x * movementDirection,
+            -right.y * movementDirection
+        };
         const float rocketSize = 0.86F * scale;
-        const Vec2 root {
-            cx + turnSide.x * rocketSize * (0.052F / 0.11F),
-            cy + turnSide.y * rocketSize * (0.052F / 0.11F)
+        const float nozzleOffset = rocketSize
+            * (kManeuverBoosterNozzleOffset / kOrbitRocketSize);
+        const Vec2 nozzle {
+            cx + exhaustSide.x * nozzleOffset,
+            cy + exhaustSide.y * nozzleOffset
         };
         const float halfWidth = rocketSize * (kManeuverBoosterHalfWidth / 0.11F);
         const float length = rocketSize
             * ((kManeuverBoosterBaseLength
                 + std::abs(launchSteering) * kManeuverBoosterLengthRange) / 0.11F);
-        const Vec2 tip {root.x + turnSide.x * length, root.y + turnSide.y * length};
+        const Vec2 tip {
+            nozzle.x + exhaustSide.x * length,
+            nozzle.y + exhaustSide.y * length
+        };
         drawTriangle(
-            root.x + forward.x * halfWidth,
-            root.y + forward.y * halfWidth,
-            root.x - forward.x * halfWidth,
-            root.y - forward.y * halfWidth,
+            nozzle.x + forward.x * halfWidth,
+            nozzle.y + forward.y * halfWidth,
+            nozzle.x - forward.x * halfWidth,
+            nozzle.y - forward.y * halfWidth,
             tip.x,
             tip.y,
             {1.0F, 0.42F, 0.06F, 1.0F});

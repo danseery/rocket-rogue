@@ -144,6 +144,8 @@ public:
         shipDamage = snapshot.shipDamage;
         miningHeat = snapshot.miningHeat;
         miningOperatorRigTethered = snapshot.miningOperatorRigTethered;
+        miningEvaDeathActive = snapshot.miningEvaDeathActive;
+        miningEvaDeathProgress = snapshot.miningEvaDeathProgress;
         flybyInputY = snapshot.flybyInputY;
         launchCourseOffset = snapshot.launchCourseOffset;
         launchCourseVelocity = snapshot.launchCourseVelocity;
@@ -228,6 +230,7 @@ public:
     double animationTime = 0.0;
     double shipDamage = 0.0;
     double miningHeat = 0.0;
+    double miningEvaDeathProgress = 0.0;
     double flybyInputY = 0.0;
     double launchCourseOffset = 0.0;
     double launchCourseVelocity = 0.0;
@@ -261,6 +264,7 @@ public:
     bool miningSwarmActive = false;
     bool miningSwarmAlert = false;
     bool miningOperatorRigTethered = false;
+    bool miningEvaDeathActive = false;
 };
 
 class FakeUi final : public rocket::IGameUi {
@@ -541,6 +545,24 @@ std::string activeMiningSave(double drillHeat)
     assert(rocket::startMiningRun(state, catalog).applied);
     state.run.mining.drillHeat = drillHeat;
     state.run.shipDamage = 37;
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
+std::string evaDeathMiningSave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0xDEA7E7AULL);
+    state.run.destinationIndex = 2;
+    rocket::startSurfaceExpedition(state, catalog);
+    state.run.surfaceExpedition.miningSitePrepared = true;
+    assert(rocket::startMiningRun(state, catalog).applied);
+    rocket::MiningRunState& mining = state.run.mining;
+    mining.operatorMode = rocket::MiningOperatorMode::Jetpack;
+    mining.operatorPresent = true;
+    mining.operatorX = mining.droneX;
+    mining.operatorY = mining.droneY;
+    mining.operatorIntegrity = 0.0;
+    mining.failurePending = false;
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
@@ -1849,8 +1871,7 @@ int main()
         assert(fixture.renderer.titleScreen);
         assert(fixture.renderer.sceneFadeToBlack > 0.0 && fixture.renderer.sceneFadeToBlack < 1.0);
         assert(fixture.ui.presentation.runtime.sceneTransitionActive);
-        assert(fixture.ui.html.find("title-screen is-launching") != std::string::npos);
-        assert(fixture.ui.html.find("rr-scene-transition") != std::string::npos);
+        assert(fixture.ui.html.empty());
         for (int frame = 0; frame < 4 && fixture.renderer.titleScreen; ++frame) {
             fixture.host.now += 0.25;
             fixture.runner.frame();
@@ -1858,7 +1879,7 @@ int main()
         assert(!fixture.renderer.titleScreen);
         assert(fixture.renderer.screen == rocket::Screen::Mining);
         assert(fixture.renderer.sceneFadeToBlack > 0.0);
-        assert(fixture.ui.html.find("rr-scene-transition") != std::string::npos);
+        assert(fixture.ui.html.empty());
         assert(std::abs(fixture.renderer.shipDamage - 37.0) < 0.0001);
         assert(std::abs(fixture.renderer.miningHeat - 0.78) < 0.0001);
         assert(fixture.saves.storeCount == 0);
@@ -1868,6 +1889,49 @@ int main()
         assert(fixture.renderer.sceneFadeToBlack == 0.0);
         assert(!fixture.ui.presentation.runtime.sceneTransitionActive);
         assert(fixture.ui.html.find("rr-scene-transition") == std::string::npos);
+        fixture.runner.shutdown();
+    }
+
+    // EVA death gets a presentation-only impact beat and camera blackout
+    // before the unchanged mining-failure modal becomes actionable.
+    {
+        AppFixture fixture;
+        fixture.saves.value = evaDeathMiningSave();
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
+
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.renderer.miningEvaDeathActive);
+        assert(fixture.ui.html.find("data-modal=\"mining_failure\" data-auto-modal=\"1\"") == std::string::npos);
+        fixture.runner.app().miningFailureAck();
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
+
+        for (int frame = 0; frame < 3; ++frame) {
+            fixture.host.now += 0.25;
+            fixture.runner.frame();
+        }
+        assert(fixture.renderer.miningEvaDeathActive);
+        assert(fixture.renderer.miningEvaDeathProgress > 0.0 && fixture.renderer.miningEvaDeathProgress < 1.0);
+        assert(fixture.renderer.sceneFadeToBlack == 0.0);
+        assert(fixture.ui.html.find("data-modal=\"mining_failure\" data-auto-modal=\"1\"") == std::string::npos);
+
+        bool sawCameraFade = false;
+        for (int frame = 0; frame < 16; ++frame) {
+            fixture.host.now += 0.25;
+            fixture.runner.frame();
+            sawCameraFade = sawCameraFade || fixture.renderer.sceneFadeToBlack > 0.0;
+            if (fixture.ui.html.find("data-modal=\"mining_failure\" data-auto-modal=\"1\"") != std::string::npos) {
+                break;
+            }
+        }
+        assert(sawCameraFade);
+        assert(fixture.renderer.sceneFadeToBlack == 0.0);
+        assert(!fixture.renderer.miningEvaDeathActive);
+        assert(fixture.ui.html.find("data-modal=\"mining_failure\" data-auto-modal=\"1\"") != std::string::npos);
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
         fixture.runner.shutdown();
     }
 

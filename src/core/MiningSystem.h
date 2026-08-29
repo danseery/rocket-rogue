@@ -122,6 +122,7 @@ double miningRigFuelConsumptionPerSecond(
 int miningCarriedCargo(const MiningRunState& mining);
 int miningBankedCargo(const MiningRunState& mining);
 bool miningAtReturnZone(const MiningRunState& mining);
+bool miningRigAtReturnZone(const MiningRunState& mining);
 MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& catalog);
 int miningDrillRepairCost(const MiningRunState& mining);
 int miningDroneRepairCost(const MiningRunState& mining);

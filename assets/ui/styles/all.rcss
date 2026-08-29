@@ -1020,7 +1020,8 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 }
 .arrival-fanfare-panel {
     box-sizing: border-box;
-    display: block;
+    display: flex;
+    flex-direction: column;
     width: 100%;
     height: 100%;
     padding: 10px 8px;
@@ -1028,6 +1029,13 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     border-width: 1px;
     border-color: #31566b;
     border-radius: 9px;
+}
+.arrival-stamp-content {
+    display: block;
+    flex: 1 1 auto;
+    min-height: 0px;
+    width: 100%;
+    overflow-y: auto;
 }
 .arrival-stamp-kicker {
     color: #ffd166;
@@ -1077,6 +1085,8 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     border-color: #8a7131;
 }
 .arrival-stamp-continue {
+    box-sizing: border-box;
+    flex: 0 0 36px;
     width: 320px;
     min-height: 36px;
     height: 36px;
@@ -9487,7 +9497,7 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     min-height: var(--rr-legacy-layout-194, 0px);
     height: var(--rr-legacy-layout-194, 0px);
     margin: 0px 10px 0px 0px;
-    padding: 12px;
+    padding: 14px;
     overflow: hidden;
 }
 #rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card:last-child {
@@ -9498,7 +9508,7 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     width: 100%;
     min-height: 0px;
     height: auto;
-    margin: 0px 0px 6px 0px;
+    margin: 0px 0px 8px 0px;
     overflow: hidden;
 }
 #rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .pilot-card-top strong {
@@ -9512,9 +9522,9 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
 #rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .surface-upgrade-detail {
     display: block;
     width: 100%;
-    min-height: 30px;
-    max-height: 30px;
-    margin: 0px 0px 6px 0px;
+    min-height: 36px;
+    max-height: 44px;
+    margin: 0px 0px 8px 0px;
     color: #9fb7c5;
     font-size: 12px;
     line-height: 1.2;
@@ -9524,7 +9534,7 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     display: flex;
     flex: 0 0 auto;
     width: 100%;
-    min-height: 22px;
+    min-height: 26px;
     margin: 0px;
 }
 #rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .draft-card-footer {
@@ -9536,7 +9546,7 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     width: 100%;
     height: auto;
     margin: auto 0px 0px 0px;
-    padding: 7px 0px 0px 0px;
+    padding: 10px 0px 0px 0px;
     border-top-width: 1px;
     border-top-color: #34596a;
 }
@@ -9544,7 +9554,7 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     display: block;
     width: 100%;
     min-height: 13px;
-    margin: 0px 0px 4px 0px;
+    margin: 0px 0px 6px 0px;
     color: #55d86d;
     font-size: 11px;
     line-height: 1.1;
@@ -9552,8 +9562,8 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
 }
 #rr-panel.selection-family-panel .phase-board-surface-upgrade .surface-upgrade-card .draft-card-footer button {
     width: 100%;
-    min-height: 34px;
-    height: 34px;
+    min-height: 36px;
+    height: 36px;
     margin: 0px;
     padding: 4px 8px;
     font-size: 11px;

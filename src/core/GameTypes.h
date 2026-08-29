@@ -573,6 +573,9 @@ struct MiningCocoonLayerDefinition {
 struct MiningCocoonDefinition {
     std::string id;
     int version = 1;
+    // Surface Survey uses this authored offset to forecast a guaranteed
+    // protected payload without turning it into a random artifact roll.
+    int surveySignalDepthOffset = 0;
     std::vector<MiningCocoonLayerDefinition> layers;
     ProtectedObjectiveRef protectedObjective;
 };

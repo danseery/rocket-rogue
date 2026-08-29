@@ -42,6 +42,7 @@ private:
     void drawMiningMaterialMarker(float cx, float cy, float radius, int material, Color color, bool worldSpace = true);
     void drawMiningOreSparkle(float cx, float cy, float unitSize, int material, float animationTime, float phaseSeed, float alphaScale = 1.0F);
     void drawMiningOreSparkleColor(float cx, float cy, float unitSize, Color glow, float animationTime, float phaseSeed, float alphaScale = 1.0F);
+    static float miningHazardHeartbeat(double animationTime, int x, int y) noexcept;
     void updateMiningOreGlintWave(double animationTime, int width, int height, bool restart);
     void drawMiningPickupText(float cx, float cy, float unitSize, MiningPickupKind kind, int amount, float age);
     void drawMiningCombatText(float cx, float cy, float unitSize, int amount, float age, bool allied, bool critical, bool rigDamage, int kind);

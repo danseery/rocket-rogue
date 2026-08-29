@@ -129,6 +129,11 @@ struct SceneComposerTestAccess {
             static_cast<double>(composer.miningOreGlintWaveSequence_)};
     }
 
+    static float miningHazardHeartbeat(double animationTime, int x, int y)
+    {
+        return SceneComposer::miningHazardHeartbeat(animationTime, x, y);
+    }
+
     static ScenePacket miningPickupTextPacket(
         SceneComposer& composer,
         MiningPickupKind kind,
@@ -1238,27 +1243,47 @@ void testLaunchUsesAttachedFlameAndSideSteeringTriangleOnly()
     snapshot.currentMultiplier = 1.2;
     snapshot.targetMultiplier = 2.0;
 
-    const auto orangeVertexCount = [](const ScenePacket& packet) {
-        return static_cast<int>(std::count_if(
-            packet.vertices.begin(),
-            packet.vertices.end(),
-            [](const PackedSceneVertex& packed) {
-                const SceneVertex vertex = rocket::unpackSceneVertex(packed);
-                return std::abs(vertex.r - 1.0F) < 0.01F
-                    && std::abs(vertex.g - 0.42F) < 0.01F
-                    && std::abs(vertex.b - 0.06F) < 0.01F;
-            }));
+    const auto orangeVertices = [](const ScenePacket& packet) {
+        std::vector<SceneVertex> vertices;
+        for (const PackedSceneVertex& packed : packet.vertices) {
+            const SceneVertex vertex = rocket::unpackSceneVertex(packed);
+            if (std::abs(vertex.r - 1.0F) < 0.01F
+                && std::abs(vertex.g - 0.42F) < 0.01F
+                && std::abs(vertex.b - 0.06F) < 0.01F) {
+                vertices.push_back(vertex);
+            }
+        }
+        return vertices;
     };
 
     const ScenePacket powered = rocket::SceneComposerTestAccess::rocketPacket(composer, snapshot);
-    assert(orangeVertexCount(powered) == 0);
+    assert(orangeVertices(powered).empty());
     assert(std::any_of(powered.draws.begin(), powered.draws.end(), [](const SceneDraw& draw) {
         return draw.texture == TextureId::Thrust;
     }));
 
     snapshot.launchSteerInput = 1.0;
     const ScenePacket steering = rocket::SceneComposerTestAccess::rocketPacket(composer, snapshot);
-    assert(orangeVertexCount(steering) == 3);
+    const std::vector<SceneVertex> booster = orangeVertices(steering);
+    assert(booster.size() == 3U);
+
+    // The rocket is the final textured instance submitted after the steering
+    // triangle. Its X axis is the ship's screen-right axis. A positive launch
+    // steer must put the exhaust on the negative (left) side, at the same
+    // inset proportion used by Orbit so the triangle touches the visible hull.
+    assert(!steering.instances.empty());
+    const SceneInstance rocket = rocket::unpackSceneInstance(steering.instances.back());
+    const float rocketHalfWidth = std::hypot(rocket.axisXx, rocket.axisXy);
+    assert(rocketHalfWidth > 0.0F);
+    const float rightX = rocket.axisXx / rocketHalfWidth;
+    const float rightY = rocket.axisXy / rocketHalfWidth;
+    const float nozzleX = (booster[0].x + booster[1].x) * 0.5F;
+    const float nozzleY = (booster[0].y + booster[1].y) * 0.5F;
+    const float nozzleSide =
+        (nozzleX - rocket.centerX) * rightX +
+        (nozzleY - rocket.centerY) * rightY;
+    assert(nozzleSide < 0.0F);
+    assert(std::abs((-nozzleSide / rocketHalfWidth) - (2.0F * 0.028F / 0.11F)) < 0.03F);
 }
 
 void testFlightPlumesScaleContinuouslyWithThrottle()
@@ -1751,6 +1776,169 @@ void testMiningOreGlintStartsImmediatelyThenUsesRandomizedSlowWaves()
     assert(std::abs((second[1] - second[0]) - (initial[1] - initial[0])) > 0.01);
 }
 
+std::vector<SceneInstance> miningAffinityGlows(
+    const ScenePacket& packet,
+    Color expectedColor)
+{
+    std::vector<SceneInstance> result;
+    for (const PackedSceneInstance& packed : packet.instances) {
+        const SceneInstance instance = rocket::unpackSceneInstance(packed);
+        if (!instance.textured
+            && instance.shape == SceneInstanceShape::RadialGlow
+            && std::abs(instance.color.r - expectedColor.r) < 0.015F
+            && std::abs(instance.color.g - expectedColor.g) < 0.015F
+            && std::abs(instance.color.b - expectedColor.b) < 0.015F) {
+            result.push_back(instance);
+        }
+    }
+    return result;
+}
+
+bool miningFrameSparkGeometryContainsColor(const ScenePacket& packet, Color expectedColor)
+{
+    const auto sameColor = [&](Color color) {
+        return std::abs(color.r - expectedColor.r) < 0.015F
+            && std::abs(color.g - expectedColor.g) < 0.015F
+            && std::abs(color.b - expectedColor.b) < 0.015F
+            && color.a > 0.02F;
+    };
+    const bool coloredVertices = std::any_of(packet.vertices.begin(), packet.vertices.end(), [&](const PackedSceneVertex& packed) {
+        const SceneVertex vertex = rocket::unpackSceneVertex(packed);
+        return sameColor({vertex.r, vertex.g, vertex.b, vertex.a});
+    });
+    if (coloredVertices) {
+        return true;
+    }
+    return std::any_of(packet.instances.begin(), packet.instances.end(), [&](const PackedSceneInstance& packed) {
+        const SceneInstance instance = rocket::unpackSceneInstance(packed);
+        if (instance.textured
+            || instance.shape != SceneInstanceShape::Rectangle
+            || !sameColor(instance.color)) {
+            return false;
+        }
+        const float halfWidth = std::hypot(instance.axisXx, instance.axisXy);
+        const float halfHeight = std::hypot(instance.axisYx, instance.axisYy);
+        return std::max(halfWidth, halfHeight)
+            > std::max(0.0001F, std::min(halfWidth, halfHeight)) * 3.0F;
+    });
+}
+
+void testMiningHazardsUseAffinityHeartbeatGlowsWithoutOreGlints()
+{
+    const float firstBeat = rocket::SceneComposerTestAccess::miningHazardHeartbeat(0.11, 0, 0);
+    const float secondBeat = rocket::SceneComposerTestAccess::miningHazardHeartbeat(0.29, 0, 0);
+    const float resting = rocket::SceneComposerTestAccess::miningHazardHeartbeat(0.80, 0, 0);
+    assert(firstBeat > 0.98F);
+    assert(secondBeat > 0.75F);
+    assert(resting < 0.01F);
+    assert(std::abs(
+        rocket::SceneComposerTestAccess::miningHazardHeartbeat(0.11, 1, 0)
+        - firstBeat) > 0.25F);
+
+    const std::array<std::pair<rocket::MiningElementalAffinity, Color>, 4> affinities {{
+        {rocket::MiningElementalAffinity::Thermal, {1.0F, 0.32F, 0.10F, 1.0F}},
+        {rocket::MiningElementalAffinity::Cryo, {0.24F, 0.78F, 1.0F, 1.0F}},
+        {rocket::MiningElementalAffinity::Radiation, {0.72F, 1.0F, 0.16F, 1.0F}},
+        {rocket::MiningElementalAffinity::Toxic, {0.82F, 0.24F, 1.0F, 1.0F}},
+    }};
+    for (const auto& [affinity, color] : affinities) {
+        rocket::MiningRunState mining;
+        mining.active = true;
+        mining.terrain.width = 2;
+        mining.terrain.height = 2;
+        mining.terrain.cells.resize(4);
+        mining.droneX = 0.5;
+        mining.droneY = 0.5;
+        mining.targetTipX = 0.5;
+        mining.targetTipY = 1.5;
+        rocket::MiningCell& hazard = mining.terrain.cells[0];
+        hazard.material = rocket::MiningCellMaterial::HazardPocket;
+        hazard.hazard = true;
+        hazard.hazardAffinity = affinity;
+        hazard.maxToughness = 1.0;
+        hazard.remainingToughness = 1.0;
+        hazard.revealed = true;
+
+        RenderSnapshot snapshot = miningSnapshot(mining);
+        snapshot.animationTime = 0.11;
+        snapshot.miningShipPresent = false;
+        SceneComposer composer;
+        composer.setViewport({1280, 800, 1280, 800, 1.0F});
+        const ScenePacket& packet = composer.compose(snapshot);
+        const std::vector<SceneInstance> glows = miningAffinityGlows(packet, color);
+        assert(!glows.empty());
+        assert(glows.front().color.a >= 0.23F);
+        assert(!miningFrameSparkGeometryContainsColor(packet, color));
+
+        hazard.revealed = false;
+        RenderSnapshot hiddenSnapshot = miningSnapshot(mining);
+        hiddenSnapshot.animationTime = 0.11;
+        hiddenSnapshot.miningShipPresent = false;
+        SceneComposer hiddenComposer;
+        hiddenComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+        assert(miningAffinityGlows(hiddenComposer.compose(hiddenSnapshot), color).empty());
+    }
+
+    rocket::MiningRunState thermalMining;
+    thermalMining.active = true;
+    thermalMining.terrain.width = 2;
+    thermalMining.terrain.height = 2;
+    thermalMining.terrain.cells.resize(4);
+    thermalMining.droneX = 0.5;
+    thermalMining.droneY = 0.5;
+    thermalMining.targetTipX = 0.5;
+    thermalMining.targetTipY = 1.5;
+    rocket::MiningCell& thermal = thermalMining.terrain.cells[0];
+    thermal.material = rocket::MiningCellMaterial::HazardPocket;
+    thermal.hazard = true;
+    thermal.hazardAffinity = rocket::MiningElementalAffinity::Thermal;
+    thermal.maxToughness = 1.0;
+    thermal.remainingToughness = 1.0;
+    thermal.revealed = true;
+    const Color thermalColor {1.0F, 0.32F, 0.10F, 1.0F};
+
+    RenderSnapshot restSnapshot = miningSnapshot(thermalMining);
+    restSnapshot.animationTime = 0.80;
+    restSnapshot.miningShipPresent = false;
+    SceneComposer restComposer;
+    restComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const std::vector<SceneInstance> restGlows = miningAffinityGlows(
+        restComposer.compose(restSnapshot),
+        thermalColor);
+    assert(!restGlows.empty());
+
+    RenderSnapshot beatSnapshot = miningSnapshot(thermalMining);
+    beatSnapshot.animationTime = 0.11;
+    beatSnapshot.miningShipPresent = false;
+    SceneComposer beatComposer;
+    beatComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const std::vector<SceneInstance> beatGlows = miningAffinityGlows(
+        beatComposer.compose(beatSnapshot),
+        thermalColor);
+    assert(!beatGlows.empty());
+    assert(beatGlows.front().axisXx > restGlows.front().axisXx + 0.03F);
+    assert(beatGlows.front().color.a > restGlows.front().color.a + 0.12F);
+
+    RenderSnapshot scannerSnapshot = restSnapshot;
+    scannerSnapshot.miningScannerPulse = rocket::tuning::mining::scannerPulseSeconds;
+    SceneComposer scannerComposer;
+    scannerComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const std::vector<SceneInstance> scannerGlows = miningAffinityGlows(
+        scannerComposer.compose(scannerSnapshot),
+        thermalColor);
+    assert(!scannerGlows.empty());
+    assert(scannerGlows.front().color.a > restGlows.front().color.a + 0.08F);
+
+    thermal.material = rocket::MiningCellMaterial::Empty;
+    thermal.hazard = false;
+    RenderSnapshot treatedSnapshot = miningSnapshot(thermalMining);
+    treatedSnapshot.animationTime = 0.11;
+    treatedSnapshot.miningShipPresent = false;
+    SceneComposer treatedComposer;
+    treatedComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    assert(miningAffinityGlows(treatedComposer.compose(treatedSnapshot), thermalColor).empty());
+}
+
 std::size_t countInstanceShape(const ScenePacket& packet, SceneInstanceShape shape)
 {
     return static_cast<std::size_t>(std::count_if(
@@ -1968,6 +2156,60 @@ void testMiningEVAUsesDedicatedTextureWithoutFallback()
     assert(std::none_of(absentPacket.draws.begin(), absentPacket.draws.end(), [](const SceneDraw& draw) {
         return draw.texture == TextureId::JetpackCapybara;
     }));
+}
+
+void testMiningEvaDeathAddsPresentationWithoutReplacingTheSuit()
+{
+    rocket::MiningRunState mining = miningState(20.0, 20.0);
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningShipPresent = false;
+    snapshot.miningOperatorPresent = true;
+    snapshot.miningOperatorActive = true;
+    snapshot.miningOperatorX = 2.0;
+    snapshot.miningOperatorY = 2.0;
+    snapshot.miningOperatorAimX = 1.0;
+    snapshot.miningOperatorAimY = 0.0;
+    snapshot.miningAnchorValid = true;
+    snapshot.miningAnchorX = snapshot.miningOperatorX;
+    snapshot.miningAnchorY = snapshot.miningOperatorY;
+
+    SceneComposer baselineComposer;
+    baselineComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    baselineComposer.setTextureReady(TextureId::MiningDrone, true);
+    baselineComposer.setTextureReady(TextureId::JetpackCapybara, true);
+    const ScenePacket& baselinePacket = baselineComposer.compose(snapshot);
+    assertValidDrawRanges(baselinePacket);
+    const SceneInstance baselineSuit = spriteInstance(
+        baselinePacket,
+        TextureId::JetpackCapybara,
+        0.0F,
+        0.0F,
+        1.0F,
+        1.0F);
+    const std::size_t baselineSolidCount = nonTexturedFrameInstances(baselinePacket).size();
+
+    snapshot.miningEvaDeathActive = true;
+    snapshot.miningEvaDeathProgress = 0.55;
+    snapshot.miningFailurePulse = 0.8;
+    SceneComposer deathComposer;
+    deathComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    deathComposer.setTextureReady(TextureId::MiningDrone, true);
+    deathComposer.setTextureReady(TextureId::JetpackCapybara, true);
+    const ScenePacket& deathPacket = deathComposer.compose(snapshot);
+    assertValidDrawRanges(deathPacket);
+    const SceneInstance deathSuit = spriteInstance(
+        deathPacket,
+        TextureId::JetpackCapybara,
+        0.0F,
+        0.0F,
+        1.0F,
+        1.0F);
+
+    assert(std::abs(deathSuit.centerY - baselineSuit.centerY) > 0.01F);
+    assert(std::abs(deathSuit.axisXx - baselineSuit.axisXx) > 0.01F
+        || std::abs(deathSuit.axisXy - baselineSuit.axisXy) > 0.01F);
+    assert(deathSuit.color.r > deathSuit.color.g);
+    assert(nonTexturedFrameInstances(deathPacket).size() > baselineSolidCount);
 }
 
 void testMiningActiveAnchorOwnsDefenseEffects()
@@ -3639,6 +3881,7 @@ int main()
     testUniformAndGradientLineOrdering();
     testAtlasPageBatchingAcrossLogicalTextures();
     testMiningEVAUsesDedicatedTextureWithoutFallback();
+    testMiningEvaDeathAddsPresentationWithoutReplacingTheSuit();
     testMiningActiveAnchorOwnsDefenseEffects();
     testMiningLooseChunksAreVisibleWorldEntities();
     testMiningCellsAndScannerMarksUseMaterialSilhouettes();
@@ -3649,6 +3892,7 @@ int main()
     testSceneTransitionFadesEverySceneToBlack();
     testMiningOrePaletteMakesCommonSilverAndRareGold();
     testMiningOreGlintStartsImmediatelyThenUsesRandomizedSlowWaves();
+    testMiningHazardsUseAffinityHeartbeatGlowsWithoutOreGlints();
     testMiningPickupTextUsesTypedColorsAndTwoSecondLifetime();
     testMiningPickupHistoryDoesNotReplayAfterLevelUp();
     testMiningRigSlerpsVerticalDuringExtraction();

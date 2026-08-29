@@ -372,7 +372,9 @@ ContentCatalog createDefaultContent()
         surfaceUpgrade(content::surfaceUpgrade::coolantMist, "Coolant Mist", "A hiss of cold vapor keeps the drill biting without cooking the head.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillCooling = 1.6, .drillDurability = 0.6}, {"drill", "cooling"}),
         surfaceUpgrade(content::surfaceUpgrade::recoilBraces, "Recoil Braces", "Kickback struts turn hard-rock bonks into controlled shoves while the drone keeps moving.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.drillDurability = 0.5, .hardRockBounceRelief = 0.24, .droneSpeed = 0.25}, {"drone", "recoil", "control"}),
         surfaceUpgrade(content::surfaceUpgrade::oreHopper, "Ore Hopper", "A squat canister rack gives loose ore a cleaner ride back to the ship zone.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.oreYieldChance = 0.07, .droneStorage = 1.0}, {"drone", "yield"}),
-        surfaceUpgrade(content::surfaceUpgrade::emergencyWinch, "Emergency Winch", "A return tether extends oxygen and makes artifact towing easier during a recall.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.oxygenSeconds = 10.0, .artifactTowEfficiency = 0.25}, {"drone", "recovery"}),
+        // Keep the established ID for save compatibility. This is an artifact
+        // handling upgrade, not the retired EVA-to-rig return-tether concept.
+        surfaceUpgrade(content::surfaceUpgrade::emergencyWinch, "Artifact Winch", "A powered recovery spool reduces artifact towing burden by 25% per rank.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.artifactTowEfficiency = 0.25}, {"artifact", "tether", "transport"}),
         surfaceUpgrade(content::surfaceUpgrade::deepEchoMapper, "Deep Echo Mapper", "Low-frequency pings read deeper silhouettes and artifact pockets before the flare fades.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.oreYieldChance = 0.04, .scannerRadius = 3.0, .hazardRelief = 0.015}, {"scanner", "depth", "artifact"}),
         surfaceUpgrade(content::surfaceUpgrade::expandablePanniers, "Expandable Panniers", "Fold-out panniers widen the free carry buffer before ore starts slowing the drone.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.droneStorage = 3.0}, {"drone", "cargo", "storage"}),
         surfaceUpgrade(content::surfaceUpgrade::vectorNozzles, "Vector Nozzles", "Trim jets keep loaded turns crisp and burn less fuel under a heavy haul.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.droneSpeed = 0.15, .droneEngineEfficiency = 0.25}, {"drone", "engine", "load"}),
@@ -541,6 +543,7 @@ ContentCatalog createDefaultContent()
     thermalLayeredRecovery.baselineOxygenSeconds = tuning::mining::ioArtifactOxygenSeconds;
     thermalLayeredRecovery.cocoon.id = "thermal_two_layer";
     thermalLayeredRecovery.cocoon.version = 1;
+    thermalLayeredRecovery.cocoon.surveySignalDepthOffset = 1;
     // This is a content-owned payload identity. The cocoon and scenario
     // systems consume it generically; compatibility migration can preserve
     // the established artifact ID without either mechanic recognizing Io.

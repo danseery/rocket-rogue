@@ -599,13 +599,15 @@ void layeredCocoonsHonorAuthoredRevealPolicies()
             !mining.artifact.revealed,
         "an authored site should avoid legacy story state and begin with its payload and non-immediate layers hidden");
 
-    mining.droneX = mining.gate.anchorX;
-    mining.droneY = mining.gate.anchorY;
+    mining.droneX = 2.0;
+    mining.droneY = 4.0;
     pulseMiningScanner(state, catalog);
     require(mining.gate.cocoonLayers[0].revealed &&
             !mining.gate.cocoonLayers[1].revealed &&
             !mining.gate.cocoonLayers[2].revealed,
-        "discovering one outer segment should reveal exactly its authored layer");
+        "the first scanner pulse should map the declared outer objective seal even at a distance");
+    require(state.statusLine.find("OBJECTIVE SIGNAL DETECTED") != std::string::npos,
+        "the first objective pulse should explicitly report the mapped outer seal");
 
     auto clearLayer = [&](int layer) {
         for (MiningCell& cell : mining.terrain.cells) {
@@ -634,6 +636,8 @@ void layeredCocoonsHonorAuthoredRevealPolicies()
     pulseMiningScanner(state, catalog);
     require(!mining.gate.cocoonLayers[2].revealed,
         "an ordinary follow-up scan should wait for the shared scanner recharge");
+    mining.droneX = mining.gate.anchorX;
+    mining.droneY = mining.gate.anchorY;
     updateMiningRun(state, catalog, 4.0);
     pulseMiningScanner(state, catalog);
     require(mining.gate.cocoonLayers[2].revealed,

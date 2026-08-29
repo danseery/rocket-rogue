@@ -46,6 +46,9 @@ constexpr double kTitleLaunchSequenceSeconds =
     kTitleLaunchIgnitionDelaySeconds + kTitleLaunchDepartureSeconds;
 constexpr double kSceneFadeToBlackSeconds = 1.0;
 constexpr double kSceneFadeFromBlackSeconds = 0.25;
+constexpr double kMiningEvaDeathImpactSeconds = 1.15;
+constexpr double kMiningEvaDeathFadeToBlackSeconds = 0.62;
+constexpr double kMiningEvaDeathFadeFromBlackSeconds = 0.32;
 
 int destinationIndexForId(const ContentCatalog& catalog, std::string_view destinationId);
 
@@ -661,6 +664,7 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
     rng_ = Random(state_.seed);
     session_ = {};
     miningExtraction_ = {};
+    miningEvaDeathPresentation_ = {};
     miningSceneHandoff_ = MiningSceneHandoff::None;
     miningSceneHandoffCommitted_ = false;
     levelUp_ = {};
@@ -1566,10 +1570,12 @@ void RocketGameApp::tick(double deltaSeconds)
         }
         return;
     }
+    const bool evaDeathTransitionOwned =
+        advanceMiningEvaDeathPresentation(deltaSeconds);
     if (advanceMiningSceneHandoff(deltaSeconds)) {
         return;
     }
-    if (sceneTransition_.active()) {
+    if (sceneTransition_.active() && !evaDeathTransitionOwned) {
         sceneTransition_.advance(std::clamp(deltaSeconds, 0.0, 0.25));
         // The fade is a shared scene/UI overlay, so remove it from both
         // renderers on the frame it completes.
@@ -1722,8 +1728,17 @@ void RocketGameApp::tick(double deltaSeconds)
             }
         } else {
             const bool wasActive = state_.run.mining.active;
+            const bool failureWasPending = state_.run.mining.failurePending;
             const bool thermalLockWasActive = state_.run.mining.drillThermalLock;
             updateMiningRun(state_, catalog_, deltaSeconds);
+            const MiningRunState& mining = state_.run.mining;
+            if (!failureWasPending &&
+                mining.failurePending &&
+                mining.operatorMode == MiningOperatorMode::Jetpack &&
+                mining.operatorPresent &&
+                mining.operatorIntegrity <= 0.0) {
+                beginMiningEvaDeathPresentation();
+            }
             if (!thermalLockWasActive && state_.run.mining.drillThermalLock) {
                 keyboardRealtimeInput_.drilling = false;
                 controllerRealtimeInput_.drilling = false;
@@ -2900,31 +2915,41 @@ void RocketGameApp::miningRepairDrone()
     const bool evaActive =
         mining.operatorMode == MiningOperatorMode::Jetpack &&
         mining.operatorPresent;
-    const int cost = evaActive
+    const bool repairingDisabledRig =
+        mining.rigDisabled && miningRigAtReturnZone(mining);
+    const bool repairingOperator = evaActive && !repairingDisabledRig;
+    const int cost = repairingOperator
         ? (mining.operatorIntegrity < 1.0
                 ? static_cast<int>(tuning::mining::operatorIntegrityRepairCommonCost)
                 : 0)
         : miningDroneRepairCost(mining);
     if (!miningAtReturnZone(mining)) {
-        state_.statusLine = evaActive
+        state_.statusLine = repairingOperator
             ? "Return to the shuttle to repair the EVA suit."
             : "Return to the ship to repair the Mining Rig.";
+    } else if (repairingDisabledRig) {
+        if (repairMiningDrone(state_)) {
+            state_.statusLine =
+                "Shuttle umbilical patch complete: Rig restored to 35% integrity. Move beside it and re-enter to keep mining.";
+            save();
+        }
     } else if (cost <= 0) {
-        state_.statusLine = evaActive
+        state_.statusLine = repairingOperator
             ? "EVA suit integrity is already full."
             : "Mining Rig integrity is already full.";
     } else if (mining.stowedMaterials.common < cost) {
         state_.statusLine =
             "Need " + std::to_string(cost) +
             " stowed common materials to repair the " +
-            (evaActive ? "EVA suit." : "Mining Rig.");
-    } else if (evaActive
+            (repairingOperator ? "EVA suit." : "Mining Rig.");
+    } else if (repairingOperator
                    ? repairMiningOperator(state_)
                    : repairMiningDrone(state_)) {
         state_.statusLine =
-            std::string(evaActive ? "EVA suit" : "Mining Rig") +
+            std::string(repairingOperator ? "EVA suit" : "Mining Rig") +
             " repaired for " + std::to_string(cost) +
-            " common materials.";
+            " common materials." +
+            (repairingDisabledRig ? " Move beside it and re-enter to keep mining." : "");
         save();
     }
     panelDirty_ = true;
@@ -3044,7 +3069,9 @@ void RocketGameApp::miningAbort()
 
 void RocketGameApp::miningFailureAck()
 {
-    if (state_.screen != Screen::Mining || !state_.run.mining.failurePending) {
+    if (state_.screen != Screen::Mining ||
+        !state_.run.mining.failurePending ||
+        !miningEvaDeathModalReady()) {
         return;
     }
 
@@ -4089,6 +4116,7 @@ void RocketGameApp::startNewGame()
     session_ = {};
     session_.returnTrip.duration = tuning::session::returnDefaultDuration;
     miningExtraction_ = {};
+    miningEvaDeathPresentation_ = {};
     levelUp_ = {};
     expeditionXpPulseSeconds_ = 0.0;
     expeditionXpObservationInitialized_ = false;
@@ -4174,6 +4202,64 @@ void RocketGameApp::beginSceneFadeFromBlack(double durationSeconds)
     sceneTransition_.beginFadeFromBlack(durationSeconds);
 }
 
+void RocketGameApp::beginMiningEvaDeathPresentation()
+{
+    if (miningEvaDeathPresentation_.phase !=
+        MiningEvaDeathPresentationState::Phase::None) {
+        return;
+    }
+    miningEvaDeathPresentation_.phase =
+        MiningEvaDeathPresentationState::Phase::Impact;
+    miningEvaDeathPresentation_.elapsed = 0.0;
+    releaseRealtimeInputs(true);
+    panelDirty_ = true;
+}
+
+bool RocketGameApp::advanceMiningEvaDeathPresentation(double deltaSeconds)
+{
+    using Phase = MiningEvaDeathPresentationState::Phase;
+    const double dt = std::clamp(deltaSeconds, 0.0, 0.25);
+    switch (miningEvaDeathPresentation_.phase) {
+    case Phase::None:
+    case Phase::Complete:
+        return false;
+    case Phase::Impact:
+        miningEvaDeathPresentation_.elapsed = std::min(
+            kMiningEvaDeathImpactSeconds,
+            miningEvaDeathPresentation_.elapsed + dt);
+        if (miningEvaDeathPresentation_.elapsed >=
+            kMiningEvaDeathImpactSeconds) {
+            miningEvaDeathPresentation_.phase = Phase::FadingOut;
+            beginSceneFadeToBlack(kMiningEvaDeathFadeToBlackSeconds);
+            refreshPanel();
+            return true;
+        }
+        return false;
+    case Phase::FadingOut:
+        if (sceneTransition_.advance(dt)) {
+            miningEvaDeathPresentation_.phase = Phase::FadingIn;
+            beginSceneFadeFromBlack(kMiningEvaDeathFadeFromBlackSeconds);
+        }
+        refreshPanel();
+        return true;
+    case Phase::FadingIn:
+        sceneTransition_.advance(dt);
+        if (!sceneTransition_.active()) {
+            miningEvaDeathPresentation_.phase = Phase::Complete;
+        }
+        refreshPanel();
+        return true;
+    }
+    return false;
+}
+
+bool RocketGameApp::miningEvaDeathModalReady() const noexcept
+{
+    using Phase = MiningEvaDeathPresentationState::Phase;
+    return miningEvaDeathPresentation_.phase == Phase::None ||
+        miningEvaDeathPresentation_.phase == Phase::Complete;
+}
+
 void RocketGameApp::queueMiningSceneHandoff(MiningSceneHandoff handoff)
 {
     if (handoff == MiningSceneHandoff::None ||
@@ -4215,6 +4301,7 @@ bool RocketGameApp::advanceMiningSceneHandoff(double deltaSeconds)
 
 void RocketGameApp::completeMiningSceneHandoff()
 {
+    miningEvaDeathPresentation_ = {};
     switch (miningSceneHandoff_) {
     case MiningSceneHandoff::EnterMining:
         startMiningRunAfterFade();
@@ -4409,6 +4496,7 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         levelUpActivationLocked(),
         levelUp_.resolving ? levelUp_.selectedOfferIndex : -1,
         expeditionXpPulseSeconds_ > 0.0,
+        miningEvaDeathModalReady(),
     };
 }
 
@@ -4970,6 +5058,18 @@ RenderSnapshot RocketGameApp::snapshot() const
             : miningStats.scannerRadius;
         result.miningBounceRelief = miningStats.hardRockBounceRelief;
         result.miningFailurePulse = mining.failurePending ? std::max(0.25, std::clamp(mining.failureSeconds / 1.5, 0.0, 1.0)) : 0.0;
+        const auto evaDeathPhase = miningEvaDeathPresentation_.phase;
+        result.miningEvaDeathActive =
+            evaDeathPhase != MiningEvaDeathPresentationState::Phase::None &&
+            evaDeathPhase != MiningEvaDeathPresentationState::Phase::Complete;
+        result.miningEvaDeathProgress =
+            evaDeathPhase == MiningEvaDeathPresentationState::Phase::Impact
+            ? std::clamp(
+                  miningEvaDeathPresentation_.elapsed /
+                      kMiningEvaDeathImpactSeconds,
+                  0.0,
+                  1.0)
+            : (result.miningEvaDeathActive ? 1.0 : 0.0);
         result.miningRecoilX = mining.recoilX;
         result.miningRecoilY = mining.recoilY;
         result.miningMoveX = mining.moveX;

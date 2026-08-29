@@ -1234,7 +1234,12 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
     // Expose the remaining height to reusable fixed-action workspaces rather
     // than embedding viewport math in a screen-specific stylesheet.
     const int workspaceActionStackHeight = std::max(280, panelHeight - 114);
-    const int surfaceUpgradeChoiceCardHeight = std::clamp(viewportHeight - 240, 130, 220);
+    // Level-up offers carry a title, a readable benefit, two stat chips, and
+    // an explicit action lane. Keep the whole decision in view instead of
+    // squeezing the copy against its footer on Steam Deck-height viewports.
+    // The containing phase board already scrolls on unusually short windows,
+    // so the minimum protects card content without making it unreachable.
+    const int surfaceUpgradeChoiceCardHeight = std::clamp(viewportHeight - 240, 236, 280);
     const int hangarOperationCardHeight = std::clamp(viewportHeight - 350, 130, 210);
     const int droneRosterWidth = std::max(
         1,
