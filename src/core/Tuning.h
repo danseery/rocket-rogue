@@ -574,6 +574,10 @@ inline constexpr int terrainWidth = 64;
 inline constexpr int terrainHeight = 40;
 inline constexpr int chunkSize = 8;
 inline constexpr double oxygenSeconds = 30.0;
+// The EVA suit is an emergency fallback, not an upgrade track. Its reserve is
+// intentionally fixed so rig oxygen upgrades cannot turn a bailout into a
+// second full mining run.
+inline constexpr double operatorOxygenSeconds = 15.0;
 inline constexpr double ioArtifactOxygenSeconds = 60.0;
 inline constexpr double maximumOxygenSeconds = 120.0;
 inline constexpr double oxygenPocketRestoreSeconds = 10.0;
@@ -703,9 +707,13 @@ inline constexpr double artifactTetherPullPerSecond = 0.72;
 inline constexpr double artifactTetherSpring = 10.5;
 inline constexpr double artifactTetherDamping = 4.2;
 inline constexpr double artifactImpactDamageScale = 0.055;
-inline constexpr double artifactImpactDamageThreshold = 1.45;
+// Towing routinely brings an artifact into contact with tunnel walls. Treat
+// those ordinary bumps as momentum loss; reserve damage for a real slam.
+inline constexpr double artifactImpactDamageThreshold = 5.5;
 inline constexpr double artifactDropDamageThreshold = 2.20;
-inline constexpr double artifactDeliveryRadiusCells = 1.45;
+// Match the visible ship service field. A tethered artifact that reaches the
+// pad should be captured, not bounce around inside a smaller invisible ring.
+inline constexpr double artifactDeliveryRadiusCells = returnZoneRadiusCells;
 inline constexpr double artifactShipBayY = 2.65;
 inline constexpr int artifactStoryArkRepair = 1;
 inline constexpr int artifactStoryHullRepair = 8;

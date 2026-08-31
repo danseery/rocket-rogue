@@ -1270,10 +1270,11 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
     const int modalNewGameLeft = std::max(modalGutter, (viewportWidth - modalNewGameWidth) / 2);
     const int modalNewGameTop = std::max(modalGutter, (viewportHeight - modalNewGameHeight) / 2);
     const int modalActivityWidth = std::max(1, std::min(560, viewportWidth - modalGutter * 2));
-    // Briefings include a fixed 54 px action footer below their authored
-    // content. A 320 px border-box clips that footer after modal padding and
-    // the title row are removed, including the very first launch CTA.
-    const int modalActivityHeight = std::max(1, std::min(360, viewportHeight - modalGutter * 2));
+    // Briefings reserve permanent vertical breathing room for their action
+    // footer, even when an individual message is short. This keeps their CTA
+    // inside the frame on desktop and Steam Deck without relying on a
+    // particular copy length.
+    const int modalActivityHeight = std::max(1, std::min(420, viewportHeight - modalGutter * 2));
     const int modalActivityLeft = std::max(modalGutter, (viewportWidth - modalActivityWidth) / 2);
     const int modalActivityTop = std::max(modalGutter, (viewportHeight - modalActivityHeight) / 2);
     // Outcome summaries contain three consequence rows plus a persistent

@@ -5465,7 +5465,7 @@ button.settings-toggle:hover {
 .activity-introduction {
     display: flex;
     flex-direction: column;
-    min-height: 218px;
+    min-height: 270px;
 }
 .activity-introduction-kicker {
     margin-bottom: 10px;
@@ -7235,6 +7235,16 @@ body.panel-input-helper-visible #rr-panel.control-panel {
 #rr-panel.decision-family-panel > .status.panel-objective,
 #rr-panel.decision-family-panel > .rr-shell .rr-shell-content > .status.panel-objective {
     display: block;
+    min-height: 0px;
+    margin: 0px 0px 8px 0px;
+    padding: 0px;
+    color: #f1b72b;
+    font-size: 11px;
+    line-height: 1.2;
+}
+#rr-panel.arrival-family-panel .phase-board-arrival > .arrival-objective {
+    box-sizing: border-box;
+    width: 100%;
     min-height: 0px;
     margin: 0px 0px 8px 0px;
     padding: 0px;

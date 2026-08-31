@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -548,6 +549,142 @@ std::string activeMiningSave(double drillHeat)
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
+rocket::GameState readyJupiterDepartureState(const rocket::ContentCatalog& catalog)
+{
+    rocket::GameState state = rocket::createNewGame(catalog, 0x5A7A2EULL);
+    const auto destination = std::find_if(
+        catalog.destinations.begin(),
+        catalog.destinations.end(),
+        [](const rocket::Destination& candidate) {
+            return candidate.id == rocket::content::destination::jupiter;
+        });
+    assert(destination != catalog.destinations.end());
+    state.run.destinationIndex = static_cast<int>(
+        std::distance(catalog.destinations.begin(), destination));
+    state.meta.furthestTier = destination->tier;
+    state.meta.unlockKeys.push_back(rocket::content::unlock::routeJupiter);
+    state.meta.unlockKeys.push_back("outer_transfer_ready");
+    rocket::startSurfaceExpedition(state, catalog);
+    state.run.arrivalOps = {true, rocket::content::destination::jupiter};
+    state.screen = rocket::Screen::ArrivalOps;
+    return state;
+}
+
+std::string readyJupiterDepartureSave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    return rocket::serializeSaveData(
+        rocket::captureSaveData(readyJupiterDepartureState(catalog)));
+}
+
+rocket::GameState completedPerfectJupiterDepartureState(
+    const rocket::ContentCatalog& catalog,
+    bool rewardAlreadyClaimed)
+{
+    rocket::GameState state = readyJupiterDepartureState(catalog);
+    assert(rocket::performScenarioAction(
+               state,
+               catalog,
+               rocket::content::scenario::outerTransfer,
+               "briefing",
+               rocket::ScenarioActionKind::AcknowledgeBriefing).applied);
+    assert(rocket::startScenarioFlybyRun(
+        state,
+        catalog,
+        rocket::content::scenario::outerTransfer,
+        "flyby"));
+    state.run.flyby.completed = true;
+    state.run.flyby.result = rocket::FlybyGrade::Perfect;
+    if (rewardAlreadyClaimed) {
+        rocket::completeFlybyRun(state, catalog);
+        assert(rocket::performScenarioAction(
+                   state,
+                   catalog,
+                   rocket::content::scenario::outerTransfer,
+                   "flyby",
+                   rocket::ScenarioActionKind::ClaimReward).applied);
+    }
+
+    // Reproduce the live failure: the physical Jupiter objective is complete,
+    // but a stale Mars -> Jupiter reapproach left the generic frontier ledger
+    // one index behind.
+    state.run.destinationIndex = 2;
+    state.run.routeTransit = {
+        rocket::content::routeLink::marsJupiter,
+        rocket::content::destination::mars,
+        rocket::content::destination::jupiter,
+        rocket::RouteTransitIntent::Reapproach};
+    rocket::syncLaunchConfig(state, catalog);
+    return state;
+}
+
+std::string completedPerfectJupiterDepartureSave(bool rewardAlreadyClaimed)
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = completedPerfectJupiterDepartureState(
+        catalog,
+        rewardAlreadyClaimed);
+    if (!rewardAlreadyClaimed) {
+        // Active realtime Flyby state is intentionally not part of the
+        // campaign save. Persist the equivalent ReadyToClaim Hangar state for
+        // the app action regression; the in-memory RmlUi test below covers
+        // the result-screen binding itself.
+        rocket::completeFlybyRun(state, catalog);
+        state.screen = rocket::Screen::Hangar;
+    }
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
+rocket::GameState saturnArtifactReadyState(const rocket::ContentCatalog& catalog)
+{
+    rocket::GameState state = rocket::createNewGame(catalog, 0x5A7A70ULL);
+    state.meta.launchLessons.stage = rocket::LaunchTrainingStage::Complete;
+    state.meta.unlockKeys.push_back(rocket::content::unlock::routeSaturn);
+    state.run.destinationIndex = 4;
+    state.meta.furthestTier = 4;
+    rocket::ArtifactRecord artifact;
+    artifact.id = "saturn_app_route_artifact";
+    artifact.originDestinationId = rocket::content::destination::saturn;
+    artifact.rewardApplied = true;
+    state.meta.artifacts.push_back(std::move(artifact));
+    rocket::ensureScenarioInstances(state, catalog);
+    state.screen = rocket::Screen::Hangar;
+    rocket::syncLaunchConfig(state, catalog);
+    return state;
+}
+
+std::string saturnArtifactReadySave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    return rocket::serializeSaveData(rocket::captureSaveData(
+        saturnArtifactReadyState(catalog)));
+}
+
+int jupiterDestinationIndex()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    const auto jupiter = std::find_if(
+        catalog.destinations.begin(),
+        catalog.destinations.end(),
+        [](const rocket::Destination& destination) {
+            return destination.id == rocket::content::destination::jupiter;
+        });
+    assert(jupiter != catalog.destinations.end());
+    return static_cast<int>(std::distance(catalog.destinations.begin(), jupiter));
+}
+
+void assertJupiterSaturnRoutePersisted(std::string_view serializedSave)
+{
+    const std::optional<rocket::SaveData> save =
+        rocket::deserializeSaveData(serializedSave);
+    assert(save.has_value());
+    assert(save->destinationIndex == jupiterDestinationIndex());
+    assert(save->routeTransit.intent == rocket::RouteTransitIntent::Outbound);
+    assert(save->routeTransit.routeLinkId == rocket::content::routeLink::jupiterSaturn);
+    assert(save->routeTransit.originDestinationId == rocket::content::destination::jupiter);
+    assert(save->routeTransit.targetDestinationId == rocket::content::destination::saturn);
+}
+
 std::string evaDeathMiningSave()
 {
     const rocket::ContentCatalog catalog = rocket::createDefaultContent();
@@ -810,24 +947,24 @@ void ioRecoveryEntryActionsRepairPartialSaves()
     // an older partial save lost its bay/frame state. Mine and the named
     // scenario action must converge on the same authored mining site.
     for (const bool useNamedRecoveryAction : {false, true}) {
-        AppFixture fixture;
-        fixture.saves.value = partialIoRecoverySave();
-        assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("continue_game");
-        completeTitleLaunch(fixture);
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
+        auto fixture = std::make_unique<AppFixture>();
+        fixture->saves.value = partialIoRecoverySave();
+        assert(fixture->runner.initialize());
+        fixture->ui.dispatchAction("continue_game");
+        completeTitleLaunch(*fixture);
+        assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
 
         if (useNamedRecoveryAction) {
-            fixture.ui.dispatchAction(
+            fixture->ui.dispatchAction(
                 std::string(rocket::ui::actions::scenarioActionPrefix) +
                 rocket::content::scenario::volcanicDescent + "|recovery|" +
                 std::to_string(static_cast<int>(rocket::ScenarioActionKind::BeginActivity)));
         } else {
-            fixture.ui.dispatchAction("mine_surface");
+            fixture->ui.dispatchAction("mine_surface");
         }
-        advanceSceneHandoff(fixture);
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
-        const std::optional<rocket::SaveData> mining = rocket::deserializeSaveData(fixture.saves.value);
+        advanceSceneHandoff(*fixture);
+        assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
+        const std::optional<rocket::SaveData> mining = rocket::deserializeSaveData(fixture->saves.value);
         assert(mining.has_value());
         assert(mining->mining.active);
         assert(mining->mining.miningSiteDefinitionId == rocket::content::miningSite::thermalLayeredRecovery);
@@ -840,8 +977,163 @@ void ioRecoveryEntryActionsRepairPartialSaves()
                    mining->equippedDroneIds.begin(),
                    mining->equippedDroneIds.end(),
                    rocket::content::drone::hazardDrone) != mining->equippedDroneIds.end());
-        fixture.runner.shutdown();
+        fixture->runner.shutdown();
     }
+}
+
+void jupiterDepartureLaunchActionStartsFlyby()
+{
+    auto fixture = std::make_unique<AppFixture>();
+    fixture->saves.value = readyJupiterDepartureSave();
+    assert(fixture->runner.initialize());
+    fixture->ui.dispatchAction("continue_game");
+    completeTitleLaunch(*fixture);
+    assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::ArrivalOps));
+
+    fixture->ui.dispatchAction(std::string(rocket::ui::actions::beginSaturnSlingshot));
+    assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flyby));
+    fixture->runner.shutdown();
+}
+
+void perfectJupiterDepartureClaimQueuesSaturn()
+{
+    auto fixture = std::make_unique<AppFixture>();
+    fixture->saves.value = completedPerfectJupiterDepartureSave(false);
+    assert(fixture->runner.initialize());
+    fixture->ui.dispatchAction("continue_game");
+    completeTitleLaunch(*fixture);
+
+    fixture->ui.dispatchAction(
+        std::string(rocket::ui::actions::scenarioActionPrefix) +
+        rocket::content::scenario::outerTransfer + "|flyby|" +
+        std::to_string(static_cast<int>(rocket::ScenarioActionKind::ClaimReward)));
+    assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
+    fixture->host.now += 1.0 / 120.0;
+    fixture->runner.frame();
+
+    assertJupiterSaturnRoutePersisted(fixture->saves.value);
+    fixture->runner.shutdown();
+    fixture.reset();
+
+    // A valid v15 save produced by the old split transaction has already
+    // claimed the reward, so it has no claim button left to retry. Startup
+    // must finish that same transaction and persist the physical Saturn leg.
+    auto interruptedClaim = std::make_unique<AppFixture>();
+    interruptedClaim->saves.value = completedPerfectJupiterDepartureSave(true);
+    assert(interruptedClaim->runner.initialize());
+    interruptedClaim->ui.dispatchAction("continue_game");
+    completeTitleLaunch(*interruptedClaim);
+    interruptedClaim->ui.dispatchAction(std::string(rocket::ui::actions::claimSaturnCourse));
+    interruptedClaim->host.now += 1.0 / 120.0;
+    interruptedClaim->runner.frame();
+    assertJupiterSaturnRoutePersisted(interruptedClaim->saves.value);
+    interruptedClaim->runner.shutdown();
+}
+
+void perfectJupiterDepartureResultDispatchesStableRmlAction()
+{
+#if !defined(__EMSCRIPTEN__)
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    const auto completedDeparture = std::make_unique<rocket::GameState>(
+        completedPerfectJupiterDepartureState(catalog, false));
+    rocket::Random launchRng(0x5A7A2F0ULL);
+    const rocket::PreparedLaunch launch =
+        rocket::prepareLaunch(*completedDeparture, catalog, launchRng);
+    rocket::PanelRenderContext context {
+        *completedDeparture,
+        catalog,
+        launch,
+        launch};
+    context.firstTimeIntroductionsEnabled = false;
+
+    FakePreferenceStore preferences;
+    FakeHost host;
+    host.metrics = {1280, 800, 1280, 800, 1.0F};
+    FakeUiBridge bridge;
+    NullRmlRenderHost renderHost;
+    rocket::GameRmlUi ui(
+        preferences,
+        host,
+        bridge,
+        renderHost,
+        repositoryRootForRmlTests());
+    std::string dispatchedAction;
+    assert(ui.initialize([&](const std::string& action) { dispatchedAction = action; }));
+    ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+    const std::string claimFocusId =
+        "action:" + std::string(rocket::ui::actions::claimSaturnCourse);
+    ui.requestFocus(claimFocusId);
+    ui.refresh();
+    assert(ui.focusedId() == claimFocusId);
+    assert(ui.activateFocused());
+    assert(dispatchedAction == rocket::ui::actions::claimSaturnCourse);
+    ui.shutdown();
+#endif
+}
+
+void saturnArtifactGenericClaimQueuesUranus()
+{
+    const std::string action = rocket::ui::actions::scenarioAction(
+        rocket::content::scenario::saturnDeparture,
+        "artifact",
+        static_cast<int>(rocket::ScenarioActionKind::ClaimReward));
+
+    auto fixture = std::make_unique<AppFixture>();
+    fixture->saves.value = saturnArtifactReadySave();
+    assert(fixture->runner.initialize());
+    fixture->ui.dispatchAction("continue_game");
+    completeTitleLaunch(*fixture);
+    fixture->ui.dispatchAction(action);
+    fixture->host.now += 1.0 / 120.0;
+    fixture->runner.frame();
+
+    const std::optional<rocket::SaveData> save =
+        rocket::deserializeSaveData(fixture->saves.value);
+    assert(save.has_value());
+    assert(save->destinationIndex == 4);
+    assert(save->routeTransit.intent == rocket::RouteTransitIntent::Outbound);
+    assert(save->routeTransit.routeLinkId == rocket::content::routeLink::saturnUranus);
+    assert(save->routeTransit.originDestinationId == rocket::content::destination::saturn);
+    assert(save->routeTransit.targetDestinationId == rocket::content::destination::uranus);
+    assert(std::find(
+               save->unlockKeys.begin(),
+               save->unlockKeys.end(),
+               rocket::content::unlock::routeUranus) != save->unlockKeys.end());
+    fixture->runner.shutdown();
+
+#if !defined(__EMSCRIPTEN__)
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    const auto state = std::make_unique<rocket::GameState>(
+        saturnArtifactReadyState(catalog));
+    rocket::Random launchRng(0x5A7A71ULL);
+    const rocket::PreparedLaunch launch = rocket::prepareLaunch(*state, catalog, launchRng);
+    rocket::PanelRenderContext context {*state, catalog, launch, launch};
+    context.firstTimeIntroductionsEnabled = false;
+
+    FakePreferenceStore preferences;
+    FakeHost host;
+    host.metrics = {1280, 800, 1280, 800, 1.0F};
+    FakeUiBridge bridge;
+    NullRmlRenderHost renderHost;
+    rocket::GameRmlUi ui(
+        preferences,
+        host,
+        bridge,
+        renderHost,
+        repositoryRootForRmlTests());
+    std::string dispatchedAction;
+    assert(ui.initialize([&](const std::string& value) { dispatchedAction = value; }));
+    ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+    const std::string focusId = "scenario:" +
+        std::string(rocket::content::scenario::saturnDeparture) +
+        ":artifact:" + std::to_string(static_cast<int>(rocket::ScenarioActionKind::ClaimReward));
+    ui.requestFocus(focusId);
+    ui.refresh();
+    assert(ui.focusedId() == focusId);
+    assert(ui.activateFocused());
+    assert(dispatchedAction == action);
+    ui.shutdown();
+#endif
 }
 
 } // namespace
@@ -855,6 +1147,12 @@ int main()
 #endif
 
     ioRecoveryEntryActionsRepairPartialSaves();
+    jupiterDepartureLaunchActionStartsFlyby();
+    perfectJupiterDepartureResultDispatchesStableRmlAction();
+#if !defined(__EMSCRIPTEN__)
+    perfectJupiterDepartureClaimQueuesSaturn();
+    saturnArtifactGenericClaimQueuesUranus();
+#endif
 
 #if !defined(__EMSCRIPTEN__)
     // The packaged document shell is loaded once. Changing screen-family
@@ -885,7 +1183,8 @@ int main()
             bridge,
             renderHost,
             repositoryRootForRmlTests());
-        assert(ui.initialize([](const std::string&) {}));
+        std::string dispatchedAction;
+        assert(ui.initialize([&](const std::string& action) { dispatchedAction = action; }));
         assert(bridge.rmlUiEnabled);
 
         ui.setPanelPresentation(rocket::buildGamePanelPresentation(hangarContext));
@@ -1086,18 +1385,19 @@ int main()
         applyRealtimePresentation(scanContext);
         ui.closeModal();
 
-        rocket::GameState results = rocket::createNewGame(catalog, 0xDEB21EFULL);
-        results.screen = rocket::Screen::Results;
-        results.lastOutcome.type = rocket::LaunchResultType::SafeEject;
-        results.lastOutcome.recoveryMethod = rocket::RecoveryMethod::ReturnHome;
-        results.lastOutcome.ejectMultiplier = 1.1;
-        results.lastOutcome.crashMultiplier = 1.5;
+        auto results = std::make_unique<rocket::GameState>(
+            rocket::createNewGame(catalog, 0xDEB21EFULL));
+        results->screen = rocket::Screen::Results;
+        results->lastOutcome.type = rocket::LaunchResultType::SafeEject;
+        results->lastOutcome.recoveryMethod = rocket::RecoveryMethod::ReturnHome;
+        results->lastOutcome.ejectMultiplier = 1.1;
+        results->lastOutcome.crashMultiplier = 1.5;
         rocket::Random resultsRng(0xDEB21EFULL);
         const rocket::PreparedLaunch resultsLaunch =
-            rocket::prepareLaunch(results, catalog, resultsRng);
+            rocket::prepareLaunch(*results, catalog, resultsRng);
         const rocket::PanelDocumentPresentation resultsPresentation =
             rocket::buildGamePanelPresentation({
-                results,
+                *results,
                 catalog,
                 resultsLaunch,
                 resultsLaunch});
@@ -2873,18 +3173,43 @@ int main()
         levelUpFixture.runner.shutdown();
     }
 
-    // An older v13 payload is rejected at the title boundary with Continue
-    // unavailable and the exact fresh-start notice.
+    // Every incompatible payload is discarded at boot and immediately
+    // replaced with a fresh v15 campaign. The rejected campaign is never a
+    // Continue target.
+    const auto requireFreshCampaignBoundary = [](std::string payload) {
+        AppFixture fixture;
+        fixture.saves.value = std::move(payload);
+        assert(fixture.runner.initialize());
+        assert(fixture.saves.clearCount == 1);
+        assert(fixture.saves.storeCount == 1);
+        const std::optional<rocket::SaveData> replacement =
+            rocket::deserializeSaveData(fixture.saves.value);
+        assert(replacement.has_value() && replacement->version == rocket::save_schema::currentVersion);
+        assert(fixture.ui.html.find("data-rr-action=\"continue_game\"") == std::string::npos);
+        assert(fixture.ui.html.find("Previous campaign cleared for this revision.") != std::string::npos);
+        fixture.runner.shutdown();
+    };
+    std::string v14Save = levelUpExpeditionSave();
+    const std::size_t versionOffset = v14Save.find("version=15");
+    assert(versionOffset != std::string::npos);
+    v14Save.replace(versionOffset, 10, "version=14");
+    requireFreshCampaignBoundary(v14Save);
+    requireFreshCampaignBoundary("RR_SAVE_V0\ncredits=1\n");
+    std::string futureSave = levelUpExpeditionSave();
+    const std::size_t futureVersionOffset = futureSave.find("version=15");
+    assert(futureVersionOffset != std::string::npos);
+    futureSave.replace(futureVersionOffset, 10, "version=16");
+    requireFreshCampaignBoundary(futureSave);
+
+    // A failed clear must still try to overwrite the incompatible payload.
     {
-        AppFixture oldSaveFixture;
-        oldSaveFixture.saves.value = levelUpExpeditionSave();
-        const std::size_t versionOffset = oldSaveFixture.saves.value.find("version=14");
-        assert(versionOffset != std::string::npos);
-        oldSaveFixture.saves.value.replace(versionOffset, 10, "version=13");
-        assert(oldSaveFixture.runner.initialize());
-        assert(oldSaveFixture.ui.html.find("data-rr-action=\"continue_game\"") == std::string::npos);
-        assert(oldSaveFixture.ui.html.find("Progression update requires a new game.") != std::string::npos);
-        oldSaveFixture.runner.shutdown();
+        AppFixture fixture;
+        fixture.saves.value = "RR_SAVE_V0\ncredits=1\n";
+        fixture.saves.failClear = true;
+        assert(fixture.runner.initialize());
+        assert(fixture.saves.clearCount == 1 && fixture.saves.storeCount == 1);
+        assert(rocket::deserializeSaveData(fixture.saves.value).has_value());
+        fixture.runner.shutdown();
     }
 
     assert(host.viewportMetrics().logicalWidth == 1280);

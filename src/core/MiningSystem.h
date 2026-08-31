@@ -102,6 +102,11 @@ MiningCell* miningCellAt(MiningTerrain& terrain, int x, int y);
 const MiningCell* miningCellAt(const MiningTerrain& terrain, int x, int y);
 MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& catalog);
 MiningDrillStats miningOperatorDrillStats();
+// These are the single source of truth for the currently controlled actor's
+// oxygen readout. UI warnings and guidance use them rather than duplicating
+// the rig/EVA branch.
+double miningActiveOxygenSeconds(const MiningRunState& mining);
+double miningActiveOxygenCapacity(const GameState& state, const ContentCatalog& catalog);
 MiningLootLuckProfile miningLootLuckProfile(
     const GameState& state,
     const ContentCatalog& catalog,

@@ -2909,9 +2909,12 @@ void arrivalOperationsUseMutuallyExclusiveCommitments()
     LaunchOutcome saturnArrival = moonArrival;
     saturnArrival.destinationId = content::destination::saturn;
     startArrivalOps(generic, saturnArrival);
-    require(flybyClearsGenericNextRoute(generic, catalog), "Saturn Pass Through should expose the generic Uranus fast route");
-    require(bankFlybyRouteClearance(generic, catalog), "successful generic Flyby should fill onward Flight Data readiness");
-    require(generic.run.frontierReadiness == frontierReadinessCap(generic, catalog), "generic Flyby should fill the exact route-readiness cap");
+    require(!flybyClearsGenericNextRoute(generic, catalog),
+        "Saturn Pass Through must not bypass the authored Uranus artifact route");
+    require(!bankFlybyRouteClearance(generic, catalog),
+        "an authored Uranus route must reject generic Flyby clearance");
+    require(generic.run.frontierReadiness == 0,
+        "a Saturn Pass Through must not manufacture readiness for the artifact-gated route");
 
     LaunchOutcome marsArrival = moonArrival;
     marsArrival.destinationId = content::destination::mars;
@@ -2966,7 +2969,8 @@ void arrivalPresentationExplainsCommitmentAndResearchProgress()
             && uncommitted.find("DIRECT DESCENT") == std::string::npos,
         "the first Moon arrival should present only its required Orbit capture path");
     require(uncommitted.find("UNMAPPED +20") != std::string::npos
-            && uncommitted.find("7/8 • RECOVERY") != std::string::npos
+            && uncommitted.find("RECOVERY") != std::string::npos
+            && uncommitted.find("IN 1 RD") != std::string::npos
             && uncommitted.find("future Refit offers") != std::string::npos,
         "Arrival board should expose exact unmapped hazard and current/next Research Data milestone meaning");
     require(uncommitted.find("First landing protocol: Capture Orbit, then Land") != std::string::npos,
@@ -4180,6 +4184,48 @@ void exhaustedRunUpgradePoolConsumesQueuedChoices()
         "queued choices should drain deterministically when every eligible upgrade is installed");
 }
 
+void combatRunUpgradesWaitForFirstEnemyEncounter()
+{
+    ContentCatalog catalog = createDefaultContent();
+    catalog.surfaceUpgrades = {
+        *catalog.findSurfaceUpgrade(content::surfaceUpgrade::resonantDischarge),
+        *catalog.findSurfaceUpgrade(content::surfaceUpgrade::thermalDrillJackets)};
+    catalog.miniDrones.clear();
+    catalog.droneModules.clear();
+    catalog.droneSynergies.clear();
+
+    GameState state = createNewGame(catalog, 6423);
+    state.run.surfaceExpedition.pendingRunUpgradeChoices = 1;
+    Random rng(6424);
+    require(generateRunUpgradeOffers(state, catalog, rng), "non-combat upgrades should remain available before enemy contact");
+    require(state.run.surfaceExpedition.runUpgradeOfferCount == 1 &&
+            state.run.surfaceExpedition.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::thermalDrillJackets,
+        "Resonant Discharge should stay out of the early upgrade pool before an enemy is encountered");
+
+    state.run.surfaceExpedition.runUpgradeOffers = {{
+        {RunUpgradeKind::Rig, content::surfaceUpgrade::resonantDischarge, 1, -1}}};
+    state.run.surfaceExpedition.runUpgradeOfferCount = 1;
+    state.run.surfaceExpedition.runUpgradeOfferPending = true;
+    require(generateRunUpgradeOffers(state, catalog, rng) &&
+            state.run.surfaceExpedition.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::thermalDrillJackets,
+        "a saved pre-contact combat draft should be rerolled without consuming its earned pick");
+
+    state.meta.hasEncounteredEnemy = true;
+    state.run.surfaceExpedition.runUpgradeOffers = {};
+    state.run.surfaceExpedition.runUpgradeOfferCount = 0;
+    state.run.surfaceExpedition.runUpgradeOfferPending = false;
+    require(generateRunUpgradeOffers(state, catalog, rng) &&
+            state.run.surfaceExpedition.runUpgradeOfferCount == 2,
+        "the combat upgrade should enter the pool after the first hostile encounter");
+    require(std::any_of(
+                state.run.surfaceExpedition.runUpgradeOffers.begin(),
+                state.run.surfaceExpedition.runUpgradeOffers.begin() + state.run.surfaceExpedition.runUpgradeOfferCount,
+                [](const RunUpgradeOffer& offer) {
+                    return offer.definitionId == content::surfaceUpgrade::resonantDischarge;
+                }),
+        "Resonant Discharge should become eligible immediately after the first hostile encounter");
+}
+
 void droneGraftOffersAreDistinctPerCompatibleSlot()
 {
     ContentCatalog catalog = createDefaultContent();
@@ -4187,6 +4233,7 @@ void droneGraftOffersAreDistinctPerCompatibleSlot()
     catalog.droneSynergies.clear();
     GameState state = createNewGame(catalog, 6431);
     state.screen = Screen::SurfaceUpgrade;
+    state.meta.hasEncounteredEnemy = true;
     state.meta.unlockKeys = {content::unlock::droneBay, content::unlock::perimeterDrones};
     state.meta.droneBaySlots = 2;
     state.meta.ownedDroneIds = {content::drone::miningDrone, content::drone::miningDrone};
@@ -4820,7 +4867,7 @@ void runUpgradeLifetimeFollowsTheTransport()
         "Transport destruction should clear XP progression and every temporary upgrade family");
 }
 
-void miningDepletionAtShipGracefullyEndsRun()
+void miningShipServiceRestoresOxygenWithoutEndingRun()
 {
     const ContentCatalog catalog = createDefaultContent();
     auto startParkedAtShip = [&catalog](GameState& state, int seed) {
@@ -4838,9 +4885,12 @@ void miningDepletionAtShipGracefullyEndsRun()
     startParkedAtShip(oxygen, 650);
     oxygen.run.mining.oxygenSeconds = 0.01;
     updateMiningRun(oxygen, catalog, 0.08);
-    require(oxygen.screen == Screen::SurfaceExpedition, "oxygen depletion at the ship should return to surface ops");
-    require(!oxygen.run.mining.active, "oxygen depletion at the ship should finish the mining run");
-    require(!oxygen.run.mining.failurePending, "oxygen depletion at the ship should not start failure recall");
+    require(oxygen.screen == Screen::Mining && oxygen.run.mining.active,
+        "ship oxygen service should keep an empty rig's mining run active");
+    require(std::abs(oxygen.run.mining.oxygenSeconds - miningActiveOxygenCapacity(oxygen, catalog)) < 0.000001,
+        "ship oxygen service should instantly restore the full rig reserve without cargo");
+    require(!oxygen.run.mining.failurePending,
+        "ship oxygen service should not start failure recall");
 
     GameState fuel;
     startParkedAtShip(fuel, 651);
@@ -5169,12 +5219,12 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
         genericLockedPrepared,
         genericLockedPrepared});
     require(
-        frontierGateStatus(genericLockedRoute, catalog).kind == FrontierGateKind::FlightData
+        frontierGateStatus(genericLockedRoute, catalog).kind == FrontierGateKind::ScenarioRequirement
             && !frontierGateStatus(genericLockedRoute, catalog).satisfied
             && genericLockedPanel.find(
                 "<button class=\"disabled rr-text-button\" disabled><span class=\"rr-button-label\">Uranus: Unavailable</span></button>")
                 != std::string::npos,
-        "a generic Flight Data lock must use the same disabled Unavailable destination treatment");
+        "the authored Uranus artifact lock must use the disabled Unavailable destination treatment");
 
     GameState lockedJupiterRoute = createNewGame(catalog, 0x10AA);
     lockedJupiterRoute.run.destinationIndex = 2;
@@ -5361,6 +5411,97 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
             && state.run.surfaceExpedition.runDroneRanks.empty(),
         "a protected objective should record exactly once without granting a free permanent Drone rank");
 
+    state.screen = Screen::Hangar;
+    syncLaunchConfig(state, catalog);
+    Random directDepartureRng(0x10F0E);
+    const PreparedLaunch directDepartureLaunch = prepareLaunch(state, catalog, directDepartureRng);
+    const std::string directDepartureHangar = buildGamePanelHtml({
+        state,
+        catalog,
+        directDepartureLaunch,
+        directDepartureLaunch});
+    require(directDepartureHangar.find("rr-button-label\">Launch</span>") != std::string::npos &&
+            directDepartureHangar.find("Launch Jupiter Departure Slingshot") == std::string::npos &&
+            directDepartureHangar.find("Launch: Jupiter") == std::string::npos,
+        "recovering Io's artifact should replace the generic Jupiter launch with a concise departure action");
+
+    GameState oneClickDeparture = state;
+    startSurfaceExpedition(oneClickDeparture, catalog);
+    oneClickDeparture.screen = Screen::ArrivalOps;
+    oneClickDeparture.run.arrivalOps.active = true;
+    oneClickDeparture.run.arrivalOps.destinationId = content::destination::jupiter;
+    require(
+        startScenarioFlybyRun(
+            oneClickDeparture,
+            catalog,
+            content::scenario::outerTransfer,
+            "flyby") &&
+            oneClickDeparture.screen == Screen::Flyby &&
+            !oneClickDeparture.run.surfaceExpedition.active &&
+            scenarioStepBriefingAcknowledged(
+                oneClickDeparture,
+                content::scenario::outerTransfer,
+                "briefing"),
+        "the Arrival Ops Launch action should close the settled surface visit, acknowledge its pending departure briefing, and start the Flyby in one click");
+
+    require(performScenarioAction(
+                state,
+                catalog,
+                content::scenario::outerTransfer,
+                "briefing",
+                ScenarioActionKind::AcknowledgeBriefing).applied,
+        "the Jupiter departure briefing should acknowledge before the slingshot can be presented");
+    GameState surfaceDepartureHold = state;
+    startSurfaceExpedition(surfaceDepartureHold, catalog);
+    const ScenarioObjectivePresentation surfaceDepartureObjective = scenarioObjectiveForDestination(
+        surfaceDepartureHold,
+        catalog,
+        content::destination::jupiter);
+    require(surfaceDepartureObjective.action == ScenarioActionKind::None &&
+            surfaceDepartureObjective.detail == "RETURN TO EARTH TO BEGIN THE DEPARTURE SLINGSHOT.",
+        "Surface Ops must not offer a departure-only slingshot action that its active expedition cannot launch");
+    GameState arrivalDeparture = state;
+    arrivalDeparture.screen = Screen::ArrivalOps;
+    arrivalDeparture.run.arrivalOps.active = true;
+    arrivalDeparture.run.arrivalOps.destinationId = content::destination::jupiter;
+    const ScenarioObjectivePresentation arrivalDepartureScenario =
+        scenarioDepartureChallengeForDestination(
+            arrivalDeparture,
+            catalog,
+            content::destination::jupiter);
+    require(arrivalDepartureScenario.available &&
+            arrivalDepartureScenario.action == ScenarioActionKind::BeginActivity,
+        "the active Jupiter slingshot must be discoverable independently of higher-ranked completed objectives");
+    GameState lockedDeparture = arrivalDeparture;
+    lockedDeparture.meta.unlockKeys.erase(
+        std::remove(
+            lockedDeparture.meta.unlockKeys.begin(),
+            lockedDeparture.meta.unlockKeys.end(),
+            "outer_transfer_ready"),
+        lockedDeparture.meta.unlockKeys.end());
+    const ScenarioObjectivePresentation lockedDepartureScenario =
+        scenarioDepartureChallengeForDestination(
+            lockedDeparture,
+            catalog,
+            content::destination::jupiter);
+    require(!lockedDepartureScenario.available,
+        "Jupiter Arrival Ops must not expose a dead departure challenge before the artifact recovery unlocks it");
+    Random arrivalDepartureRng(0x10F10);
+    const PreparedLaunch arrivalDepartureLaunch = prepareLaunch(
+        arrivalDeparture,
+        catalog,
+        arrivalDepartureRng);
+    const std::string arrivalDepartureHtml = buildGamePanelHtml({
+        arrivalDeparture,
+        catalog,
+        arrivalDepartureLaunch,
+        arrivalDepartureLaunch});
+    require(arrivalDepartureHtml.find("JUPITER DEPARTURE — PERFECT SLINGSHOT") != std::string::npos
+            && arrivalDepartureHtml.find("rr-button-label\">Launch</span>") != std::string::npos
+            && arrivalDepartureHtml.find("data-rr-action=\"begin_saturn_slingshot\"") != std::string::npos
+            && arrivalDepartureHtml.find("Begin Jupiter Departure Slingshot") == std::string::npos,
+        "an active Jupiter departure challenge must present its required route with a concise Launch action at Arrival Ops");
+
     require(startSaturnSlingshotRun(state, catalog)
             && state.screen == Screen::Flyby
             && state.run.flyby.purpose == FlybyPurpose::SaturnSlingshot,
@@ -5375,17 +5516,232 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
     require(acknowledgeSaturnSlingshotFailure(state),
         "the first failed slingshot explanation should persist until acknowledged");
 
+    Random retryDepartureRng(0x10F11);
+    const PreparedLaunch retryDepartureLaunch = prepareLaunch(state, catalog, retryDepartureRng);
+    const std::string retryDepartureHangar = buildGamePanelHtml({
+        state,
+        catalog,
+        retryDepartureLaunch,
+        retryDepartureLaunch});
+    require(retryDepartureHangar.find("rr-button-label\">Retry</span>") != std::string::npos &&
+            retryDepartureHangar.find("Retry Jupiter Departure Slingshot") == std::string::npos &&
+            retryDepartureHangar.find("Launch: Jupiter") == std::string::npos,
+        "a failed Perfect pass should return to a concise departure retry rather than a generic Jupiter loop");
+
     require(startSaturnSlingshotRun(state, catalog), "a failed slingshot should remain retryable");
     state.run.flyby.completed = true;
     state.run.flyby.result = FlybyGrade::Perfect;
+    Random completedDepartureRng(0x10F111);
+    const PreparedLaunch completedDepartureLaunch = prepareLaunch(state, catalog, completedDepartureRng);
+    const std::string completedDepartureFlyby = buildGamePanelHtml({
+        state,
+        catalog,
+        completedDepartureLaunch,
+        completedDepartureLaunch});
+    require(completedDepartureFlyby.find("Lock Saturn Course") != std::string::npos &&
+            completedDepartureFlyby.find("data-rr-action=\"claim_saturn_course\"") != std::string::npos &&
+            completedDepartureFlyby.find("data-auto-modal=\"1\"") == std::string::npos &&
+            completedDepartureFlyby.find("Retry Slingshot Run") == std::string::npos,
+        "a completed Perfect departure must expose one stable course-claim control without a competing auto-modal");
     completeFlybyRun(state, catalog);
+    const ScenarioObjectivePresentation saturnCourseClaim = scenarioObjectiveForDestination(
+        state,
+        catalog,
+        content::destination::jupiter);
     require(canClaimSaturnCourse(state)
             && !state.meta.saturnRouteUnlocked
-            && claimSaturnCourse(state, catalog),
-        "Perfect should create a separate explicit Lock Saturn Course claim");
-    gate = frontierGateStatus(state, catalog);
-    require(gate.kind == FrontierGateKind::ScenarioRequirement && gate.satisfied,
-        "claiming the saved Perfect solution should permanently satisfy Saturn's authored route requirement");
+            && saturnCourseClaim.state == ScenarioStepState::ReadyToClaim
+            && saturnCourseClaim.action == ScenarioActionKind::ClaimReward
+            && saturnCourseClaim.actionLabel == "Lock Saturn Course",
+        "Perfect should create a separately labeled Lock Saturn Course claim");
+    Random courseClaimRng(0x10F12);
+    const PreparedLaunch courseClaimLaunch = prepareLaunch(state, catalog, courseClaimRng);
+    const std::string courseClaimHangar = buildGamePanelHtml({
+        state,
+        catalog,
+        courseClaimLaunch,
+        courseClaimLaunch});
+    require(courseClaimHangar.find("Lock Saturn Course") != std::string::npos &&
+            courseClaimHangar.find("Launch: Jupiter") == std::string::npos,
+        "a secured Perfect pass should make locking Saturn the Hangar's primary action");
+
+    GameState staleReapproachClaim = state;
+    staleReapproachClaim.run.destinationIndex = 2;
+    staleReapproachClaim.run.routeTransit = {
+        content::routeLink::marsJupiter,
+        content::destination::mars,
+        content::destination::jupiter,
+        RouteTransitIntent::Reapproach};
+    require(claimSaturnCourse(staleReapproachClaim, catalog)
+            && currentDestination(staleReapproachClaim, catalog).id == content::destination::jupiter
+            && staleReapproachClaim.run.routeTransit.intent == RouteTransitIntent::Outbound
+            && staleReapproachClaim.run.routeTransit.originDestinationId == content::destination::jupiter
+            && staleReapproachClaim.run.routeTransit.targetDestinationId == content::destination::saturn,
+        "the explicit Saturn reward must queue the physical Jupiter-to-Saturn leg and repair a stale reapproach index");
+    Random staleSaturnLaunchRng(0x10F121);
+    const PreparedLaunch staleSaturnLaunch = prepareLaunch(
+        staleReapproachClaim,
+        catalog,
+        staleSaturnLaunchRng);
+    const std::string staleSaturnHangar = buildGamePanelHtml({
+        staleReapproachClaim,
+        catalog,
+        staleSaturnLaunch,
+        staleSaturnLaunch});
+    require(staleSaturnHangar.find("Transfer: Jupiter \xE2\x86\x92 Saturn") != std::string::npos
+            && staleSaturnHangar.find("Reapproach: Jupiter") == std::string::npos,
+        "the repaired claim must present the authored Jupiter-to-Saturn transfer rather than another Jupiter loop");
+
+    require(claimSaturnCourse(state, catalog),
+        "the secured Jupiter departure should claim the Saturn route");
+    Random saturnLaunchRng(0x10F13);
+    const PreparedLaunch saturnLaunch = prepareLaunch(state, catalog, saturnLaunchRng);
+    const std::string saturnHangar = buildGamePanelHtml({state, catalog, saturnLaunch, saturnLaunch});
+    require(saturnHangar.find("Transfer: Jupiter \xE2\x86\x92 Saturn") != std::string::npos,
+        "locking the Saturn course should expose the physical Jupiter-to-Saturn launch action");
+    gate = frontierGateStatusForDestination(state, catalog, content::destination::saturn);
+    require(gate.kind == FrontierGateKind::ScenarioRequirement && gate.satisfied &&
+            currentDestination(state, catalog).id == content::destination::jupiter &&
+            state.run.routeTransit.targetDestinationId == content::destination::saturn,
+        "claiming the saved Perfect solution should unlock and queue Saturn's authored route without arriving early");
+}
+
+void saturnArtifactQueuesPhysicalUranusRoute()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0x51A7);
+    state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+    state.meta.unlockKeys.push_back(content::unlock::routeSaturn);
+    state.run.destinationIndex = 4;
+    state.meta.furthestTier = 4;
+    state.screen = Screen::Hangar;
+    syncLaunchConfig(state, catalog);
+
+    ScenarioObjectivePresentation objective = scenarioObjectiveForDestination(
+        state,
+        catalog,
+        content::destination::saturn);
+    require(objective.available && objective.scenarioId == content::scenario::saturnDeparture &&
+            objective.current == 0 && objective.required == 1 &&
+            objective.state == ScenarioStepState::Active,
+        "Saturn should expose a visible 0/1 artifact-departure objective");
+
+    state.run.surfaceExpedition.active = true;
+    state.run.surfaceExpedition.destinationId = content::destination::saturn;
+    state.run.surfaceExpedition.temporaryArtifacts.push_back(
+        {"saturn_route_artifact", content::destination::saturn, false});
+    objective = scenarioObjectiveForDestination(state, catalog, content::destination::saturn);
+    require(objective.current == 0 && objective.state == ScenarioStepState::Active,
+        "a temporary Saturn artifact must not count before safe extraction");
+
+    const SurfaceActionOutcome extracted = extractSurfacePayload(state, catalog);
+    require(extracted.applied && extracted.artifactFound && state.meta.artifacts.size() == 1,
+        "safe Saturn extraction should move the artifact into permanent inventory");
+    state.screen = Screen::Hangar;
+    objective = scenarioObjectiveForDestination(state, catalog, content::destination::saturn);
+    require(objective.current == 1 && objective.required == 1 &&
+            objective.state == ScenarioStepState::ReadyToClaim &&
+            objective.location == "SATURN DEPARTURE" &&
+            objective.title == "Artifact Secured" &&
+            objective.actionLabel == "Lock Uranus Course",
+        "the returned Saturn artifact should expose the explicit Uranus course claim");
+
+    Random claimPanelRng(0x51A8);
+    const PreparedLaunch claimPanelLaunch = prepareLaunch(state, catalog, claimPanelRng);
+    const std::string claimPanel = buildGamePanelHtml({
+        state,
+        catalog,
+        claimPanelLaunch,
+        claimPanelLaunch});
+    require(claimPanel.find("SATURN DEPARTURE") != std::string::npos &&
+            claimPanel.find("1/1") != std::string::npos &&
+            claimPanel.find("Lock Uranus Course") != std::string::npos &&
+            claimPanel.find("Launch: Saturn") == std::string::npos,
+        "the Saturn Hangar should prioritize the concise Uranus claim over another Saturn sortie");
+
+    require(performScenarioAction(
+                state,
+                catalog,
+                content::scenario::saturnDeparture,
+                "artifact",
+                ScenarioActionKind::ClaimReward).applied &&
+            commitClaimedScenarioRoute(
+                state,
+                catalog,
+                content::scenario::saturnDeparture,
+                "artifact"),
+        "claiming the Saturn artifact objective should queue its authored route");
+    require(hasUnlock(state.meta, content::unlock::routeUranus) &&
+            currentDestination(state, catalog).id == content::destination::saturn &&
+            state.run.routeTransit.intent == RouteTransitIntent::Outbound &&
+            state.run.routeTransit.originDestinationId == content::destination::saturn &&
+            state.run.routeTransit.targetDestinationId == content::destination::uranus,
+        "locking Uranus must leave the ship at Saturn and queue Saturn-to-Uranus");
+
+    Random routeRng(0x51A9);
+    const PreparedLaunch uranusLaunch = prepareLaunch(state, catalog, routeRng);
+    const LaunchPanelPresentation launchPresentation = launchPanelPresentation(
+        state,
+        catalog,
+        uranusLaunch,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        FlightActionState {});
+    require(uranusLaunch.config.destinationId == content::destination::uranus &&
+            uranusLaunch.config.routeTransit.originDestinationId == content::destination::saturn &&
+            launchPresentation.sectionTitle.find("Saturn \xE2\x86\x92 Uranus") != std::string::npos &&
+            launchPresentation.objectiveTitle == "REACH Uranus",
+        "the queued flight should visibly depart Saturn for Uranus");
+
+    GameState retry = state;
+    LaunchOutcome returned;
+    returned.type = LaunchResultType::SafeEject;
+    returned.recoveryMethod = RecoveryMethod::ReturnHome;
+    returned.frontierTransfer = true;
+    returned.destinationId = content::destination::uranus;
+    returned.routeTransit = retry.run.routeTransit;
+    applyLaunchOutcome(retry, catalog, returned);
+    require(currentDestination(retry, catalog).id == content::destination::saturn &&
+            retry.run.routeTransit.targetDestinationId == content::destination::uranus,
+        "an incomplete Uranus leg should remain retryable from Saturn");
+
+    LaunchOutcome arrived;
+    arrived.type = LaunchResultType::MissionComplete;
+    arrived.recoveryMethod = RecoveryMethod::TransferArrival;
+    arrived.frontierTransfer = true;
+    arrived.destinationId = content::destination::uranus;
+    arrived.routeTransit = state.run.routeTransit;
+    applyLaunchOutcome(state, catalog, arrived);
+    require(currentDestination(state, catalog).id == content::destination::uranus &&
+            !state.run.routeTransit.active(),
+        "only a successful Saturn-to-Uranus arrival should advance the frontier and clear the leg");
+
+    GameState existing = createNewGame(catalog, 0x51AA);
+    existing.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+    existing.meta.unlockKeys.push_back(content::unlock::routeSaturn);
+    existing.run.destinationIndex = 4;
+    ArtifactRecord recovered;
+    recovered.id = "existing_saturn_artifact";
+    recovered.originDestinationId = content::destination::saturn;
+    recovered.rewardApplied = true;
+    existing.meta.artifacts.push_back(recovered);
+    existing.run.surfaceExpedition.expeditionExperience = 42.0;
+    const std::optional<SaveData> encoded = deserializeSaveData(
+        serializeSaveData(captureSaveData(existing)));
+    require(encoded.has_value() && encoded->version == save_schema::currentVersion,
+        "the existing-artifact fixture should remain a valid current-schema save");
+    GameState restored = createNewGame(catalog, 0x51AB);
+    restoreSaveData(restored, catalog, *encoded);
+    const ScenarioObjectivePresentation restoredObjective = scenarioObjectiveForDestination(
+        restored,
+        catalog,
+        content::destination::saturn);
+    require(restoredObjective.state == ScenarioStepState::ReadyToClaim &&
+            restoredObjective.current == 1 &&
+            std::abs(restored.run.surfaceExpedition.expeditionExperience - 42.0) < 0.001,
+        "a valid v15 Saturn artifact should reconcile to ready without replaying objective XP");
 }
 
 void campaignStateRoundTripsAtCurrentVersion()
@@ -5841,6 +6197,7 @@ void proceduralScenarioTemplatesStayDormantUntilInstanced()
         "scenario initialization must preserve a concrete procedural instance");
     const ScenarioInstance* persisted = findScenarioInstance(state.meta, instanceId);
     require(persisted != nullptr, "the procedural fixture should retain its resolved values");
+    const std::vector<std::string> persistedParameters = persisted->resolvedParameters;
     const ScenarioDefinition resolvedDelivery = resolveScenarioDefinition(*templateDefinition, *persisted);
     const ScenarioStepDefinition* resolvedDeliveryStep =
         findScenarioStepDefinition(resolvedDelivery, "delivery");
@@ -5917,7 +6274,7 @@ void proceduralScenarioTemplatesStayDormantUntilInstanced()
     require(
         restoredInstance != nullptr && restoredInstance->source == ScenarioSource::Procedural &&
             restoredInstance->factoryId == "generated_mining" &&
-            restoredInstance->resolvedParameters == persisted->resolvedParameters &&
+            restoredInstance->resolvedParameters == persistedParameters &&
             resolveScenarioDefinition(*templateDefinition, *restoredInstance).destinationId ==
                 "procedural_fixture_destination",
         "a procedural factory instance should reload its resolved values without rerolling");
@@ -6154,6 +6511,8 @@ void enemyContactStartsBeyondSolarSystemAndCanBeMitigated()
             }
 
             require(outcome.enemyEncounter, "enemy contact event should set the encounter flag");
+            require(state.meta.hasEncounteredEnemy,
+                "the first hostile contact should permanently unlock combat upgrade eligibility");
             require(state.run.surfaceExpedition.supply == supplyBefore + outcome.supplyDelta, "enemy contact supply delta should match expedition state");
             require(outcome.supplyDelta == -(tuning::research::surveySupplyCost + tuning::research::surfaceEnemySupplyLoss), "enemy contact should consume supply in addition to the action");
             const MiningArenaRules contactRules = resolveMiningArenaRules({MiningAct::ActTwo, 1, 0});
@@ -6307,14 +6666,18 @@ void physicalMiningArtifactsAreSingleAndDeliveryGated()
     state.run.mining.drilling = false;
     state.run.mining.artifact.state = MiningArtifactState::Loose;
     state.run.mining.artifact.tethered = true;
-    state.run.mining.artifact.x = state.run.mining.returnZoneX;
+    state.run.mining.artifact.x = state.run.mining.returnZoneX +
+        tuning::mining::returnZoneRadiusCells - 0.05;
     state.run.mining.artifact.y = state.run.mining.returnZoneY;
-    state.run.mining.droneX = state.run.mining.artifact.x;
-    state.run.mining.droneY = state.run.mining.artifact.y;
+    // The artifact can reach the ship bay before the rig reaches the pad.
+    // Its ownership must still become Ship manifest immediately.
+    state.run.mining.droneX = state.run.mining.returnZoneX + 5.0;
+    state.run.mining.droneY = state.run.mining.returnZoneY;
     updateMiningRun(state, catalog, 0.08);
-    require(state.run.mining.artifact.state == MiningArtifactState::Delivered, "tethered artifact should deliver at the ship zone");
-    require(state.run.mining.temporaryArtifacts.empty(), "delivered artifact should not stay carried after auto-bank");
-    require(state.run.mining.stowedArtifacts.size() == 1, "delivered artifact should bank at the ship");
+    require(state.run.mining.artifact.state == MiningArtifactState::Delivered,
+        "a tethered artifact should deliver anywhere inside the visible ship service zone");
+    require(state.run.mining.temporaryArtifacts.empty(), "delivered artifact should not remain in the rig ledger");
+    require(state.run.mining.stowedArtifacts.size() == 1, "delivered artifact should enter the Ship manifest even before the rig docks");
     require(state.run.mining.stowedCargo >= tuning::mining::artifactCargo, "delivered artifact should add banked cargo weight");
 }
 
@@ -6365,6 +6728,32 @@ void miningArtifactTetherAndDestructionRules()
     state.run.mining.artifact.velocityX = 0.0;
     updateMiningRun(state, catalog, 0.08);
     require(state.run.mining.artifact.velocityX < 0.0, "the longer tether should pull once an artifact moves beyond its trailing length");
+
+    // A tethered artifact must be able to scrape tunnel terrain while being
+    // dragged. Only a high-speed slam should cost condition.
+    MiningCell* bumpWall = miningCellAt(state.run.mining.terrain, 21, 10);
+    require(bumpWall != nullptr, "artifact bump-threshold fixture requires a wall cell");
+    *bumpWall = {MiningCellMaterial::HardRock, 1.0, 1.0, true, false};
+    state.run.mining.gravityStrength = 0.0;
+    state.run.mining.artifact.tethered = false;
+    state.run.mining.artifact.state = MiningArtifactState::Loose;
+    state.run.mining.artifact.maxHealth = 1.0;
+    state.run.mining.artifact.health = 1.0;
+    state.run.mining.artifact.x = 20.95;
+    state.run.mining.artifact.y = 10.5;
+    state.run.mining.artifact.velocityX = 5.0;
+    state.run.mining.artifact.velocityY = 0.0;
+    updateMiningRun(state, catalog, 0.08);
+    require(std::abs(state.run.mining.artifact.health - 1.0) < 0.000001,
+        "ordinary artifact bumps against tunnel terrain must not cause damage");
+
+    state.run.mining.artifact.x = 20.95;
+    state.run.mining.artifact.y = 10.5;
+    state.run.mining.artifact.velocityX = 8.0;
+    state.run.mining.artifact.velocityY = 0.0;
+    updateMiningRun(state, catalog, 0.08);
+    require(state.run.mining.artifact.health < 1.0,
+        "a high-speed artifact slam should still cause condition damage");
 
     state.run.mining.artifact.state = MiningArtifactState::Destroyed;
     state.run.mining.artifact.tethered = true;
@@ -6709,14 +7098,14 @@ void poiGuidancePrioritizesSafetyAndTracksRecoverableArtifacts()
     mining.artifact.y = 18.5;
 
     PoiGuidanceTarget guidance = miningPoiGuidanceTarget(
-        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+        mining, miningActiveOxygenSeconds(mining), 100.0, tuning::launch::warningCautionThreshold, false);
     require(guidance.active && guidance.kind == PoiGuidanceKind::Artifact &&
             guidance.direction == PoiGuidanceDirection::WorldTarget,
         "a revealed recoverable artifact on the active layer should receive dynamic guidance");
 
     mining.oxygenSeconds = 37.0;
     guidance = miningPoiGuidanceTarget(
-        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+        mining, miningActiveOxygenSeconds(mining), 100.0, tuning::launch::warningCautionThreshold, false);
     require(guidance.active && guidance.kind == PoiGuidanceKind::Ship &&
             guidance.direction == PoiGuidanceDirection::Ascend,
         "oxygen caution should override artifact guidance and point upward below surface");
@@ -6724,7 +7113,7 @@ void poiGuidancePrioritizesSafetyAndTracksRecoverableArtifacts()
     mining.oxygenSeconds = 100.0;
     mining.droneHealth = 0.37;
     guidance = miningPoiGuidanceTarget(
-        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+        mining, miningActiveOxygenSeconds(mining), 100.0, tuning::launch::warningCautionThreshold, false);
     require(guidance.active && guidance.kind == PoiGuidanceKind::Ship,
         "mining rig integrity caution should override artifact guidance");
 
@@ -6733,7 +7122,7 @@ void poiGuidancePrioritizesSafetyAndTracksRecoverableArtifacts()
     mining.operatorPresent = true;
     mining.operatorIntegrity = 0.37;
     guidance = miningPoiGuidanceTarget(
-        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+        mining, miningActiveOxygenSeconds(mining), tuning::mining::operatorOxygenSeconds, tuning::launch::warningCautionThreshold, false);
     require(guidance.active && guidance.kind == PoiGuidanceKind::Ship,
         "active operator suit integrity caution should override artifact guidance");
 
@@ -6742,7 +7131,7 @@ void poiGuidancePrioritizesSafetyAndTracksRecoverableArtifacts()
     mining.operatorIntegrity = 1.0;
     mining.drillIntegrity = 0.37;
     guidance = miningPoiGuidanceTarget(
-        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+        mining, miningActiveOxygenSeconds(mining), 100.0, tuning::launch::warningCautionThreshold, false);
     require(guidance.active && guidance.kind == PoiGuidanceKind::Ship,
         "drill integrity caution should override artifact guidance");
 
@@ -6750,23 +7139,23 @@ void poiGuidancePrioritizesSafetyAndTracksRecoverableArtifacts()
     mining.oxygenSeconds = 37.0;
     mining.depthZone = 0;
     guidance = miningPoiGuidanceTarget(
-        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+        mining, miningActiveOxygenSeconds(mining), 100.0, tuning::launch::warningCautionThreshold, false);
     require(guidance.active && guidance.direction == PoiGuidanceDirection::WorldTarget &&
             guidance.x == mining.returnZoneX && guidance.y == mining.returnZoneY,
         "surface safety guidance should point directly to the ship");
     require(!miningPoiGuidanceTarget(
-                 mining, 100.0, tuning::launch::warningCautionThreshold, true).active,
+                 mining, miningActiveOxygenSeconds(mining), 100.0, tuning::launch::warningCautionThreshold, true).active,
         "surface ship guidance should disappear inside the return zone");
 
     mining.oxygenSeconds = 100.0;
     mining.depthZone = 2;
     mining.artifact.state = MiningArtifactState::Delivered;
     guidance = miningPoiGuidanceTarget(
-        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+        mining, miningActiveOxygenSeconds(mining), 100.0, tuning::launch::warningCautionThreshold, false);
     require(!guidance.active, "delivered artifacts should not retain POI guidance");
     mining.artifact.state = MiningArtifactState::Destroyed;
     guidance = miningPoiGuidanceTarget(
-        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+        mining, miningActiveOxygenSeconds(mining), 100.0, tuning::launch::warningCautionThreshold, false);
     require(!guidance.active, "destroyed artifacts should not retain POI guidance");
 
     MiningDepthLayerState upperLayer;
@@ -6776,12 +7165,12 @@ void poiGuidancePrioritizesSafetyAndTracksRecoverableArtifacts()
     upperLayer.artifact.state = MiningArtifactState::Loose;
     mining.depthLayers = {upperLayer};
     guidance = miningPoiGuidanceTarget(
-        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+        mining, miningActiveOxygenSeconds(mining), 100.0, tuning::launch::warningCautionThreshold, false);
     require(guidance.active && guidance.direction == PoiGuidanceDirection::Ascend,
         "an artifact on an upper cached layer should lead to the ascent boundary");
     mining.depthLayers.front().depthZone = 3;
     guidance = miningPoiGuidanceTarget(
-        mining, 100.0, tuning::launch::warningCautionThreshold, false);
+        mining, miningActiveOxygenSeconds(mining), 100.0, tuning::launch::warningCautionThreshold, false);
     require(guidance.active && guidance.direction == PoiGuidanceDirection::Descend,
         "an artifact on a lower cached layer should lead to the descent boundary");
 
@@ -8098,6 +8487,22 @@ void miningHazardAffinitiesApplyOnlyOnDrillContact()
     updateMiningRun(nearbyOnly, catalog, 0.20);
     require(nearbyOnly.run.mining.drillHeat > 0.0, "nearby thermal hazards should heat the rig even while it is not drilling");
     require(nearbyOnly.run.mining.droneHealth < healthBeforeProximity, "nearby thermal hazards should visibly damage rig health while the Hazard Drone is still treating them");
+
+    GameState hiddenCocoon = contactState(MiningElementalAffinity::Thermal);
+    hiddenCocoon.run.mining.drillHeat = 0.0;
+    hiddenCocoon.run.mining.droneX = 32.5;
+    hiddenCocoon.run.mining.droneY = 8.5;
+    MiningCell* concealedCocoonHazard = miningCellAt(hiddenCocoon.run.mining.terrain, 33, 8);
+    require(concealedCocoonHazard != nullptr, "hidden cocoon hazard test cell should exist");
+    concealedCocoonHazard->revealed = true;
+    concealedCocoonHazard->cocoonLayer = 0;
+    hiddenCocoon.run.mining.gate.cocoonLayers.push_back({"hidden", "HIDDEN", 1, 1, 1, false});
+    const double healthBeforeHiddenCocoon = hiddenCocoon.run.mining.droneHealth;
+    setMiningDrilling(hiddenCocoon, false);
+    updateMiningRun(hiddenCocoon, catalog, 0.20);
+    require(hiddenCocoon.run.mining.drillHeat == 0.0 &&
+            hiddenCocoon.run.mining.droneHealth == healthBeforeHiddenCocoon,
+        "concealed cocoon layers must remain inert until their reveal rule is satisfied");
 }
 
 
@@ -10009,14 +10414,14 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
     require(state.run.mining.stowedCargo == 2, "ship zone should stow carried cargo");
     require(
         std::abs(state.run.mining.oxygenSeconds - oxygenCapacity) < 0.000001,
-        "banking payload at the ship should refill the current oxygen capacity");
+        "ship service should refill the current oxygen capacity while banking payload");
     require(!state.run.mining.oxygenDepletedNotified, "oxygen refill should reset the depletion warning latch");
 
     state.run.mining.oxygenSeconds = 3.0;
     updateMiningRun(state, catalog, 0.08);
     require(
-        state.run.mining.oxygenSeconds < 3.0,
-        "entering the ship zone without carried payload should not grant a free oxygen refill");
+        std::abs(state.run.mining.oxygenSeconds - oxygenCapacity) < 0.000001,
+        "entering the ship zone without carried payload should grant free rig oxygen service");
 
     MiningRunPresentation atShip = miningRunPresentation(state, catalog);
     require(std::any_of(atShip.actions.begin(), atShip.actions.end(), [](const PanelButtonPresentation& action) {
@@ -10221,7 +10626,9 @@ void miningOxygenDrainsRigHealthBeforeEmergencyEjection()
         startMiningRun(state, catalog, {MiningAct::ActOne, 2, 95960}, false).applied,
         "mining should start for oxygen drain test with oxygen pressure enabled");
 
+    state.run.mining.droneY += tuning::mining::returnZoneRadiusCells + 2.0;
     state.run.mining.oxygenSeconds = 0.0;
+    state.run.mining.operatorOxygenSeconds = 5.0;
     const double healthBefore = state.run.mining.droneHealth;
     updateMiningRun(state, catalog, 0.08);
     require(!state.run.mining.failurePending, "zero oxygen should not recall immediately");
@@ -10236,6 +10643,80 @@ void miningOxygenDrainsRigHealthBeforeEmergencyEjection()
         "rig destruction should emergency-eject the operator into EVA");
     require(!state.run.mining.failurePending && state.run.mining.active,
         "a successful emergency ejection should preserve the active deployment");
+    const double suitBeforeEvaTick = state.run.mining.operatorOxygenSeconds;
+    const double rigOxygenAfterEjection = state.run.mining.oxygenSeconds;
+    const double suitIntegrityBeforeEvaTick = state.run.mining.operatorIntegrity;
+    updateMiningRun(state, catalog, 0.08);
+    require(state.run.mining.operatorOxygenSeconds < suitBeforeEvaTick &&
+            std::abs(state.run.mining.oxygenSeconds - rigOxygenAfterEjection) < 0.000001 &&
+            std::abs(state.run.mining.operatorIntegrity - suitIntegrityBeforeEvaTick) < 0.000001,
+        "emergency EVA should use its remaining suit reserve before draining suit integrity");
+}
+
+void miningOxygenReservesDrainIndependentlyAndShipServicesBoth()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = activeMiningStateForEvaTest(catalog, 0x0A2E);
+    MiningRunState& mining = state.run.mining;
+    mining.gravityStrength = 0.0;
+    mining.droneX = mining.returnZoneX + tuning::mining::returnZoneRadiusCells + 2.0;
+    mining.droneY = mining.returnZoneY;
+    mining.oxygenSeconds = 12.0;
+    mining.operatorOxygenSeconds = 9.0;
+
+    updateMiningRun(state, catalog, 0.08);
+    require(mining.oxygenSeconds < 12.0 && std::abs(mining.operatorOxygenSeconds - 9.0) < 0.000001,
+        "rig mode should drain only the rig reserve outside ship service");
+    const double rigAfterRigTick = mining.oxygenSeconds;
+    require(toggleMiningOperator(state), "independent oxygen test should be able to leave the rig for EVA");
+    updateMiningRun(state, catalog, 0.08);
+    require(mining.operatorOxygenSeconds < 9.0 &&
+            std::abs(mining.oxygenSeconds - rigAfterRigTick) < 0.000001,
+        "EVA should drain only the suit reserve while the rig oxygen pauses");
+    mining.operatorOxygenSeconds = 0.0;
+    const double rigIntegrityBeforeSuitDepletion = mining.droneHealth;
+    const double suitIntegrityBeforeSuitDepletion = mining.operatorIntegrity;
+    updateMiningRun(state, catalog, 0.08);
+    require(mining.operatorIntegrity < suitIntegrityBeforeSuitDepletion &&
+            std::abs(mining.droneHealth - rigIntegrityBeforeSuitDepletion) < 0.000001,
+        "empty suit oxygen should damage only suit integrity while the rig remains safe");
+    mining.operatorOxygenSeconds = 8.0;
+    const double suitAfterEvaTick = mining.operatorOxygenSeconds;
+    require(toggleMiningOperator(state), "independent oxygen test should re-enter the nearby rig");
+    require(std::abs(mining.operatorOxygenSeconds - suitAfterEvaTick) < 0.000001,
+        "re-entering the rig away from the ship must not refill the EVA suit");
+
+    mining.droneX = mining.returnZoneX;
+    mining.droneY = mining.returnZoneY;
+    mining.oxygenSeconds = 1.0;
+    mining.operatorOxygenSeconds = 1.0;
+    updateMiningRun(state, catalog, 0.08);
+    require(std::abs(mining.oxygenSeconds - miningActiveOxygenCapacity(state, catalog)) < 0.000001 &&
+            std::abs(mining.operatorOxygenSeconds - tuning::mining::operatorOxygenSeconds) < 0.000001,
+        "an occupied rig at the ship should refill both independent reserves");
+    require(miningHudPresentation(state, catalog).vitals[0].label == "RIG O2",
+        "the compact HUD should identify the active rig oxygen reserve");
+    Random rigPanelRng(0x0A2E);
+    const PreparedLaunch rigPanelLaunch = prepareLaunch(state, catalog, rigPanelRng);
+    const std::string rigPanelHtml = buildGamePanelHtml(
+        {state, catalog, rigPanelLaunch, rigPanelLaunch});
+    require(rigPanelHtml.find("id=\"rr-hud-mining-oxygen-label\">RIG O2") != std::string::npos &&
+            rigPanelHtml.find("Rig O2") != std::string::npos &&
+            rigPanelHtml.find("Suit O2") != std::string::npos,
+        "mining details should expose both reserves while the compact vital names the active rig reserve");
+
+    require(toggleMiningOperator(state), "ship-service test should be able to exit into EVA");
+    mining.operatorOxygenSeconds = 1.0;
+    updateMiningRun(state, catalog, 0.08);
+    require(std::abs(mining.operatorOxygenSeconds - tuning::mining::operatorOxygenSeconds) < 0.000001 &&
+            miningHudPresentation(state, catalog).vitals[0].label == "SUIT O2",
+        "EVA at the ship should refill only the suit and label the active suit reserve");
+    Random suitPanelRng(0x0A2F);
+    const PreparedLaunch suitPanelLaunch = prepareLaunch(state, catalog, suitPanelRng);
+    const std::string suitPanelHtml = buildGamePanelHtml(
+        {state, catalog, suitPanelLaunch, suitPanelLaunch});
+    require(suitPanelHtml.find("id=\"rr-hud-mining-oxygen-label\">SUIT O2") != std::string::npos,
+        "native and web panel markup should switch the live oxygen label to the suit during EVA");
 }
 
 void miningLoadBurdenAndUpgradeRelief()
@@ -10659,6 +11140,7 @@ void miningEvaAndSwarmStateRoundTrips()
     mining.operatorAimDirX = 0.6;
     mining.operatorAimDirY = 0.8;
     mining.operatorIntegrity = 0.63;
+    mining.operatorOxygenSeconds = 6.25;
     mining.operatorFireCooldownSeconds = 0.11;
     mining.operatorFirePulseSeconds = 0.07;
     mining.gravityDirectionX = 0.8;
@@ -10757,6 +11239,8 @@ void miningEvaAndSwarmStateRoundTrips()
             std::abs(result.operatorAimDirY - 0.8) < 0.000001 &&
             std::abs(result.operatorIntegrity - 0.63) < 0.000001,
         "operator aim and integrity should round trip");
+    require(std::abs(result.operatorOxygenSeconds - 6.25) < 0.000001,
+        "independent EVA oxygen should round trip in the mining operator record");
     require(std::abs(result.gravityDirectionX - 0.8) < 0.000001 &&
             std::abs(result.gravityDirectionY - 0.6) < 0.000001 &&
             std::abs(result.gravityStrength - 3.75) < 0.000001,
@@ -12085,7 +12569,7 @@ void progressedSavesSkipTheFirstLaunchIntroduction()
 void saveSchemaConstantsMatchSerializedFields()
 {
     const ContentCatalog catalog = createDefaultContent();
-    require(save_schema::currentVersion == 14, "the current save schema should be version fourteen");
+    require(save_schema::currentVersion == 15, "the current save schema should be version fifteen");
     GameState state = createNewGame(catalog, 12);
     state.run.credits = 123.0;
     state.run.inventoryModuleIds = {content::module::sparrowEngine, content::module::cryoLoop};
@@ -12139,18 +12623,18 @@ void saveSchemaConstantsMatchSerializedFields()
             text.find("pendingDroneModuleOfferIndex=") == std::string::npos &&
             text.find("pendingDroneModuleFrame=") == std::string::npos &&
             text.find("pendingDroneModuleReplacementConfirmation=") == std::string::npos,
-        "version-fourteen saves must not persist the retired surface draft subflows");
+        "version-fifteen saves must not persist the retired surface draft subflows");
     require(text.find("fieldInsight=") == std::string::npos &&
             text.find("fieldInsightAwardKeys=") == std::string::npos &&
             text.find("miningDraftsEarned=") == std::string::npos &&
             text.find("pendingFieldDraftThreshold=") == std::string::npos &&
             text.find("fieldDraftReturnScreen=") == std::string::npos,
-        "version-fourteen saves must not persist retired Field Insight progression");
+        "version-fifteen saves must not persist retired Field Insight progression");
     require(text.find("droneUpgrades=") == std::string::npos &&
             text.find("droneUpgradeCredits=") == std::string::npos,
-        "version-fourteen saves must not persist retired permanent drone progression");
+        "version-fifteen saves must not persist retired permanent drone progression");
     require(text.find("miningFuelBurn=") == std::string::npos,
-        "version-fourteen saves must not persist the retired seconds-based fuel field");
+        "version-fifteen saves must not persist the retired seconds-based fuel field");
     require(text.find(std::string(1, save_schema::textListDelimiter)) != std::string::npos, "text list delimiter should be shared");
 
     const std::string minimalSave = std::string(save_schema::header) + "\n" +
@@ -12173,14 +12657,14 @@ void saveSchemaConstantsMatchSerializedFields()
                 .has_value(),
         "save payloads with malformed version declarations must not parse");
     require(!deserializeSaveData(
-                std::string(save_schema::header) + "\nversion=14trailing-data\ncredits=1\n")
+                std::string(save_schema::header) + "\nversion=15trailing-data\ncredits=1\n")
                 .has_value(),
         "save payloads must declare the exact current version value");
 
     SaveData incompatible = captureSaveData(state);
     incompatible.version = save_schema::currentVersion - 1;
     require(!deserializeSaveData(serializeSaveData(incompatible)).has_value(),
-        "version-thirteen saves must be rejected instead of partially migrated");
+        "prior-version saves must be rejected instead of partially migrated");
     incompatible.version = save_schema::currentVersion + 1;
     require(!deserializeSaveData(serializeSaveData(incompatible)).has_value(),
         "future save versions must also be rejected instead of partially restored");
@@ -12422,37 +12906,6 @@ void hostileNavigationSelectsShuttleSortie()
 
     startSurfaceExpedition(state, catalog);
     require(state.run.surfaceExpedition.enemyEncountersEnabled, "hostile-system surface expeditions should enable enemy contact");
-}
-
-void legacyDeepSpaceFrontierMigratesToArkFlow()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 62004);
-    auto destinationIndex = [&](std::string_view id) {
-        for (int index = 0; index < static_cast<int>(catalog.destinations.size()); ++index) {
-            if (catalog.destinations[static_cast<std::size_t>(index)].id == id) {
-                return index;
-            }
-        }
-        return -1;
-    };
-    const int neptuneIndex = destinationIndex(content::destination::neptune);
-    const int legacyStarIndex = destinationIndex(content::destination::nearbyStar);
-    require(neptuneIndex >= 0, "Neptune should resolve");
-    require(legacyStarIndex > neptuneIndex, "legacy deep-space destination should still exist for save compatibility");
-
-    state.run.destinationIndex = legacyStarIndex;
-    state.meta.furthestTier = catalog.destinations[static_cast<std::size_t>(legacyStarIndex)].tier;
-    state.launchConfig.frontierTransfer = true;
-    state.launchConfig.destinationId = content::destination::nearbyStar;
-    state.screen = Screen::Launch;
-
-    require(migrateLegacyDeepSpaceFrontier(state, catalog), "legacy direct star launch should migrate");
-    require(arkDiscovered(state), "migration should discover the Ark instead of preserving the retired ladder");
-    require(!hostileSystemActive(state), "migration should not skip the scripted Ark jumps");
-    require(state.screen == Screen::Hangar, "migration should return stale launch saves to the Hangar");
-    require(state.run.destinationIndex == neptuneIndex, "migration should put the solar frontier at Neptune");
-    require(nextDestination(state, catalog) == nullptr, "Solar System ladder should stop at Neptune once Ark flow begins");
 }
 
 void arkCampaignStateRoundTripsThroughSave()
@@ -13094,6 +13547,7 @@ void secondaryMiningStateRoundTrips()
     expedition.runRigUpgradeRanks = {{content::surfaceUpgrade::thermalDrillJackets, 2}};
     expedition.runDroneRanks = {{content::drone::surveyDrone, 3}};
     expedition.selectedSynergyIds = {"relic_pathfinder", "full_spectrum_swarm"};
+    state.meta.hasEncounteredEnemy = true;
     expedition.scannerCooldownSeconds = 2.5;
     expedition.treasureMarks.push_back({4, 5, 2});
     expedition.droneModuleAssignments.push_back({1, content::drone::surveyDrone, DroneModuleKind::PulseStrike});
@@ -13126,6 +13580,8 @@ void secondaryMiningStateRoundTrips()
             restoredExpedition.runDroneRanks.front().rank == 3 &&
             restoredExpedition.selectedSynergyIds.size() == 2,
         "temporary rig ranks, drone ranks, and selected synergies should round trip");
+    require(restored.meta.hasEncounteredEnemy,
+        "enemy encounter knowledge should round trip with the campaign save");
     require(restored.run.surfaceExpedition.scannerCooldownSeconds > 2.4 && restored.run.surfaceExpedition.treasureMarks.size() == 1,
         "scanner cooldown and treasure marks should round trip");
     require(restored.run.surfaceExpedition.droneModuleAssignments.size() == 1 && restored.run.surfaceExpedition.droneModuleRuntime.size() == 1,
@@ -13392,6 +13848,7 @@ int main()
     animalCrewClassesModifySurfaceExpeditions();
     expeditionExperienceQueuesDistinctSelectableOffers();
     exhaustedRunUpgradePoolConsumesQueuedChoices();
+    combatRunUpgradesWaitForFirstEnemyEncounter();
     droneGraftOffersAreDistinctPerCompatibleSlot();
     postExtractionLevelUpDraftRestoresWithoutSurfaceRuntime();
     selectedSurfaceUpgradesModifyMiningAndSurfaceStats();
@@ -13403,11 +13860,12 @@ int main()
     surfaceScanTimingWindowsTightenByMappedDepth();
     runUpgradesSurviveEmergencyRecall();
     runUpgradeLifetimeFollowsTheTransport();
-    miningDepletionAtShipGracefullyEndsRun();
+    miningShipServiceRestoresOxygenWithoutEndingRun();
     droneBayUnlocksSlotsLoadoutsAndMiningEffects();
     scenarioUiActionsDoNotAwardExpeditionExperience();
     firstMiningContractBuildsAndCelebratesProspector();
     explicitSolarCampaignObjectivesGateRewardsAndRoutes();
+    saturnArtifactQueuesPhysicalUranusRoute();
     campaignStateRoundTripsAtCurrentVersion();
     scenarioAndCocoonStateRoundTrips();
     surfaceSiteProfilesChangeExpeditionRules();
@@ -13470,6 +13928,7 @@ int main()
     miningShipBankingLeaveAndEmergencyRecallRules();
     miningSwarmNestPreviewAndPersistence();
     miningOxygenDrainsRigHealthBeforeEmergencyEjection();
+    miningOxygenReservesDrainIndependentlyAndShipServicesBoth();
     miningLoadBurdenAndUpgradeRelief();
     miningRefitModulesImproveDrillProfileIncrementally();
     miningEvaFixedDrillProfileIgnoresRigUpgrades();
@@ -13494,7 +13953,6 @@ int main()
     arkDiscoveryAndScriptedJumpProgression();
     numberedChaptersAdvanceMonotonically();
     hostileNavigationSelectsShuttleSortie();
-    legacyDeepSpaceFrontierMigratesToArkFlow();
     arkCampaignStateRoundTripsThroughSave();
     uiActionsUseStableSchemaIds();
     panelLayoutModeIsPortablePresentationData();

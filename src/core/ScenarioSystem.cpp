@@ -59,6 +59,7 @@ bool parseScenarioEventKind(std::string_view text, ScenarioEventKind& value)
     else if (text == "activity_aborted") value = ScenarioEventKind::ActivityAborted;
     else if (text == "mining_site_completed") value = ScenarioEventKind::MiningSiteCompleted;
     else if (text == "equipment_assigned") value = ScenarioEventKind::EquipmentAssigned;
+    else if (text == "artifact_recovered") value = ScenarioEventKind::ArtifactRecovered;
     else return false;
     return true;
 }
@@ -68,6 +69,7 @@ bool awardsAuthoredObjectiveExperience(ScenarioEventKind kind)
     switch (kind) {
     case ScenarioEventKind::SafeMaterialDelivered:
     case ScenarioEventKind::ProtectedObjectiveExtracted:
+    case ScenarioEventKind::ArtifactRecovered:
     case ScenarioEventKind::FlybyFinished:
     case ScenarioEventKind::MiningSiteCompleted:
         return true;
@@ -136,6 +138,36 @@ bool failResolvedParameter(std::string* error, std::string_view message)
 bool hasPositiveMaterials(const MaterialInventory& materials)
 {
     return materials.common > 0 || materials.rare > 0 || materials.exotic > 0;
+}
+
+bool protectedObjectiveAwaitingReturn(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const ScenarioStepDefinition& step)
+{
+    if (step.completionEvent != ScenarioEventKind::ProtectedObjectiveExtracted ||
+        step.miningSiteDefinitionId.empty()) {
+        return false;
+    }
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    if (!expedition.active || expedition.temporaryArtifacts.empty()) {
+        return false;
+    }
+    const MiningSiteDefinition* site =
+        findMiningSiteDefinition(catalog, step.miningSiteDefinitionId);
+    if (site == nullptr || site->cocoon.protectedObjective.id.empty()) {
+        return false;
+    }
+    return std::any_of(
+        expedition.temporaryArtifacts.begin(),
+        expedition.temporaryArtifacts.end(),
+        [&](const ArtifactRecord& artifact) {
+            // Physical custody is authoritative here. Older saves may have
+            // marked the adapter reward as applied when the artifact reached
+            // the ship, but it still must keep the player on the return leg
+            // until that manifest is actually settled at Earth.
+            return artifact.id == site->cocoon.protectedObjective.id;
+        });
 }
 
 bool validateScenarioReward(
@@ -545,6 +577,61 @@ void refreshScenarioCompletion(const ScenarioDefinition& definition, ScenarioIns
         });
 }
 
+void reconcileRecoveredArtifactObjectives(GameState& state, const ContentCatalog& catalog)
+{
+    // Valid v15 saves already own their safely returned artifacts. New
+    // scenario content may recognize that canonical inventory without
+    // replaying extraction rewards or objective XP at load time.
+    for (ScenarioInstance& instance : state.meta.scenarios) {
+        const ScenarioDefinition* definition = definitionForInstance(catalog, instance);
+        if (definition == nullptr) {
+            continue;
+        }
+        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
+        if (!definitionAvailable(state, resolved)) {
+            continue;
+        }
+
+        bool changed = false;
+        for (const ScenarioStepDefinition& step : resolved.steps) {
+            if (step.completionEvent != ScenarioEventKind::ArtifactRecovered) {
+                continue;
+            }
+            ScenarioStepProgress* progress = findScenarioStepProgress(instance, step.id);
+            if (progress == nullptr || progress->completed ||
+                !prerequisitesSatisfied(resolved, instance, step)) {
+                continue;
+            }
+
+            const int recovered = static_cast<int>(std::count_if(
+                state.meta.artifacts.begin(),
+                state.meta.artifacts.end(),
+                [&](const ArtifactRecord& artifact) {
+                    return (step.eventOriginId.empty() ||
+                            step.eventOriginId == artifact.originDestinationId) &&
+                        (step.eventTargetId.empty() || step.eventTargetId == artifact.id);
+                }));
+            const int required = std::max(1, step.requiredProgress);
+            const int reconciled = std::min(required, recovered);
+            if (reconciled <= progress->progress) {
+                continue;
+            }
+            progress->progress = reconciled;
+            if (progress->progress >= required) {
+                progress->completed = true;
+                if (!step.claimRequired) {
+                    progress->claimed = true;
+                    applyStepRewards(state, catalog, instance, resolved, step);
+                }
+            }
+            changed = true;
+        }
+        if (changed) {
+            refreshScenarioCompletion(resolved, instance);
+        }
+    }
+}
+
 bool eventMatches(
     const ScenarioDefinition& definition,
     const ScenarioInstance& instance,
@@ -878,6 +965,7 @@ void ensureScenarioInstances(GameState& state, const ContentCatalog& catalog)
     // an older partial save cannot leave a later scenario activity impossible.
     // Do not replay resources, readiness refills, or automatic assignment for
     // a frame the player already owns.
+    reconcileRecoveredArtifactObjectives(state, catalog);
     repairClaimedPersistentRewards(state, catalog);
 }
 
@@ -1190,12 +1278,26 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
     presentation.required = std::max(1, step->requiredProgress);
     presentation.completionEvent = step->completionEvent;
     presentation.eventTargetId = step->eventTargetId;
+    presentation.returnPending = protectedObjectiveAwaitingReturn(state, catalog, *step);
+    if (presentation.returnPending) {
+        presentation.detail = "ARTIFACT SECURED // RETURN TO EARTH TO FINALIZE.";
+    }
+    const bool departureBlockedBySurfaceLoop =
+        step->completionEvent == ScenarioEventKind::FlybyFinished &&
+        (step->action == ScenarioActionKind::BeginActivity ||
+         step->action == ScenarioActionKind::RetryActivity) &&
+        state.run.surfaceExpedition.active;
+    if (departureBlockedBySurfaceLoop) {
+        presentation.detail = "RETURN TO EARTH TO BEGIN THE DEPARTURE SLINGSHOT.";
+    }
     presentation.mandatoryBriefing = step->mandatoryBriefing;
     presentation.briefingAcknowledged = progress->briefingAcknowledged;
     presentation.firstFailurePending = progress->failureSeen && !progress->failureAcknowledged;
     presentation.activityStarted = progress->activityStarted;
     presentation.miningSiteDefinitionId = step->miningSiteDefinitionId;
-    if (presentation.firstFailurePending) {
+    if (presentation.returnPending || departureBlockedBySurfaceLoop) {
+        presentation.action = ScenarioActionKind::None;
+    } else if (presentation.firstFailurePending) {
         presentation.action = ScenarioActionKind::AcknowledgeFailure;
     } else if (step->mandatoryBriefing && !progress->briefingAcknowledged) {
         presentation.action =
@@ -1225,6 +1327,32 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
             presentation.actionLabel = "Retry " + presentation.title;
         }
     }
+    if (presentation.state == ScenarioStepState::ReadyToClaim &&
+        presentation.action == ScenarioActionKind::ClaimReward) {
+        for (const Destination& destination : catalog.destinations) {
+            const bool unlocksRoute = std::any_of(
+                step->rewards.begin(),
+                step->rewards.end(),
+                [&](const ScenarioReward& reward) {
+                    return std::any_of(
+                        destination.routeRequirementKeys.begin(),
+                        destination.routeRequirementKeys.end(),
+                        [&](std::string_view key) {
+                            return rewardGrantsRouteRequirementKey(catalog, reward, key);
+                        });
+                });
+            if (unlocksRoute) {
+                if (presentation.actionLabel.rfind("Lock ", 0) == 0) {
+                    break;
+                }
+                // Surface-contract rewards authorize a destination directly;
+                // only a flight challenge is a distinct course-locking beat.
+                presentation.actionLabel = "Lock " + destination.name +
+                    (step->completionEvent == ScenarioEventKind::FlybyFinished ? " Course" : "");
+                break;
+            }
+        }
+    }
     return presentation;
 }
 
@@ -1244,13 +1372,20 @@ ScenarioObjectivePresentation scenarioObjectiveForDestination(
         if (resolved.destinationId != destinationId) {
             continue;
         }
+        if (!hasUnlock(state.meta, resolved.availabilityUnlockKey)) {
+            // Scenario instances are seeded before their authored availability
+            // rewards are earned. Keep those definitions out of the visible
+            // objective selection until their unlock is actually owned.
+            continue;
+        }
         for (const ScenarioStepDefinition& step : resolved.steps) {
             ScenarioObjectivePresentation candidate =
                 scenarioObjectivePresentation(state, catalog, instance.id, step.id);
             if (!candidate.available) {
                 continue;
             }
-            const int rank = candidate.state == ScenarioStepState::ReadyToClaim ? 0
+            const int rank = candidate.returnPending ? -1
+                : candidate.state == ScenarioStepState::ReadyToClaim ? 0
                 : candidate.state == ScenarioStepState::Active ? 1
                 : candidate.state == ScenarioStepState::Locked ? 2
                 : 3;
@@ -1259,12 +1394,73 @@ ScenarioObjectivePresentation scenarioObjectiveForDestination(
                 bestRank = rank;
             }
             // Definition order is meaningful for an equal state rank.
-            if (bestRank == 0) {
+            if (bestRank <= 0) {
                 break;
             }
         }
     }
     return best;
+}
+
+ScenarioObjectivePresentation scenarioDepartureChallengeForDestination(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view destinationId)
+{
+    for (const ScenarioInstance& instance : state.meta.scenarios) {
+        const ScenarioDefinition* definition = definitionForInstance(catalog, instance);
+        if (definition == nullptr) {
+            continue;
+        }
+        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
+        if (resolved.destinationId != destinationId) {
+            continue;
+        }
+        if (!hasUnlock(state.meta, resolved.availabilityUnlockKey)) {
+            // Do not synthesize an actionable departure card from a seeded,
+            // still-unavailable scenario. The core action correctly rejects
+            // it, which otherwise strands Arrival Ops behind a dead button.
+            continue;
+        }
+        for (const ScenarioStepDefinition& step : resolved.steps) {
+            if (step.completionEvent != ScenarioEventKind::FlybyFinished) {
+                continue;
+            }
+            ScenarioObjectivePresentation candidate =
+                scenarioObjectivePresentation(state, catalog, instance.id, step.id);
+            if (candidate.available && candidate.state == ScenarioStepState::Active &&
+                (candidate.action == ScenarioActionKind::BeginActivity ||
+                 candidate.action == ScenarioActionKind::RetryActivity)) {
+                return candidate;
+            }
+            if (!candidate.available || candidate.state != ScenarioStepState::Locked) {
+                continue;
+            }
+
+            // Arrival Ops is the explicit presentation of a departure
+            // briefing. If its only remaining prerequisites are acknowledgable
+            // briefings, expose the departure card now; starting the card uses
+            // the shared action path to acknowledge those briefings before it
+            // creates the Flyby run. This prevents a generic Jupiter arrival
+            // from appearing between artifact recovery and the required pass.
+            const bool prerequisitesCanAcknowledge = std::all_of(
+                step.prerequisites.begin(),
+                step.prerequisites.end(),
+                [&](std::string_view prerequisiteId) {
+                    const ScenarioObjectivePresentation prerequisite =
+                        scenarioObjectivePresentation(state, catalog, instance.id, prerequisiteId);
+                    return prerequisite.state == ScenarioStepState::Complete ||
+                        prerequisite.action == ScenarioActionKind::AcknowledgeBriefing;
+                });
+            if (prerequisitesCanAcknowledge) {
+                candidate.state = ScenarioStepState::Active;
+                candidate.action = ScenarioActionKind::BeginActivity;
+                candidate.actionLabel = step.actionLabel;
+                return candidate;
+            }
+        }
+    }
+    return {};
 }
 
 ScenarioObjectivePresentation scenarioObjectiveForMining(

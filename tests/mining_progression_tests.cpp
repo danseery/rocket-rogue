@@ -1,5 +1,6 @@
 #include "core/Content.h"
 #include "core/ContentIds.h"
+#include "core/ArtifactProgression.h"
 #include "core/GameState.h"
 #include "core/MiningProgression.h"
 #include "core/MiningSystem.h"
@@ -282,30 +283,6 @@ void progressionSaveFieldsRoundTripAndLegacyDefault()
     const std::optional<SaveData> legacySave = deserializeSaveData(legacy);
     require(!legacySave.has_value(), "pre-v14 saves must be rejected at the fresh-start boundary");
 
-    const ContentCatalog catalog = createDefaultContent();
-    SaveData activeLegacy;
-    activeLegacy.seed = 321;
-    activeLegacy.chapter = GameChapter::RedFrontier;
-    activeLegacy.screen = Screen::Mining;
-    activeLegacy.surfaceExpedition.active = true;
-    activeLegacy.surfaceExpedition.destinationId = content::destination::mars;
-    activeLegacy.surfaceExpedition.depth = 2;
-    activeLegacy.mining.active = true;
-    activeLegacy.mining.destinationId = content::destination::mars;
-    activeLegacy.mining.terrain.cells.resize(
-        static_cast<std::size_t>(activeLegacy.mining.terrain.width * activeLegacy.mining.terrain.height));
-
-    GameState restoredState = createNewGame(catalog, 999);
-    restoreSaveData(restoredState, catalog, activeLegacy);
-    require(restoredState.run.mining.active, "legacy arena migration should preserve valid serialized terrain");
-    require(restoredState.run.mining.arenaMetadata.act == MiningAct::ActOne
-            && restoredState.run.mining.arenaMetadata.difficulty == 6,
-        "legacy active arena metadata should derive from campaign chapter and surface depth");
-    require(restoredState.run.mining.arenaMetadata.rulesVersion == miningArenaRulesVersion,
-        "legacy active arena migration should stamp the current rules version without rerolling");
-    require(restoredState.run.mining.terrain.cells.size()
-            == static_cast<std::size_t>(activeLegacy.mining.terrain.width * activeLegacy.mining.terrain.height),
-        "legacy active arena metadata migration should not reroll serialized terrain");
 }
 
 void miningGateContractsAndRuntimeAreDeterministic()
@@ -413,6 +390,8 @@ void miningGateContractsAndRuntimeAreDeterministic()
     hazardState.run.mining.droneY = hazardState.run.mining.artifact.y;
     toggleMiningTether(hazardState);
     require(!hazardState.run.mining.artifact.tethered, "a locked cocoon must reject tether bypass");
+    require(hazardState.run.mining.artifactTetherDeniedFlashSeconds > 0.0,
+        "a nearby sealed artifact should acknowledge the rejected tether with a transient flash");
     for (MiningCell& cell : hazardState.run.mining.terrain.cells) {
         if (cell.gateAssociated && cell.material == MiningCellMaterial::HazardPocket) {
             cell.material = MiningCellMaterial::Regolith;
@@ -445,23 +424,77 @@ void miningGateContractsAndRuntimeAreDeterministic()
     const MiningArenaRequest surveyRequest {MiningAct::ActOne, 8, 0x5151, true, MiningGateType::SurveyTriangulation};
     require(startMiningRun(surveyState, catalog, surveyRequest, false).applied, "Survey Triangulation debug arena should start");
     require(surveyState.run.mining.gate.markers.size() == 3, "triangulation should stamp three distinct scanner origins");
+    require(!surveyState.run.mining.artifact.revealed,
+        "triangulation should keep the artifact hidden until every signal is resolved");
     updateMiningRun(surveyState, catalog, 0.01);
     require(!surveyState.run.mining.gate.derivedStateDirty,
         "initial triangulation reconciliation should clean the derived cache");
-    for (const MiningGateMarker marker : surveyState.run.mining.gate.markers) {
-        surveyState.run.mining.droneX = marker.x;
-        surveyState.run.mining.droneY = marker.y;
-        pulseMiningScanner(surveyState, catalog);
-    }
+    surveyState.run.mining.droneX = surveyState.run.mining.gate.markers.front().x;
+    surveyState.run.mining.droneY = surveyState.run.mining.gate.markers.front().y;
+    pulseMiningScanner(surveyState, catalog);
     require(surveyState.run.surfaceExpedition.scannerCooldownSeconds > 0.0,
         "triangulation calibration should preserve the shared scanner recharge");
-    require(surveyState.run.mining.gate.derivedStateDirty,
-        "activating a triangulation marker should invalidate gate-derived state");
-    updateMiningRun(surveyState, catalog, 0.01);
+    const int afterFirstPulse = surveyState.run.mining.gate.surveyOriginsCompleted;
+    require(afterFirstPulse >= 1,
+        "one real scanner pulse should resolve every hidden signal inside its coverage");
+    const auto cooldownMarker = std::find_if(
+        surveyState.run.mining.gate.markers.begin(),
+        surveyState.run.mining.gate.markers.end(),
+        [](const MiningGateMarker& marker) { return !marker.activated; });
+    if (cooldownMarker != surveyState.run.mining.gate.markers.end()) {
+        surveyState.run.mining.droneX = cooldownMarker->x;
+        surveyState.run.mining.droneY = cooldownMarker->y;
+        pulseMiningScanner(surveyState, catalog);
+        require(surveyState.run.mining.gate.surveyOriginsCompleted == afterFirstPulse,
+            "scanner input during cooldown must not calibrate a nearby hidden signal");
+    }
+    while (!surveyState.run.mining.gate.surveyComplete) {
+        const auto marker = std::find_if(
+            surveyState.run.mining.gate.markers.begin(),
+            surveyState.run.mining.gate.markers.end(),
+            [](const MiningGateMarker& candidate) { return !candidate.activated; });
+        require(marker != surveyState.run.mining.gate.markers.end(),
+            "an incomplete triangulation should retain an unresolved hidden signal");
+        surveyState.run.surfaceExpedition.scannerCooldownSeconds = 0.0;
+        surveyState.run.mining.droneX = marker->x;
+        surveyState.run.mining.droneY = marker->y;
+        pulseMiningScanner(surveyState, catalog);
+    }
     require(surveyState.run.mining.gate.surveyComplete && surveyState.run.mining.gate.state == MiningGateState::Open,
-        "a no-drone rig should solve triangulation by repositioning to every marker");
+        "the third resolved signal should open triangulation during that pulse");
+    require(surveyState.run.mining.artifact.revealed,
+        "completing triangulation should reveal the artifact during the same pulse");
+    require(surveyState.statusLine == "TRIANGULATION COMPLETE — ARTIFACT EXPOSED.",
+        "triangulation completion should emit the authored exposure message");
     require(!surveyState.run.mining.gate.derivedStateDirty,
-        "triangulation should resolve and clean its cache in the same simulation tick");
+        "triangulation should resolve and clean its cache in the same scanner pulse");
+
+    GameState partialSurvey = createNewGame(catalog, 505);
+    prepareSurface(partialSurvey, content::destination::mars);
+    require(startMiningRun(partialSurvey, catalog, surveyRequest, false).applied,
+        "partial triangulation save test should start");
+    partialSurvey.run.mining.gate.markers.front().activated = true;
+    partialSurvey.run.mining.gate.surveyOriginsCompleted = 1;
+    partialSurvey.run.mining.gate.surveyComplete = false;
+    partialSurvey.run.mining.artifact.revealed = true;
+    const int partialArtifactX = static_cast<int>(std::floor(partialSurvey.run.mining.artifact.x));
+    const int partialArtifactY = static_cast<int>(std::floor(partialSurvey.run.mining.artifact.y));
+    if (MiningCell* cell = miningCellAt(partialSurvey.run.mining.terrain, partialArtifactX, partialArtifactY)) {
+        cell->revealed = true;
+    }
+    const std::optional<SaveData> partialParsed = deserializeSaveData(
+        serializeSaveData(captureSaveData(partialSurvey)));
+    require(partialParsed.has_value(), "partial triangulation should serialize");
+    GameState partialRestored = createNewGame(catalog, 1);
+    restoreSaveData(partialRestored, catalog, *partialParsed);
+    const int restoredSignals = static_cast<int>(std::count_if(
+        partialRestored.run.mining.gate.markers.begin(),
+        partialRestored.run.mining.gate.markers.end(),
+        [](const MiningGateMarker& marker) { return marker.activated; }));
+    require(restoredSignals == 1,
+        "partial triangulation reload should preserve completed signal slices");
+    require(!partialRestored.run.mining.artifact.revealed,
+        "an incomplete v15 triangulation reload should force the artifact back to hidden");
 
     GameState burrowState = createNewGame(catalog, 504);
     prepareSurface(burrowState, content::destination::nearbyGalaxy);
@@ -507,6 +540,117 @@ void miningGateContractsAndRuntimeAreDeterministic()
             && gateRoundTrip->mining.gate.derivedStateDirty
             && gateRoundTrip->miningSites.front().artifactId == meta.miningSites.front().artifactId,
         "active gate state and compatibility site identity should survive save/load while transient derived state reloads dirty");
+}
+
+void progressionArtifactPlacementAdvancesThreePerDepth()
+{
+    ContentCatalog catalog = createDefaultContent();
+    const auto addArtifactScenario = [&](std::string id, std::string destinationId) {
+        ScenarioDefinition scenario;
+        scenario.id = std::move(id);
+        scenario.destinationId = std::move(destinationId);
+        ScenarioStepDefinition step;
+        step.id = "artifact";
+        step.completionEvent = ScenarioEventKind::ArtifactRecovered;
+        step.eventOriginId = scenario.destinationId;
+        scenario.steps.push_back(std::move(step));
+        catalog.scenarios.push_back(std::move(scenario));
+    };
+    addArtifactScenario("uranus_artifact_test", content::destination::uranus);
+    addArtifactScenario("neptune_artifact_test", content::destination::neptune);
+
+    GameState state = createNewGame(catalog, 0xA471FAC7ULL);
+    const Destination* jupiter = catalog.findDestination(content::destination::jupiter);
+    require(jupiter != nullptr, "Jupiter should exist for progression artifact placement tests");
+
+    const ProgressionArtifactPlacement first = resolveProgressionArtifactPlacement(
+        state, catalog, *jupiter, 1, "first_artifact");
+    require(first.ordinal == 0 && first.targetDepth == 1 && first.withinDepthSlot == 0 &&
+            first.horizontalOffset == 0 && first.verticalOffset == 10,
+        "the first progression artifact should be centered ten cells below the depth-one entry");
+
+    state.meta.artifacts.push_back({"random_mars_bonus", content::destination::mars});
+    require(resolveProgressionArtifactPlacement(state, catalog, *jupiter, 1, "first_artifact").ordinal == 0,
+        "an incidental artifact from a non-authored destination must not advance progression placement");
+
+    state.meta.artifacts.push_back({"jupiter_progression", content::destination::jupiter});
+    const ProgressionArtifactPlacement secondEasy = resolveProgressionArtifactPlacement(
+        state, catalog, *jupiter, 1, "second_artifact");
+    const ProgressionArtifactPlacement secondHard = resolveProgressionArtifactPlacement(
+        state, catalog, *jupiter, 10, "second_artifact");
+    require(secondEasy.targetDepth == 1 && secondEasy.withinDepthSlot == 1 &&
+            std::abs(secondEasy.horizontalOffset) <= 10 && secondEasy.verticalOffset >= 1 &&
+            secondEasy.verticalOffset <= 10 && secondEasy.manhattanDistance >= 11 &&
+            secondEasy.manhattanDistance <= 14,
+        "the second artifact should stay on depth one inside the first displacement band");
+    require(secondHard.manhattanDistance >= secondEasy.manhattanDistance,
+        "raising mining difficulty must not make the same progression slot easier");
+
+    state.meta.artifacts.push_back({"jupiter_duplicate", content::destination::jupiter});
+    require(resolveProgressionArtifactPlacement(state, catalog, *jupiter, 5, "second_artifact").ordinal == 1,
+        "duplicate artifacts from one authored destination must count only once");
+
+    state.meta.artifacts.push_back({"saturn_progression", content::destination::saturn});
+    const ProgressionArtifactPlacement third = resolveProgressionArtifactPlacement(
+        state, catalog, *jupiter, 5, "third_artifact");
+    require(third.targetDepth == 1 && third.withinDepthSlot == 2 &&
+            third.manhattanDistance >= 15 && third.manhattanDistance <= 20 &&
+            std::abs(third.horizontalOffset) <= 10 && third.verticalOffset <= 10,
+        "the third artifact should remain on depth one inside the harder displacement band");
+
+    state.meta.artifacts.push_back({"uranus_progression", content::destination::uranus});
+    const ProgressionArtifactPlacement fourth = resolveProgressionArtifactPlacement(
+        state, catalog, *jupiter, 10, "fourth_artifact");
+    require(fourth.ordinal == 3 && fourth.targetDepth == 2 && fourth.withinDepthSlot == 0 &&
+            fourth.horizontalOffset == 0 && fourth.verticalOffset == 10,
+        "the fourth progression artifact should reset to the centered depth-two layout");
+}
+
+void authoredArtifactLayerIsPrebuiltAtResolvedDepth()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0x10A471FAC7ULL);
+    state.run.surfaceExpedition = {};
+    state.run.surfaceExpedition.active = true;
+    state.run.surfaceExpedition.destinationId = content::destination::jupiter;
+    state.run.surfaceExpedition.rigFuel = 4.0;
+    state.run.surfaceExpedition.rigFuelCapacity = 4.0;
+    state.run.surfaceExpedition.supply = 4;
+    state.run.surfaceExpedition.pendingScenarioId = content::scenario::volcanicDescent;
+    state.run.surfaceExpedition.pendingScenarioStepId = "recovery";
+    state.run.surfaceExpedition.pendingMiningSiteDefinitionId =
+        content::miningSite::thermalLayeredRecovery;
+
+    require(startMiningRun(state, catalog).applied,
+        "the authored Io artifact run should start");
+    require(state.run.mining.depthZone == 0 && !state.run.mining.artifact.present,
+        "starting above the resolved artifact depth should not duplicate the objective on the entry layer");
+    const auto layer = std::find_if(
+        state.run.mining.depthLayers.begin(),
+        state.run.mining.depthLayers.end(),
+        [](const MiningDepthLayerState& candidate) { return candidate.depthZone == 1; });
+    require(layer != state.run.mining.depthLayers.end() && layer->artifact.present,
+        "the first authored artifact should be prebuilt in the persisted depth-one cache");
+    require(static_cast<int>(std::floor(layer->artifact.x)) == layer->terrain.width / 2 &&
+            static_cast<int>(std::floor(layer->artifact.y)) == 14,
+        "the first authored artifact should be dead center and ten cells below its layer entry");
+    require(layer->gate.type == MiningGateType::HazardCocoon &&
+            layer->gate.cocoonLayers.size() == 1,
+        "the cached Io objective should retain its authored one-layer thermal seal");
+
+    const SaveData captured = captureSaveData(state);
+    const std::optional<SaveData> parsed = deserializeSaveData(serializeSaveData(captured));
+    require(parsed.has_value(), "cached progression artifact layers should serialize");
+    GameState restored = createNewGame(catalog, 2);
+    restoreSaveData(restored, catalog, *parsed);
+    const auto restoredLayer = std::find_if(
+        restored.run.mining.depthLayers.begin(),
+        restored.run.mining.depthLayers.end(),
+        [](const MiningDepthLayerState& candidate) { return candidate.depthZone == 1; });
+    require(restoredLayer != restored.run.mining.depthLayers.end() &&
+            restoredLayer->artifact.x == layer->artifact.x &&
+            restoredLayer->artifact.y == layer->artifact.y,
+        "reload should preserve the cached authored artifact position without rerolling it");
 }
 
 void thermalSiteRulesAreContentDriven()
@@ -766,6 +910,8 @@ void tetherTargetingPrioritizesArtifactsAndKeepsEvaTow()
     require(!mining.artifact.tethered && !mining.operatorRigTethered &&
             state.statusLine.find("locked") != std::string::npos,
         "a nearest gate-locked artifact must explain its lock instead of falling through to the Mining Rig");
+    require(mining.artifactTetherDeniedFlashSeconds > 0.0,
+        "a nearby locked artifact should trigger the presentation denial flash");
 
     mining.artifact = {};
     mining.gate = {};
@@ -857,6 +1003,8 @@ int main()
     enemyThemesFollowProgressionAndRemainDeterministic();
     progressionSaveFieldsRoundTripAndLegacyDefault();
     miningGateContractsAndRuntimeAreDeterministic();
+    progressionArtifactPlacementAdvancesThreePerDepth();
+    authoredArtifactLayerIsPrebuiltAtResolvedDepth();
     thermalSiteRulesAreContentDriven();
     layeredCocoonsHonorAuthoredRevealPolicies();
     tetherTargetingPrioritizesArtifactsAndKeepsEvaTow();

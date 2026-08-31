@@ -436,6 +436,26 @@ void RocketGameApp::maybeOpenLevelUpDraft()
 
     if (state_.screen == Screen::SurfaceUpgrade) {
         if (expedition.runUpgradeOfferPending) {
+            // Revalidate drafts restored from before an encounter gate existed.
+            // The generator is a no-op unless it finds a combat offer that the
+            // player has not yet been introduced to.
+            const auto offersBefore = expedition.runUpgradeOffers;
+            const int offerCountBefore = expedition.runUpgradeOfferCount;
+            (void)generateRunUpgradeOffers(state_, catalog_, rng_);
+            const bool offersChanged = offerCountBefore != expedition.runUpgradeOfferCount ||
+                std::any_of(
+                    offersBefore.begin(),
+                    offersBefore.end(),
+                    [&](const RunUpgradeOffer& before) {
+                        const std::size_t index = static_cast<std::size_t>(&before - offersBefore.data());
+                        const RunUpgradeOffer& after = expedition.runUpgradeOffers[index];
+                        return before.kind != after.kind || before.definitionId != after.definitionId ||
+                            before.targetRank != after.targetRank || before.slotIndex != after.slotIndex;
+                    });
+            if (offersChanged) {
+                save();
+                panelDirty_ = true;
+            }
             return;
         }
         if (expedition.pendingRunUpgradeChoices <= 0) {
@@ -686,14 +706,27 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
         state_.statusLine = std::string(text::status::saveRestored);
         hasSavedGame_ = true;
     } else if (!storedSave.empty()) {
-        // Save v14 is an intentional fresh-start boundary. Keep an older file
-        // untouched until New Game successfully replaces it, but never expose
-        // Continue for partially compatible progression state.
-        titleNotice_ = "Progression update requires a new game.";
+        // This revision is a deliberate fresh-campaign boundary. Never
+        // reconstruct an older progression state: delete it, then leave a
+        // brand-new v15 payload in its place for the next launch.
+        const bool cleared = services_.saves.clear();
+        if (!cleared) {
+            services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
+        }
+        const bool storedFresh = services_.saves.storeAtomic(
+            serializeSaveData(captureSaveData(state_)));
+        if (!storedFresh) {
+            services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
+            titleNotice_ = "Previous campaign was cleared, but the fresh save could not be stored.";
+        } else {
+            titleNotice_ = "Previous campaign cleared for this revision.";
+        }
+        // The title screen must never offer Continue for the rejected
+        // campaign, even though a replacement payload is ready for later.
+        hasSavedGame_ = false;
     }
 
     ensureDroneBayState(state_, catalog_);
-    migrateLegacyDeepSpaceFrontier(state_, catalog_);
     syncLaunchConfig(state_, catalog_);
     titleScreenActive_ = showTitleScreen;
 }
@@ -1781,6 +1814,22 @@ void RocketGameApp::tick(double deltaSeconds)
             const ScenarioStepDefinition* challenge = scenario == nullptr
                 ? nullptr
                 : findScenarioStepDefinition(*scenario, state_.run.flyby.scenarioStepId);
+            if (scenarioChallenge) {
+                // Realtime Flyby motion is intentionally transient, but the
+                // finished grade is campaign progress. Record it before the
+                // result modal is shown so a refresh cannot erase a Perfect
+                // pass and strand the player back at an Active objective.
+                (void)recordScenarioEvent(
+                    state_,
+                    catalog_,
+                    {ScenarioEventKind::FlybyFinished,
+                     state_.run.flyby.scenarioId,
+                     state_.run.flyby.scenarioStepId,
+                     state_.run.flyby.scenarioId,
+                     {},
+                     1,
+                     static_cast<int>(state_.run.flyby.result)});
+            }
             switch (state_.run.flyby.result) {
             case FlybyGrade::Perfect:
                 state_.statusLine = transferAssistRun
@@ -2110,6 +2159,16 @@ void RocketGameApp::next()
 void RocketGameApp::runArrivalFlyby()
 {
     if (state_.screen != Screen::ArrivalOps || !canRunArrivalFlyby(state_, catalog_)) {
+        return;
+    }
+
+    const ScenarioObjectivePresentation objective = scenarioDepartureChallengeForDestination(
+        state_,
+        catalog_,
+        state_.run.arrivalOps.destinationId);
+    if (objective.available) {
+        state_.statusLine = "Jupiter departure requires the Perfect Slingshot challenge. Use its route card.";
+        panelDirty_ = true;
         return;
     }
 
@@ -4556,6 +4615,26 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
         return true;
     }
 
+    // The completed Flyby result screen presents the reward claim directly.
+    // Its run has finished visually, but its completion event is deliberately
+    // committed only by this explicit player action.  Resolve that event
+    // before asking the scenario system to claim the reward; otherwise the
+    // button is labelled from the still-active step and the claim is rejected.
+    const FlybyRunState& flyby = state_.run.flyby;
+    const bool claimingCompletedScenarioFlyby =
+        address.action == ScenarioActionKind::ClaimReward &&
+        state_.screen == Screen::Flyby &&
+        flyby.active && flyby.completed &&
+        flyby.purpose == FlybyPurpose::ScenarioChallenge &&
+        flyby.scenarioId == address.scenarioId &&
+        flyby.scenarioStepId == address.stepId;
+    if (claimingCompletedScenarioFlyby) {
+        if (flyby.result != FlybyGrade::Perfect) {
+            return true;
+        }
+        completeFlybyRun(state_, catalog_);
+    }
+
     const bool miningSiteAction =
         (address.action == ScenarioActionKind::BeginActivity ||
          address.action == ScenarioActionKind::RetryActivity) &&
@@ -4607,6 +4686,17 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
     const bool marsExpansionClaimed = address.action == ScenarioActionKind::ClaimReward &&
         address.scenarioId == content::scenario::marsBayExpansion &&
         address.stepId == "delivery";
+    const Destination* claimedRoute = address.action == ScenarioActionKind::ClaimReward
+        ? scenarioRouteRewardDestination(catalog_, *step)
+        : nullptr;
+    const bool explicitCourseClaim = claimedRoute != nullptr &&
+        (step->completionEvent == ScenarioEventKind::FlybyFinished ||
+         std::any_of(
+             step->rewards.begin(),
+             step->rewards.end(),
+             [](const ScenarioReward& reward) {
+                 return reward.kind == ScenarioRewardKind::RouteAccess;
+             }));
     const bool supportDroneNeedsAssignment = grantsAutoAssignedSupportDrone &&
         state_.meta.equippedDroneIds.size() <= equippedDroneCountBefore;
     if (outcome.beginsActivity && !outcome.miningSiteDefinitionId.empty()) {
@@ -4632,6 +4722,17 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
         // but deliberately leaves fabrication/assignment to the player.
         state_.screen = Screen::DroneOps;
         state_.statusLine = "Drone Ops unlocked. Fabricate and assign Prospector Mk I to learn the bay.";
+    } else if (explicitCourseClaim) {
+        if (commitClaimedScenarioRoute(
+                state_,
+                catalog_,
+                address.scenarioId,
+                address.stepId)) {
+            state_.statusLine = claimedRoute->name + " course locked. Launch when ready.";
+        } else {
+            state_.statusLine = claimedRoute->name +
+                " route is secured, but its physical launch leg could not be queued.";
+        }
     } else if (marsExpansionClaimed) {
         state_.screen = Screen::Hangar;
         state_.statusLine =
@@ -4702,8 +4803,17 @@ bool RocketGameApp::runLegacyScenarioUiAction(std::string_view action)
             }
             (void)completeMatchingChallenge();
         }
-        return runScenarioUiAction(encodeScenarioAction(
-            scenarioId, stepId, ScenarioActionKind::ClaimReward));
+        // The result action is deliberately idempotent. A previous build
+        // could award the route but fail before selecting Saturn, leaving a
+        // visible Lock Saturn Course button whose generic ClaimReward retry
+        // was rejected as already claimed. Finish the authored route
+        // transaction directly in both ReadyToClaim and already-claimed
+        // states.
+        (void)rocket::claimSaturnCourse(state_, catalog_);
+        syncLaunchConfig(state_, catalog_);
+        save();
+        panelDirty_ = true;
+        return true;
     }
 
     if (completedMatchingChallenge()) {
@@ -5048,7 +5158,8 @@ RenderSnapshot RocketGameApp::snapshot() const
         if (!miningExtraction_.active) {
             result.miningPoiGuidance = miningPoiGuidanceTarget(
                 mining,
-                std::max(miningStats.oxygenSeconds, mining.siteBaselineOxygenSeconds),
+                miningActiveOxygenSeconds(mining),
+                miningActiveOxygenCapacity(state_, catalog_),
                 tuning::launch::warningCautionThreshold,
                 result.miningAtReturnZone);
         }
@@ -5137,7 +5248,8 @@ RenderSnapshot RocketGameApp::snapshot() const
                 mining.artifact.tethered,
                 mining.artifact.revealed,
                 static_cast<int>(mining.gate.type),
-                static_cast<int>(mining.gate.state)
+                static_cast<int>(mining.gate.state),
+                mining.artifactTetherDeniedFlashSeconds
             };
         }
         result.bindMiningFrameViews(mining);

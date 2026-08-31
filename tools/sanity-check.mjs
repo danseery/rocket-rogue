@@ -144,7 +144,7 @@ const requireNativeCssRule = (selector, tokens, contract) => {
 };
 
 for (const [pattern, contract] of [
-  [/const int modalActivityHeight\s*=\s*std::max\(1,\s*std::min\(360,\s*viewportHeight - modalGutter \* 2\)\);/, "viewport-clamped activity briefing height"],
+  [/const int modalActivityHeight\s*=\s*std::max\(1,\s*std::min\(420,\s*viewportHeight - modalGutter \* 2\)\);/, "viewport-clamped activity briefing height"],
   [/const int modalOutcomeHeight\s*=\s*std::max\(1,\s*std::min\(\d+,\s*viewportHeight - modalGutter \* 2\)\);/, "viewport-clamped launch outcome height"],
   [/const int modalOutcomeTop\s*=\s*std::max\(modalGutter,\s*\(viewportHeight - modalOutcomeHeight\) \/ 2\);/, "centered launch outcome position"],
   [/const bool modalOutcomeNeedsScroll\s*=\s*modalOutcomeHeight < \d+;/, "short-height launch outcome scrolling"],

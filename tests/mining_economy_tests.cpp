@@ -606,9 +606,10 @@ void ioTerrainAndArtifactSealAreDeterministic()
         require(recovery.applied && recovery.beginsActivity &&
                 recovery.miningSiteDefinitionId == content::miningSite::thermalLayeredRecovery,
             "the generic Io recovery step should select its authored thermal mining site");
-        state.run.surfaceExpedition.pendingScenarioId = content::scenario::volcanicDescent;
-        state.run.surfaceExpedition.pendingScenarioStepId = "recovery";
-        state.run.surfaceExpedition.pendingMiningSiteDefinitionId = recovery.miningSiteDefinitionId;
+        // The progression curve authors the first artifact on depth +1. This
+        // fixture starts on that surveyed layer so the remaining assertions
+        // can exercise the protected-objective adapter directly.
+        state.run.surfaceExpedition.depth = 1;
         state.run.surfaceExpedition.prospectMaterials = {
             .common = 5,
             .rare = 2,
@@ -616,6 +617,14 @@ void ioTerrainAndArtifactSealAreDeterministic()
         };
         require(startMiningRun(state, catalog, request, true).applied,
             "Io story arena should start");
+        // Keep this focused adapter fixture's synthetic ship bay on its only
+        // loaded layer; depth-transition behavior is covered separately.
+        state.run.mining.entryDepthZone = state.run.mining.depthZone;
+        require(state.run.mining.scenarioId == content::scenario::volcanicDescent &&
+                state.run.mining.scenarioStepId == "recovery" &&
+                state.run.mining.miningSiteDefinitionId ==
+                    content::miningSite::thermalLayeredRecovery,
+            "campaign mining should resolve the active authored recovery site even when no UI pending binding survives");
         return state;
     };
 
@@ -635,9 +644,14 @@ void ioTerrainAndArtifactSealAreDeterministic()
         "the generic protected-objective adapter should own Io payload visibility while the scenario owns its drone-credit reward");
     require(mining.gate.outerShellTilesTotal == 4
             && mining.gate.outerShellTilesRemaining == 4
-            && mining.gate.innerShellTilesTotal == 4
-            && mining.gate.innerShellTilesRemaining == 4,
-        "the Io artifact should begin behind staged four-segment outer and inner seals");
+            && mining.gate.innerShellTilesTotal == 0
+            && mining.gate.innerShellTilesRemaining == 0,
+        "the introductory Io artifact should begin behind one four-segment thermal seal");
+    require(static_cast<int>(std::floor(mining.gate.anchorX)) ==
+                static_cast<int>(std::floor(mining.droneX))
+            && static_cast<int>(std::floor(mining.gate.anchorY)) ==
+                static_cast<int>(std::floor(mining.droneY)) + 10,
+        "the first Io artifact should stay centered in the entry lane, ten cells below the Mining Rig");
 
     int thermalLava = 0;
     for (std::size_t index = 0;
@@ -665,58 +679,24 @@ void ioTerrainAndArtifactSealAreDeterministic()
 
     const int anchorX = static_cast<int>(std::floor(mining.gate.anchorX));
     const int anchorY = static_cast<int>(std::floor(mining.gate.anchorY));
-    constexpr std::array<std::pair<int, int>, 4> innerOffsets {{
-        {-1, -1}, {1, -1}, {1, 1}, {-1, 1}
-    }};
-    for (const auto& [dx, dy] : innerOffsets) {
-        const MiningCell* inner = miningCellAt(
-            mining.terrain,
-            anchorX + dx,
-            anchorY + dy);
-        require(inner != nullptr && !inner->revealed,
-            "the inner Io seal should remain hidden while the outer seal stands");
-    }
-
-    constexpr std::array<std::pair<int, int>, 4> outerOffsets {{
+    constexpr std::array<std::pair<int, int>, 4> thermalSealOffsets {{
         {0, -2}, {2, 0}, {0, 2}, {-2, 0}
     }};
-    for (const auto& [dx, dy] : outerOffsets) {
-        MiningCell* outer = miningCellAt(
-            mining.terrain,
-            anchorX + dx,
-            anchorY + dy);
-        require(outer != nullptr, "outer Io seal segment should exist");
-        *outer = {};
-    }
-    mining.gate.derivedStateDirty = true;
-    updateMiningRun(first, catalog, 0.01);
-    require(mining.gate.outerShellTilesRemaining == 0
-            && mining.gate.innerShellTilesRemaining == 4,
-        "clearing the outer seal should expose but not complete the inner seal");
-    for (const auto& [dx, dy] : innerOffsets) {
-        const MiningCell* inner = miningCellAt(
-            mining.terrain,
-            anchorX + dx,
-            anchorY + dy);
-        require(inner != nullptr && inner->revealed,
-            "all four inner Io seal segments should reveal together");
-    }
-
     const ExpeditionExperienceSnapshot experienceBeforeGateOpen =
         snapshotExpeditionExperience(first);
-    for (const auto& [dx, dy] : innerOffsets) {
-        MiningCell* inner = miningCellAt(
+    for (const auto& [dx, dy] : thermalSealOffsets) {
+        MiningCell* seal = miningCellAt(
             mining.terrain,
             anchorX + dx,
             anchorY + dy);
-        require(inner != nullptr, "inner Io seal segment should still exist");
-        *inner = {};
+        require(seal != nullptr, "thermal Io seal segment should exist");
+        *seal = {};
     }
     mining.gate.derivedStateDirty = true;
     updateMiningRun(first, catalog, 0.01);
     require(
         mining.gate.state == MiningGateState::Open,
-        "clearing the final protected layer should authoritatively open the gate");
+        "clearing the introductory thermal seal should authoritatively open the gate");
     require(
         std::abs(
             expeditionExperienceEarnedSince(experienceBeforeGateOpen, first)
@@ -731,6 +711,89 @@ void ioTerrainAndArtifactSealAreDeterministic()
             - 10.0)
             < 0.000001,
         "refreshing an already-open gate should not duplicate objective XP");
+
+    // Crossing the ship bay is an immediate ship-manifest handoff, even when
+    // the towing rig is still a few cells away. The later surface return must
+    // carry that same protected objective into the authored recovery step.
+    GameState recovered = makeIoState(1010);
+    MiningRunState& recoveredMining = recovered.run.mining;
+    recoveredMining.gate.state = MiningGateState::Open;
+    recoveredMining.artifact.revealed = true;
+    recoveredMining.artifact.state = MiningArtifactState::Loose;
+    recoveredMining.artifact.tethered = true;
+    recoveredMining.artifact.x = recoveredMining.returnZoneX;
+    recoveredMining.artifact.y = recoveredMining.returnZoneY;
+    recoveredMining.droneX = recoveredMining.returnZoneX + 5.0;
+    recoveredMining.droneY = recoveredMining.returnZoneY;
+    updateMiningRun(recovered, catalog, 0.01);
+    require(recoveredMining.stowedArtifacts.size() == 1 &&
+            recoveredMining.temporaryArtifacts.empty(),
+        "an artifact captured by the ship bay must enter the Ship manifest before the rig docks");
+    recoveredMining.droneX = recoveredMining.returnZoneX;
+    recoveredMining.droneY = recoveredMining.returnZoneY;
+    require(finishMiningRun(recovered, catalog, false).applied,
+        "the rig should be able to leave after its artifact is secured aboard the ship");
+    require(recovered.run.surfaceExpedition.temporaryArtifacts.size() == 1,
+        "stowing and leaving must retain the delivered artifact for the return flight");
+    const ScenarioObjectivePresentation pendingRecovery = scenarioObjectiveForDestination(
+        recovered,
+        catalog,
+        content::destination::jupiter);
+    require(pendingRecovery.returnPending &&
+            pendingRecovery.scenarioId == content::scenario::volcanicDescent &&
+            pendingRecovery.stepId == "recovery" &&
+            pendingRecovery.current == 0 &&
+            pendingRecovery.required == 1 &&
+            pendingRecovery.action == ScenarioActionKind::None,
+        "a protected artifact aboard the ship should replace the next objective with a pending-return recovery state");
+    GameState legacyPending = recovered;
+    legacyPending.run.surfaceExpedition.temporaryArtifacts.front().rewardApplied = true;
+    const ScenarioObjectivePresentation repairedLegacyPending = scenarioObjectiveForDestination(
+        legacyPending,
+        catalog,
+        content::destination::jupiter);
+    require(repairedLegacyPending.returnPending &&
+            repairedLegacyPending.action == ScenarioActionKind::None,
+        "a previously ship-marked artifact must remain pending until its Earth return clears the manifest");
+    const SurfaceActionOutcome recoveredPayload = extractSurfacePayload(recovered, catalog);
+    const ScenarioStepState recoveryState = scenarioStepState(
+        recovered,
+        catalog,
+        content::scenario::volcanicDescent,
+        "recovery");
+    require(recoveredPayload.artifactFound &&
+            (recoveryState == ScenarioStepState::ReadyToClaim ||
+             recoveryState == ScenarioStepState::Complete),
+        "returning the ship-secured Io artifact must advance the recovery mission");
+}
+
+void proceduralArtifactGatesStayCenteredTenCellsBelowEntry()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 1213);
+    state.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+    prepareSurface(state, content::destination::jupiter);
+    const MiningArenaRequest request {
+        MiningAct::ActOne,
+        8,
+        0xCE117EULL,
+        true,
+        MiningGateType::HazardCocoon
+    };
+    require(startMiningRun(state, catalog, request, false).applied,
+        "procedural Jupiter artifact arena should start");
+
+    MiningRunState& mining = state.run.mining;
+    require(mining.gate.active && mining.artifact.present,
+        "procedural Jupiter artifact arena should create an artifact gate");
+    require(static_cast<int>(std::floor(mining.gate.anchorX)) == mining.terrain.width / 2 &&
+            static_cast<int>(std::floor(mining.gate.anchorY)) ==
+                static_cast<int>(std::floor(mining.droneY)) + 10 &&
+            static_cast<int>(std::floor(mining.artifact.x)) == mining.terrain.width / 2 &&
+            static_cast<int>(std::floor(mining.artifact.y)) ==
+                static_cast<int>(std::floor(mining.droneY)) + 10,
+        "new procedural artifact gates should be centered exactly ten cells below the Mining Rig");
+
 }
 
 void ioLavaAlwaysCoolsIntoMineableCommonOre()
@@ -839,6 +902,7 @@ int main()
         oxygenCapacityHasAHardCeiling();
         regolithNeverProducesCommonOre();
         supplyPocketsAreDeterministicAndPayImmediately();
+        proceduralArtifactGatesStayCenteredTenCellsBelowEntry();
         ioTerrainAndArtifactSealAreDeterministic();
         ioLavaAlwaysCoolsIntoMineableCommonOre();
         std::cout << "Mining economy tests passed\n";

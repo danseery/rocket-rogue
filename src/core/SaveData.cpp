@@ -1243,6 +1243,8 @@ bool parseInventoryAndHistoryField(SaveData& save, std::string_view key, std::st
         save.saturnSlingshotFailed = parseInt(value, 0) != 0;
     } else if (key == save_schema::field::saturnSlingshotFailureAcknowledged) {
         save.saturnSlingshotFailureAcknowledged = parseInt(value, 0) != 0;
+    } else if (key == save_schema::field::hasEncounteredEnemy) {
+        save.hasEncounteredEnemy = parseInt(value, 0) != 0;
     } else if (key == save_schema::field::artifacts) {
         save.artifacts = parseArtifacts(value);
     } else if (key == save_schema::field::furthestTier) {
@@ -2424,7 +2426,10 @@ std::string serializeMiningOperatorState(const MiningRunState& mining)
         << save_schema::crewFieldDelimiter << mining.operatorIntegrity
         << save_schema::crewFieldDelimiter << mining.operatorFireCooldownSeconds
         << save_schema::crewFieldDelimiter << mining.operatorFirePulseSeconds
-        << save_schema::crewFieldDelimiter << (mining.operatorRigTethered ? 1 : 0);
+        << save_schema::crewFieldDelimiter << (mining.operatorRigTethered ? 1 : 0)
+        // Trailing field preserves compatibility with version-14 records
+        // written before independent EVA oxygen existed.
+        << save_schema::crewFieldDelimiter << mining.operatorOxygenSeconds;
     return out.str();
 }
 
@@ -2453,6 +2458,12 @@ void parseMiningOperatorState(std::string_view text, MiningRunState& mining)
     }
     if (fields.size() > 11) {
         mining.operatorRigTethered = parseInt(fields[11], mining.operatorRigTethered ? 1 : 0) != 0;
+    }
+    if (fields.size() > 12) {
+        mining.operatorOxygenSeconds = std::clamp(
+            parseDouble(fields[12], mining.operatorOxygenSeconds),
+            0.0,
+            tuning::mining::operatorOxygenSeconds);
     }
 }
 
@@ -2808,6 +2819,7 @@ SaveData captureSaveData(const GameState& state)
     save.saturnRouteUnlocked = state.meta.saturnRouteUnlocked;
     save.saturnSlingshotFailed = state.meta.saturnSlingshotFailed;
     save.saturnSlingshotFailureAcknowledged = state.meta.saturnSlingshotFailureAcknowledged;
+    save.hasEncounteredEnemy = state.meta.hasEncounteredEnemy;
     save.artifacts = state.meta.artifacts;
     save.miningFirstClearProgress = state.meta.miningFirstClearProgress;
     save.miningSites = state.meta.miningSites;
@@ -3003,6 +3015,36 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
                 }),
             mining.depthLayers.end());
         mining.depthTransitionCooldownSeconds = 0.0;
+        const auto concealIncompleteTriangulation = [](MiningArtifactObject& artifact,
+                                                        MiningGateRuntime& gate,
+                                                        MiningTerrain& terrain) {
+            if (gate.type != MiningGateType::SurveyTriangulation ||
+                gate.surveyComplete ||
+                !artifact.present ||
+                artifact.state != MiningArtifactState::Embedded) {
+                return;
+            }
+            artifact.revealed = false;
+            const int x = static_cast<int>(std::floor(artifact.x));
+            const int y = static_cast<int>(std::floor(artifact.y));
+            if (x >= 0 && y >= 0 && x < terrain.width && y < terrain.height) {
+                const std::size_t index = static_cast<std::size_t>(y * terrain.width + x);
+                if (index < terrain.cells.size()) {
+                    terrain.cells[index].revealed = false;
+                }
+            }
+            gate.derivedStateDirty = true;
+        };
+        concealIncompleteTriangulation(
+            mining.artifact,
+            mining.gate,
+            mining.terrain);
+        for (MiningDepthLayerState& layer : mining.depthLayers) {
+            concealIncompleteTriangulation(
+                layer.artifact,
+                layer.gate,
+                layer.terrain);
+        }
     }
     if (state.run.mining.active) {
         state.run.surfaceExpedition.miningSitePrepared = true;
@@ -3110,6 +3152,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.saturnRouteUnlocked = save.saturnRouteUnlocked;
     state.meta.saturnSlingshotFailed = save.saturnSlingshotFailed;
     state.meta.saturnSlingshotFailureAcknowledged = save.saturnSlingshotFailureAcknowledged;
+    state.meta.hasEncounteredEnemy = save.hasEncounteredEnemy;
     state.meta.acknowledgedActivityBriefingIds = save.acknowledgedActivityBriefingIds;
     ensureDroneBayState(state, catalog);
     if (state.screen == Screen::DroneOps && !droneBayUnlocked(state)) {
@@ -3474,6 +3517,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::saturnRouteUnlocked, save.saturnRouteUnlocked ? 1 : 0);
     writeField(out, save_schema::field::saturnSlingshotFailed, save.saturnSlingshotFailed ? 1 : 0);
     writeField(out, save_schema::field::saturnSlingshotFailureAcknowledged, save.saturnSlingshotFailureAcknowledged ? 1 : 0);
+    writeField(out, save_schema::field::hasEncounteredEnemy, save.hasEncounteredEnemy ? 1 : 0);
     writeField(out, save_schema::field::artifacts, serializeArtifacts(save.artifacts));
     writeField(out, save_schema::field::miningFirstClearProgress, serializeMiningFirstClearProgress(save.miningFirstClearProgress));
     writeField(out, save_schema::field::miningStorySites, serializeMiningSites(save.miningSites));

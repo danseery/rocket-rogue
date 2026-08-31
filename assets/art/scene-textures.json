@@ -72,6 +72,7 @@
     { "textureId": "EnemySpawnerIce", "key": "enemy_spawner_ice", "source": "assets/art/enemies/enemy-spawner-ice-sheet.png", "columns": 20, "rows": 1 },
     { "textureId": "EnemySpawnerRadioactive", "key": "enemy_spawner_radioactive", "source": "assets/art/enemies/enemy-spawner-radioactive-sheet.png", "columns": 20, "rows": 1 },
     { "textureId": "EnemySpawnerToxic", "key": "enemy_spawner_toxic", "source": "assets/art/enemies/enemy-spawner-toxic-sheet.png", "columns": 20, "rows": 1 },
+    { "textureId": "MiningArtifact", "key": "mining_artifact", "source": "assets/art/mining-artifact.png", "columns": 1, "rows": 1 },
     { "textureId": "MiningTilesMoon", "key": "mining_tiles_moon", "source": "assets/art/mining/mining-tiles-moon.png", "columns": 1, "rows": 1 },
     { "textureId": "MiningTilesMars", "key": "mining_tiles_mars", "source": "assets/art/mining/mining-tiles-mars.png", "columns": 1, "rows": 1 },
     { "textureId": "MiningTilesIo", "key": "mining_tiles_io", "source": "assets/art/mining/mining-tiles-io.png", "columns": 1, "rows": 1 },

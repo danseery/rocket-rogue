@@ -24,6 +24,16 @@ struct MiningArtifactSnapshot {
     bool revealed = false;
     int gateType = 0;
     int gateState = 0;
+    double tetherDeniedFlashSeconds = 0.0;
+};
+
+struct MiningTriangulationPresentation {
+    bool active = false;
+    double centerX = 0.0;
+    double centerY = 0.0;
+    double radius = 0.0;
+    double rotationRadians = 0.0;
+    std::array<bool, 3> completed {};
 };
 
 enum class PoiGuidanceKind {
@@ -64,6 +74,7 @@ struct LaunchAsteroidSnapshot {
 
 inline PoiGuidanceTarget miningPoiGuidanceTarget(
     const MiningRunState& mining,
+    double activeOxygenSeconds,
     double oxygenCapacity,
     double cautionThreshold,
     bool atReturnZone)
@@ -76,7 +87,7 @@ inline PoiGuidanceTarget miningPoiGuidanceTarget(
         mining.operatorMode == MiningOperatorMode::Jetpack &&
         mining.operatorPresent;
     const double oxygenPressure = oxygenCapacity > 0.0
-        ? std::clamp(1.0 - mining.oxygenSeconds / oxygenCapacity, 0.0, 1.0)
+        ? std::clamp(1.0 - activeOxygenSeconds / oxygenCapacity, 0.0, 1.0)
         : 0.0;
     const double actorPressure = std::clamp(
         1.0 - (operatorActive ? mining.operatorIntegrity : mining.droneHealth),
@@ -294,6 +305,7 @@ struct RenderSnapshot {
     double miningSwarmCacheX = 0.0;
     double miningSwarmCacheY = 0.0;
     MiningArtifactSnapshot miningArtifact;
+    MiningTriangulationPresentation miningTriangulation;
     PoiGuidanceTarget miningPoiGuidance;
     std::span<const MiningGateMarker> miningGateMarkers;
     std::span<const MiningCell> miningCells;
@@ -366,6 +378,27 @@ struct RenderSnapshot {
     void bindMiningFrameViews(const MiningRunState& mining) noexcept
     {
         miningGateMarkers = mining.gate.markers;
+        if (mining.gate.type == MiningGateType::SurveyTriangulation &&
+            !mining.gate.surveyComplete &&
+            mining.gate.markers.size() >= 3) {
+            miningTriangulation.active = true;
+            miningTriangulation.centerX = mining.gate.anchorX;
+            miningTriangulation.centerY = mining.gate.anchorY;
+            miningTriangulation.rotationRadians = std::atan2(
+                mining.gate.markers.front().y - mining.gate.anchorY,
+                mining.gate.markers.front().x - mining.gate.anchorX) -
+                3.14159265358979323846 / 3.0;
+            for (std::size_t index = 0; index < 3; ++index) {
+                const MiningGateMarker& marker = mining.gate.markers[index];
+                miningTriangulation.completed[index] = marker.activated;
+                miningTriangulation.radius = std::max(
+                    miningTriangulation.radius,
+                    std::hypot(
+                        marker.x - mining.gate.anchorX,
+                        marker.y - mining.gate.anchorY));
+            }
+            miningTriangulation.radius += 1.45;
+        }
         miningCells = mining.terrain.cells;
         miningEnemies = mining.enemies;
         miningMiniDrones = mining.miniDrones;

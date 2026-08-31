@@ -331,6 +331,36 @@ std::string missionStamp(
     return out.str();
 }
 
+bool scenarioClaimQueuesRoute(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const ScenarioObjectivePresentation& objective)
+{
+    if (!objective.available || objective.action != ScenarioActionKind::ClaimReward) {
+        return false;
+    }
+    const ScenarioDefinition* definition = scenarioDefinitionForRuntimeId(
+        state,
+        catalog,
+        objective.scenarioId);
+    const ScenarioInstance* instance = findScenarioInstance(state.meta, objective.scenarioId);
+    if (definition == nullptr || instance == nullptr) {
+        return false;
+    }
+    const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, *instance);
+    const ScenarioStepDefinition* step = findScenarioStepDefinition(resolved, objective.stepId);
+    if (step == nullptr || scenarioRouteRewardDestination(catalog, *step) == nullptr) {
+        return false;
+    }
+    return step->completionEvent == ScenarioEventKind::FlybyFinished ||
+        std::any_of(
+            step->rewards.begin(),
+            step->rewards.end(),
+            [](const ScenarioReward& reward) {
+                return reward.kind == ScenarioRewardKind::RouteAccess;
+            });
+}
+
 std::string modalButton(
     std::string_view label,
     std::string_view modalId,
@@ -1343,6 +1373,21 @@ std::string scenarioObjectiveStateClass(ScenarioStepState state)
     }
 }
 
+std::string scenarioObjectiveDisplayStateLabel(
+    const ScenarioObjectivePresentation& objective)
+{
+    return objective.returnPending
+        ? "PENDING RETURN"
+        : scenarioObjectiveStateLabel(objective.state);
+}
+
+int scenarioObjectiveDisplayCurrent(const ScenarioObjectivePresentation& objective)
+{
+    return objective.returnPending
+        ? objective.required
+        : objective.current;
+}
+
 std::string scenarioObjectiveMarkup(
     const ScenarioObjectivePresentation& objective,
     bool showAction = true,
@@ -1353,14 +1398,16 @@ std::string scenarioObjectiveMarkup(
     }
 
     std::ostringstream out;
+    const std::string displayState = scenarioObjectiveDisplayStateLabel(objective);
+    const int displayCurrent = scenarioObjectiveDisplayCurrent(objective);
     out << "<section class=\"objective-strip rr-objective-strip scenario-objective "
         << (usePhaseLane ? "phase-lane " : "")
         << scenarioObjectiveStateClass(objective.state)
         << "\" data-scenario-id=\"" << htmlEscape(objective.scenarioId)
         << "\" data-scenario-step-id=\"" << htmlEscape(objective.stepId)
-        << "\" data-objective-state=\"" << scenarioObjectiveStateLabel(objective.state) << "\">"
+        << "\" data-objective-state=\"" << htmlEscape(displayState) << "\">"
         << "<div class=\"campaign-objective-head\"><span>" << htmlEscape(objective.location)
-        << "</span><em>" << htmlEscape(scenarioObjectiveStateLabel(objective.state)) << "</em></div>"
+        << "</span><em>" << htmlEscape(displayState) << "</em></div>"
         << "<strong>" << htmlEscape(objective.title) << "</strong>";
     if (objective.required > 0) {
         // A numeric readout remains authoritative for large contracts; a
@@ -1368,18 +1415,21 @@ std::string scenarioObjectiveMarkup(
         constexpr int visualSegments = 8;
         const int filled = std::clamp(
             static_cast<int>(std::ceil(
-                static_cast<double>(std::clamp(objective.current, 0, objective.required)) /
+                static_cast<double>(std::clamp(displayCurrent, 0, objective.required)) /
                 static_cast<double>(objective.required) * visualSegments)),
             0,
             visualSegments);
         out << "<div class=\"campaign-progress\" aria-label=\""
-            << htmlEscape(std::to_string(objective.current) + " of " + std::to_string(objective.required))
+            << htmlEscape(std::to_string(displayCurrent) + " of " + std::to_string(objective.required) +
+                (objective.returnPending ? ", pending return" : ""))
             << "\">";
         for (int index = 0; index < visualSegments; ++index) {
             out << "<i class=\"" << (index < filled ? "is-filled" : "") << "\"></i>";
         }
-        out << "<b>" << std::clamp(objective.current, 0, objective.required) << "/"
-            << objective.required << "</b></div>";
+        out << "<b>" << std::clamp(displayCurrent, 0, objective.required) << "/"
+            << objective.required
+            << (objective.returnPending ? " // PENDING RETURN" : "")
+            << "</b></div>";
     }
     out << "<p>" << htmlEscape(objective.detail) << "</p>"
         << "<div class=\"campaign-objective-foot\"><small>" << htmlEscape(objective.rewardPreview) << "</small>";
@@ -1401,19 +1451,24 @@ std::string droneMissionStripMarkup(
     }
 
     std::ostringstream out;
+    const std::string displayState = scenarioObjectiveDisplayStateLabel(objective);
+    const int displayCurrent = scenarioObjectiveDisplayCurrent(objective);
     out << "<section class=\"drone-mission-strip scenario-objective "
         << scenarioObjectiveStateClass(objective.state)
         << "\" data-scenario-id=\"" << htmlEscape(objective.scenarioId)
         << "\" data-scenario-step-id=\"" << htmlEscape(objective.stepId)
-        << "\" data-objective-state=\"" << scenarioObjectiveStateLabel(objective.state) << "\">"
+        << "\" data-objective-state=\"" << htmlEscape(displayState) << "\">"
         << "<div class=\"drone-mission-identity\"><span>" << htmlEscape(objective.location)
-        << "</span><em>" << htmlEscape(scenarioObjectiveStateLabel(objective.state)) << "</em></div>"
+        << "</span><em>" << htmlEscape(displayState) << "</em></div>"
         << "<strong class=\"drone-mission-title\">" << htmlEscape(objective.title) << "</strong>";
     if (objective.required > 0) {
         out << "<div class=\"drone-mission-progress\" aria-label=\""
-            << htmlEscape(std::to_string(objective.current) + " of " + std::to_string(objective.required))
-            << "\"><b>" << std::clamp(objective.current, 0, objective.required) << "/"
-            << objective.required << "</b></div>";
+            << htmlEscape(std::to_string(displayCurrent) + " of " + std::to_string(objective.required) +
+                (objective.returnPending ? ", pending return" : ""))
+            << "\"><b>" << std::clamp(displayCurrent, 0, objective.required) << "/"
+            << objective.required
+            << (objective.returnPending ? " // PENDING RETURN" : "")
+            << "</b></div>";
     }
     out << "<p class=\"drone-mission-instruction\">" << htmlEscape(instruction)
         << "</p><small class=\"drone-mission-reward\">" << htmlEscape(objective.rewardPreview)
@@ -1982,6 +2037,29 @@ std::string researchDataMilestoneLabel(int progress)
     const auto& finalMilestone = tuning::unlocks::blueprintUnlocks[std::size(tuning::unlocks::blueprintUnlocks) - 1];
     return std::to_string(std::max(0, progress)) + " / " + std::to_string(finalMilestone.threshold)
         + " — ALL RESEARCH FAMILIES AVAILABLE";
+}
+
+struct ArrivalResearchUnlockPresentation {
+    std::string label;
+    std::string value;
+};
+
+ArrivalResearchUnlockPresentation arrivalResearchUnlockPresentation(int progress)
+{
+    for (const tuning::unlocks::BlueprintUnlock& milestone : tuning::unlocks::blueprintUnlocks) {
+        if (progress >= milestone.threshold) {
+            continue;
+        }
+        std::string family = unlockDisplayName(milestone.key);
+        if (family == "Thermal systems") family = "THERMAL";
+        else if (family == "Recovery hardware") family = "RECOVERY";
+        else if (family == "Deep-space modules") family = "DEEP SPACE";
+        else if (family == "Predictive guidance") family = "GUIDANCE";
+        else if (family == "Exotic prototypes") family = "EXOTIC";
+        const int remaining = std::max(0, milestone.threshold - progress);
+        return {family, "IN " + std::to_string(remaining) + " RD"};
+    }
+    return {"Research", "ALL OPEN"};
 }
 
 const tuning::unlocks::BlueprintUnlock* pendingResearchBreakthrough(const GameState& state)
@@ -3319,7 +3397,9 @@ std::string buildGamePanelMarkup(
     out << solarMapTemplate(context);
 
     if (!headerMetrics.empty()) {
-        out << "<p class=\"status panel-objective\">" << htmlEscape(compactHeaderObjective(state, catalog)) << "</p>";
+        if (state.screen != Screen::ArrivalOps) {
+            out << "<p class=\"status panel-objective\">" << htmlEscape(compactHeaderObjective(state, catalog)) << "</p>";
+        }
         out << "<div class=\"metric-grid rr-metric-strip panel-kpis\">";
         for (const PanelMetricPresentation& metricItem : headerMetrics) {
             out << metric(metricItem.label, metricItem.value);
@@ -3534,6 +3614,12 @@ std::string buildGamePanelMarkup(
                               ? recoveryRouteLabel + " RECOVERY"
                               : (skippedObjective.available ? "STORY ROUTE BLOCKED" : (clearsGenericRoute ? "GENERIC ROUTE CLEARED" : "NEXT LAUNCH: NO BOOST")))
                           : "APPROACH UNCOMMITTED")));
+            const bool perfectChallengeReadyToClaim = scenarioChallenge &&
+                grade == FlybyGrade::Perfect;
+            const std::string perfectChallengeClaimLabel =
+                challengeObjective.action == ScenarioActionKind::ClaimReward
+                    ? challengeObjective.actionLabel
+                    : "Lock Saturn Course";
             out << "<div data-panel-mode=\"mission-stamp\" data-flyby-run=\"1\" data-flyby-completed=\"1\" data-flyby-purpose=\""
                 << (scenarioChallenge ? "scenario-challenge" : "recon") << "\" hidden></div>";
             out << missionStamp(
@@ -3543,23 +3629,17 @@ std::string buildGamePanelMarkup(
                 tagOne,
                 tagTwo,
                 tagThree,
-                scenarioChallenge && grade == FlybyGrade::Perfect
-                    ? ui::actions::scenarioAction(
-                        challengeObjective.scenarioId,
-                        challengeObjective.stepId,
-                        static_cast<int>(ScenarioActionKind::ClaimReward))
+                perfectChallengeReadyToClaim
+                    ? ui::actions::claimSaturnCourse
                     : ui::actions::flybyContinue,
-                scenarioChallenge && grade == FlybyGrade::Perfect
-                    ? std::string_view(challengeObjective.actionLabel)
+                perfectChallengeReadyToClaim
+                    ? std::string_view(perfectChallengeClaimLabel)
                     : (scenarioChallenge
                           ? std::string_view("Return to Hangar")
                           : (recoveryRequired
                                 ? std::string_view("Begin Recovery: " + recoveryRouteLabel)
                                 : std::string_view("Continue"))),
-                scenarioChallenge && grade == FlybyGrade::Perfect ? &challengeObjective : nullptr);
-            if (scenarioChallenge) {
-                out << scenarioObjectiveModal(challengeObjective);
-            }
+                nullptr);
             out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
             out << inventoryTemplate(state, catalog);
             return out.str();
@@ -3888,6 +3968,10 @@ std::string buildGamePanelMarkup(
         const ScenarioObjectivePresentation arrivalScenario = arrivalDestination == nullptr
             ? ScenarioObjectivePresentation {}
             : scenarioObjectiveForDestination(state, catalog, arrivalDestination->id);
+        const ScenarioObjectivePresentation departureScenario = arrivalDestination == nullptr
+            ? ScenarioObjectivePresentation {}
+            : scenarioDepartureChallengeForDestination(state, catalog, arrivalDestination->id);
+        const bool arrivalDepartureChallenge = departureScenario.available;
         const Destination* routeDestination = nextDestination(state, catalog);
         const bool authoredRoute = routeDestination != nullptr && !routeDestination->routeRequirementKeys.empty();
         const std::string routeStatus = routeDestination == nullptr
@@ -3922,6 +4006,8 @@ std::string buildGamePanelMarkup(
         }
 
         out << phaseBoardOpen("phase-board-arrival", "");
+        out << "<p class=\"status panel-objective arrival-objective\">"
+            << htmlEscape(compactHeaderObjective(state, catalog)) << "</p>";
         out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::arrivalOps)
             << "</h2><p>" << htmlEscape(commitmentLabel + " — choose one arrival path for this visit.") << "</p></div></div>";
         const double landingPackFuel = arkDiscovered(state)
@@ -3929,10 +4015,12 @@ std::string buildGamePanelMarkup(
                   tuning::research::expeditionRigPackFuel,
                   static_cast<double>(std::max(0, state.meta.ark.fuelReserve)))
             : tuning::research::expeditionRigPackFuel;
+        const ArrivalResearchUnlockPresentation researchUnlock =
+            arrivalResearchUnlockPresentation(state.meta.blueprintProgress);
         const std::vector<PanelMetricPresentation> arrivalFuelMetrics {
             panelMetric("Transfer", display::fixed(state.run.arrivalOps.transferFuelRemaining, 1)),
             panelMetric("Rig fuel", display::fixed(landingPackFuel + state.run.arrivalOps.transferFuelRemaining, 1)),
-            panelMetric("RD next", researchDataMilestoneLabel(state.meta.blueprintProgress)),
+            panelMetric(researchUnlock.label, researchUnlock.value),
             panelMetric("Descent", orbitCaptured ? "MAPPED +0" : "UNMAPPED +20")
         };
         out << "<div class=\"stat-grid chip-strip phase-lane\">"
@@ -3952,7 +4040,19 @@ std::string buildGamePanelMarkup(
         out << "<h2>" << htmlEscape(
             orbitCaptured ? "Resolve captured orbit" : (firstLandingSequence ? "Map first landing" : "Commit approach")) << "</h2>";
         out << "<div class=\"ops-grid\">";
-        if (orbitCaptured) {
+        if (arrivalDepartureChallenge) {
+            out << arrivalOperationCard(
+                "JUPITER DEPARTURE — PERFECT SLINGSHOT",
+                "The Saturn route is locked behind this departure pass. Hold the gold corridor through the finish, then lock the Saturn course.",
+                "Required route challenge",
+                "Perfect unlocks Saturn",
+                panelActionButton(
+                    "Launch",
+                    ui::actions::beginSaturnSlingshot,
+                    "ok"),
+                {},
+                true);
+        } else if (orbitCaptured) {
             out << arrivalOperationCard(
                 "LAND",
                 "Descend to " + landingTarget + ". Surface hazard +0 from approach mapping. Earns the normal one-step Flight Data contribution. Orbit remains this visit's committed path.",
@@ -4111,9 +4211,9 @@ std::string buildGamePanelMarkup(
             "rr-hud-mining-drill-bit",
             "rr-hud-mining-load"
         };
-        const MiningDrillStats hudMiningStats = miningDrillStats(state, catalog);
-        const double oxygenPressure = hudMiningStats.oxygenSeconds > 0.0
-            ? std::clamp(1.0 - mining.oxygenSeconds / hudMiningStats.oxygenSeconds, 0.0, 1.0)
+        const double activeOxygenCapacity = miningActiveOxygenCapacity(state, catalog);
+        const double oxygenPressure = activeOxygenCapacity > 0.0
+            ? std::clamp(1.0 - miningActiveOxygenSeconds(mining) / activeOxygenCapacity, 0.0, 1.0)
             : 1.0;
         const double fuelPressure = state.run.surfaceExpedition.rigFuelCapacity > 0.0
             ? std::clamp(
@@ -4153,7 +4253,8 @@ std::string buildGamePanelMarkup(
             if (!tile.cssClass.empty()) {
                 vitalClass += " " + tile.cssClass;
             }
-            out << "<article id=\"" << id << "\" class=\"mining-vital-tile " << htmlEscape(vitalClass) << "\"><span>"
+            out << "<article id=\"" << id << "\" class=\"mining-vital-tile " << htmlEscape(vitalClass) << "\"><span"
+                << (index == 0 ? " id=\"rr-hud-mining-oxygen-label\"" : "") << ">"
                 << htmlEscape(tile.label) << "</span><strong id=\"" << id << "-value\">" << htmlEscape(tile.value) << "</strong>";
             if (!tile.microLabel.empty()) {
                 out << "<small><b>" << htmlEscape(tile.microLabel) << "</b> <i id=\"" << id << "-micro\">"
@@ -5016,6 +5117,15 @@ std::string buildGamePanelMarkup(
         && !ui::briefings::acknowledged(
             state.meta.acknowledgedActivityBriefingIds,
             ui::briefings::flightControlsCalibration);
+    const ScenarioObjectivePresentation departureChallenge =
+        scenarioDepartureChallengeForDestination(state, catalog, launchTarget.id);
+    const ScenarioObjectivePresentation launchScenario =
+        scenarioObjectiveForDestination(state, catalog, launchTarget.id);
+    const bool saturnCourseReady =
+        canClaimSaturnCourse(state);
+    const bool scenarioRouteClaimReady =
+        scenarioClaimQueuesRoute(state, catalog, launchScenario);
+
     std::string prepareLaunchLabel = "Launch: " + launchTarget.name;
     if (state.run.routeTransit.active()) {
         const Destination* origin = catalog.findDestination(state.run.routeTransit.originDestinationId);
@@ -5028,6 +5138,12 @@ std::string buildGamePanelMarkup(
         } else {
             prepareLaunchLabel = "Transfer: " + route;
         }
+    } else if (departureChallenge.available) {
+        prepareLaunchLabel =
+            (departureChallenge.action == ScenarioActionKind::RetryActivity ||
+             departureChallenge.activityStarted)
+            ? "Retry"
+            : "Launch";
     }
     const bool prepareLaunchBlocked =
         launchReadiness.blocked || !currentDestinationLaunchReady(state, catalog);
@@ -5038,7 +5154,18 @@ std::string buildGamePanelMarkup(
     if (arkDiscovered(state) && !hostileSystemActive(state)) {
         out << button(state.meta.ark.firstJumpComplete ? "Attempt next Ark jump" : "Make first Ark jump", ui::actions::arkJump, "warn");
     }
-    if (pendingTransferAssistForDestination(state, launchTarget.id) != nullptr) {
+    if (saturnCourseReady) {
+        out << button(
+            "Lock Saturn Course",
+            ui::actions::claimSaturnCourse,
+            "ok hangar-launch-prep",
+            true);
+    } else if (scenarioRouteClaimReady) {
+        out << scenarioActionButton(
+            launchScenario,
+            "ok hangar-launch-prep",
+            true);
+    } else if (pendingTransferAssistForDestination(state, launchTarget.id) != nullptr) {
         out << button("Continue to Jupiter", ui::actions::continueTransferAssist, "ok", true);
     } else {
         out << (prepareLaunchBlocked
@@ -5596,7 +5723,6 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
     }
 
     const MiningRunState& mining = state.run.mining;
-    const MiningDrillStats miningStats = miningDrillStats(state, catalog);
     const MiningLoadStats miningLoad = miningLoadStats(state, catalog);
     const MiningHudPresentation miningHud = miningHudPresentation(state, catalog);
     const int currentDepth = std::max(0, mining.depthZone);
@@ -5616,8 +5742,9 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
         "rr-hud-mining-route-down",
         std::string("DESCEND \xE2\x80\xA2 DEPTH +") + std::to_string(currentDepth + 1));
 
-    const double oxygenPressure = miningStats.oxygenSeconds > 0.0
-        ? std::clamp(1.0 - mining.oxygenSeconds / miningStats.oxygenSeconds, 0.0, 1.0)
+    const double activeOxygenCapacity = miningActiveOxygenCapacity(state, catalog);
+    const double oxygenPressure = activeOxygenCapacity > 0.0
+        ? std::clamp(1.0 - miningActiveOxygenSeconds(mining) / activeOxygenCapacity, 0.0, 1.0)
         : 1.0;
     const double fuelPressure = state.run.surfaceExpedition.rigFuelCapacity > 0.0
         ? std::clamp(
@@ -5689,6 +5816,7 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
     for (std::size_t index = 0; index < miningHud.vitals.size(); ++index) {
         appendHudText(result, vitalValueIds[index], miningHud.vitals[index].value);
     }
+    appendHudText(result, "rr-hud-mining-oxygen-label", miningHud.vitals[0].label);
     appendHudText(result, "rr-hud-mining-fuel-micro", miningHud.vitals[1].microValue);
     appendHudText(result, "rr-hud-mining-drill-bit-micro", miningHud.vitals[2].microValue);
     appendHudText(result, "rr-hud-mining-ore-common", miningHud.oreManifest.ores[0].value);

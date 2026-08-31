@@ -299,6 +299,9 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         mining.operatorPresent;
     const MiningDrillStats operatorStats =
         miningOperatorDrillStats();
+    const double rigOxygenCapacity = std::max(
+        stats.oxygenSeconds,
+        std::max(0.0, mining.siteBaselineOxygenSeconds));
     const double displayedDrillPower = evaActive
         ? operatorStats.power
         : stats.power;
@@ -326,7 +329,8 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric("Mode", evaActive ? "EVA" : "Rig"),
         panelMetric("Gravity", display::fixed(mining.gravityStrength, 1) + " cells/s2"),
         panelMetric(text::labels::drillBit, mining.drillIntegrity <= 0.0 ? "Broken" : display::percent(std::clamp(mining.drillIntegrity, 0.0, 1.0))),
-        panelMetric(text::labels::oxygen, miningOxygenValue(mining.oxygenSeconds)),
+        panelMetric("Rig O2", miningOxygenValue(mining.oxygenSeconds) + "/" + miningOxygenValue(rigOxygenCapacity)),
+        panelMetric("Suit O2", miningOxygenValue(mining.operatorOxygenSeconds) + "/" + miningOxygenValue(tuning::mining::operatorOxygenSeconds)),
         panelMetric("Rig cargo", std::to_string(carriedCargo)),
         panelMetric("Ship cargo", std::to_string(bankedCargo)),
         panelMetric(text::labels::load, display::fixed(load.currentLoad, 1)),
@@ -404,6 +408,8 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
                 : std::string("WASD/left stick thrusts and steers the rig drill; left click/R2 drills; E/X scans; T/Y tethers; F or hold A exits for EVA.")),
         detailPresentationRow("Site", std::string(surfaceSiteProfileName(surface.siteProfile))),
         detailPresentationRow("Rig health", presentation.rigHealth),
+        detailPresentationRow("Rig O2", miningOxygenValue(mining.oxygenSeconds) + " / " + miningOxygenValue(rigOxygenCapacity)),
+        detailPresentationRow("Suit O2", miningOxygenValue(mining.operatorOxygenSeconds) + " / " + miningOxygenValue(tuning::mining::operatorOxygenSeconds)),
         detailPresentationRow("Drill power", display::fixed(displayedDrillPower, 1)),
         detailPresentationRow("Drill range", display::fixed(displayedDrillRange, 1) + " cells"),
         detailPresentationRow("Scanner radius", display::fixed(displayedScannerRadius, 1) + " cells"),
@@ -637,6 +643,15 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
             ? "SURFACE \xE2\x80\xA2 "
             : "DEPTH +" + std::to_string(currentDepth) + " \xE2\x80\xA2 ";
     }
+    if (mining.gate.type == MiningGateType::SurveyTriangulation &&
+        !mining.gate.surveyComplete) {
+        const int completed = static_cast<int>(std::count_if(
+            mining.gate.markers.begin(),
+            mining.gate.markers.end(),
+            [](const MiningGateMarker& marker) { return marker.activated; }));
+        presentation.objective = "SIGNAL TRIANGULATION " +
+            std::to_string(completed) + "/3";
+    }
     if (currentDepth == 0) {
         presentation.objective += "SHIP HERE";
     } else {
@@ -666,7 +681,8 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
     presentation.failureBody = run.failureBody;
     presentation.details = run.details;
     presentation.vitals = {{
-        {"OXYGEN", metricValue(text::labels::oxygen), "oxygen", {}, {}},
+        {evaActive ? "SUIT O2" : "RIG O2",
+            miningOxygenValue(miningActiveOxygenSeconds(mining)), "oxygen", {}, {}},
         {"RIG FUEL", metricValue(text::fuel::reserveLabel(arkKnown), display::fixed(surface.rigFuel, 0)), "fuel", "NEXT", metricValue("Next fuel", "100%")},
         {"DRILL", metricValue(text::labels::drillBit), std::move(drillCssClass), "HEAT", metricValue(text::labels::drillHeat, "0%")},
         {"LOAD", display::fixed(load.currentLoad, 1), "load", {}, {}}
@@ -687,9 +703,21 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
         {"EXOTIC", std::to_string(std::max(0, mining.temporaryMaterials.exotic)) + " / " +
             std::to_string(droneOre(&MaterialInventory::exotic)) + " / " + std::to_string(std::max(0, mining.stowedMaterials.exotic)), "exotic", {}, {}}
     }};
+    const bool triangulationConcealed =
+        mining.gate.type == MiningGateType::SurveyTriangulation &&
+        !mining.gate.surveyComplete;
+    const int triangulationCompleted = static_cast<int>(std::count_if(
+        mining.gate.markers.begin(),
+        mining.gate.markers.end(),
+        [](const MiningGateMarker& marker) { return marker.activated; }));
     presentation.payload = {{
         {"SHIP", payloadValue("Ship cargo"), "stowed", {}, {}},
-        {"ARTIFACT", mining.artifact.present ? metricValue("Artifact integrity", "0%") : "--", mining.artifact.present ? "artifact active" : "artifact", {}, {}}
+        {triangulationConcealed ? "SIGNAL" : "ARTIFACT",
+            triangulationConcealed
+                ? std::to_string(triangulationCompleted) + "/3"
+                : (mining.artifact.present ? metricValue("Artifact integrity", "0%") : "--"),
+            triangulationConcealed ? "signal active" : (mining.artifact.present ? "artifact active" : "artifact"),
+            {}, {}}
     }};
 
     if (!mining.active || mining.failurePending) {

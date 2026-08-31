@@ -5,7 +5,9 @@
 namespace rocket::save_schema {
 
 inline constexpr std::string_view header = "RR_SAVE_V1";
-inline constexpr int currentVersion = 14;
+// Version fifteen intentionally starts a new campaign generation. Older
+// payloads are cleared by the application at startup rather than migrated.
+inline constexpr int currentVersion = 15;
 inline constexpr char keyValueDelimiter = '=';
 inline constexpr char listDelimiter = ',';
 inline constexpr char textListDelimiter = '|';
@@ -190,6 +192,7 @@ inline constexpr std::string_view saturnSlingshotPerfect = "saturnSlingshotPerfe
 inline constexpr std::string_view saturnRouteUnlocked = "saturnRouteUnlocked";
 inline constexpr std::string_view saturnSlingshotFailed = "saturnSlingshotFailed";
 inline constexpr std::string_view saturnSlingshotFailureAcknowledged = "saturnSlingshotFailureAcknowledged";
+inline constexpr std::string_view hasEncounteredEnemy = "hasEncounteredEnemy";
 inline constexpr std::string_view artifacts = "artifacts";
 inline constexpr std::string_view miningFirstClearProgress = "miningFirstClearProgress";
 inline constexpr std::string_view miningStorySites = "miningStorySites";

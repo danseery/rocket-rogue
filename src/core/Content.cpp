@@ -517,6 +517,8 @@ ContentCatalog createDefaultContent()
             destination.routeRequirementKeys = {content::unlock::routeJupiter};
         } else if (destination.id == content::destination::saturn) {
             destination.routeRequirementKeys = {content::unlock::routeSaturn};
+        } else if (destination.id == content::destination::uranus) {
+            destination.routeRequirementKeys = {content::unlock::routeUranus};
         }
     }
 
@@ -535,14 +537,17 @@ ContentCatalog createDefaultContent()
 
     MiningSiteDefinition thermalLayeredRecovery;
     thermalLayeredRecovery.id = content::miningSite::thermalLayeredRecovery;
-    thermalLayeredRecovery.version = 1;
+    thermalLayeredRecovery.version = 2;
     thermalLayeredRecovery.arena = {MiningAct::ActOne, 8, 0, true, MiningGateType::HazardCocoon};
     thermalLayeredRecovery.biome = MiningSiteBiome::ThermalLava;
     thermalLayeredRecovery.enemyTheme = MiningEnemyTheme::Lava;
     thermalLayeredRecovery.gateType = MiningGateType::HazardCocoon;
+    thermalLayeredRecovery.objectivePlacement = MiningSiteObjectivePlacement::EntryCentered;
     thermalLayeredRecovery.baselineOxygenSeconds = tuning::mining::ioArtifactOxygenSeconds;
-    thermalLayeredRecovery.cocoon.id = "thermal_two_layer";
-    thermalLayeredRecovery.cocoon.version = 1;
+    // The first protected objective teaches the cocoon language with one
+    // clearly visible seal, not a surprise second phase.
+    thermalLayeredRecovery.cocoon.id = "thermal_intro_seal";
+    thermalLayeredRecovery.cocoon.version = 2;
     thermalLayeredRecovery.cocoon.surveySignalDepthOffset = 1;
     // This is a content-owned payload identity. The cocoon and scenario
     // systems consume it generically; compatibility migration can preserve
@@ -551,12 +556,8 @@ ContentCatalog createDefaultContent()
         ProtectedObjectiveKind::Artifact,
         content::protectedObjective::ioMinorArtifact};
     thermalLayeredRecovery.cocoon.layers = {
-        {"outer", "OUTER SEAL", {{0, -2}, {2, 0}, {0, 2}, {-2, 0}},
+        {"thermal", "THERMAL SEAL", {{0, -2}, {2, 0}, {0, 2}, {-2, 0}},
             MiningCocoonRevealPolicy::OnAnyCellDiscovered,
-            MiningCocoonCompletionRule::TreatAndExcavate,
-            MiningElementalAffinity::Thermal, 1},
-        {"inner", "INNER SEAL", {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}},
-            MiningCocoonRevealPolicy::AfterPreviousLayerCompleted,
             MiningCocoonCompletionRule::TreatAndExcavate,
             MiningElementalAffinity::Thermal, 1}
     };
@@ -633,8 +634,8 @@ ContentCatalog createDefaultContent()
                      {ScenarioRewardKind::DroneBaySlots, {}, 1, false},
                      {ScenarioRewardKind::UnlockKey, content::unlock::ioHazardDrone, 0, false},
                      {ScenarioRewardKind::SupportDrone, content::drone::hazardDrone, 1, true}}},
-                {"recovery", {"commission"}, "IO // JUPITER SYSTEM", "Layered Recovery",
-                    "Discover the outer seal, cool and excavate every segment, then reveal, tether, and extract the protected objective.",
+                {"recovery", {"commission"}, "IO // JUPITER SYSTEM", "Artifact Recovery",
+                    "Discover the thermal seal, cool and excavate its four segments, then tether the exposed artifact home.",
                     "REWARD // 75 ARTIFACT XP + 10 OBJECTIVE XP + OUTER TRANSFER DATA", "Begin Volcanic Recovery", {},
                     ScenarioEventKind::ProtectedObjectiveExtracted, {}, content::miningSite::thermalLayeredRecovery, 1, 0, false, false, false,
                     ScenarioActionKind::BeginActivity, content::miningSite::thermalLayeredRecovery,
@@ -649,17 +650,31 @@ ContentCatalog createDefaultContent()
             {
                 {"briefing", {}, "JUPITER DEPARTURE", "Perfect Slingshot",
                     "Saturn is beyond normal transfer range. Hold the gold corridor for a Perfect pass; departure commits the expedition outward.",
-                    "REWARD // SATURN ROUTE", "Begin Slingshot Run", {},
+                    "REWARD // SATURN ROUTE", "Review", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"flyby", {"briefing"}, "JUPITER DEPARTURE", "Perfect Slingshot",
                     "Good is not enough. Hold the gold corridor through the finish.",
-                    "REWARD // SATURN ROUTE", "Begin Slingshot Run",
+                    "REWARD // SATURN ROUTE", "Launch",
                     "INSUFFICIENT SLINGSHOT — Saturn remains locked. Hold the gold corridor for a Perfect pass.",
                     ScenarioEventKind::FlybyFinished, content::scenario::outerTransfer, {}, 1, static_cast<int>(FlybyGrade::Perfect), false, true, true,
                     ScenarioActionKind::BeginActivity, {},
                     {{ScenarioRewardKind::UnlockKey, content::unlock::routeSaturn, 0, false},
                      {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}}
+            }
+        },
+        {
+            content::scenario::saturnDeparture,
+            1,
+            content::unlock::routeSaturn,
+            content::destination::saturn,
+            {
+                {"artifact", {}, "SATURN DEPARTURE", "Artifact Secured",
+                    "Recover one Saturn artifact and return it safely to permanent inventory.",
+                    "REWARD // URANUS ROUTE", "Lock Uranus Course", {},
+                    ScenarioEventKind::ArtifactRecovered, content::destination::saturn, {}, 1, 0,
+                    false, true, false, ScenarioActionKind::ClaimReward, {},
+                    {{ScenarioRewardKind::RouteAccess, content::destination::uranus, 0, false}}}
             }
         },
         {

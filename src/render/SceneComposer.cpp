@@ -54,6 +54,9 @@ constexpr float kFlightThrustMinimumWidthScale = 0.72F;
 constexpr float kLaunchThrustNozzlePaddingScale = 0.245F;
 constexpr float kLaunchThrustMinimumLengthScale = 0.40F;
 constexpr float kLaunchThrustMinimumWidthScale = 0.72F;
+// Each thrust-sheet frame has about 27% transparent space before the first
+// flame pixel. Account for it when a plume must visibly touch a nozzle.
+constexpr float kThrustSheetLeadingTransparentShare = 0.27F;
 // The bottom dock produces a deliberately shallow scene. The local-system
 // backdrop reaches roughly 1.75 world units below center (the large authored
 // Earth sprite), so this scale keeps that complete body inside sceneRect rather
@@ -192,7 +195,8 @@ enum ArtAsset {
     EnemySpawnerLavaAsset = 64,
     EnemySpawnerIceAsset = 65,
     EnemySpawnerRadioactiveAsset = 66,
-    EnemySpawnerToxicAsset = 67
+    EnemySpawnerToxicAsset = 67,
+    MiningArtifactAsset = 68
 };
 
 constexpr TextureId textureForAsset(int assetIndex) noexcept
@@ -3129,16 +3133,38 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     // The authored bay opening sits below the sprite's centerline.
     const Vec2 extractionBay {shipBay.x, shipSpriteY - shipSpriteSize * 0.17F};
     if (snapshot.miningExtractionActive && extractionLaunch > 0.001F) {
-        const float exhaustSize = shipSpriteSize * (0.42F + extractionLaunch * 0.78F);
-        drawRadialGlow(shipBay.x, shipSpriteY - shipSpriteSize * 0.42F, exhaustSize, {0.18F, 0.82F, 1.0F, 0.10F + extractionLaunch * 0.18F}, 36);
-        drawTriangle(
-            shipBay.x - shipSpriteSize * 0.12F,
-            shipSpriteY - shipSpriteSize * 0.28F,
-            shipBay.x + shipSpriteSize * 0.12F,
-            shipSpriteY - shipSpriteSize * 0.28F,
+        // Use the shared animated launch flame rather than a blue geometric
+        // stand-in. Its leading edge sits directly at the bay nozzle and its
+        // warm palette makes this read as the ship's engines, not a scanner
+        // or mining marker.
+        const float flameLength = shipSpriteSize * (0.44F + extractionLaunch * 0.70F);
+        const float flameWidth = shipSpriteSize * (0.22F + extractionLaunch * 0.10F);
+        // Anchor the first visible flame pixels just inside the ship's visible
+        // lower edge. Centering the full texture at the nozzle leaves its 27%
+        // transparent leading margin as a conspicuous gap during extraction.
+        const float visibleNozzleY = shipGroundY + shipSpriteSize * 0.025F;
+        const float flameCenterY = visibleNozzleY - flameLength *
+            (0.50F - kThrustSheetLeadingTransparentShare);
+        const int flameFrame = static_cast<int>(snapshot.animationTime * 18.0) % 6;
+        drawRadialGlow(
             shipBay.x,
-            shipSpriteY - shipSpriteSize * (0.52F + extractionLaunch * 0.52F),
-            {0.32F, 0.90F, 1.0F, 0.58F + extractionLaunch * 0.34F});
+            visibleNozzleY - flameLength * 0.26F,
+            flameLength * 0.82F,
+            {1.0F, 0.24F, 0.05F, 0.08F + extractionLaunch * 0.14F},
+            36);
+        if (textureReady(ThrustAsset)) {
+            drawSpriteRotated(
+                shipBay.x,
+                flameCenterY,
+                flameWidth,
+                flameLength,
+                0.0F,
+                1.0F,
+                {1.0F, 1.0F, 1.0F, 0.74F + extractionLaunch * 0.26F},
+                ThrustAsset,
+                flameFrame,
+                6);
+        }
     }
     if (snapshot.miningShipPresent && snapshot.miningExtractionActive && textureReady(RocketOpenAsset)) {
         drawSpriteRotated(
@@ -3185,20 +3211,29 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         }
         const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
         const bool hazardGate = cell.material == MiningCellMaterial::HazardPocket;
+        const bool introductoryCocoon = snapshot.miningArtifact.gateType == static_cast<int>(MiningGateType::HazardCocoon) &&
+            snapshot.miningArtifact.gateState != static_cast<int>(MiningGateState::Open) &&
+            snapshot.miningArtifact.gateState != static_cast<int>(MiningGateState::Completed);
         const float hazardHeartbeat = hazardGate
             ? miningHazardHeartbeat(snapshot.animationTime, x, y)
             : 0.0F;
         const Color hazardColor = miningHazardColor(static_cast<int>(cell.hazardAffinity));
         Color gateColor = hazardGate
-            ? Color {hazardColor.r, hazardColor.g, hazardColor.b, 0.42F + hazardHeartbeat * 0.26F}
+            ? (introductoryCocoon
+                ? Color {1.0F, 0.62F, 0.16F, 0.72F + hazardHeartbeat * 0.20F}
+                : Color {hazardColor.r, hazardColor.g, hazardColor.b, 0.42F + hazardHeartbeat * 0.26F})
             : Color {0.78F, 0.54F, 1.0F, 0.50F + gatePulse * 0.18F};
         gateColor.a *= revealFraction;
-        const float halfW = cellW * 0.47F;
-        const float halfH = cellH * 0.47F;
-        drawLine(center.x - halfW, center.y - halfH, center.x + halfW, center.y - halfH, gateColor, 1.6F);
-        drawLine(center.x + halfW, center.y - halfH, center.x + halfW, center.y + halfH, gateColor, 1.6F);
-        drawLine(center.x + halfW, center.y + halfH, center.x - halfW, center.y + halfH, gateColor, 1.6F);
-        drawLine(center.x - halfW, center.y + halfH, center.x - halfW, center.y - halfH, gateColor, 1.6F);
+        const float halfW = cellW * (introductoryCocoon ? 0.53F : 0.47F);
+        const float halfH = cellH * (introductoryCocoon ? 0.53F : 0.47F);
+        if (introductoryCocoon) {
+            drawRadialGlow(center.x, center.y, cellSize * 1.05F, {1.0F, 0.42F, 0.08F, (0.09F + gatePulse * 0.07F) * revealFraction}, 16);
+        }
+        const float gateLineWidth = introductoryCocoon ? 2.8F : 1.6F;
+        drawLine(center.x - halfW, center.y - halfH, center.x + halfW, center.y - halfH, gateColor, gateLineWidth);
+        drawLine(center.x + halfW, center.y - halfH, center.x + halfW, center.y + halfH, gateColor, gateLineWidth);
+        drawLine(center.x + halfW, center.y + halfH, center.x - halfW, center.y + halfH, gateColor, gateLineWidth);
+        drawLine(center.x - halfW, center.y + halfH, center.x - halfW, center.y - halfH, gateColor, gateLineWidth);
     }
 
     for (std::size_t cellIndex = 0; cellIndex < renderedCellCount; ++cellIndex) {
@@ -3652,8 +3687,74 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         previousMiningOperatorActive_ = snapshot.miningOperatorActive;
         miningOperatorTogglePulseStartedAt_ = snapshot.animationTime;
     }
-    if (snapshot.miningArtifact.present && (snapshot.miningArtifact.revealed || snapshot.miningArtifact.state != static_cast<int>(MiningArtifactState::Embedded))) {
+    if (snapshot.miningTriangulation.active) {
+        const Vec2 center = cellCenter(
+            snapshot.miningTriangulation.centerX - 0.5,
+            snapshot.miningTriangulation.centerY - 0.5);
+        const float radiusX = static_cast<float>(snapshot.miningTriangulation.radius) * cellW;
+        const float radiusY = static_cast<float>(snapshot.miningTriangulation.radius) * cellH;
+        constexpr int segmentsPerSlice = 12;
+        for (int slice = 0; slice < 3; ++slice) {
+            const bool completed = snapshot.miningTriangulation.completed[static_cast<std::size_t>(slice)];
+            const Color fill = completed
+                ? Color {0.18F, 1.0F, 0.48F, 0.15F}
+                : Color {0.10F, 0.92F, 1.0F, 0.13F + gatePulse * 0.035F};
+            const float start = static_cast<float>(snapshot.miningTriangulation.rotationRadians) +
+                static_cast<float>(slice) * 2.0F * kPi / 3.0F;
+            const float end = start + 2.0F * kPi / 3.0F;
+            for (int segment = 0; segment < segmentsPerSlice; ++segment) {
+                const float t0 = static_cast<float>(segment) / static_cast<float>(segmentsPerSlice);
+                const float t1 = static_cast<float>(segment + 1) / static_cast<float>(segmentsPerSlice);
+                const float a0 = start + (end - start) * t0;
+                const float a1 = start + (end - start) * t1;
+                drawTriangle(
+                    center.x,
+                    center.y,
+                    center.x + std::cos(a0) * radiusX,
+                    center.y - std::sin(a0) * radiusY,
+                    center.x + std::cos(a1) * radiusX,
+                    center.y - std::sin(a1) * radiusY,
+                    fill);
+            }
+            const Color edge = completed
+                ? Color {0.24F, 1.0F, 0.56F, 0.92F}
+                : Color {0.20F, 0.92F, 1.0F, 0.84F};
+            drawLine(
+                center.x,
+                center.y,
+                center.x + std::cos(start) * radiusX,
+                center.y - std::sin(start) * radiusY,
+                edge,
+                2.1F);
+        }
+        drawRadialGlow(
+            center.x,
+            center.y,
+            std::max(radiusX, radiusY) * 1.04F,
+            {0.12F, 0.92F, 1.0F, 0.055F + gatePulse * 0.018F},
+            40);
+        drawEllipseLine(
+            center.x,
+            center.y,
+            radiusX,
+            radiusY,
+            {0.22F, 0.94F, 1.0F, 0.88F},
+            64,
+            0.0F,
+            kPi * 2.0F);
+    }
+    if (!snapshot.miningTriangulation.active &&
+        snapshot.miningArtifact.present &&
+        snapshot.miningArtifact.state != static_cast<int>(MiningArtifactState::Delivered)) {
         const Vec2 artifact = cellCenter(snapshot.miningArtifact.x - 0.5, snapshot.miningArtifact.y - 0.5);
+        const bool undiscoveredArtifact = !snapshot.miningTriangulation.active &&
+            !snapshot.miningArtifact.revealed &&
+            snapshot.miningArtifact.state == static_cast<int>(MiningArtifactState::Embedded);
+        if (undiscoveredArtifact) {
+            // A faint signal makes the sealed objective discoverable without
+            // exposing the relic sprite before the player reaches it.
+            drawRadialGlow(artifact.x, artifact.y, cellSize * 1.12F, {0.78F, 0.54F, 1.0F, 0.30F}, 24);
+        } else {
         const Color artifactColor = miningArtifactColor(snapshot.miningArtifact.kind, snapshot.miningArtifact.state);
         const float artifactReveal = pulseRevealFractionAt(snapshot.miningArtifact.x, snapshot.miningArtifact.y);
         if (artifactReveal > 0.0F) {
@@ -3665,39 +3766,101 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         const float statePulse = snapshot.miningArtifact.state == static_cast<int>(MiningArtifactState::Delivered)
             ? 0.35F + 0.18F * std::sin(static_cast<float>(snapshot.animationTime) * 12.0F)
             : 0.0F;
-        drawCircle(artifact.x, artifact.y, cellSize * (0.72F + statePulse), {artifactColor.r, artifactColor.g, artifactColor.b, artifactColor.a * artifactReveal}, 18);
-        drawCircle(artifact.x, artifact.y, cellSize * 0.34F, {1.0F, 1.0F, 0.86F, (snapshot.miningArtifact.state == static_cast<int>(MiningArtifactState::Destroyed) ? 0.20F : 0.82F) * artifactReveal}, 14);
+        // Purple belongs to the artifact language rather than any material or
+        // hazard affinity, so the exposed relic reads at a glance on Deck.
+        drawRadialGlow(artifact.x, artifact.y, cellSize * (1.92F + statePulse), {0.74F, 0.28F, 1.0F, 0.48F * artifactReveal}, 28);
+        drawRadialGlow(artifact.x, artifact.y, cellSize * (1.05F + statePulse), {0.82F, 0.58F, 1.0F, 0.28F * artifactReveal}, 24);
+        drawRadialGlow(artifact.x, artifact.y, cellSize * (0.72F + statePulse), {artifactColor.r, artifactColor.g, artifactColor.b, 0.15F * artifactReveal}, 20);
+        const float denialAge = std::clamp(0.68F - static_cast<float>(snapshot.miningArtifact.tetherDeniedFlashSeconds), 0.0F, 0.68F);
+        const auto denialPulse = [denialAge](float center) {
+            return std::max(0.0F, 1.0F - std::abs(denialAge - center) / 0.09F);
+        };
+        const float tetherDeniedFlash = std::max(denialPulse(0.08F), denialPulse(0.32F));
+        if (tetherDeniedFlash > 0.0F) {
+            drawRadialGlow(artifact.x, artifact.y, cellSize * (1.38F + tetherDeniedFlash * 0.22F), {1.0F, 0.08F, 0.05F, 0.46F * tetherDeniedFlash * artifactReveal}, 24);
+            drawEllipseLine(artifact.x, artifact.y, cellW * 1.42F, cellH * 1.42F, {1.0F, 0.10F, 0.06F, 0.92F * tetherDeniedFlash * artifactReveal}, 28, 0.0F, kPi * 2.0F);
+        }
+        if (textureReady(MiningArtifactAsset)) {
+            const Color spriteTint = snapshot.miningArtifact.state == static_cast<int>(MiningArtifactState::Destroyed)
+                ? Color {0.50F, 0.18F, 0.18F, 0.78F * artifactReveal}
+                : Color {1.0F, 1.0F, 1.0F, artifactReveal};
+            drawSprite(
+                artifact.x,
+                artifact.y,
+                cellSize * (1.54F + statePulse * 0.20F),
+                cellSize * (1.54F + statePulse * 0.20F),
+                spriteTint,
+                MiningArtifactAsset);
+        } else {
+            drawCircle(artifact.x, artifact.y, cellSize * (0.72F + statePulse), {artifactColor.r, artifactColor.g, artifactColor.b, artifactColor.a * artifactReveal}, 18);
+            drawCircle(artifact.x, artifact.y, cellSize * 0.34F, {1.0F, 1.0F, 0.86F, (snapshot.miningArtifact.state == static_cast<int>(MiningArtifactState::Destroyed) ? 0.20F : 0.82F) * artifactReveal}, 14);
+        }
         const float health = static_cast<float>(std::clamp(snapshot.miningArtifact.maxHealth <= 0.0 ? 0.0 : snapshot.miningArtifact.health / snapshot.miningArtifact.maxHealth, 0.0, 1.0));
-        drawRect(artifact.x, artifact.y - cellH * 0.92F, cellW * 1.65F, cellH * 0.12F, {0.12F, 0.04F, 0.04F, 0.76F * artifactReveal});
-        drawRect(artifact.x - cellW * 0.825F * (1.0F - health), artifact.y - cellH * 0.92F, cellW * 1.65F * health, cellH * 0.12F, {0.34F + (1.0F - health) * 0.66F, 0.95F * health, 0.24F, 0.90F * artifactReveal});
+        // The old always-on rectangular condition bar could read as a box
+        // framing the artifact aura while it was being towed. Only surface
+        // condition once the relic is damaged, as an arc that stays in the
+        // artifact's circular visual language.
+        if (health < 0.995F) {
+            const Color conditionColor {
+                0.34F + (1.0F - health) * 0.66F,
+                0.95F * health,
+                0.24F,
+                0.92F * artifactReveal
+            };
+            drawEllipseLine(
+                artifact.x,
+                artifact.y,
+                cellW * 1.20F,
+                cellH * 1.20F,
+                conditionColor,
+                32,
+                -kPi * 0.5F,
+                -kPi * 0.5F + kPi * 2.0F * health);
+        }
         if (snapshot.miningArtifact.gateType != static_cast<int>(MiningGateType::None) &&
             snapshot.miningArtifact.gateState != static_cast<int>(MiningGateState::Open) &&
             snapshot.miningArtifact.gateState != static_cast<int>(MiningGateState::Completed)) {
             drawEllipseLine(
                 artifact.x,
                 artifact.y,
-                cellW * (1.05F + gatePulse * 0.10F),
-                cellH * (1.05F + gatePulse * 0.10F),
-                {0.88F, 0.44F, 1.0F, 0.72F * artifactReveal},
+                cellW * (1.32F + gatePulse * 0.14F),
+                cellH * (1.32F + gatePulse * 0.14F),
+                {1.0F, 0.62F, 0.16F, 0.88F * artifactReveal},
                 28,
                 0.0F,
                 kPi * 2.0F);
         }
         }
+        }
     }
+    if (!snapshot.miningTriangulation.active) {
     for (const MiningGateMarker& marker : snapshot.miningGateMarkers) {
         const Vec2 center = cellCenter(marker.x - 0.5, marker.y - 0.5);
         const float markerReveal = pulseRevealFractionAt(marker.x, marker.y);
         if (markerReveal <= 0.0F) {
             continue;
         }
+        const bool cocoonLocked = snapshot.miningArtifact.gateType == static_cast<int>(MiningGateType::HazardCocoon) &&
+            snapshot.miningArtifact.gateState != static_cast<int>(MiningGateState::Open) &&
+            snapshot.miningArtifact.gateState != static_cast<int>(MiningGateState::Completed);
         Color markerColor = marker.activated
             ? Color {0.30F, 1.0F, 0.66F, 0.82F}
-            : Color {0.46F, 0.86F, 1.0F, 0.60F + gatePulse * 0.24F};
+            : (cocoonLocked
+                ? Color {1.0F, 0.66F, 0.18F, 0.78F + gatePulse * 0.18F}
+                : Color {0.46F, 0.86F, 1.0F, 0.60F + gatePulse * 0.24F});
         markerColor.a *= markerReveal;
-        drawEllipseLine(center.x, center.y, cellW * 0.72F, cellH * 0.72F, markerColor, 24, 0.0F, kPi * 2.0F);
-        drawLine(center.x - cellW * 0.44F, center.y, center.x + cellW * 0.44F, center.y, markerColor, 1.4F);
-        drawLine(center.x, center.y - cellH * 0.44F, center.x, center.y + cellH * 0.44F, markerColor, 1.4F);
+        if (cocoonLocked) {
+            drawRadialGlow(center.x, center.y, cellSize * 1.16F, {1.0F, 0.42F, 0.06F, 0.13F * markerReveal}, 16);
+            drawEllipseLine(center.x, center.y, cellW * 0.98F, cellH * 0.98F, markerColor, 28, 0.0F, kPi * 2.0F);
+            drawRect(center.x, center.y, cellW * 0.28F, cellH * 0.28F, markerColor);
+        } else {
+            drawEllipseLine(center.x, center.y, cellW * 0.72F, cellH * 0.72F, markerColor, 24, 0.0F, kPi * 2.0F);
+        }
+        const float markerArm = cocoonLocked ? 0.58F : 0.44F;
+        const float markerLineWidth = cocoonLocked ? 2.4F : 1.4F;
+        drawLine(center.x - cellW * markerArm, center.y, center.x + cellW * markerArm, center.y, markerColor, markerLineWidth);
+        drawLine(center.x, center.y - cellH * markerArm, center.x, center.y + cellH * markerArm, markerColor, markerLineWidth);
+    }
     }
     if (snapshot.miningScannerPulse > 0.0) {
         std::vector<SceneVertex>& scannerGridVertices = scratchVertices(384);

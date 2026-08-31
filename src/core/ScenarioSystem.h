@@ -52,6 +52,11 @@ struct ScenarioObjectivePresentation {
     bool mandatoryBriefing = false;
     bool briefingAcknowledged = false;
     bool firstFailurePending = false;
+    // A protected objective can be physically secured aboard the expedition
+    // ship before its return-to-Earth settlement records the scenario event.
+    // Keep that transient-but-save-backed handoff visible without treating it
+    // as completed gameplay progress.
+    bool returnPending = false;
     bool activityStarted = false;
     ScenarioActionKind action = ScenarioActionKind::None;
     std::string miningSiteDefinitionId;
@@ -133,6 +138,13 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
     std::string_view scenarioId,
     std::string_view stepId);
 ScenarioObjectivePresentation scenarioObjectiveForDestination(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view destinationId);
+// Returns an actionable authored departure Flyby independently of ordinary
+// objective ranking, so arrival screens cannot route players into a generic
+// pass-through while the required departure challenge is active.
+ScenarioObjectivePresentation scenarioDepartureChallengeForDestination(
     const GameState& state,
     const ContentCatalog& catalog,
     std::string_view destinationId);

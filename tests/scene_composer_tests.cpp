@@ -1939,6 +1939,133 @@ void testMiningHazardsUseAffinityHeartbeatGlowsWithoutOreGlints()
     assert(miningAffinityGlows(treatedComposer.compose(treatedSnapshot), thermalColor).empty());
 }
 
+void testTetheredArtifactAuraHasNoRectangularOverlay()
+{
+    rocket::MiningRunState mining;
+    mining.active = true;
+    mining.terrain.width = 3;
+    mining.terrain.height = 3;
+    mining.terrain.cells.resize(9);
+    mining.droneX = 1.5;
+    mining.droneY = 1.5;
+    mining.targetTipX = mining.droneX;
+    mining.targetTipY = mining.droneY;
+
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningShipPresent = false;
+    snapshot.miningArtifact = {
+        true,
+        1.5,
+        1.5,
+        1.0,
+        1.0,
+        0,
+        0,
+        static_cast<int>(rocket::MiningArtifactState::Loose),
+        true,
+        true
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const ScenePacket& packet = composer.compose(snapshot);
+
+    const auto artifactGlow = std::find_if(
+        packet.instances.begin(),
+        packet.instances.end(),
+        [](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return !instance.textured
+                && instance.shape == SceneInstanceShape::RadialGlow
+                && instance.color.r > 0.70F
+                && instance.color.b > 0.90F
+                && instance.color.a > 0.20F;
+        });
+    assert(artifactGlow != packet.instances.end());
+
+    const SceneInstance glow = rocket::unpackSceneInstance(*artifactGlow);
+    const bool hasArtifactRectangle = std::any_of(
+        packet.instances.begin(),
+        packet.instances.end(),
+        [&](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return !instance.textured
+                && instance.shape == SceneInstanceShape::Rectangle
+                && std::abs(instance.centerX - glow.centerX) < 0.002F
+                && std::abs(instance.centerY - glow.centerY) < 0.002F;
+        });
+    assert(!hasArtifactRectangle);
+}
+
+void testTriangulationUsesOneThreeSliceAuraAndHidesArtifactGlow()
+{
+    rocket::MiningRunState mining;
+    mining.active = true;
+    mining.terrain.width = 20;
+    mining.terrain.height = 20;
+    mining.terrain.cells.resize(400);
+    mining.droneX = 10.0;
+    mining.droneY = 4.0;
+    mining.targetTipX = 10.0;
+    mining.targetTipY = 5.0;
+    mining.gate.active = true;
+    mining.gate.type = rocket::MiningGateType::SurveyTriangulation;
+    mining.gate.state = rocket::MiningGateState::Locked;
+    mining.gate.anchorX = 10.5;
+    mining.gate.anchorY = 10.5;
+    mining.gate.surveyComplete = false;
+    mining.gate.markers = {
+        {14.5, 10.5, true},
+        {8.5, 13.96, false},
+        {8.5, 7.04, false}
+    };
+
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningArtifact = {
+        true,
+        10.5,
+        10.5,
+        1.0,
+        1.0,
+        0,
+        0,
+        static_cast<int>(rocket::MiningArtifactState::Embedded),
+        false,
+        false,
+        static_cast<int>(rocket::MiningGateType::SurveyTriangulation),
+        static_cast<int>(rocket::MiningGateState::Locked)
+    };
+    assert(snapshot.miningTriangulation.active);
+    assert(snapshot.miningTriangulation.completed[0]);
+    assert(!snapshot.miningTriangulation.completed[1]);
+    assert(!snapshot.miningTriangulation.completed[2]);
+    assert(snapshot.miningTriangulation.radius > 4.0);
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const ScenePacket& packet = composer.compose(snapshot);
+    const bool hasPurpleArtifactGlow = std::any_of(
+        packet.instances.begin(),
+        packet.instances.end(),
+        [](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return instance.shape == SceneInstanceShape::RadialGlow &&
+                instance.color.r > 0.74F && instance.color.r < 0.82F &&
+                instance.color.g > 0.48F && instance.color.g < 0.60F &&
+                instance.color.b > 0.94F &&
+                instance.color.a > 0.25F && instance.color.a < 0.35F;
+        });
+    assert(!hasPurpleArtifactGlow);
+    assert(!packet.vertices.empty());
+
+    for (rocket::MiningGateMarker& marker : mining.gate.markers) {
+        marker.activated = true;
+    }
+    mining.gate.surveyComplete = true;
+    RenderSnapshot completed = miningSnapshot(mining);
+    assert(!completed.miningTriangulation.active);
+}
+
 std::size_t countInstanceShape(const ScenePacket& packet, SceneInstanceShape shape)
 {
     return static_cast<std::size_t>(std::count_if(
@@ -3893,6 +4020,8 @@ int main()
     testMiningOrePaletteMakesCommonSilverAndRareGold();
     testMiningOreGlintStartsImmediatelyThenUsesRandomizedSlowWaves();
     testMiningHazardsUseAffinityHeartbeatGlowsWithoutOreGlints();
+    testTetheredArtifactAuraHasNoRectangularOverlay();
+    testTriangulationUsesOneThreeSliceAuraAndHidesArtifactGlow();
     testMiningPickupTextUsesTypedColorsAndTwoSecondLifetime();
     testMiningPickupHistoryDoesNotReplayAfterLevelUp();
     testMiningRigSlerpsVerticalDuringExtraction();

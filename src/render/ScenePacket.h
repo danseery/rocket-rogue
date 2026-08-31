@@ -91,6 +91,7 @@ enum class TextureId : std::uint8_t {
     EnemySpawnerIce,
     EnemySpawnerRadioactive,
     EnemySpawnerToxic,
+    MiningArtifact,
     MiningTilesMoon,
     MiningTilesMars,
     MiningTilesIo,

@@ -82,6 +82,7 @@ struct SaveData {
     bool saturnRouteUnlocked = false;
     bool saturnSlingshotFailed = false;
     bool saturnSlingshotFailureAcknowledged = false;
+    bool hasEncounteredEnemy = false;
     std::vector<ArtifactRecord> artifacts;
     std::array<MiningFirstClearProgress, miningFirstClearProgressCount> miningFirstClearProgress {};
     std::vector<MiningSiteProgress> miningSites;

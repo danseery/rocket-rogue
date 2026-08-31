@@ -1,4 +1,5 @@
 #include "core/ResearchSystem.h"
+#include "core/ArtifactProgression.h"
 #include "core/ContentIds.h"
 #include "core/GameFormat.h"
 #include "core/GameText.h"
@@ -118,6 +119,27 @@ const LegacyCampaignScenarioBinding* legacyCampaignScenarioBinding(CampaignObjec
         legacyCampaignScenarioBindings.end(),
         [&](const LegacyCampaignScenarioBinding& binding) { return binding.objective == objective; });
     return found == legacyCampaignScenarioBindings.end() ? nullptr : &*found;
+}
+
+const Destination* findScenarioRouteRewardDestination(
+    const ContentCatalog& catalog,
+    const ScenarioStepDefinition& step)
+{
+    for (const Destination& destination : catalog.destinations) {
+        for (const ScenarioReward& reward : step.rewards) {
+            const bool grantsDestination = reward.kind == ScenarioRewardKind::RouteAccess &&
+                reward.id == destination.id;
+            const bool grantsRequiredKey = reward.kind == ScenarioRewardKind::UnlockKey &&
+                std::find(
+                    destination.routeRequirementKeys.begin(),
+                    destination.routeRequirementKeys.end(),
+                    reward.id) != destination.routeRequirementKeys.end();
+            if (grantsDestination || grantsRequiredKey) {
+                return &destination;
+            }
+        }
+    }
+    return nullptr;
 }
 
 const ContentCatalog& legacyCampaignCatalog()
@@ -259,14 +281,43 @@ bool surfaceHasAuthoredArtifactSignalAtDepth(
     const GameState& state,
     int depthOffset)
 {
-    const MiningSiteDefinition* site = miningSiteForSurface(
+    const ContentCatalog& catalog = legacyCampaignCatalog();
+    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const Destination* destination = catalog.findDestination(expedition.destinationId);
+    const auto opportunity = unresolvedProgressionArtifactOpportunity(
         state,
-        legacyCampaignCatalog());
-    return site != nullptr &&
-        site->cocoon.protectedObjective.kind == ProtectedObjectiveKind::Artifact &&
-        !site->cocoon.protectedObjective.id.empty() &&
-        std::max(0, depthOffset) ==
-            std::max(0, site->cocoon.surveySignalDepthOffset);
+        catalog,
+        expedition.destinationId);
+    if (destination == nullptr || !opportunity.has_value()) {
+        return false;
+    }
+    const MiningSiteDefinition* site = opportunity->miningSiteDefinitionId.empty()
+        ? nullptr
+        : findMiningSiteDefinition(catalog, opportunity->miningSiteDefinitionId);
+    const int completedHostileSorties = destinationHistoryValue(
+        state.meta.destinationSuccesses,
+        catalog,
+        expedition.destinationId);
+    const int landingOrdinal = destinationHistoryValue(
+        state.meta.destinationLandings,
+        catalog,
+        expedition.destinationId);
+    const MiningArenaRequest request = site != nullptr
+        ? site->arena
+        : campaignMiningArenaRequest(
+            state.meta.chapter,
+            expedition.destinationId,
+            expedition.depth,
+            completedHostileSorties,
+            state.seed,
+            landingOrdinal);
+    const ProgressionArtifactPlacement placement = resolveProgressionArtifactPlacement(
+        state,
+        catalog,
+        *destination,
+        request.difficulty,
+        opportunity->siteIdentity);
+    return expedition.depth + std::max(0, depthOffset) == placement.targetDepth;
 }
 
 ArtifactRecord* firstUnidentifiedArtifact(GameState& state)
@@ -484,6 +535,7 @@ void applyEnemyContact(GameState& state, SurfaceActionOutcome& outcome, double e
     outcome.cargoDelta -= actualCargoLoss;
     outcome.hazardDelta += hazardPressure;
     outcome.enemyEncounter = true;
+    state.meta.hasEncounteredEnemy = true;
 }
 
 void applySurfaceEvent(GameState& state, SurfaceActionOutcome& outcome, Random& rng)
@@ -1098,6 +1150,13 @@ void pushOrbitTrailPoint(OrbitRunState& orbit, double x, double y)
 }
 
 } // namespace
+
+const Destination* scenarioRouteRewardDestination(
+    const ContentCatalog& catalog,
+    const ScenarioStepDefinition& step)
+{
+    return findScenarioRouteRewardDestination(catalog, step);
+}
 
 CampaignObjectiveStatus campaignObjectiveStatus(const GameState& state, CampaignObjectiveId objective)
 {
@@ -1875,13 +1934,15 @@ bool canStartScenarioFlyby(
         step->mandatoryBriefing &&
         (step->action == ScenarioActionKind::BeginActivity ||
          step->action == ScenarioActionKind::RetryActivity);
+    const bool departingFinishedSurfaceVisit =
+        state.screen == Screen::ArrivalOps && state.run.arrivalOps.active;
     return (resolved.destinationId.empty() || resolved.destinationId == destination.id) &&
         (stepIsActive || prerequisitesCanTransition) &&
         (!step->mandatoryBriefing ||
          scenarioStepBriefingAcknowledged(state, scenarioId, stepId) ||
          matchingActivityAcknowledgesBriefing) &&
         !state.run.flyby.active
-        && !state.run.surfaceExpedition.active
+        && (!state.run.surfaceExpedition.active || departingFinishedSurfaceVisit)
         && !state.run.mining.active;
 }
 
@@ -1926,6 +1987,11 @@ bool startScenarioFlybyRun(
     state.run.flyby = createFlybyRun(state, catalog, *destination, FlybyPurpose::ScenarioChallenge);
     state.run.flyby.scenarioId = std::string(scenarioId);
     state.run.flyby.scenarioStepId = std::string(stepId);
+    // Arrival Ops is the departure boundary for a completed surface visit.
+    // The surface record deliberately survives ascent so its settlement can
+    // be presented, but it must not keep blocking the authored departure
+    // challenge once the player explicitly launches it.
+    state.run.surfaceExpedition = {};
     state.run.arrivalOps = {};
     state.screen = Screen::Flyby;
     state.statusLine = actionOutcome.message;
@@ -2375,7 +2441,10 @@ void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
             flyby.scenarioId,
             flyby.scenarioStepId);
         if (challengeState == ScenarioStepState::ReadyToClaim && hasChallengeStep) {
-            state.statusLine = challengeStep.rewardPreview;
+            const Destination* route = scenarioRouteRewardDestination(catalog, challengeStep);
+            state.statusLine = route == nullptr
+                ? challengeStep.rewardPreview
+                : "PERFECT DEPARTURE SECURED // LOCK " + route->name + " COURSE.";
         } else if (hasChallengeStep && !challengeStep.failureExplanation.empty()) {
             state.statusLine = challengeStep.failureExplanation;
         } else {
@@ -2452,11 +2521,123 @@ void acknowledgeFlybyResult(GameState& state)
 bool canClaimSaturnCourse(const GameState& state)
 {
     const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::SaturnSlingshot);
-    return binding != nullptr && scenarioStepState(
+    if (binding == nullptr) {
+        return false;
+    }
+    const ContentCatalog& catalog = legacyCampaignCatalog();
+    if (scenarioStepState(
+            state,
+            catalog,
+            binding->scenarioId,
+            binding->progressStepId) == ScenarioStepState::ReadyToClaim) {
+        return true;
+    }
+    const ScenarioInstance* instance = findScenarioInstance(
+        state.meta,
+        binding->scenarioId);
+    const ScenarioStepProgress* progress = instance == nullptr
+        ? nullptr
+        : findScenarioStepProgress(*instance, binding->progressStepId);
+    const Destination* saturn = catalog.findDestination(content::destination::saturn);
+    if (progress == nullptr || !progress->claimed || saturn == nullptr ||
+        !hasUnlock(state.meta, content::unlock::routeSaturn)) {
+        return false;
+    }
+    const auto destination = std::find_if(
+        catalog.destinations.begin(),
+        catalog.destinations.end(),
+        [&](const Destination& candidate) { return candidate.id == saturn->id; });
+    const int saturnIndex = destination == catalog.destinations.end()
+        ? -1
+        : static_cast<int>(std::distance(catalog.destinations.begin(), destination));
+    const bool alreadyQueued = state.run.routeTransit.active() &&
+        state.run.routeTransit.intent == RouteTransitIntent::Outbound &&
+        state.run.routeTransit.targetDestinationId == saturn->id;
+    return !alreadyQueued && saturnIndex > state.run.destinationIndex;
+}
+
+bool commitClaimedScenarioRoute(
+    GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view scenarioId,
+    std::string_view stepId)
+{
+    const ScenarioDefinition* definition = scenarioDefinitionForRuntimeId(
         state,
-        legacyCampaignCatalog(),
-        binding->scenarioId,
-        binding->progressStepId) == ScenarioStepState::ReadyToClaim;
+        catalog,
+        scenarioId);
+    const ScenarioInstance* instance = findScenarioInstance(state.meta, scenarioId);
+    if (definition == nullptr || instance == nullptr) {
+        return false;
+    }
+
+    const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, *instance);
+    const ScenarioStepDefinition* step = findScenarioStepDefinition(resolved, stepId);
+    const ScenarioStepProgress* progress = findScenarioStepProgress(*instance, stepId);
+    const Destination* route = step == nullptr
+        ? nullptr
+        : scenarioRouteRewardDestination(catalog, *step);
+    if (progress == nullptr || !progress->claimed || route == nullptr ||
+        !frontierGateStatusForDestination(state, catalog, route->id).satisfied) {
+        return false;
+    }
+
+    const auto destination = std::find_if(
+        catalog.destinations.begin(),
+        catalog.destinations.end(),
+        [&](const Destination& candidate) { return candidate.id == route->id; });
+    if (destination == catalog.destinations.end()) {
+        return false;
+    }
+
+    const int routeIndex = static_cast<int>(
+        std::distance(catalog.destinations.begin(), destination));
+    if (routeIndex <= state.run.destinationIndex) {
+        // Valid v15 saves created before physical route claims may already
+        // have selected or reached the rewarded destination. Do not regress
+        // them or manufacture another copy of the leg.
+        state.screen = Screen::Hangar;
+        syncLaunchConfig(state, catalog);
+        return true;
+    }
+
+    const Destination* origin = resolved.destinationId.empty()
+        ? &currentDestination(state, catalog)
+        : catalog.findDestination(resolved.destinationId);
+    if (origin == nullptr) {
+        return false;
+    }
+    const auto originPosition = std::find_if(
+        catalog.destinations.begin(),
+        catalog.destinations.end(),
+        [&](const Destination& candidate) { return candidate.id == origin->id; });
+    if (originPosition == catalog.destinations.end()) {
+        return false;
+    }
+    const int originIndex = static_cast<int>(
+        std::distance(catalog.destinations.begin(), originPosition));
+    RouteTransitState transit = makeRouteTransit(
+        catalog,
+        origin->id,
+        route->id,
+        RouteTransitIntent::Outbound);
+    if (!transit.active()) {
+        return false;
+    }
+
+    // Completing an authored departure is evidence that the ship is at that
+    // departure body, even if an interrupted valid-v15 transaction retained
+    // an older recovery index. Never advance to the target before the flight.
+    state.run.destinationIndex = originIndex;
+    state.run.frontierReadiness = 0;
+    state.run.routeTransit = std::move(transit);
+    state.run.arrivalOps = {};
+    state.launchConfig.frontierTransfer = true;
+    state.launchConfig.destinationId = route->id;
+    state.launchConfig.burnGoalMultiplier = route->targetMultiplier;
+    state.screen = Screen::Hangar;
+    syncLaunchConfig(state, catalog);
+    return true;
 }
 
 bool claimSaturnCourse(GameState& state, const ContentCatalog& catalog)
@@ -2465,18 +2646,34 @@ bool claimSaturnCourse(GameState& state, const ContentCatalog& catalog)
     if (binding == nullptr) {
         return false;
     }
-    const ScenarioActionOutcome outcome = performScenarioAction(
-        state,
-        catalog,
-        binding->scenarioId,
-        binding->progressStepId,
-        ScenarioActionKind::ClaimReward);
-    if (!outcome.applied) {
-        state.statusLine = "Complete the active transfer objective before claiming its route.";
+    const ScenarioInstance* instance = findScenarioInstance(
+        state.meta,
+        binding->scenarioId);
+    const ScenarioStepProgress* progress = instance == nullptr
+        ? nullptr
+        : findScenarioStepProgress(*instance, binding->progressStepId);
+    if (progress == nullptr || !progress->claimed) {
+        const ScenarioActionOutcome outcome = performScenarioAction(
+            state,
+            catalog,
+            binding->scenarioId,
+            binding->progressStepId,
+            ScenarioActionKind::ClaimReward);
+        if (!outcome.applied) {
+            state.statusLine = "Complete the active transfer objective before claiming its route.";
+            return false;
+        }
+    }
+    if (!commitClaimedScenarioRoute(
+            state,
+            catalog,
+            binding->scenarioId,
+            binding->progressStepId)) {
+        state.statusLine = "Saturn route is secured, but the frontier could not advance.";
         return false;
     }
     writeLegacyCampaignSaveProjection(state, catalog);
-    state.statusLine = outcome.message;
+    state.statusLine = "Saturn course locked. Launch when ready.";
     return true;
 }
 
@@ -2899,6 +3096,55 @@ int runUpgradeOfferWeight(Rarity rarity)
     return 1;
 }
 
+bool roleUsesCombat(MiniDroneRole role)
+{
+    return role == MiniDroneRole::Attack || role == MiniDroneRole::Defense;
+}
+
+bool synergyUsesCombat(const DroneSynergyDefinition& synergy)
+{
+    return std::any_of(
+               synergy.requiredRoles.begin(),
+               synergy.requiredRoles.end(),
+               roleUsesCombat) ||
+        synergy.stats.enemyDamageRelief > 0.0 ||
+        synergy.stats.areaControlDamagePerSecond > 0.0 ||
+        synergy.stats.enemySlow > 0.0 ||
+        synergy.stats.reactiveArmorDamagePerSecond > 0.0 ||
+        synergy.stats.alliedCritChanceBonus > 0.0 ||
+        synergy.stats.alliedFireRateBonus > 0.0 ||
+        synergy.stats.sentryVolleyBonus > 0;
+}
+
+bool runUpgradeRequiresEnemyEncounter(
+    const ContentCatalog& catalog,
+    const RunUpgradeOffer& offer)
+{
+    switch (offer.kind) {
+    case RunUpgradeKind::Rig:
+        if (const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(offer.definitionId)) {
+            return hasTag(upgrade->tags, "combat") || upgrade->stats.scannerPulseDamage > 0;
+        }
+        break;
+    case RunUpgradeKind::DroneRank:
+        if (const MiniDrone* drone = catalog.findMiniDrone(offer.definitionId)) {
+            return roleUsesCombat(drone->role) || hasTag(drone->tags, "combat");
+        }
+        break;
+    case RunUpgradeKind::DroneGraft:
+        if (const DroneModuleDefinition* module = catalog.findDroneModule(offer.definitionId)) {
+            return roleUsesCombat(module->hostRole) || roleUsesCombat(module->secondaryRole);
+        }
+        break;
+    case RunUpgradeKind::Synergy:
+        if (const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(offer.definitionId)) {
+            return synergyUsesCombat(*synergy);
+        }
+        break;
+    }
+    return false;
+}
+
 bool equippedRoleAvailable(const GameState& state, const ContentCatalog& catalog, MiniDroneRole role)
 {
     return std::any_of(
@@ -3108,7 +3354,21 @@ bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, R
 {
     SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
     if (expedition.runUpgradeOfferPending) {
-        return expedition.runUpgradeOfferCount > 0;
+        const bool containsLockedCombatOffer = !state.meta.hasEncounteredEnemy && std::any_of(
+            expedition.runUpgradeOffers.begin(),
+            expedition.runUpgradeOffers.begin() + std::clamp(
+                expedition.runUpgradeOfferCount,
+                0,
+                static_cast<int>(expedition.runUpgradeOffers.size())),
+            [&](const RunUpgradeOffer& offer) {
+                return runUpgradeRequiresEnemyEncounter(catalog, offer);
+            });
+        if (!containsLockedCombatOffer) {
+            return expedition.runUpgradeOfferCount > 0;
+        }
+        // Existing saves can hold a card rolled before the discovery gate was
+        // introduced. Replace only that draft; the earned pick remains intact.
+        clearRunUpgradeOffers(expedition);
     }
     clearRunUpgradeOffers(expedition);
     if (expedition.pendingRunUpgradeChoices <= 0) {
@@ -3121,7 +3381,9 @@ bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, R
 
     for (const SurfaceUpgrade& upgrade : catalog.surfaceUpgrades) {
         const int targetRank = runRigUpgradeRank(state, upgrade.id) + 1;
-        if (targetRank <= std::clamp(upgrade.maxRank, 1, kMaximumRunUpgradeRank)) {
+        if (targetRank <= std::clamp(upgrade.maxRank, 1, kMaximumRunUpgradeRank) &&
+            (state.meta.hasEncounteredEnemy ||
+                !runUpgradeRequiresEnemyEncounter(catalog, {RunUpgradeKind::Rig, upgrade.id, targetRank, -1}))) {
             RunUpgradeOffer offer {RunUpgradeKind::Rig, upgrade.id, targetRank, -1};
             candidates.push_back({offer, runUpgradeOfferRarity(state, catalog, offer)});
         }
@@ -3135,7 +3397,9 @@ bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, R
         seenDroneIds.push_back(droneId);
         const MiniDrone* drone = catalog.findMiniDrone(droneId);
         const int targetRank = expeditionDroneRank(state, droneId) + 1;
-        if (drone != nullptr && isMiniDroneUnlocked(state.meta, *drone) && targetRank <= kMaximumRunUpgradeRank) {
+        if (drone != nullptr && isMiniDroneUnlocked(state.meta, *drone) && targetRank <= kMaximumRunUpgradeRank &&
+            (state.meta.hasEncounteredEnemy ||
+                !runUpgradeRequiresEnemyEncounter(catalog, {RunUpgradeKind::DroneRank, droneId, targetRank, -1}))) {
             RunUpgradeOffer offer {RunUpgradeKind::DroneRank, droneId, targetRank, -1};
             candidates.push_back({offer, runUpgradeOfferRarity(state, catalog, offer)});
         }
@@ -3153,7 +3417,9 @@ bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, R
                     return assignment.equippedFrame == static_cast<int>(slot);
                 });
             const MiniDrone* drone = catalog.findMiniDrone(state.meta.equippedDroneIds[slot]);
-            if (!occupied && drone != nullptr && drone->role == module.hostRole) {
+            if (!occupied && drone != nullptr && drone->role == module.hostRole &&
+                (state.meta.hasEncounteredEnemy ||
+                    !runUpgradeRequiresEnemyEncounter(catalog, {RunUpgradeKind::DroneGraft, module.id, 0, static_cast<int>(slot)}))) {
                 RunUpgradeOffer offer {
                     RunUpgradeKind::DroneGraft,
                     module.id,
@@ -3166,7 +3432,9 @@ bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, R
 
     for (const DroneSynergyDefinition& synergy : catalog.droneSynergies) {
         if (!containsId(expedition.selectedSynergyIds, synergy.id) &&
-            synergyRequirementsMet(state, catalog, synergy)) {
+            synergyRequirementsMet(state, catalog, synergy) &&
+            (state.meta.hasEncounteredEnemy ||
+                !runUpgradeRequiresEnemyEncounter(catalog, {RunUpgradeKind::Synergy, synergy.id, 0, -1}))) {
             RunUpgradeOffer offer {RunUpgradeKind::Synergy, synergy.id, 0, -1};
             candidates.push_back({offer, runUpgradeOfferRarity(state, catalog, offer)});
         }
@@ -4316,6 +4584,10 @@ SurfaceDepthProspect rollSurfaceDepthProspect(
     if (authoredArtifactSignal) {
         prospect.possibleArtifacts = 1;
     } else if (!thermalSurface
+        && !unresolvedProgressionArtifactOpportunity(
+            state,
+            legacyCampaignCatalog(),
+            expedition.destinationId).has_value()
         && prospect.depthOffset >= 2
         && rng.chance(std::min(0.70, 0.05 + signal * 0.18 + crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus))) {
         prospect.possibleArtifacts = 1;
@@ -4787,12 +5059,17 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     bool artifactFound = false;
     const bool thermalSurface = surfaceUsesThermalOnlyRegolith(state);
+    const bool authoredArtifactPending = unresolvedProgressionArtifactOpportunity(
+        state,
+        catalog,
+        expedition.destinationId).has_value();
     const bool forecastArtifact = forecast != nullptr && forecast->possibleArtifacts > 0;
     const double blindArtifactChance = thermalSurface
         ? 0.0
         : tuning::research::artifactChanceBase * 0.40 + push.steps * 0.10 +
             crew.artifactChanceBonus + site.artifactChanceBonus + support.artifactChanceBonus;
     if (!thermalSurface
+        && !authoredArtifactPending
         && (forecastArtifact || push.steps >= 2)
         && push.temporaryArtifacts.empty()
         && (forecastArtifact || rng.chance(std::min(0.82, blindArtifactChance)))) {
@@ -4995,6 +5272,18 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
         catalog,
         expedition.temporaryArtifacts,
         expedition.pendingMiningSiteDefinitionId);
+    for (const ArtifactRecord& artifact : expedition.temporaryArtifacts) {
+        (void)recordScenarioEvent(
+            state,
+            catalog,
+            {ScenarioEventKind::ArtifactRecovered,
+             {},
+             {},
+             artifact.originDestinationId,
+             artifact.id,
+             1,
+             0});
+    }
     creditExtractedCompatibilityMiningSiteArtifacts(
         state.meta,
         expedition.temporaryArtifacts);

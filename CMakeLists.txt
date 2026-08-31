@@ -103,6 +103,7 @@ file(GENERATE OUTPUT "${ROCKET_RUNTIME_ASSET_MANIFEST}" CONTENT "${ROCKET_RUNTIM
 include(FetchContent)
 
 add_library(rocket_core
+    src/core/ArtifactProgression.cpp
     src/core/Content.cpp
     src/core/GameState.cpp
     src/core/LaunchSimulation.cpp
@@ -214,6 +215,12 @@ set_target_properties(rocket_controller_input_tests PROPERTIES RUNTIME_OUTPUT_DI
 add_executable(rocket_app_services_tests tests/app_services_tests.cpp)
 target_link_libraries(rocket_app_services_tests PRIVATE rocket_app rmlui_core)
 set_target_properties(rocket_app_services_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+if(MSVC)
+    # This integration executable intentionally keeps several complete game
+    # states alive while exercising one persistent RmlUi document. The default
+    # 1 MiB Windows test stack is too small for that diagnostic fixture.
+    target_link_options(rocket_app_services_tests PRIVATE "/STACK:8388608")
+endif()
 
 add_executable(rocket_performance_metrics_tests tests/performance_metrics_tests.cpp)
 target_link_libraries(rocket_performance_metrics_tests PRIVATE rocket_app)

@@ -1977,64 +1977,6 @@ void syncChapterProgress(GameState& state, const ContentCatalog& catalog)
     }
 }
 
-bool migrateLegacyDeepSpaceFrontier(GameState& state, const ContentCatalog& catalog)
-{
-    bool migrated = false;
-    const int jupiterIndex = destinationIndexForId(catalog, content::destination::jupiter);
-    const int neptuneIndex = destinationIndexForId(catalog, content::destination::neptune);
-    const int khepriIndex = destinationIndexForId(catalog, content::destination::nearbyStar);
-    if (state.launchConfig.destinationId == content::destination::outerPlanets && jupiterIndex >= 0) {
-        state.run.destinationIndex = jupiterIndex;
-        state.launchConfig.frontierTransfer = false;
-        state.launchConfig.destinationId = content::destination::jupiter;
-        migrated = true;
-    }
-
-    const bool legacyDirectDeepSpace = !arkDiscovered(state)
-        && khepriIndex >= 0
-        && state.run.destinationIndex >= khepriIndex
-        && (state.launchConfig.destinationId == content::destination::nearbyStar
-            || state.launchConfig.destinationId == content::destination::nearbyGalaxy);
-    if (legacyDirectDeepSpace && neptuneIndex >= 0) {
-        state.meta.campaignMilestone = CampaignMilestone::ArkDiscovered;
-        state.meta.ark.condition = ArkCondition::DerelictOperable;
-        state.meta.ark.fuelReserve = std::max(state.meta.ark.fuelReserve, 1);
-        state.run.destinationIndex = neptuneIndex;
-        state.launchConfig.frontierTransfer = false;
-        state.launchConfig.destinationId = content::destination::neptune;
-        state.storyBriefing = {};
-        state.screen = Screen::Hangar;
-        migrated = true;
-    }
-
-    if (arkDiscovered(state) && neptuneIndex >= 0) {
-        if (!state.meta.straylightDiscoveryAcknowledged) {
-            state.meta.straylightDiscoveryAcknowledged = true;
-            migrated = true;
-        }
-        state.meta.furthestTier = std::max(state.meta.furthestTier, catalog.destinations[static_cast<std::size_t>(neptuneIndex)].tier);
-        for (const std::string_view id : {std::string_view(content::destination::jupiter), std::string_view(content::destination::saturn), std::string_view(content::destination::uranus), std::string_view(content::destination::neptune)}) {
-            const int index = destinationIndexForId(catalog, std::string(id));
-            if (index >= 0 && static_cast<std::size_t>(index) < state.meta.destinationSuccesses.size()
-                && state.meta.destinationSuccesses[static_cast<std::size_t>(index)] < 1) {
-                state.meta.destinationSuccesses[static_cast<std::size_t>(index)] = 1;
-                migrated = true;
-            }
-        }
-        if (state.meta.navigation.arkLocationId.empty()) {
-            state.meta.navigation.arkLocationId = content::destination::neptune;
-            migrated = true;
-        }
-        addUniqueId(state.meta.navigation.discoveredDestinationIds, content::destination::neptune);
-    }
-
-    if (migrated) {
-        state.statusLine = "Legacy frontier progress migrated to the individual outer-planet route.";
-        syncLaunchConfig(state, catalog);
-    }
-    return migrated;
-}
-
 void scheduleStoryBriefing(GameState& state, StoryBriefingId briefing, Screen continuation)
 {
     state.storyBriefing.pending = briefing;

@@ -239,6 +239,16 @@ bool startScenarioFlybyRun(
     std::string_view stepId,
     ScenarioActionKind action = ScenarioActionKind::BeginActivity);
 bool canClaimSaturnCourse(const GameState& state);
+const Destination* scenarioRouteRewardDestination(
+    const ContentCatalog& catalog,
+    const ScenarioStepDefinition& step);
+// Queues the exact physical route granted by a claimed scenario step. The
+// frontier index remains at the authored origin until that flight succeeds.
+bool commitClaimedScenarioRoute(
+    GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view scenarioId,
+    std::string_view stepId);
 bool claimSaturnCourse(GameState& state, const ContentCatalog& catalog);
 bool acknowledgeSaturnSlingshotFailure(GameState& state);
 

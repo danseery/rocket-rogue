@@ -599,6 +599,13 @@ enum class MiningSiteBiome {
     ThermalLava
 };
 
+// Objective placement is an authored site affordance. It keeps early teaching
+// sites from inheriting the deep-route layout that later endurance sites use.
+enum class MiningSiteObjectivePlacement {
+    DeepRoute,
+    EntryCentered
+};
+
 // An authored site configures reusable mining mechanics. It deliberately has
 // no campaign or destination semantics; scenarios decide where it is offered.
 struct MiningSiteDefinition {
@@ -607,6 +614,7 @@ struct MiningSiteDefinition {
     MiningArenaRequest arena;
     MiningSiteBiome biome = MiningSiteBiome::Default;
     MiningGateType gateType = MiningGateType::None;
+    MiningSiteObjectivePlacement objectivePlacement = MiningSiteObjectivePlacement::DeepRoute;
     double baselineOxygenSeconds = 0.0;
     MiningCocoonDefinition cocoon;
     MiningEnemyTheme enemyTheme = MiningEnemyTheme::Neutral;
@@ -1028,7 +1036,10 @@ enum class ScenarioEventKind {
     // A site event is emitted only after its staged run extracts safely;
     // assignment is emitted when a player actually equips a Support Drone.
     MiningSiteCompleted,
-    EquipmentAssigned
+    EquipmentAssigned,
+    // Emitted only when an artifact crosses the permanent-inventory boundary.
+    // Temporary, tethered, dropped, and unreturned artifacts never qualify.
+    ArtifactRecovered
 };
 
 enum class ScenarioActionKind {
@@ -1364,6 +1375,9 @@ struct MetaProgress {
     bool saturnRouteUnlocked = false;
     bool saturnSlingshotFailed = false;
     bool saturnSlingshotFailureAcknowledged = false;
+    // Combat upgrades become understandable only after the crew has met a
+    // hostile force. This is campaign knowledge, not a per-sortie reset.
+    bool hasEncounteredEnemy = false;
     std::vector<ArtifactRecord> artifacts;
     std::array<MiningFirstClearProgress, miningFirstClearProgressCount> miningFirstClearProgress {};
     std::vector<MiningSiteProgress> miningSites;
@@ -1868,6 +1882,8 @@ struct MiningRunState {
     double siteBaselineOxygenSeconds = 0.0;
     SurfaceSiteProfile siteProfile = SurfaceSiteProfile::SurveyBasin;
     double elapsedSeconds = 0.0;
+    // Rig life support. This continues to receive rig upgrades, site
+    // baselines, pockets, and support-drone bonuses.
     double oxygenSeconds = 30.0;
     double fuelCycleProgress = 0.0;
     int fuelSpent = 0;
@@ -1892,6 +1908,8 @@ struct MiningRunState {
     double operatorAimDirX = 0.0;
     double operatorAimDirY = 1.0;
     double operatorIntegrity = 1.0;
+    // EVA carries a fixed emergency reserve independent of the rig tank.
+    double operatorOxygenSeconds = 15.0;
     double operatorFireCooldownSeconds = 0.0;
     double operatorFirePulseSeconds = 0.0;
     double operatorToggleProgress = 0.0;
@@ -1924,6 +1942,9 @@ struct MiningRunState {
     double contactIndicatorSeconds = 0.0;
     double contactIndicatorDirX = 0.0;
     double contactIndicatorDirY = 0.0;
+    // Short-lived presentation acknowledgement when a nearby artifact is
+    // still sealed. This is deliberately transient and is not save data.
+    double artifactTetherDeniedFlashSeconds = 0.0;
     double recoilX = 0.0;
     double recoilY = 0.0;
     double contactBounce = 0.0;
@@ -1946,6 +1967,11 @@ struct MiningRunState {
     double hazardDelta = 0.0;
     bool drillBreakNotified = false;
     bool oxygenDepletedNotified = false;
+    bool operatorOxygenDepletedNotified = false;
+    // Ship service keeps this latched while the applicable actor remains in
+    // the service field so the successful refill does not spam the status
+    // line each simulation tick.
+    bool shipServiceOxygenNotified = false;
     int passiveDroneYield = 0;
     int cellsBroken = 0;
     int enemiesDefeated = 0;
