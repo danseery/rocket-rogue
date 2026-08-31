@@ -23,6 +23,7 @@ inline constexpr const char* routeMars = "route_mars";
 inline constexpr const char* routeJupiter = "route_jupiter";
 inline constexpr const char* routeSaturn = "route_saturn";
 inline constexpr const char* routeUranus = "route_uranus";
+inline constexpr const char* routeNeptune = "route_neptune";
 } // namespace unlock
 
 namespace scenario {
@@ -31,6 +32,7 @@ inline constexpr const char* marsBayExpansion = "mars_bay_expansion";
 inline constexpr const char* volcanicDescent = "volcanic_descent";
 inline constexpr const char* outerTransfer = "outer_transfer";
 inline constexpr const char* saturnDeparture = "saturn_departure";
+inline constexpr const char* uranusDeparture = "uranus_departure";
 inline constexpr const char* generatedTemplate = "generated_mining_template";
 } // namespace scenario
 

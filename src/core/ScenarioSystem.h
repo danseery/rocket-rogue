@@ -126,6 +126,10 @@ ScenarioRouteRequirementStatus scenarioRouteRequirementStatus(
     const GameState& state,
     const ContentCatalog& catalog,
     const Destination& destination);
+bool scenarioRouteUsesFlightData(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const Destination& destination);
 
 bool scenarioHasCompletedStep(
     const GameState& state,

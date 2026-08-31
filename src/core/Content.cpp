@@ -506,6 +506,10 @@ ContentCatalog createDefaultContent()
             destination.calibratedTransferMarginRequired = 5.0;
             destination.transferMarginBlockerText =
                 "Create 5 fuel of Jupiter transfer margin with Fuel Tanks III, a Good-or-better Mars slingshot, or both.";
+        } else if (destination.id == content::destination::uranus) {
+            destination.approachBriefTitle = "LAST CHARTED DEPARTURE";
+            destination.approachBriefDetail =
+                "Neptune is the last charted world. Bank 8 Flight Data to solve its vector: a Good or Perfect Pass Through completes the solution, Landing adds 1, and Orbit alone adds none.";
         }
         // The current catalog begins its outward-only expedition at Saturn.
         // This is content policy: recovery and transfer mechanics consume the
@@ -519,6 +523,8 @@ ContentCatalog createDefaultContent()
             destination.routeRequirementKeys = {content::unlock::routeSaturn};
         } else if (destination.id == content::destination::uranus) {
             destination.routeRequirementKeys = {content::unlock::routeUranus};
+        } else if (destination.id == content::destination::neptune) {
+            destination.routeRequirementKeys = {content::unlock::routeNeptune};
         }
     }
 
@@ -678,6 +684,25 @@ ContentCatalog createDefaultContent()
             }
         },
         {
+            content::scenario::uranusDeparture,
+            1,
+            content::unlock::routeUranus,
+            content::destination::uranus,
+            {
+                {"briefing", {}, "URANUS DEPARTURE", "Signal Beyond Neptune",
+                    "Neptune is the last charted world. A repeating carrier signal is pulsing from the dark beyond it. Build a stable Neptune vector before the expedition leaves Uranus.",
+                    "OBJECTIVE // 8 FLIGHT DATA", "Track Signal", {},
+                    ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
+                    ScenarioActionKind::AcknowledgeBriefing, {}, {}},
+                {"vector", {"briefing"}, "URANUS DEPARTURE", "Neptune Vector",
+                    "Bank 8 Flight Data. A Good or Perfect Pass Through completes the solution now; each safe Landing adds 1. Orbit alone adds none.",
+                    "REWARD // NEPTUNE ROUTE", "Lock Neptune Course", {},
+                    ScenarioEventKind::FlightDataBanked, content::destination::uranus, content::destination::neptune,
+                    8, 0, false, true, false, ScenarioActionKind::ClaimReward, {},
+                    {{ScenarioRewardKind::RouteAccess, content::destination::neptune, 0, false}}}
+            }
+        },
+        {
             content::scenario::generatedTemplate,
             1,
             content::unlock::starter,
@@ -821,6 +846,12 @@ std::string unlockDisplayName(std::string_view key)
     }
     if (key == content::unlock::routeSaturn) {
         return "Saturn route";
+    }
+    if (key == content::unlock::routeUranus) {
+        return "Uranus route";
+    }
+    if (key == content::unlock::routeNeptune) {
+        return "Neptune route";
     }
     return {};
 }

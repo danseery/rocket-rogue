@@ -60,6 +60,7 @@ bool parseScenarioEventKind(std::string_view text, ScenarioEventKind& value)
     else if (text == "mining_site_completed") value = ScenarioEventKind::MiningSiteCompleted;
     else if (text == "equipment_assigned") value = ScenarioEventKind::EquipmentAssigned;
     else if (text == "artifact_recovered") value = ScenarioEventKind::ArtifactRecovered;
+    else if (text == "flight_data_banked") value = ScenarioEventKind::FlightDataBanked;
     else return false;
     return true;
 }
@@ -77,6 +78,7 @@ bool awardsAuthoredObjectiveExperience(ScenarioEventKind kind)
     case ScenarioEventKind::ManualAction:
     case ScenarioEventKind::ActivityAborted:
     case ScenarioEventKind::EquipmentAssigned:
+    case ScenarioEventKind::FlightDataBanked:
         return false;
     }
     return false;
@@ -632,6 +634,55 @@ void reconcileRecoveredArtifactObjectives(GameState& state, const ContentCatalog
     }
 }
 
+void reconcileFlightDataObjectives(GameState& state, const ContentCatalog& catalog)
+{
+    const Destination& origin = currentDestination(state, catalog);
+    const Destination* target = nextDestination(state, catalog);
+    if (target == nullptr) {
+        return;
+    }
+    for (ScenarioInstance& instance : state.meta.scenarios) {
+        const ScenarioDefinition* definition = definitionForInstance(catalog, instance);
+        if (definition == nullptr) {
+            continue;
+        }
+        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
+        if (!definitionAvailable(state, resolved)) {
+            continue;
+        }
+        bool changed = false;
+        for (const ScenarioStepDefinition& step : resolved.steps) {
+            if (step.completionEvent != ScenarioEventKind::FlightDataBanked ||
+                (!step.eventOriginId.empty() && step.eventOriginId != origin.id) ||
+                (!step.eventTargetId.empty() && step.eventTargetId != target->id)) {
+                continue;
+            }
+            ScenarioStepProgress* progress = findScenarioStepProgress(instance, step.id);
+            if (progress == nullptr || progress->completed ||
+                !prerequisitesSatisfied(resolved, instance, step)) {
+                continue;
+            }
+            const int required = std::max(1, step.requiredProgress);
+            const int reconciled = std::min(required, std::max(0, state.run.frontierReadiness));
+            if (reconciled <= progress->progress) {
+                continue;
+            }
+            progress->progress = reconciled;
+            if (progress->progress >= required) {
+                progress->completed = true;
+                if (!step.claimRequired) {
+                    progress->claimed = true;
+                    applyStepRewards(state, catalog, instance, resolved, step);
+                }
+            }
+            changed = true;
+        }
+        if (changed) {
+            refreshScenarioCompletion(resolved, instance);
+        }
+    }
+}
+
 bool eventMatches(
     const ScenarioDefinition& definition,
     const ScenarioInstance& instance,
@@ -966,6 +1017,7 @@ void ensureScenarioInstances(GameState& state, const ContentCatalog& catalog)
     // Do not replay resources, readiness refills, or automatic assignment for
     // a frame the player already owns.
     reconcileRecoveredArtifactObjectives(state, catalog);
+    reconcileFlightDataObjectives(state, catalog);
     repairClaimedPersistentRewards(state, catalog);
 }
 
@@ -1046,6 +1098,7 @@ ScenarioActionOutcome performScenarioAction(
             progress->claimed = true;
             applyStepRewards(state, catalog, *instance, resolved, *step);
             refreshScenarioCompletion(resolved, *instance);
+            reconcileFlightDataObjectives(state, catalog);
         }
         outcome.applied = true;
         outcome.message = step->detail;
@@ -1152,13 +1205,21 @@ bool recordScenarioEvent(GameState& state, const ContentCatalog& catalog, const 
                 continue;
             }
 
-            const int increment = event.kind == ScenarioEventKind::SafeMaterialDelivered
-                ? std::max(0, event.amount)
-                : std::max(1, event.amount);
-            progress->progress = std::min(
-                std::max(1, step.requiredProgress),
-                progress->progress + increment);
-            if (progress->progress >= std::max(1, step.requiredProgress)) {
+            const int required = std::max(1, step.requiredProgress);
+            if (event.kind == ScenarioEventKind::FlightDataBanked) {
+                // Flight Data is a canonical saved ledger. ensureScenarioInstances
+                // may already have reconciled it before this event is dispatched,
+                // so mirror the ledger rather than double-counting the delta.
+                progress->progress = std::max(
+                    progress->progress,
+                    std::min(required, std::max(0, state.run.frontierReadiness)));
+            } else {
+                const int increment = event.kind == ScenarioEventKind::SafeMaterialDelivered
+                    ? std::max(0, event.amount)
+                    : std::max(1, event.amount);
+                progress->progress = std::min(required, progress->progress + increment);
+            }
+            if (progress->progress >= required) {
                 progress->completed = true;
                 awardScenarioStepExperience(state, step);
                 if (!step.claimRequired) {
@@ -1226,6 +1287,30 @@ ScenarioRouteRequirementStatus scenarioRouteRequirementStatus(
         return status;
     }
     return status;
+}
+
+bool scenarioRouteUsesFlightData(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const Destination& destination)
+{
+    const ScenarioRouteRequirementStatus status =
+        scenarioRouteRequirementStatus(state, catalog, destination);
+    if (status.satisfied || status.scenarioId.empty() || status.stepId.empty()) {
+        return false;
+    }
+    const ScenarioInstance* instance = findScenarioInstance(state.meta, status.scenarioId);
+    const ScenarioDefinition* definition = instance == nullptr
+        ? findScenarioDefinition(catalog, status.scenarioId)
+        : definitionForInstance(catalog, *instance);
+    if (definition == nullptr) {
+        return false;
+    }
+    const ScenarioDefinition resolved = instance == nullptr
+        ? *definition
+        : resolveScenarioDefinition(*definition, *instance);
+    const ScenarioStepDefinition* step = findScenarioStepDefinition(resolved, status.stepId);
+    return step != nullptr && step->completionEvent == ScenarioEventKind::FlightDataBanked;
 }
 
 bool scenarioHasCompletedStep(

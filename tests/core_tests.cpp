@@ -5744,6 +5744,125 @@ void saturnArtifactQueuesPhysicalUranusRoute()
         "a valid v15 Saturn artifact should reconcile to ready without replaying objective XP");
 }
 
+void uranusFlightDataQueuesPhysicalNeptuneRoute()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const Destination* neptune = catalog.findDestination(content::destination::neptune);
+    require(neptune != nullptr &&
+            neptune->routeRequirementKeys == std::vector<std::string> {content::unlock::routeNeptune},
+        "Neptune should be protected by its authored route key");
+
+    GameState state = createNewGame(catalog, 0x6E7074);
+    state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+    state.meta.unlockKeys.push_back(content::unlock::routeUranus);
+    state.run.destinationIndex = 5;
+    state.meta.furthestTier = 5;
+    state.screen = Screen::ArrivalOps;
+    state.run.arrivalOps.active = true;
+    state.run.arrivalOps.destinationId = content::destination::uranus;
+    syncLaunchConfig(state, catalog);
+
+    ScenarioObjectivePresentation objective = scenarioObjectiveForDestination(
+        state,
+        catalog,
+        content::destination::uranus);
+    require(objective.available && objective.scenarioId == content::scenario::uranusDeparture &&
+            objective.stepId == "briefing" && objective.mandatoryBriefing &&
+            objective.title == "Signal Beyond Neptune" && objective.actionLabel == "Track Signal",
+        "Uranus arrival should explain the carrier signal and its Neptune-vector objective");
+    FrontierGateStatus gate = frontierGateStatusForDestination(
+        state,
+        catalog,
+        content::destination::neptune);
+    require(gate.kind == FrontierGateKind::ScenarioRequirement && !gate.satisfied &&
+            gate.current == 0 && gate.required == 8,
+        "Neptune should begin behind the visible 0/8 Flight Data gate");
+
+    Random panelRng(0x6E7075);
+    const PreparedLaunch panelLaunch = prepareLaunch(state, catalog, panelRng);
+    const std::string arrivalPanel = buildGamePanelHtml({state, catalog, panelLaunch, panelLaunch});
+    require(arrivalPanel.find("Signal Beyond Neptune") != std::string::npos &&
+            arrivalPanel.find("OBJECTIVE // 8 FLIGHT DATA") != std::string::npos &&
+            arrivalPanel.find("Track Signal") != std::string::npos,
+        "Arrival Ops should render the mandatory Uranus story briefing and action");
+
+    require(performScenarioAction(
+                state,
+                catalog,
+                content::scenario::uranusDeparture,
+                "briefing",
+                ScenarioActionKind::AcknowledgeBriefing).applied,
+        "the Uranus signal briefing should acknowledge through the scenario action");
+    objective = scenarioObjectiveForDestination(state, catalog, content::destination::uranus);
+    require(objective.stepId == "vector" && objective.current == 0 && objective.required == 8 &&
+            objective.state == ScenarioStepState::Active,
+        "acknowledging the signal should expose the saved Neptune Vector counter");
+
+    require(bankArrivalLandingFlightData(state, catalog),
+        "a safe Uranus landing should add one Flight Data to the route solution");
+    objective = scenarioObjectiveForDestination(state, catalog, content::destination::uranus);
+    require(objective.current == 1 && objective.required == 8,
+        "the Uranus departure objective should mirror the landing's Flight Data");
+    require(bankFlybyRouteClearance(state, catalog),
+        "a Good or Perfect Uranus Pass Through should finish the authored Flight Data route");
+    objective = scenarioObjectiveForDestination(state, catalog, content::destination::uranus);
+    require(objective.current == 8 && objective.state == ScenarioStepState::ReadyToClaim &&
+            objective.actionLabel == "Lock Neptune Course",
+        "a solved vector should expose the explicit Neptune course claim");
+
+    require(performScenarioAction(
+                state,
+                catalog,
+                content::scenario::uranusDeparture,
+                "vector",
+                ScenarioActionKind::ClaimReward).applied &&
+            commitClaimedScenarioRoute(
+                state,
+                catalog,
+                content::scenario::uranusDeparture,
+                "vector"),
+        "claiming the Uranus departure should queue its authored physical route");
+    require(hasUnlock(state.meta, content::unlock::routeNeptune) &&
+            currentDestination(state, catalog).id == content::destination::uranus &&
+            state.run.routeTransit.intent == RouteTransitIntent::Outbound &&
+            state.run.routeTransit.originDestinationId == content::destination::uranus &&
+            state.run.routeTransit.targetDestinationId == content::destination::neptune,
+        "locking Neptune must leave the ship at Uranus and queue Uranus-to-Neptune");
+
+    LaunchOutcome arrived;
+    arrived.type = LaunchResultType::MissionComplete;
+    arrived.recoveryMethod = RecoveryMethod::TransferArrival;
+    arrived.frontierTransfer = true;
+    arrived.destinationId = content::destination::neptune;
+    arrived.routeTransit = state.run.routeTransit;
+    applyLaunchOutcome(state, catalog, arrived);
+    require(currentDestination(state, catalog).id == content::destination::neptune &&
+            !state.run.routeTransit.active() &&
+            state.storyBriefing.pending == StoryBriefingId::StraylightDiscovery,
+        "successful Neptune arrival should advance once and queue the existing Straylight reveal");
+
+    GameState reconciled = createNewGame(catalog, 0x6E7076);
+    reconciled.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+    reconciled.meta.unlockKeys.push_back(content::unlock::routeUranus);
+    reconciled.run.destinationIndex = 5;
+    reconciled.run.frontierReadiness = 8;
+    ensureScenarioInstances(reconciled, catalog);
+    require(performScenarioAction(
+                reconciled,
+                catalog,
+                content::scenario::uranusDeparture,
+                "briefing",
+                ScenarioActionKind::AcknowledgeBriefing).applied,
+        "a current save with banked Flight Data should still acknowledge the new briefing");
+    const ScenarioObjectivePresentation reconciledObjective = scenarioObjectiveForDestination(
+        reconciled,
+        catalog,
+        content::destination::uranus);
+    require(reconciledObjective.stepId == "vector" && reconciledObjective.current == 8 &&
+            reconciledObjective.state == ScenarioStepState::ReadyToClaim,
+        "current-schema Uranus saves should reconcile existing Flight Data without replaying launches");
+}
+
 void campaignStateRoundTripsAtCurrentVersion()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -13866,6 +13985,7 @@ int main()
     firstMiningContractBuildsAndCelebratesProspector();
     explicitSolarCampaignObjectivesGateRewardsAndRoutes();
     saturnArtifactQueuesPhysicalUranusRoute();
+    uranusFlightDataQueuesPhysicalNeptuneRoute();
     campaignStateRoundTripsAtCurrentVersion();
     scenarioAndCocoonStateRoundTrips();
     surfaceSiteProfilesChangeExpeditionRules();

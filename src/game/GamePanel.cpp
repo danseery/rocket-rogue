@@ -3974,9 +3974,11 @@ std::string buildGamePanelMarkup(
         const bool arrivalDepartureChallenge = departureScenario.available;
         const Destination* routeDestination = nextDestination(state, catalog);
         const bool authoredRoute = routeDestination != nullptr && !routeDestination->routeRequirementKeys.empty();
+        const bool flightDataRoute = routeDestination != nullptr &&
+            scenarioRouteUsesFlightData(state, catalog, *routeDestination);
         const std::string routeStatus = routeDestination == nullptr
             ? "No onward route"
-            : (authoredRoute
+            : (authoredRoute && !flightDataRoute
                   ? "Objective remains active; " + routeDestination->name + " route stays locked"
                   : "Clears all Flight Data required for " + routeDestination->name);
         const std::string commitmentLabel = orbitCaptured ? "ORBIT CAPTURED" : "APPROACH UNCOMMITTED";
@@ -4153,6 +4155,10 @@ std::string buildGamePanelMarkup(
                 "Begin landing",
                 ui::actions::arrivalLanding,
                 "danger");
+        }
+        if (arrivalDestination != nullptr && arrivalScenario.available &&
+            arrivalScenario.scenarioId == content::scenario::uranusDeparture) {
+            out << scenarioObjectiveModalForDestination(state, catalog, arrivalDestination->id);
         }
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);

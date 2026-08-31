@@ -1039,7 +1039,10 @@ enum class ScenarioEventKind {
     EquipmentAssigned,
     // Emitted only when an artifact crosses the permanent-inventory boundary.
     // Temporary, tethered, dropped, and unreturned artifacts never qualify.
-    ArtifactRecovered
+    ArtifactRecovered,
+    // Appended for authored route solutions that reuse the shared Flight Data
+    // ledger. The event carries the physical origin and target route IDs.
+    FlightDataBanked
 };
 
 enum class ScenarioActionKind {

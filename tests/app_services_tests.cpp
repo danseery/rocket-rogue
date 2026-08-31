@@ -660,6 +660,33 @@ std::string saturnArtifactReadySave()
         saturnArtifactReadyState(catalog)));
 }
 
+rocket::GameState uranusVectorReadyState(const rocket::ContentCatalog& catalog)
+{
+    rocket::GameState state = rocket::createNewGame(catalog, 0x6E7077ULL);
+    state.meta.launchLessons.stage = rocket::LaunchTrainingStage::Complete;
+    state.meta.unlockKeys.push_back(rocket::content::unlock::routeUranus);
+    state.run.destinationIndex = 5;
+    state.meta.furthestTier = 5;
+    state.run.frontierReadiness = 8;
+    rocket::ensureScenarioInstances(state, catalog);
+    assert(rocket::performScenarioAction(
+               state,
+               catalog,
+               rocket::content::scenario::uranusDeparture,
+               "briefing",
+               rocket::ScenarioActionKind::AcknowledgeBriefing).applied);
+    state.screen = rocket::Screen::Hangar;
+    rocket::syncLaunchConfig(state, catalog);
+    return state;
+}
+
+std::string uranusVectorReadySave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    return rocket::serializeSaveData(rocket::captureSaveData(
+        uranusVectorReadyState(catalog)));
+}
+
 int jupiterDestinationIndex()
 {
     const rocket::ContentCatalog catalog = rocket::createDefaultContent();
@@ -1136,6 +1163,37 @@ void saturnArtifactGenericClaimQueuesUranus()
 #endif
 }
 
+void uranusVectorGenericClaimQueuesNeptune()
+{
+    const std::string action = rocket::ui::actions::scenarioAction(
+        rocket::content::scenario::uranusDeparture,
+        "vector",
+        static_cast<int>(rocket::ScenarioActionKind::ClaimReward));
+
+    auto fixture = std::make_unique<AppFixture>();
+    fixture->saves.value = uranusVectorReadySave();
+    assert(fixture->runner.initialize());
+    fixture->ui.dispatchAction("continue_game");
+    completeTitleLaunch(*fixture);
+    fixture->ui.dispatchAction(action);
+    fixture->host.now += 1.0 / 120.0;
+    fixture->runner.frame();
+
+    const std::optional<rocket::SaveData> save =
+        rocket::deserializeSaveData(fixture->saves.value);
+    assert(save.has_value());
+    assert(save->destinationIndex == 5);
+    assert(save->routeTransit.intent == rocket::RouteTransitIntent::Outbound);
+    assert(save->routeTransit.routeLinkId == rocket::content::routeLink::uranusNeptune);
+    assert(save->routeTransit.originDestinationId == rocket::content::destination::uranus);
+    assert(save->routeTransit.targetDestinationId == rocket::content::destination::neptune);
+    assert(std::find(
+               save->unlockKeys.begin(),
+               save->unlockKeys.end(),
+               rocket::content::unlock::routeNeptune) != save->unlockKeys.end());
+    fixture->runner.shutdown();
+}
+
 } // namespace
 
 int main()
@@ -1152,6 +1210,7 @@ int main()
 #if !defined(__EMSCRIPTEN__)
     perfectJupiterDepartureClaimQueuesSaturn();
     saturnArtifactGenericClaimQueuesUranus();
+    uranusVectorGenericClaimQueuesNeptune();
 #endif
 
 #if !defined(__EMSCRIPTEN__)

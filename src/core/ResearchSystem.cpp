@@ -1520,7 +1520,9 @@ int orbitResearchDataReward(const Destination& destination, OrbitGrade grade)
 bool flybyClearsGenericNextRoute(const GameState& state, const ContentCatalog& catalog)
 {
     const Destination* next = nextDestination(state, catalog);
-    return next != nullptr && next->routeRequirementKeys.empty() && frontierReadinessCap(state, catalog) > 0;
+    return next != nullptr &&
+        (next->routeRequirementKeys.empty() || scenarioRouteUsesFlightData(state, catalog, *next)) &&
+        frontierReadinessCap(state, catalog) > 0;
 }
 
 bool bankFlybyRouteClearance(GameState& state, const ContentCatalog& catalog)
@@ -1530,7 +1532,17 @@ bool bankFlybyRouteClearance(GameState& state, const ContentCatalog& catalog)
     }
     const int before = state.run.frontierReadiness;
     state.run.frontierReadiness = frontierReadinessCap(state, catalog);
-    return state.run.frontierReadiness > before;
+    const int gained = state.run.frontierReadiness - before;
+    if (gained > 0) {
+        const Destination& origin = currentDestination(state, catalog);
+        const Destination* target = nextDestination(state, catalog);
+        recordScenarioEvent(
+            state,
+            catalog,
+            {ScenarioEventKind::FlightDataBanked, {}, {}, origin.id,
+             target == nullptr ? std::string {} : target->id, gained, 0});
+    }
+    return gained > 0;
 }
 
 bool queueBlockedArrivalFlybyRecovery(GameState& state, const ContentCatalog& catalog)
@@ -1670,7 +1682,19 @@ bool bankArrivalLandingFlightData(GameState& state, const ContentCatalog& catalo
     if (!canAttemptArrivalLanding(state, catalog)) {
         return false;
     }
-    return bankFrontierReadiness(state, catalog);
+    const int before = state.run.frontierReadiness;
+    if (!bankFrontierReadiness(state, catalog)) {
+        return false;
+    }
+    const Destination& origin = currentDestination(state, catalog);
+    const Destination* target = nextDestination(state, catalog);
+    recordScenarioEvent(
+        state,
+        catalog,
+        {ScenarioEventKind::FlightDataBanked, {}, {}, origin.id,
+         target == nullptr ? std::string {} : target->id,
+         state.run.frontierReadiness - before, 0});
+    return true;
 }
 
 std::string arrivalOperationBlockReason(const GameState& state, const ContentCatalog& catalog, std::string_view operation)

@@ -2641,6 +2641,16 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
             state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
         }
     }
+    if (state.run.frontierReadiness > readinessBefore) {
+        const Destination& origin = currentDestination(state, catalog);
+        const Destination* target = nextDestination(state, catalog);
+        recordScenarioEvent(
+            state,
+            catalog,
+            {ScenarioEventKind::FlightDataBanked, {}, {}, origin.id,
+             target == nullptr ? std::string {} : target->id,
+             state.run.frontierReadiness - readinessBefore, 0});
+    }
     syncLaunchTrainingProgress(state, catalog);
 
     if (outcome.type == LaunchResultType::MissionComplete &&
