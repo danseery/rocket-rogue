@@ -218,16 +218,6 @@ double artifactTetherAnchorY(const MiningArtifactObject& artifact)
     return artifact.y - 0.5;
 }
 
-double controlledActorVelocityX(const MiningRunState& mining)
-{
-    return operatorControlled(mining) ? mining.operatorVelocityX : mining.rigVelocityX;
-}
-
-double controlledActorVelocityY(const MiningRunState& mining)
-{
-    return operatorControlled(mining) ? mining.operatorVelocityY : mining.rigVelocityY;
-}
-
 double controlledAimX(const MiningRunState& mining)
 {
     return operatorControlled(mining) ? mining.operatorAimDirX : mining.aimDirX;
@@ -1004,29 +994,6 @@ bool softMiningMaterial(MiningCellMaterial material)
         material == MiningCellMaterial::OxygenPocket;
 }
 
-double miningContactResistance(MiningCellMaterial material)
-{
-    if (material == MiningCellMaterial::Regolith) {
-        return tuning::mining::softTerrainMoveScale;
-    }
-    if (material == MiningCellMaterial::HazardPocket) {
-        return tuning::mining::softTerrainMoveScale * 0.65;
-    }
-    return 0.0;
-}
-
-double contactLimitedPosition(double current, double proposed, int obstacleCell)
-{
-    constexpr double contactPadding = 0.018;
-    if (proposed > current) {
-        return std::min(proposed, static_cast<double>(obstacleCell) - contactPadding);
-    }
-    if (proposed < current) {
-        return std::max(proposed, static_cast<double>(obstacleCell + 1) + contactPadding);
-    }
-    return current;
-}
-
 void updateContactBounce(MiningRunState& mining, double dt)
 {
     mining.contactBounceCooldown = std::max(0.0, mining.contactBounceCooldown - dt);
@@ -1308,6 +1275,7 @@ bool applyDrillDamage(GameState& state, const MiningDrillStats& stats, int x, in
         drillPower *= tuning::mining::overheatedDrillSlow;
     }
     target->remainingToughness = std::max(0.0, target->remainingToughness - drillPower * dt);
+    target->damageFlashSeconds = tuning::mining::tileDamageFlashSeconds;
     target->revealed = true;
     markDirty(mining.terrain, x, y);
     if (target->remainingToughness <= 0.0) {
@@ -1320,15 +1288,6 @@ struct MiniDroneHomePoint {
     double x = 0.0;
     double y = 0.0;
 };
-
-double miniDroneRoleSpread(int roleIndex)
-{
-    if (roleIndex <= 0) {
-        return 0.0;
-    }
-    const int lane = (roleIndex + 1) / 2;
-    return static_cast<double>(lane) * tuning::mining::miniDroneSameRoleSpacingCells * (roleIndex % 2 == 1 ? 1.0 : -1.0);
-}
 
 MiniDroneHomePoint miniDroneHomePoint(const MiningRunState& mining, const MiningMiniDroneAgent& agent)
 {
@@ -1392,14 +1351,6 @@ std::optional<MiniDroneHomePoint> miniDroneReturnRallyPoint(
         }
     }
     return best;
-}
-
-MiniDroneHomePoint miniDroneShipDockPoint(const MiningRunState& mining, const MiningMiniDroneAgent& agent)
-{
-    const double spread = miniDroneRoleSpread(agent.roleIndex) *
-        tuning::mining::resourceDroneDockSpacingCells / tuning::mining::miniDroneSameRoleSpacingCells;
-    const double roleLane = agent.role == MiniDroneRole::Mining ? -0.55 : 0.55;
-    return {mining.returnZoneX + roleLane + spread, mining.returnZoneY};
 }
 
 double miniDroneDistanceSquared(const MiningMiniDroneAgent& agent, double x, double y)
@@ -4016,252 +3967,6 @@ void setupMiningGate(
     }
 }
 
-void migrateActiveAuthoredCocoonLayout(
-    MiningRunState& mining,
-    const MiningArenaRules& rules,
-    const MiningSiteDefinition& site)
-{
-    if (!mining.active ||
-        site.objectivePlacement != MiningSiteObjectivePlacement::EntryCentered ||
-        site.cocoon.id.empty() ||
-        site.cocoon.layers.empty() ||
-        !mining.artifact.present ||
-        mining.artifact.state != MiningArtifactState::Embedded ||
-        mining.artifact.tethered) {
-        return;
-    }
-
-    const int expectedAnchorX = std::clamp(
-        mining.terrain.width / 2, 4, mining.terrain.width - 5);
-    const int expectedAnchorY = std::clamp(
-        14, 5, mining.terrain.height - 5);
-    const bool currentDefinition =
-        mining.gate.cocoonDefinitionId == site.cocoon.id &&
-        mining.gate.cocoonDefinitionVersion >= site.cocoon.version;
-    const bool currentLocation =
-        static_cast<int>(std::floor(mining.gate.anchorX)) == expectedAnchorX &&
-        static_cast<int>(std::floor(mining.gate.anchorY)) == expectedAnchorY &&
-        static_cast<int>(std::floor(mining.artifact.x)) == expectedAnchorX &&
-        static_cast<int>(std::floor(mining.artifact.y)) == expectedAnchorY;
-    if (currentDefinition && currentLocation) {
-        return;
-    }
-
-    // An active run persists its terrain, so an authored cocoon revision or
-    // a stale saved anchor must explicitly retire the previous marked cells
-    // instead of waiting for a new deployment. This is content-driven: any
-    // entry-centered authored cocoon can safely revise its layout this way.
-    const bool gateWasOpen = mining.gate.state == MiningGateState::Open;
-    const int artifactX = std::clamp(
-        static_cast<int>(std::floor(mining.artifact.x)), 0, mining.terrain.width - 1);
-    const int artifactY = std::clamp(
-        static_cast<int>(std::floor(mining.artifact.y)), 0, mining.terrain.height - 1);
-    for (int y = 0; y < mining.terrain.height; ++y) {
-        for (int x = 0; x < mining.terrain.width; ++x) {
-            MiningCell* cell = miningCellAt(mining.terrain, x, y);
-            if (cell == nullptr || !cell->gateAssociated ||
-                (x == artifactX && y == artifactY)) {
-                continue;
-            }
-            if (cell->material == MiningCellMaterial::ArtifactCache) {
-                // The old protected-objective tile is no longer backed by the
-                // moved artifact. Clear it so the migration cannot leave a
-                // false relic marker behind in the retired layout.
-                *cell = makeCell(MiningCellMaterial::Empty, mining.depthZone);
-                cell->revealed = true;
-            } else if (cell->material == MiningCellMaterial::HazardPocket) {
-                *cell = makeCell(MiningCellMaterial::Regolith, mining.depthZone);
-                cell->revealed = true;
-            } else {
-                cell->gateAssociated = false;
-                cell->cocoonLayer = -1;
-            }
-            markDirty(mining.terrain, x, y);
-        }
-    }
-
-    setupMiningGate(mining, rules, nullptr, &site);
-    if (gateWasOpen) {
-        // Preserve completed player work while moving the formerly misplaced
-        // artifact into the authored entry lane. It remains embedded so the
-        // player still performs the intended final tether pull.
-        for (int y = 0; y < mining.terrain.height; ++y) {
-            for (int x = 0; x < mining.terrain.width; ++x) {
-                MiningCell* cell = miningCellAt(mining.terrain, x, y);
-                if (cell == nullptr || !cell->gateAssociated ||
-                    cell->material == MiningCellMaterial::ArtifactCache) {
-                    continue;
-                }
-                if (cell->material == MiningCellMaterial::HazardPocket) {
-                    *cell = makeCell(MiningCellMaterial::Regolith, mining.depthZone);
-                    cell->revealed = true;
-                } else {
-                    cell->gateAssociated = false;
-                    cell->cocoonLayer = -1;
-                }
-                markDirty(mining.terrain, x, y);
-            }
-        }
-        mining.gate.state = MiningGateState::Open;
-        mining.gate.activeCocoonLayer = -1;
-        mining.gate.shellTilesRemaining = 0;
-        mining.gate.outerShellTilesRemaining = 0;
-        mining.gate.innerShellTilesRemaining = 0;
-        mining.gate.hazardTreatmentComplete = true;
-        mining.gate.markers.clear();
-        for (MiningCocoonLayerProgress& layer : mining.gate.cocoonLayers) {
-            layer.remaining = 0;
-            layer.revealed = true;
-            layer.completed = true;
-        }
-        revealProtectedObjective(mining);
-    }
-    mining.gate.derivedStateDirty = true;
-}
-
-void pruneObsoleteAuthoredGateMarkers(
-    MiningRunState& mining,
-    const MiningArenaRules& rules,
-    const MiningSiteDefinition& site)
-{
-    // Triangulation markers belong only to gates that presently require the
-    // scan handshake. Older saves can retain their marker vector after the
-    // authored site has changed to a cocoon, where the symbols are both
-    // meaningless and misleading.
-    const MiningGateDefinition definition = resolveMiningGateDefinition(
-        rules,
-        site.gateType,
-        false);
-    if (!mining.gate.active || definition.requiresSurveyTriangulation ||
-        mining.gate.markers.empty()) {
-        return;
-    }
-
-    mining.gate.markers.clear();
-    mining.gate.requiredSurveyOrigins = 0;
-    mining.gate.surveyOriginsCompleted = 0;
-    mining.gate.surveyComplete = !definition.burrowBreach;
-    mining.gate.derivedStateDirty = true;
-}
-
-void migrateActiveProceduralArtifactGateLayout(
-    MiningRunState& mining,
-    const MiningArenaRules& rules)
-{
-    if (!mining.active ||
-        !mining.miningSiteDefinitionId.empty() ||
-        !mining.gate.active ||
-        mining.gate.state == MiningGateState::Completed ||
-        !mining.artifact.present ||
-        mining.artifact.state != MiningArtifactState::Embedded ||
-        mining.artifact.tethered) {
-        return;
-    }
-
-    const MiningGateDefinition definition = resolveMiningGateDefinition(
-        rules,
-        mining.gate.type,
-        mining.gate.compatibilityCritical);
-    if (definition.endurancePlacement) {
-        return;
-    }
-
-    const int expectedAnchorX = std::clamp(
-        mining.terrain.width / 2, 4, mining.terrain.width - 5);
-    const int expectedAnchorY = std::clamp(
-        14, 5, mining.terrain.height - 5);
-    const bool currentLocation =
-        static_cast<int>(std::floor(mining.gate.anchorX)) == expectedAnchorX &&
-        static_cast<int>(std::floor(mining.gate.anchorY)) == expectedAnchorY &&
-        static_cast<int>(std::floor(mining.artifact.x)) == expectedAnchorX &&
-        static_cast<int>(std::floor(mining.artifact.y)) == expectedAnchorY;
-    if (currentLocation) {
-        return;
-    }
-
-    // Procedural gates are persisted with the run. Retire the old stamped
-    // encounter before rebuilding it at the current standard position, so a
-    // reload repairs an already-active expedition instead of leaving behind
-    // a second cocoon, survey marker set, or encounter wall.
-    const bool gateWasOpen = mining.gate.state == MiningGateState::Open;
-    const int artifactX = std::clamp(
-        static_cast<int>(std::floor(mining.artifact.x)), 0, mining.terrain.width - 1);
-    const int artifactY = std::clamp(
-        static_cast<int>(std::floor(mining.artifact.y)), 0, mining.terrain.height - 1);
-    for (int y = 0; y < mining.terrain.height; ++y) {
-        for (int x = 0; x < mining.terrain.width; ++x) {
-            MiningCell* cell = miningCellAt(mining.terrain, x, y);
-            if (cell == nullptr || !cell->gateAssociated ||
-                (x == artifactX && y == artifactY)) {
-                continue;
-            }
-            if (cell->material == MiningCellMaterial::ArtifactCache) {
-                *cell = makeCell(MiningCellMaterial::Empty, mining.depthZone);
-                cell->revealed = true;
-            } else if (cell->material == MiningCellMaterial::HazardPocket) {
-                *cell = makeCell(MiningCellMaterial::Regolith, mining.depthZone);
-                cell->revealed = true;
-            } else {
-                cell->gateAssociated = false;
-                cell->cocoonLayer = -1;
-            }
-            markDirty(mining.terrain, x, y);
-        }
-    }
-    mining.enemies.erase(
-        std::remove_if(
-            mining.enemies.begin(),
-            mining.enemies.end(),
-            [](const MiningEnemy& enemy) { return enemy.gateAssociated; }),
-        mining.enemies.end());
-
-    setupMiningGate(mining, rules, nullptr, nullptr);
-    if (gateWasOpen) {
-        // Moving a gate must not undo an objective the player has already
-        // opened. Only the embedded artifact itself changes position.
-        for (int y = 0; y < mining.terrain.height; ++y) {
-            for (int x = 0; x < mining.terrain.width; ++x) {
-                MiningCell* cell = miningCellAt(mining.terrain, x, y);
-                if (cell == nullptr || !cell->gateAssociated ||
-                    cell->material == MiningCellMaterial::ArtifactCache) {
-                    continue;
-                }
-                if (cell->material == MiningCellMaterial::HazardPocket) {
-                    *cell = makeCell(MiningCellMaterial::Regolith, mining.depthZone);
-                    cell->revealed = true;
-                } else {
-                    cell->gateAssociated = false;
-                    cell->cocoonLayer = -1;
-                }
-                markDirty(mining.terrain, x, y);
-            }
-        }
-        mining.gate.state = MiningGateState::Open;
-        mining.gate.hazardTreatmentComplete = true;
-        mining.gate.enemyClearanceComplete = true;
-        mining.gate.surveyComplete = true;
-        mining.gate.activeCocoonLayer = -1;
-        mining.gate.shellTilesRemaining = 0;
-        mining.gate.outerShellTilesRemaining = 0;
-        mining.gate.innerShellTilesRemaining = 0;
-        mining.gate.assignedEnemiesRemaining = 0;
-        mining.gate.markers.clear();
-        mining.enemies.erase(
-            std::remove_if(
-                mining.enemies.begin(),
-                mining.enemies.end(),
-                [](const MiningEnemy& enemy) { return enemy.gateAssociated; }),
-            mining.enemies.end());
-        for (MiningCocoonLayerProgress& layer : mining.gate.cocoonLayers) {
-            layer.remaining = 0;
-            layer.revealed = true;
-            layer.completed = true;
-        }
-        revealProtectedObjective(mining);
-    }
-    mining.gate.derivedStateDirty = true;
-}
-
 bool gateHasHardLock(const MiningGateRuntime& gate)
 {
     return gate.active && (
@@ -4550,6 +4255,9 @@ void trimMiningCombatVisuals(MiningRunState& mining)
 
 void advanceMiningCombatVisuals(MiningRunState& mining, double dt)
 {
+    for (MiningCell& cell : mining.terrain.cells) {
+        cell.damageFlashSeconds = std::max(0.0, cell.damageFlashSeconds - dt);
+    }
     for (MiningProjectileVisual& projectile : mining.combatProjectiles) {
         projectile.age += dt;
     }
@@ -4668,6 +4376,210 @@ std::pair<double, double> enemyMoveDirection(const MiningRunState& mining, const
     return {dartX / length, dartY / length};
 }
 
+bool swarmEnemyInsideChamber(const MiningRunState& mining, const MiningEnemy& enemy)
+{
+    return enemy.swarmAssociated &&
+        std::abs(enemy.x - mining.swarm.cacheX) <=
+            static_cast<double>(tuning::mining::swarmChamberHalfWidthCells) &&
+        std::abs(enemy.y - mining.swarm.cacheY) <=
+            static_cast<double>(tuning::mining::swarmChamberHalfHeightCells);
+}
+
+double swarmEnemySeparationRadius(const MiningEnemy& enemy)
+{
+    if (enemy.elite) {
+        return tuning::mining::swarmEliteSeparationRadiusCells;
+    }
+    if (enemy.type == MiningEnemyType::Beetle || enemy.type == MiningEnemyType::Mammal) {
+        return tuning::mining::swarmLargeSeparationRadiusCells;
+    }
+    return tuning::mining::swarmSmallSeparationRadiusCells;
+}
+
+std::pair<double, double> deterministicSwarmPairDirection(
+    const MiningRunState& mining,
+    std::size_t first,
+    std::size_t second)
+{
+    const double angle = unitHash(
+        mining.swarm.seed,
+        static_cast<int>(first),
+        static_cast<int>(second),
+        mining.depthZone,
+        0x5E91ULL) * kPi * 2.0;
+    return {std::cos(angle), std::sin(angle)};
+}
+
+std::vector<std::pair<double, double>> swarmSeparationSteering(const MiningRunState& mining)
+{
+    std::vector<std::pair<double, double>> steering(mining.enemies.size(), {0.0, 0.0});
+    for (std::size_t first = 0; first < mining.enemies.size(); ++first) {
+        const MiningEnemy& lhs = mining.enemies[first];
+        if (!lhs.active || !swarmEnemyInsideChamber(mining, lhs)) {
+            continue;
+        }
+        for (std::size_t second = first + 1; second < mining.enemies.size(); ++second) {
+            const MiningEnemy& rhs = mining.enemies[second];
+            if (!rhs.active || !swarmEnemyInsideChamber(mining, rhs)) {
+                continue;
+            }
+            double dx = lhs.x - rhs.x;
+            double dy = lhs.y - rhs.y;
+            double distance = std::hypot(dx, dy);
+            const double minimumDistance =
+                swarmEnemySeparationRadius(lhs) + swarmEnemySeparationRadius(rhs);
+            if (distance >= minimumDistance) {
+                continue;
+            }
+            if (distance <= 0.0001) {
+                const auto fallback = deterministicSwarmPairDirection(mining, first, second);
+                dx = fallback.first;
+                dy = fallback.second;
+                distance = 1.0;
+            }
+            const double weight = (minimumDistance - distance) / std::max(0.001, minimumDistance);
+            const double pushX = dx / distance * weight;
+            const double pushY = dy / distance * weight;
+            steering[first].first += pushX;
+            steering[first].second += pushY;
+            steering[second].first -= pushX;
+            steering[second].second -= pushY;
+        }
+    }
+    return steering;
+}
+
+bool tryMoveSwarmEnemy(MiningRunState& mining, MiningEnemy& enemy, double offsetX, double offsetY)
+{
+    const double targetX = std::clamp(
+        enemy.x + offsetX,
+        1.0,
+        static_cast<double>(mining.terrain.width - 2));
+    const double targetY = std::clamp(
+        enemy.y + offsetY,
+        1.0,
+        static_cast<double>(mining.terrain.height - 2));
+    if (!enemyIgnoresTerrain(enemy.type) && !canOccupy(mining.terrain, targetX, targetY)) {
+        return false;
+    }
+    enemy.x = targetX;
+    enemy.y = targetY;
+    return true;
+}
+
+bool tryMoveSwarmEnemyTerrainAware(
+    MiningRunState& mining,
+    MiningEnemy& enemy,
+    double offsetX,
+    double offsetY)
+{
+    return tryMoveSwarmEnemy(mining, enemy, offsetX, offsetY) ||
+        tryMoveSwarmEnemy(mining, enemy, offsetX, 0.0) ||
+        tryMoveSwarmEnemy(mining, enemy, 0.0, offsetY);
+}
+
+void resolveSwarmEnemySeparation(MiningRunState& mining)
+{
+    for (int iteration = 0; iteration < tuning::mining::swarmSeparationSolverIterations; ++iteration) {
+        bool corrected = false;
+        for (std::size_t first = 0; first < mining.enemies.size(); ++first) {
+            MiningEnemy& lhs = mining.enemies[first];
+            if (!lhs.active || !swarmEnemyInsideChamber(mining, lhs)) {
+                continue;
+            }
+            for (std::size_t second = first + 1; second < mining.enemies.size(); ++second) {
+                MiningEnemy& rhs = mining.enemies[second];
+                if (!rhs.active || !swarmEnemyInsideChamber(mining, rhs)) {
+                    continue;
+                }
+                double dx = lhs.x - rhs.x;
+                double dy = lhs.y - rhs.y;
+                double distance = std::hypot(dx, dy);
+                const double minimumDistance =
+                    swarmEnemySeparationRadius(lhs) + swarmEnemySeparationRadius(rhs);
+                if (distance >= minimumDistance - 0.001) {
+                    continue;
+                }
+                if (distance <= 0.0001) {
+                    const auto fallback = deterministicSwarmPairDirection(mining, first, second);
+                    dx = fallback.first;
+                    dy = fallback.second;
+                    distance = 1.0;
+                }
+                const double correction = (minimumDistance - distance) * 0.5;
+                const double offsetX = dx / distance * correction;
+                const double offsetY = dy / distance * correction;
+                const bool movedFirst = tryMoveSwarmEnemyTerrainAware(
+                    mining, lhs, offsetX, offsetY);
+                const bool movedSecond = tryMoveSwarmEnemyTerrainAware(
+                    mining, rhs, -offsetX, -offsetY);
+                if (movedFirst != movedSecond) {
+                    MiningEnemy& movable = movedFirst ? lhs : rhs;
+                    const double direction = movedFirst ? 1.0 : -1.0;
+                    (void)tryMoveSwarmEnemyTerrainAware(
+                        mining, movable, offsetX * direction, offsetY * direction);
+                }
+                corrected = corrected || movedFirst || movedSecond;
+            }
+        }
+        if (!corrected) {
+            break;
+        }
+    }
+}
+
+void updateSwarmMeleeAttackTokens(
+    MiningRunState& mining,
+    double actorX,
+    double actorY,
+    double dt)
+{
+    int committed = 0;
+    for (MiningEnemy& enemy : mining.enemies) {
+        enemy.swarmAttackRequeueSeconds = std::max(0.0, enemy.swarmAttackRequeueSeconds - dt);
+        if (!enemy.active || !swarmEnemyInsideChamber(mining, enemy) ||
+            !enemyUsesMeleeAttack(enemy.type) || enemy.attackCooldownSeconds > 0.0) {
+            enemy.swarmAttackCommitSeconds = 0.0;
+            continue;
+        }
+        if (enemy.swarmAttackCommitSeconds > 0.0) {
+            enemy.swarmAttackCommitSeconds = std::max(0.0, enemy.swarmAttackCommitSeconds - dt);
+            if (enemy.swarmAttackCommitSeconds <= 0.0) {
+                enemy.swarmAttackRequeueSeconds = tuning::mining::swarmMeleeAttackRequeueSeconds;
+            } else {
+                ++committed;
+            }
+        }
+    }
+
+    std::vector<std::pair<double, std::size_t>> candidates;
+    for (std::size_t index = 0; index < mining.enemies.size(); ++index) {
+        const MiningEnemy& enemy = mining.enemies[index];
+        if (!enemy.active || !swarmEnemyInsideChamber(mining, enemy) ||
+            !enemyUsesMeleeAttack(enemy.type) || enemy.attackCooldownSeconds > 0.0 ||
+            enemy.swarmAttackCommitSeconds > 0.0 || enemy.swarmAttackRequeueSeconds > 0.0) {
+            continue;
+        }
+        const double dx = actorX - enemy.x;
+        const double dy = actorY - enemy.y;
+        candidates.push_back({dx * dx + dy * dy, index});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
+        if (std::abs(lhs.first - rhs.first) > 0.000001) {
+            return lhs.first < rhs.first;
+        }
+        return lhs.second < rhs.second;
+    });
+    for (const auto& candidate : candidates) {
+        if (committed >= tuning::mining::swarmMeleeAttackTokenCount) {
+            break;
+        }
+        MiningEnemy& enemy = mining.enemies[candidate.second];
+        enemy.swarmAttackCommitSeconds = tuning::mining::swarmMeleeAttackCommitSeconds;
+        ++committed;
+    }
+}
+
 std::pair<double, double> swarmEnemyMoveDirection(
     const MiningRunState& mining,
     const MiningEnemy& enemy,
@@ -4692,13 +4604,9 @@ std::pair<double, double> swarmEnemyMoveDirection(
             ? tuning::mining::swarmRangedRetreatRadiusCells
             : tuning::mining::swarmRangedFiringRadiusCells;
     } else {
-        const double divePhase = std::fmod(
-            mining.elapsedSeconds + static_cast<double>(enemyIndex) * 0.19,
-            tuning::mining::swarmMeleeDiveCycleSeconds);
         if (enemy.attackCooldownSeconds > tuning::mining::swarmMeleeRetreatThresholdSeconds) {
             desiredRadius = tuning::mining::swarmMeleeRetreatRadiusCells;
-        } else if (enemy.attackCooldownSeconds <= 0.0 &&
-            divePhase < tuning::mining::swarmMeleeDiveWindowSeconds) {
+        } else if (enemy.swarmAttackCommitSeconds > 0.0) {
             desiredRadius = tuning::mining::swarmMeleeDiveRadiusCells;
         }
     }
@@ -4730,6 +4638,7 @@ bool applyMammalBurrow(MiningRunState& mining, int x, int y, double dt)
     target->feature = MiningCellFeature::OrganicBurrow;
     target->enemy = MiningEnemyType::Mammal;
     target->remainingToughness = std::max(0.0, target->remainingToughness - tuning::mining::mammalBurrowPower * dt);
+    target->damageFlashSeconds = tuning::mining::tileDamageFlashSeconds;
     markDirty(mining.terrain, x, y);
     if (target->remainingToughness > 0.0) {
         return false;
@@ -4978,6 +4887,7 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
 {
     MiningRunState& mining = state.run.mining;
     for (MiningEnemy& enemy : mining.enemies) {
+        enemy.attackCooldownSeconds = std::max(0.0, enemy.attackCooldownSeconds - dt);
         enemy.scannedPrioritySeconds = std::max(0.0, enemy.scannedPrioritySeconds - dt);
         enemy.attackAnimationSeconds = std::max(0.0, enemy.attackAnimationSeconds - dt);
         enemy.hitAnimationSeconds = std::max(0.0, enemy.hitAnimationSeconds - dt);
@@ -5184,12 +5094,15 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
         mining.areaControlPulseCooldownSeconds = tuning::mining::areaControlPulseSeconds;
     }
 
+    updateSwarmMeleeAttackTokens(mining, actorX, actorY, dt);
+    const std::vector<std::pair<double, double>> separationSteering =
+        swarmSeparationSteering(mining);
+
     for (std::size_t enemyIndex = 0; enemyIndex < mining.enemies.size(); ++enemyIndex) {
         MiningEnemy& enemy = mining.enemies[enemyIndex];
         if (!enemy.active) {
             continue;
         }
-        enemy.attackCooldownSeconds = std::max(0.0, enemy.attackCooldownSeconds - dt);
         const double dx = actorX - enemy.x;
         const double dy = actorY - enemy.y;
         const double distance = std::max(0.001, std::sqrt(dx * dx + dy * dy));
@@ -5225,7 +5138,20 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
                 desiredDirY = dirX * (wave >= 0.0 ? 1.0 : -1.0);
             }
         }
-        const auto [moveDirX, moveDirY] = enemyMoveDirection(mining, enemy, desiredDirX, desiredDirY);
+        const auto baseMoveDirection = enemyMoveDirection(mining, enemy, desiredDirX, desiredDirY);
+        double moveDirX = baseMoveDirection.first;
+        double moveDirY = baseMoveDirection.second;
+        if (enemy.swarmAssociated && !swarmIngress && enemyIndex < separationSteering.size()) {
+            moveDirX += separationSteering[enemyIndex].first *
+                tuning::mining::swarmSeparationSteeringWeight;
+            moveDirY += separationSteering[enemyIndex].second *
+                tuning::mining::swarmSeparationSteeringWeight;
+            const double separatedLength = std::hypot(moveDirX, moveDirY);
+            if (separatedLength > 0.001) {
+                moveDirX /= separatedLength;
+                moveDirY /= separatedLength;
+            }
+        }
         const double areaSlow = distance * distance <= areaRangeSq ? drones.enemySlow : 0.0;
         const double speedScale = std::clamp(1.0 - areaSlow, 0.40, 1.0) *
             (swarmIngress ? tuning::mining::swarmIngressSpeedScale : 1.0) *
@@ -5277,7 +5203,13 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
             applyElementalContact(state, enemy, std::clamp(shieldRelief + hazardScreenRelief, 0.0, 0.95), dt);
         }
 
-        if (enemyUsesMeleeAttack(enemy.type) && distance <= tuning::mining::enemyContactRadiusCells && enemy.attackCooldownSeconds <= 0.0) {
+        const double meleeContactRadius = enemy.swarmAssociated
+            ? tuning::mining::swarmMeleeContactRadiusCells
+            : tuning::mining::enemyContactRadiusCells;
+        const bool meleeAttackAuthorized = !enemy.swarmAssociated ||
+            enemy.swarmAttackCommitSeconds > 0.0;
+        if (enemyUsesMeleeAttack(enemy.type) && meleeAttackAuthorized &&
+            distance <= meleeContactRadius && enemy.attackCooldownSeconds <= 0.0) {
             const bool critical = deterministicCombatCrit(mining, enemy, tuning::mining::enemyCritChance, 307);
             const double rawDamage = enemy.damagePerSecond * tuning::mining::enemyDamageScale * tuning::mining::enemyMeleeAttackIntervalSeconds * (critical ? tuning::mining::enemyCritMultiplier : 1.0);
     const DefenseShieldImpact shieldImpact = defenseCoordinator.absorbIncomingDamage(enemy.x, enemy.y, rawDamage);
@@ -5307,6 +5239,7 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
             enemy.attackCooldownSeconds = enemy.swarmAssociated
                 ? tuning::mining::swarmMeleeAttackIntervalSeconds
                 : tuning::mining::enemyMeleeAttackIntervalSeconds;
+            enemy.swarmAttackCommitSeconds = 0.0;
             enemy.attackAnimationSeconds = tuning::mining::enemyAttackAnimationSeconds;
             if (drones.reactiveArmorDamagePerSecond > 0.0) {
                 const double appliedDamage = applyDefenseDamage(state, enemy, drones.reactiveArmorDamagePerSecond * tuning::mining::enemyMeleeAttackIntervalSeconds, false, true);
@@ -5353,6 +5286,7 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
             enemy.attackAnimationSeconds = tuning::mining::enemyAttackAnimationSeconds;
         }
     }
+    resolveSwarmEnemySeparation(mining);
 }
 
 void refreshTargetCell(MiningRunState& mining)
@@ -5760,41 +5694,148 @@ MiningEnemyType swarmEnemyForSpawn(const MiningSwarmState& swarm)
     }
 }
 
+double seededSwarmSpawnDelay(
+    const MiningSwarmState& swarm,
+    int depthZone,
+    int nextSpawnIndex,
+    double minimumSeconds,
+    double maximumSeconds,
+    std::uint64_t lane)
+{
+    const double t = unitHash(
+        swarm.seed,
+        std::max(1, swarm.wave),
+        std::max(0, nextSpawnIndex),
+        depthZone,
+        lane);
+    return minimumSeconds + (maximumSeconds - minimumSeconds) * t;
+}
+
+double swarmInitialSpawnDelay(const MiningSwarmState& swarm, int depthZone)
+{
+    return seededSwarmSpawnDelay(
+        swarm,
+        depthZone,
+        0,
+        tuning::mining::swarmWaveInitialDelayMinimumSeconds,
+        tuning::mining::swarmWaveInitialDelayMaximumSeconds,
+        0x5A37ULL);
+}
+
+double swarmNextSpawnDelay(const MiningSwarmState& swarm, int depthZone)
+{
+    return seededSwarmSpawnDelay(
+        swarm,
+        depthZone,
+        swarm.spawnedInWave,
+        tuning::mining::swarmSpawnIntervalMinimumSeconds,
+        tuning::mining::swarmSpawnIntervalMaximumSeconds,
+        0x5A38ULL);
+}
+
+struct SwarmSpawnPoint {
+    double x = 0.0;
+    double y = 0.0;
+    double nearestEntrantDistance = 0.0;
+};
+
+bool swarmEnemyIsOffscreen(const MiningRunState& mining, const MiningEnemy& enemy)
+{
+    return enemy.x < 0.0 || enemy.x > static_cast<double>(mining.terrain.width) ||
+        enemy.y < 0.0 || enemy.y > static_cast<double>(mining.terrain.height);
+}
+
+SwarmSpawnPoint randomizedSwarmSpawnPoint(const MiningRunState& mining, int index)
+{
+    const MiningSwarmState& swarm = mining.swarm;
+    constexpr double goldenAngle = 2.39996322973;
+    SwarmSpawnPoint best;
+    best.nearestEntrantDistance = -1.0;
+
+    for (int attempt = 0; attempt < tuning::mining::swarmSpawnPlacementAttempts; ++attempt) {
+        const double angleJitter =
+            (unitHash(swarm.seed, swarm.wave, index, mining.depthZone,
+                0x5A40ULL + static_cast<std::uint64_t>(attempt) * 7ULL) * 2.0 - 1.0) *
+            tuning::mining::swarmSpawnAngularJitterRadians;
+        const double angle = std::fmod(
+            static_cast<double>(index) * goldenAngle +
+                static_cast<double>(swarm.wave) * 0.83 + angleJitter,
+            kPi * 2.0);
+        const double directionX = std::cos(angle);
+        const double directionY = std::sin(angle);
+        const double margin = tuning::mining::swarmOffscreenSpawnMarginCells;
+        const double left = -margin;
+        const double right = static_cast<double>(mining.terrain.width) + margin;
+        const double top = -margin;
+        const double bottom = static_cast<double>(mining.terrain.height) + margin;
+        double edgeDistance = std::numeric_limits<double>::max();
+        double normalX = 0.0;
+        double normalY = 0.0;
+        const auto considerEdge = [&](double distance, double candidateNormalX, double candidateNormalY) {
+            if (distance >= 0.0 && distance < edgeDistance) {
+                edgeDistance = distance;
+                normalX = candidateNormalX;
+                normalY = candidateNormalY;
+            }
+        };
+        if (directionX > 0.0001) {
+            considerEdge((right - swarm.cacheX) / directionX, 1.0, 0.0);
+        } else if (directionX < -0.0001) {
+            considerEdge((left - swarm.cacheX) / directionX, -1.0, 0.0);
+        }
+        if (directionY > 0.0001) {
+            considerEdge((bottom - swarm.cacheY) / directionY, 0.0, 1.0);
+        } else if (directionY < -0.0001) {
+            considerEdge((top - swarm.cacheY) / directionY, 0.0, -1.0);
+        }
+
+        const double tangentJitter =
+            (unitHash(swarm.seed, swarm.wave, index, mining.depthZone,
+                0x5A41ULL + static_cast<std::uint64_t>(attempt) * 7ULL) * 2.0 - 1.0) *
+            tuning::mining::swarmSpawnTangentialJitterCells;
+        const double outwardJitter =
+            unitHash(swarm.seed, swarm.wave, index, mining.depthZone,
+                0x5A42ULL + static_cast<std::uint64_t>(attempt) * 7ULL) *
+            tuning::mining::swarmSpawnOutwardJitterCells;
+        const double tangentX = -normalY;
+        const double tangentY = normalX;
+        SwarmSpawnPoint candidate;
+        candidate.x = swarm.cacheX + directionX * edgeDistance +
+            tangentX * tangentJitter + normalX * outwardJitter;
+        candidate.y = swarm.cacheY + directionY * edgeDistance +
+            tangentY * tangentJitter + normalY * outwardJitter;
+        candidate.nearestEntrantDistance = std::numeric_limits<double>::max();
+        for (const MiningEnemy& enemy : mining.enemies) {
+            if (!enemy.active || !enemy.swarmAssociated || !swarmEnemyIsOffscreen(mining, enemy)) {
+                continue;
+            }
+            candidate.nearestEntrantDistance = std::min(
+                candidate.nearestEntrantDistance,
+                std::hypot(candidate.x - enemy.x, candidate.y - enemy.y));
+        }
+        if (candidate.nearestEntrantDistance > best.nearestEntrantDistance) {
+            best = candidate;
+        }
+        if (candidate.nearestEntrantDistance >=
+            tuning::mining::swarmSpawnMinimumSpacingCells) {
+            return candidate;
+        }
+    }
+    return best;
+}
+
 void spawnMiningSwarmEnemy(MiningRunState& mining, const MiningArenaRules& rules)
 {
     MiningSwarmState& swarm = mining.swarm;
     const MiningEnemyType type = swarmEnemyForSpawn(swarm);
     const int index = swarm.spawnedInWave;
-    constexpr double goldenAngle = 2.39996322973;
-    const double angleJitter =
-        (unitHash(swarm.seed, swarm.wave, index, mining.depthZone, 0x5A31ULL) - 0.5) * 0.22;
-    const double angle = std::fmod(
-        static_cast<double>(index) * goldenAngle + static_cast<double>(swarm.wave) * 0.83 + angleJitter,
-        kPi * 2.0);
-    const double directionX = std::cos(angle);
-    const double directionY = std::sin(angle);
-    const double margin = tuning::mining::swarmOffscreenSpawnMarginCells;
-    const double left = -margin;
-    const double right = static_cast<double>(mining.terrain.width) + margin;
-    const double top = -margin;
-    const double bottom = static_cast<double>(mining.terrain.height) + margin;
-    double edgeDistance = std::numeric_limits<double>::max();
-    if (directionX > 0.0001) {
-        edgeDistance = std::min(edgeDistance, (right - swarm.cacheX) / directionX);
-    } else if (directionX < -0.0001) {
-        edgeDistance = std::min(edgeDistance, (left - swarm.cacheX) / directionX);
-    }
-    if (directionY > 0.0001) {
-        edgeDistance = std::min(edgeDistance, (bottom - swarm.cacheY) / directionY);
-    } else if (directionY < -0.0001) {
-        edgeDistance = std::min(edgeDistance, (top - swarm.cacheY) / directionY);
-    }
+    const SwarmSpawnPoint spawn = randomizedSwarmSpawnPoint(mining, index);
     MiningEnemy enemy = makeMiningEnemyForRules(
         type,
         MiningCellFeature::SwarmArena,
         MiningElementalAffinity::None,
-        swarm.cacheX + directionX * edgeDistance,
-        swarm.cacheY + directionY * edgeDistance,
+        spawn.x,
+        spawn.y,
         rules);
     enemy.swarmAssociated = true;
     enemy.maxHealth *= tuning::mining::swarmEnemyHealthScale;
@@ -5851,7 +5892,7 @@ void updateMiningSwarm(
         swarm.wave = 1;
         swarm.waveSize = swarmWaveSize(rules, swarm.wave);
         swarm.spawnedInWave = 0;
-        swarm.spawnCooldownSeconds = 0.0;
+        swarm.spawnCooldownSeconds = swarmInitialSpawnDelay(swarm, mining.depthZone);
         state.statusLine = "SWARM 1/3 — hold the tunnel or ascend to disengage.";
     }
     if (swarm.cacheExposed) {
@@ -5883,7 +5924,7 @@ void updateMiningSwarm(
             ++swarm.wave;
             swarm.waveSize = swarmWaveSize(rules, swarm.wave);
             swarm.spawnedInWave = 0;
-            swarm.spawnCooldownSeconds = 0.0;
+            swarm.spawnCooldownSeconds = swarmInitialSpawnDelay(swarm, mining.depthZone);
             state.statusLine = "SWARM " + std::to_string(swarm.wave) + "/3 — incoming.";
         }
         return;
@@ -5892,7 +5933,7 @@ void updateMiningSwarm(
     if (swarm.spawnedInWave < swarm.waveSize && swarm.spawnCooldownSeconds <= 0.0 &&
         activeSwarmEnemyCount(mining) < swarmConcurrentEnemyCap(rules)) {
         spawnMiningSwarmEnemy(mining, rules);
-        swarm.spawnCooldownSeconds = tuning::mining::swarmSpawnIntervalSeconds;
+        swarm.spawnCooldownSeconds = swarmNextSpawnDelay(swarm, mining.depthZone);
     }
     if (swarm.spawnedInWave >= swarm.waveSize && activeSwarmEnemyCount(mining) == 0) {
         awardExpeditionExperience(
@@ -7788,7 +7829,10 @@ SurfaceActionOutcome startMiningRun(
     stampGuaranteedRichDeposits(mining.terrain, arenaRules, rareGuarantees, exoticGuarantees);
     applyMiningTerrainToughnessScale(mining.terrain, arenaRules.terrainToughnessScale);
     const bool forcedArtifact = expedition.prospectArtifacts > 0;
+    const bool authoredArtifactDestination =
+        destinationHasAuthoredProgressionArtifact(catalog, destination->id);
     if (!progressionOpportunity.has_value() &&
+        !authoredArtifactDestination &&
         (arenaRules.mechanics.artifactRecovery || forcedArtifact) &&
         mining.arenaMetadata.gateType == MiningGateType::None) {
         placeMiningArtifact(state, mining, *destination, forcedArtifact, forcedArtifact);
@@ -7810,10 +7854,12 @@ SurfaceActionOutcome startMiningRun(
     } else {
         setupMiningGate(mining, arenaRules, compatibilitySite, siteDefinition);
     }
-    if (!progressionOpportunity.has_value() && forcedArtifact && !mining.artifact.present) {
+    if (!progressionOpportunity.has_value() && !authoredArtifactDestination &&
+        forcedArtifact && !mining.artifact.present) {
         placeMiningArtifact(state, mining, *destination, true, true);
     }
-    if (!progressionOpportunity.has_value() && forcedArtifact && mining.artifact.present) {
+    if (!progressionOpportunity.has_value() && !authoredArtifactDestination &&
+        forcedArtifact && mining.artifact.present) {
         mining.artifact.revealed = true;
         const int artifactX = static_cast<int>(std::floor(mining.artifact.x));
         const int artifactY = static_cast<int>(std::floor(mining.artifact.y));
@@ -7886,9 +7932,8 @@ bool enterMiningSwarmArenaForDebug(GameState& state, const ContentCatalog& catal
         return false;
     }
 
-    // The debug entry point should demonstrate the encounter immediately. A
-    // campaign run still discovers the branch trigger and receives the alert
-    // countdown, but the lab starts inside the chamber with a complete horde.
+    // The debug entry point skips discovery but keeps the authored staggered
+    // ingress so the lab demonstrates the same entrance behavior as campaign.
     mining.enemies.clear();
     mining.droneX = mining.swarm.cacheX;
     mining.droneY = mining.swarm.cacheY;
@@ -7909,11 +7954,9 @@ bool enterMiningSwarmArenaForDebug(GameState& state, const ContentCatalog& catal
     const MiningArenaRules rules = activeMiningArenaRules(mining);
     mining.swarm.waveSize = swarmWaveSize(rules, mining.swarm.wave);
     mining.swarm.spawnedInWave = 0;
-    mining.swarm.spawnCooldownSeconds = 0.0;
+    mining.swarm.spawnCooldownSeconds = swarmInitialSpawnDelay(
+        mining.swarm, mining.depthZone);
     mining.swarm.intermissionSeconds = 0.0;
-    while (mining.swarm.spawnedInWave < mining.swarm.waveSize) {
-        spawnMiningSwarmEnemy(mining, rules);
-    }
     revealAround(mining, mining.droneX, mining.droneY, tuning::mining::passiveLightRadius);
     refreshTargetCell(mining);
     return true;

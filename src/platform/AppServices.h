@@ -163,6 +163,12 @@ public:
     virtual std::string load() = 0;
     virtual bool storeAtomic(std::string_view data) = 0;
     virtual bool clear() = 0;
+    // A checkpoint is independent from the active campaign slot.  It is only
+    // written after a stable, audited hub state, so recovery never needs to
+    // invent campaign keys or infer a physical route.
+    virtual std::string loadCheckpoint() { return {}; }
+    virtual bool storeCheckpointAtomic(std::string_view) { return false; }
+    virtual bool clearCheckpoint() { return true; }
     virtual std::string lastError() const = 0;
     virtual std::string_view description() const { return "Versioned local save data"; }
 };

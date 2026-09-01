@@ -1,9 +1,11 @@
 #include "core/Content.h"
 #include "core/ContentIds.h"
 #include "core/GameText.h"
+#include "core/ScenarioSystem.h"
 #include "core/Tuning.h"
 
 #include <algorithm>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -509,7 +511,7 @@ ContentCatalog createDefaultContent()
         } else if (destination.id == content::destination::uranus) {
             destination.approachBriefTitle = "LAST CHARTED DEPARTURE";
             destination.approachBriefDetail =
-                "Neptune is the last charted world. Bank 8 Flight Data to solve its vector: a Good or Perfect Pass Through completes the solution, Landing adds 1, and Orbit alone adds none.";
+                "Neptune is the last charted world. Recover the Uranus artifact, then complete a stable Orbit to solve its vector.";
         }
         // The current catalog begins its outward-only expedition at Saturn.
         // This is content policy: recovery and transfer mechanics consume the
@@ -665,8 +667,8 @@ ContentCatalog createDefaultContent()
                     "INSUFFICIENT SLINGSHOT — Saturn remains locked. Hold the gold corridor for a Perfect pass.",
                     ScenarioEventKind::FlybyFinished, content::scenario::outerTransfer, {}, 1, static_cast<int>(FlybyGrade::Perfect), false, true, true,
                     ScenarioActionKind::BeginActivity, {},
-                    {{ScenarioRewardKind::UnlockKey, content::unlock::routeSaturn, 0, false},
-                     {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}}
+                    {{ScenarioRewardKind::RouteAccess, content::destination::saturn, 0, false},
+                      {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}}
             }
         },
         {
@@ -691,15 +693,34 @@ ContentCatalog createDefaultContent()
             {
                 {"briefing", {}, "URANUS DEPARTURE", "Signal Beyond Neptune",
                     "Neptune is the last charted world. A repeating carrier signal is pulsing from the dark beyond it. Build a stable Neptune vector before the expedition leaves Uranus.",
-                    "OBJECTIVE // 8 FLIGHT DATA", "Track Signal", {},
+                    "OBJECTIVE // 2 FLIGHT DATA", "Track Signal", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
-                {"vector", {"briefing"}, "URANUS DEPARTURE", "Neptune Vector",
-                    "Bank 8 Flight Data. A Good or Perfect Pass Through completes the solution now; each safe Landing adds 1. Orbit alone adds none.",
+                {"artifact", {"briefing"}, "URANUS DEPARTURE", "Uranus Artifact",
+                    "Recover the Uranus artifact and return it safely. Its telemetry supplies the first Flight Data key.",
+                    "PROGRESS // 1 FLIGHT DATA", "Recover Artifact", {},
+                    ScenarioEventKind::ArtifactRecovered, content::destination::uranus, {},
+                    1, 0, false, false, false, ScenarioActionKind::None, {}, {}},
+                {"vector", {"artifact"}, "URANUS DEPARTURE", "Neptune Vector",
+                    "Artifact telemetry secured. Complete a Good or Perfect Orbit to bank the second Flight Data key.",
                     "REWARD // NEPTUNE ROUTE", "Lock Neptune Course", {},
                     ScenarioEventKind::FlightDataBanked, content::destination::uranus, content::destination::neptune,
-                    8, 0, false, true, false, ScenarioActionKind::ClaimReward, {},
+                    2, 0, false, true, false, ScenarioActionKind::ClaimReward, {},
                     {{ScenarioRewardKind::RouteAccess, content::destination::neptune, 0, false}}}
+            }
+        },
+        {
+            content::scenario::neptuneDiscovery,
+            1,
+            content::unlock::routeNeptune,
+            content::destination::neptune,
+            {
+                {"arrival", {}, "NEPTUNE", "Signal Beyond Neptune",
+                    "The Neptune vector resolves on an impossible mass beyond the charted system.",
+                    "OBJECTIVE // UNKNOWN CONTACT", "Investigate Contact", {},
+                    ScenarioEventKind::DestinationReached, {}, content::destination::neptune,
+                    1, 0, false, true, false, ScenarioActionKind::ClaimReward, {},
+                    {{ScenarioRewardKind::CampaignMilestone, {}, 0, false, {}, CampaignMilestone::ArkDiscovered}}}
             }
         },
         {
@@ -716,6 +737,48 @@ ContentCatalog createDefaultContent()
             false
         }
     };
+    // Every authored objective supplies the same player-facing contract. The
+    // defaults deliberately live beside content rather than being inferred by
+    // GamePanel, and specialized beats override only their actual transition.
+    for (ScenarioDefinition& scenario : catalog.scenarios) {
+        for (ScenarioStepDefinition& step : scenario.steps) {
+            if (step.goalText.empty()) step.goalText = step.title;
+            if (step.gateText.empty()) step.gateText = step.detail;
+            if (step.nextStepText.empty()) step.nextStepText = step.actionLabel;
+            if (!step.miningSiteDefinitionId.empty()) {
+                step.activity = ScenarioActivityKind::MiningSite;
+            } else if (step.completionEvent == ScenarioEventKind::FlybyFinished) {
+                step.activity = ScenarioActivityKind::Flyby;
+                step.retryPolicy = ScenarioRetryPolicy::PlayerConfirmed;
+            }
+            const bool awardsRoute = std::any_of(
+                step.rewards.begin(), step.rewards.end(), [](const ScenarioReward& reward) {
+                    return reward.kind == ScenarioRewardKind::RouteAccess;
+                });
+            if (awardsRoute) {
+                step.transition = {ScenarioTransitionKind::QueueRewardedRoute, Screen::Hangar, StoryBriefingId::None};
+            }
+        }
+    }
+    const auto authoredScenario = [&](std::string_view id) -> ScenarioDefinition* {
+        const auto found = std::find_if(catalog.scenarios.begin(), catalog.scenarios.end(), [&](const ScenarioDefinition& scenario) {
+            return scenario.id == id;
+        });
+        return found == catalog.scenarios.end() ? nullptr : &*found;
+    };
+    if (ScenarioDefinition* lunar = authoredScenario(content::scenario::lunarProspector)) {
+        lunar->steps[1].transition = {ScenarioTransitionKind::OpenScreen, Screen::DroneOps, StoryBriefingId::None};
+    }
+    if (ScenarioDefinition* mars = authoredScenario(content::scenario::marsBayExpansion)) {
+        mars->steps[1].transition = {ScenarioTransitionKind::OpenScreen, Screen::Hangar, StoryBriefingId::None};
+    }
+    if (ScenarioDefinition* neptune = authoredScenario(content::scenario::neptuneDiscovery)) {
+        neptune->steps[0].transition = {ScenarioTransitionKind::PresentStoryTakeover, Screen::ArrivalOps, StoryBriefingId::StraylightDiscovery};
+        neptune->steps[0].presentationMode = ScenarioPresentationMode::Takeover;
+        neptune->steps[0].goalText = "Investigate the impossible mass beyond Neptune.";
+        neptune->steps[0].gateText = "A safe Neptune arrival is required.";
+        neptune->steps[0].nextStepText = "Acknowledge the contact and begin the approach.";
+    }
     catalog.transferAssists = {
         {
             content::transferAssist::marsJupiter,
@@ -736,6 +799,10 @@ ContentCatalog createDefaultContent()
         {"generated_mining", 1, content::scenario::generatedTemplate, 0x5343454E4152494FULL}
     };
 
+    std::string scenarioError;
+    if (!validateCampaignProgressionCatalog(catalog, &scenarioError)) {
+        throw std::logic_error("Invalid campaign scenario catalog: " + scenarioError);
+    }
     return catalog;
 }
 
@@ -988,6 +1055,7 @@ std::string_view toString(LaunchMissionKind kind)
     case LaunchMissionKind::FlightControlsCalibration: return "Flight controls calibration";
     case LaunchMissionKind::ThermalManagement: return "Thermal management";
     case LaunchMissionKind::AsteroidBelt: return "Asteroid belt";
+    case LaunchMissionKind::StraylightApproach: return "Unknown contact approach";
     }
     return "Standard";
 }
@@ -1173,7 +1241,7 @@ std::string_view chapterGate(GameChapter chapter)
     case GameChapter::RedFrontier:
         return "Advance to the Outer Planets.";
     case GameChapter::Breakthrough:
-        return "Find the operational Ark beyond Neptune.";
+        return "Investigate the impossible contact beyond Neptune.";
     case GameChapter::Straylight:
         return "Leave the peaceful relay system with the Ark jump.";
     case GameChapter::Arkfall:

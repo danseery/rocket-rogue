@@ -153,10 +153,15 @@ bool AtomicTextFile::clear()
 const std::string& AtomicTextFile::lastError() const { return lastError_; }
 const std::filesystem::path& AtomicTextFile::path() const { return path_; }
 
-NativeSaveStore::NativeSaveStore(const std::filesystem::path& directory) : file_(directory / "save_v1.txt") {}
+NativeSaveStore::NativeSaveStore(const std::filesystem::path& directory)
+    : file_(directory / "save_v1.txt"),
+      checkpointFile_(directory / "save_v16_checkpoint.txt") {}
 std::string NativeSaveStore::load() { return file_.load(); }
 bool NativeSaveStore::storeAtomic(std::string_view data) { return file_.store(data); }
 bool NativeSaveStore::clear() { return file_.clear(); }
+std::string NativeSaveStore::loadCheckpoint() { return checkpointFile_.load(); }
+bool NativeSaveStore::storeCheckpointAtomic(std::string_view data) { return checkpointFile_.store(data); }
+bool NativeSaveStore::clearCheckpoint() { return checkpointFile_.clear(); }
 std::string NativeSaveStore::lastError() const { return file_.lastError(); }
 const std::filesystem::path& NativeSaveStore::path() const { return file_.path(); }
 

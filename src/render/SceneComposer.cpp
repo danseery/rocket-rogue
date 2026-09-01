@@ -55,8 +55,10 @@ constexpr float kLaunchThrustNozzlePaddingScale = 0.245F;
 constexpr float kLaunchThrustMinimumLengthScale = 0.40F;
 constexpr float kLaunchThrustMinimumWidthScale = 0.72F;
 // Each thrust-sheet frame has about 27% transparent space before the first
-// flame pixel. Account for it when a plume must visibly touch a nozzle.
+// flame pixel. Extraction crops that empty strip so the sprite geometry itself
+// can be anchored to the moving nozzle without an inferred texture offset.
 constexpr float kThrustSheetLeadingTransparentShare = 0.27F;
+constexpr float kMiningShipExhaustNozzleShare = 0.465F;
 // The bottom dock produces a deliberately shallow scene. The local-system
 // backdrop reaches roughly 1.75 world units below center (the large authored
 // Earth sprite), so this scale keeps that complete body inside sceneRect rather
@@ -1205,8 +1207,10 @@ void SceneComposer::drawFlightInstruments(const RenderSnapshot& snapshot)
             false);
     };
 
-    const bool temperatureCritical = snapshot.instrumentTemperature > 0.80;
-    const bool temperatureBlinkOn = static_cast<int>(std::floor(snapshot.animationTime * 3.0)) % 2 == 0;
+    const bool temperatureCritical =
+        snapshot.instrumentTemperature > tuning::launch::temperatureCriticalThreshold;
+    const bool temperatureBlinkOn = static_cast<int>(std::floor(
+        snapshot.animationTime * tuning::launch::temperatureWarningBlinkHz)) % 2 == 0;
     const Color temperatureColor = temperatureCritical && temperatureBlinkOn
         ? Color {1.0F, 0.18F, 0.10F, 1.0F}
         : Color {1.0F, 0.68F, 0.12F, 1.0F};
@@ -2899,6 +2903,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 cell.material,
                 cell.maxToughness,
                 cell.remainingToughness,
+                cell.damageFlashSeconds,
                 cell.hazardAffinity,
                 cell.revealed,
                 cell.hazard
@@ -2956,6 +2961,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 cell.material,
                 cell.maxToughness,
                 cell.remainingToughness,
+                cell.damageFlashSeconds,
                 cell.hazardAffinity,
                 cell.revealed,
                 cell.hazard
@@ -3000,6 +3006,22 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             const float scannerDistanceCells = nearestScannerDistanceCells(static_cast<double>(x) + 0.5, static_cast<double>(y) + 0.5);
             float localLight = std::clamp(1.0F - mainDistanceCells / kMiningLightRadiusCells, 0.0F, 1.0F) * 0.20F;
             localLight = std::max(localLight, scannerSweepBoost(scannerDistanceCells, 0.85F) * 0.032F);
+            const float damageFlash = std::clamp(
+                static_cast<float>(cell.damageFlashSeconds / tuning::mining::tileDamageFlashSeconds),
+                0.0F,
+                1.0F);
+            const auto appendDamageFlash = [&]() {
+                if (damageFlash <= 0.0F) {
+                    return;
+                }
+                appendTerrainRect(
+                    center.x,
+                    center.y,
+                    cellW * 0.96F,
+                    cellH * 0.96F,
+                    {1.0F, 0.11F, 0.09F,
+                        tuning::mining::tileDamageFlashOpacity * damageFlash * revealFraction});
+            };
             if (texturedTiles) {
                 const float integrity = static_cast<float>(cellIntegrity(cell));
                 const float breakGlow = 1.0F + (1.0F - integrity) * 0.14F;
@@ -3039,6 +3061,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                         atlasUv.u1,
                         atlasUv.v1,
                         true);
+                    appendDamageFlash();
                     continue;
                 }
             }
@@ -3052,6 +3075,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 localLight);
             color.a *= revealFraction;
             appendTerrainRect(center.x, center.y, cellW * 0.96F, cellH * 0.96F, color);
+            appendDamageFlash();
         }
         miningBaseTerrainInstanceCount_ =
             static_cast<std::uint32_t>(packedMiningTerrainInstances_.size())
@@ -3134,36 +3158,43 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     const Vec2 extractionBay {shipBay.x, shipSpriteY - shipSpriteSize * 0.17F};
     if (snapshot.miningExtractionActive && extractionLaunch > 0.001F) {
         // Use the shared animated launch flame rather than a blue geometric
-        // stand-in. Its leading edge sits directly at the bay nozzle and its
-        // warm palette makes this read as the ship's engines, not a scanner
-        // or mining marker.
-        const float flameLength = shipSpriteSize * (0.44F + extractionLaunch * 0.70F);
+        // stand-in. Crop the transparent leading strip from the thrust sheet,
+        // then parent the visible sprite edge directly to the ship nozzle.
+        // This makes both its position and motion derive from shipSpriteY.
+        const float uncroppedFlameLength =
+            shipSpriteSize * (0.44F + extractionLaunch * 0.70F);
+        const float flameLength = uncroppedFlameLength *
+            (1.0F - kThrustSheetLeadingTransparentShare);
         const float flameWidth = shipSpriteSize * (0.22F + extractionLaunch * 0.10F);
-        // Anchor the first visible flame pixels just inside the ship's visible
-        // lower edge. Centering the full texture at the nozzle leaves its 27%
-        // transparent leading margin as a conspicuous gap during extraction.
-        const float visibleNozzleY = shipGroundY + shipSpriteSize * 0.025F;
-        const float flameCenterY = visibleNozzleY - flameLength *
-            (0.50F - kThrustSheetLeadingTransparentShare);
+        const float visibleNozzleY =
+            shipSpriteY - shipSpriteSize * kMiningShipExhaustNozzleShare;
+        const float flameCenterY = visibleNozzleY - flameLength * 0.50F;
         const int flameFrame = static_cast<int>(snapshot.animationTime * 18.0) % 6;
         drawRadialGlow(
             shipBay.x,
-            visibleNozzleY - flameLength * 0.26F,
+            visibleNozzleY - flameLength * 0.22F,
             flameLength * 0.82F,
             {1.0F, 0.24F, 0.05F, 0.08F + extractionLaunch * 0.14F},
             36);
         if (textureReady(ThrustAsset)) {
-            drawSpriteRotated(
-                shipBay.x,
-                flameCenterY,
-                flameWidth,
-                flameLength,
-                0.0F,
-                1.0F,
-                {1.0F, 1.0F, 1.0F, 0.74F + extractionLaunch * 0.26F},
-                ThrustAsset,
-                flameFrame,
-                6);
+            constexpr int flameFrames = 6;
+            const float u0 = static_cast<float>(flameFrame) /
+                static_cast<float>(flameFrames);
+            const float u1 = static_cast<float>(flameFrame + 1) /
+                static_cast<float>(flameFrames);
+            submitInstance(
+                {
+                    shipBay.x, flameCenterY,
+                    flameWidth * 0.5F, 0.0F,
+                    0.0F, flameLength * 0.5F,
+                    {1.0F, 1.0F, 1.0F, 0.74F + extractionLaunch * 0.26F},
+                    u0, kThrustSheetLeadingTransparentShare, u1, 1.0F,
+                    SceneInstanceShape::Rectangle,
+                    4
+                },
+                textureForAsset(ThrustAsset),
+                CoordinateSpace::World,
+                PipelineClass::Textured);
         }
     }
     if (snapshot.miningShipPresent && snapshot.miningExtractionActive && textureReady(RocketOpenAsset)) {
@@ -3580,7 +3611,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 const Color tellColor {base.r, base.g, base.b, 0.12F + attackReady * 0.26F};
                 drawLine(enemyCenter.x + perpendicular.x * tellSpread, enemyCenter.y + perpendicular.y * tellSpread, tellTip.x, tellTip.y, tellColor, 1.4F + attackReady * 0.8F);
                 drawLine(enemyCenter.x - perpendicular.x * tellSpread, enemyCenter.y - perpendicular.y * tellSpread, tellTip.x, tellTip.y, tellColor, 1.4F + attackReady * 0.8F);
-            } else if (!spawnerEnemy) {
+            } else if (!spawnerEnemy &&
+                (!enemy.swarmAssociated || enemy.swarmAttackCommitSeconds > 0.0)) {
                 const float windupLength = std::min(cellW, cellH) * (0.74F + attackReady * 0.52F);
                 drawLine(
                     enemyCenter.x - directionToActor.y * windupLength * 0.35F,
@@ -6430,6 +6462,21 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         texturedQuad(RocketOpenAsset, 0.86F * scale, 0.86F * scale, {1.0F, 1.0F, 1.0F, 1.0F});
     } else {
         texturedQuad(RocketClosedAsset, 0.86F * scale, 0.86F * scale, {1.0F, 1.0F, 1.0F, 1.0F});
+        const bool temperatureCritical = snapshot.screen == Screen::Launch &&
+            snapshot.instrumentTemperature > tuning::launch::temperatureCriticalThreshold;
+        const bool temperatureBlinkOn = static_cast<int>(std::floor(
+            snapshot.animationTime * tuning::launch::temperatureWarningBlinkHz)) % 2 == 0;
+        if (temperatureCritical && temperatureBlinkOn) {
+            // Keep the warning where the player is already looking. A second,
+            // low-opacity copy preserves the ship art while washing the hull
+            // red in sync with the critical temperature instruments.
+            texturedQuad(
+                RocketClosedAsset,
+                0.86F * scale,
+                0.86F * scale,
+                {1.0F, 0.10F, 0.08F,
+                    tuning::launch::temperatureShipFlashOpacity});
+        }
     }
 }
 
@@ -6467,6 +6514,16 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         drawArkSprite({0.30F, -0.01F}, 1.02F, 1.0F);
         drawRadialGlow(neptune.x, neptune.y, 0.16F, {0.16F, 0.42F, 0.96F, 0.22F}, 64);
         drawBodySprite(NeptuneAsset, neptune, 0.26F, 0.92F);
+    } else if (snapshot.straylightApproach) {
+        const Vec2 origin = routePoint(snapshot, 0.0F);
+        const Vec2 endpoint = routePoint(snapshot, 1.0F);
+        const Vec2 tangent = routeTangent(snapshot, 0.0F);
+        const Vec2 right {tangent.y, -tangent.x};
+        const Vec2 neptune {origin.x - right.x * 0.19F, origin.y - right.y * 0.19F};
+        drawRadialGlow(neptune.x, neptune.y, 0.18F, {0.16F, 0.42F, 0.96F, 0.20F}, 64);
+        drawBodySprite(NeptuneAsset, neptune, 0.30F, 0.94F);
+        drawRadialGlow(endpoint.x, endpoint.y, 0.40F, {0.20F, 0.68F, 0.92F, 0.13F}, 96);
+        drawArkSprite(endpoint, 0.82F, 1.0F);
     } else if (snapshot.debugActOneCheckpoint >= 3) {
         // Act 1 departures still originate at Earth. Keep a small Moon companion
         // with the distant home body so the outgoing route has a stronger sense of scale.
@@ -6556,10 +6613,23 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             // source body, not a second launch from Earth. Transfer assists
             // use the same path, so future content never needs a renderer
             // branch for its source planet.
-            const Vec2 origin = routePoint(snapshot, 0.0F);
-            const int originAsset = originBodyAsset(snapshot.launchOriginTier);
             const float originRadius = 0.110F +
                 std::min(4.0F, static_cast<float>(snapshot.launchOriginTier)) * 0.012F;
+            const Vec2 routeOrigin = routePoint(snapshot, 0.0F);
+            const Vec2 departureTangent = routeTangent(snapshot, 0.0F);
+            const Vec2 departureRight {departureTangent.y, -departureTangent.x};
+            // The ship begins at routeOrigin. Drawing the source body at that
+            // exact point lets the closed ship cover it almost completely,
+            // especially for Jupiter's circular silhouette. Place the body
+            // beside and slightly behind the launch point so the route still
+            // reads as leaving its orbit while the source remains legible.
+            const Vec2 origin {
+                routeOrigin.x - departureTangent.x * originRadius * 0.45F -
+                    departureRight.x * originRadius * 1.55F,
+                routeOrigin.y - departureTangent.y * originRadius * 0.45F -
+                    departureRight.y * originRadius * 1.55F
+            };
+            const int originAsset = originBodyAsset(snapshot.launchOriginTier);
             const Color originColor = snapshot.launchOriginTier >= 3
                 ? Color{0.82F, 0.62F, 0.34F, 0.82F}
                 : (snapshot.launchOriginTier == 2
@@ -6631,6 +6701,25 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                 : 0.0F;
             const float bodyPulse = snapshot.screen == Screen::ArrivalFanfare ? 1.0F + arrivalBeat * 0.08F : 1.0F;
             const float bodyRadius = radius * 1.12F * bodyPulse;
+            if (snapshot.destinationTier == 6 && !arkVisible(snapshot.arkCondition)) {
+                // Let Straylight register as a distant, unexplained silhouette
+                // at Neptune without advancing or rewriting the reveal. Draw
+                // it first so the planet occludes its near edge and remains
+                // the foreground destination.
+                const Vec2 endpointTangent = routeTangent(snapshot, 1.0F);
+                const Vec2 endpointRight {endpointTangent.y, -endpointTangent.x};
+                const Vec2 distantArk {
+                    endpoint.x + endpointTangent.x * 0.22F + endpointRight.x * 0.06F,
+                    endpoint.y + endpointTangent.y * 0.22F + endpointRight.y * 0.06F
+                };
+                drawRadialGlow(
+                    distantArk.x,
+                    distantArk.y,
+                    0.16F,
+                    {0.20F, 0.68F, 0.92F, 0.06F},
+                    48);
+                drawArkSprite(distantArk, 0.22F, 0.62F);
+            }
             if (snapshot.screen == Screen::ArrivalFanfare) {
                 drawCircle(endpoint.x, endpoint.y, radius * (1.72F + arrivalBeat * 0.28F), {1.0F, 0.78F, 0.24F, 0.12F}, 72);
             }
@@ -6665,12 +6754,17 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         drawArkSprite({0.38F, -0.12F}, 0.48F, arkDamaged(snapshot.arkCondition) ? 0.86F : 0.92F);
     }
 
-    drawRoute(snapshot);
+    // Straylight story takeovers are composed as clean cinematic tableaux.
+    // The generic travel path cuts through the Ark and distracts from the
+    // discovery and Act I completion beats, so retain it only for gameplay.
+    if (!snapshot.straylightStoryReveal) {
+        drawRoute(snapshot);
+    }
     if (snapshot.screen == Screen::Launch) {
         drawLaunchAsteroids(snapshot);
     }
 
-    if (snapshot.screen == Screen::Launch) {
+    if (snapshot.screen == Screen::Launch && !snapshot.straylightApproach) {
         const float targetProgress = static_cast<float>(std::clamp(
             snapshot.launchMissionTargetProgress,
             0.0,

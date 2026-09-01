@@ -661,7 +661,7 @@ inline SurfaceUpgradeCardPresentation runUpgradeOfferCardPresentation(
             card.title = drone->name + " MK " + runUpgradeRankLabel(offer.targetRank);
             card.detail = "All current and future equipped copies gain +30% damage and support stats for this expedition.";
             card.effectChips = miniDroneChips(scaledMiniDroneStats(drone->stats, offer.targetRank), offer.targetRank, drone->role);
-            card.effectChips.insert(card.effectChips.begin(), panelMetric("Scope", "All " + drone->name + " copies"));
+            card.effectChips.insert(card.effectChips.begin(), panelMetric("Scope", "All copies"));
             card.effectChips.insert(card.effectChips.begin(), panelMetric(
                 {},
                 "Mk " + runUpgradeRankLabel(offer.targetRank - 1) + " -> Mk " + runUpgradeRankLabel(offer.targetRank)));

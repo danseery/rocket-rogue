@@ -7,7 +7,7 @@ Use this page to choose the right source before changing gameplay, presentation,
 - [Rocket Rogue Game Design Document](Rocket_Rogue_Game_Design_Document.docx) - formatted, shareable game design document.
 - [Design Notes](DESIGN.md) - current gameplay loop, balance principles, architecture ownership, and persistence contracts.
 - [Agent Design Context](AGENT_DESIGN_CONTEXT.md) - implementation priority order and condensed project direction; start here before extending a game system.
-- [Ark Campaign and Navigation Spine](ARK_CAMPAIGN_NAVIGATION_PLAN.md) - individual Jupiter-to-Neptune progression, the Neptune-only Straylight takeover, numbered chapters, and post-solar campaign structure.
+- [Scenario Framework](SCENARIO_FRAMEWORK.md) - campaign goals, gates, typed transitions, route safety validation, checkpoint recovery, and the Neptune-only Straylight takeover.
 
 ## Playable systems
 

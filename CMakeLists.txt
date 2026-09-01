@@ -119,9 +119,9 @@ add_library(rocket_core
 target_include_directories(rocket_core PUBLIC src)
 
 if(MSVC)
-    target_compile_options(rocket_core PRIVATE /W4 /permissive-)
+    target_compile_options(rocket_core PRIVATE /W4 /WX /permissive-)
 else()
-    target_compile_options(rocket_core PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(rocket_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)

@@ -349,16 +349,11 @@ bool scenarioClaimQueuesRoute(
     }
     const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, *instance);
     const ScenarioStepDefinition* step = findScenarioStepDefinition(resolved, objective.stepId);
-    if (step == nullptr || scenarioRouteRewardDestination(catalog, *step) == nullptr) {
+    if (step == nullptr || objective.transition.kind != ScenarioTransitionKind::QueueRewardedRoute ||
+        scenarioRouteRewardDestination(catalog, *step) == nullptr) {
         return false;
     }
-    return step->completionEvent == ScenarioEventKind::FlybyFinished ||
-        std::any_of(
-            step->rewards.begin(),
-            step->rewards.end(),
-            [](const ScenarioReward& reward) {
-                return reward.kind == ScenarioRewardKind::RouteAccess;
-            });
+    return true;
 }
 
 std::string modalButton(
@@ -1431,7 +1426,11 @@ std::string scenarioObjectiveMarkup(
             << (objective.returnPending ? " // PENDING RETURN" : "")
             << "</b></div>";
     }
-    out << "<p>" << htmlEscape(objective.detail) << "</p>"
+    out << "<p>" << htmlEscape(objective.goal.empty() ? objective.detail : objective.goal) << "</p>"
+        << "<div class=\"campaign-objective-guidance\"><span>GATE // "
+        << htmlEscape(objective.gate.empty() ? objective.detail : objective.gate)
+        << "</span><span>NEXT // " << htmlEscape(objective.nextStep.empty()
+            ? objective.actionLabel : objective.nextStep) << "</span></div>"
         << "<div class=\"campaign-objective-foot\"><small>" << htmlEscape(objective.rewardPreview) << "</small>";
     if (showAction) {
         out << scenarioActionButton(
@@ -3322,13 +3321,22 @@ std::string buildGamePanelMarkup(
                 << modalButton("New Game", "new_game_confirm", "title-action title-new-game")
                 << modalButton("Settings", ui::modals::settings, "title-action title-settings")
                 << "</div>";
+        } else if (context.checkpointRecoveryAvailable) {
+            out << "<div class=\"title-menu-primary\">"
+                << button("Restore Checkpoint", ui::actions::restoreCheckpoint, "title-action title-continue", true)
+                << "</div><div class=\"title-menu-separator\" aria-hidden=\"true\"></div>"
+                << "<div class=\"title-menu-secondary\">"
+                << button("New Campaign", ui::actions::newGame, "title-action title-new-game")
+                << modalButton("Settings", ui::modals::settings, "title-action title-settings")
+                << "</div>";
         } else {
             out << button("New Game", ui::actions::newGame, "title-action title-new-game", true);
             out << modalButton("Settings", ui::modals::settings, "title-action title-settings");
         }
         out << "</div>"
             << "<span class=\"title-save-state ";
-        out << (context.hasSavedGame ? "save-found\">SAVE SIGNAL ACQUIRED" : "save-empty\">NO LOCAL SAVE DETECTED");
+        out << (context.checkpointRecoveryAvailable ? "save-empty\">CHECKPOINT AVAILABLE"
+            : (context.hasSavedGame ? "save-found\">SAVE SIGNAL ACQUIRED" : "save-empty\">NO LOCAL SAVE DETECTED"));
         out << "</span>";
         if (!context.titleNotice.empty()) {
             out << "<p class=\"title-notice\">" << htmlEscape(context.titleNotice) << "</p>";
@@ -3349,21 +3357,38 @@ std::string buildGamePanelMarkup(
     }
 
     if (state.screen == Screen::StoryBriefing) {
-        const bool straylight = state.storyBriefing.pending == StoryBriefingId::StraylightDiscovery;
+        const bool straylight = state.storyBriefing.pending == StoryBriefingId::StraylightDiscovery ||
+            state.storyBriefing.pending == StoryBriefingId::StraylightApproach ||
+            state.storyBriefing.pending == StoryBriefingId::ActOneComplete;
         out << "<section class=\"story-briefing " << (straylight ? "story-straylight" : "story-introduction")
             << "\" data-panel-mode=\"story-briefing\" data-story-briefing-id=\""
             << (straylight ? "straylight-discovery" : "campaign-introduction") << "\">"
             << "<div class=\"story-vignette\"></div><div class=\"story-content\">";
-        if (straylight) {
-            out << "<span class=\"story-kicker\">NEPTUNE // DEEP-SPACE CONTACT</span>"
-                << "<h1>STRAYLIGHT</h1>"
-                << "<p class=\"story-lead\">Beyond Neptune, an impossible contact resolves against the dark.</p>"
+        if (state.storyBriefing.pending == StoryBriefingId::StraylightDiscovery) {
+            out << "<span class=\"story-kicker\">NEPTUNE // UNCHARTED MASS</span>"
+                << "<h1>SOMETHING JUST BLOCKED THE STARS</h1>"
+                << "<p class=\"story-lead\">Beyond Neptune, the distant speck resolves into a vessel so vast the instruments briefly classify it as a moon. The instruments are having a day.</p>"
                 << "<div class=\"story-beats\">"
-                << "<article><span>01</span><h2>Contact</h2><p>A hull answers where your charts insist there should be nothing.</p></article>"
-                << "<article><span>02</span><h2>Identification</h2><p>The registry wakes one name: Straylight. Derelict. Under-equipped. Operable.</p></article>"
-                << "<article><span>03</span><h2>Home</h2><p>For the first time, this expedition has more than a launch site. It has somewhere to return to.</p></article>"
+                << "<div class=\"story-beat\"><span>01</span><h2>Silhouette</h2><p>No beacon. No registry. No sane construction scale. Just a city of metal holding perfectly still in the dark.</p></div>"
+                << "<div class=\"story-beat\"><span>02</span><h2>Chorus</h2><p>Every recovered artifact wakes at once. They are not pointing toward the vessel. They are answering it.</p></div>"
+                << "<div class=\"story-beat\"><span>03</span><h2>Invitation</h2><p>One pale corridor opens along the hull. Subtle, for something large enough to have weather.</p></div>"
                 << "</div>"
-                << button("Approach the Straylight", ui::actions::acknowledgeStoryBriefing, "story-action ok", true);
+                << button("Approach", ui::actions::acknowledgeStoryBriefing, "story-action ok", true);
+        } else if (state.storyBriefing.pending == StoryBriefingId::StraylightApproach) {
+            out << "<span class=\"story-kicker\">NEPTUNE // CONTACT HELD</span>"
+                << "<h1>THE LIGHT IS STILL ON</h1>"
+                << "<p class=\"story-lead\">The impossible vessel waits beyond Neptune, silent except for one illuminated corridor. Whatever it is, it has noticed us.</p>"
+                << button("Approach", ui::actions::acknowledgeStoryBriefing, "story-action ok", true);
+        } else if (state.storyBriefing.pending == StoryBriefingId::ActOneComplete) {
+            out << "<span class=\"story-kicker\">ACT I COMPLETE</span>"
+                << "<h1>HOME IN THE DARK</h1>"
+                << "<p class=\"story-lead\">The name on the hull is STRAYLIGHT. The expedition left Earth hunting artifacts and found the impossible vessel they had been torn from.</p>"
+                << "<div class=\"story-beats\">"
+                << "<div class=\"story-beat\"><span>01</span><h2>Arrival</h2><p>The docking seals hold. Somewhere deep inside Straylight, old systems begin to wake.</p></div>"
+                << "<div class=\"story-beat\"><span>02</span><h2>Inheritance</h2><p>Every fragment carried home was a piece of this impossible ship—and now the ship recognizes its missing pieces.</p></div>"
+                << "<div class=\"story-beat\"><span>03</span><h2>Threshold</h2><p>The Solar System ends behind you. What waits aboard belongs to another journey.</p></div>"
+                << "</div>"
+                << button("Board", ui::actions::acknowledgeStoryBriefing, "story-action ok", true);
         } else {
             out << "<span class=\"story-kicker\">ARCHIVE PLAYBACK // EARTH, 20X6</span>"
                 << "<h1>THE YEAR IS 20X6</h1>"
@@ -3630,8 +3655,11 @@ std::string buildGamePanelMarkup(
                 tagTwo,
                 tagThree,
                 perfectChallengeReadyToClaim
-                    ? ui::actions::claimSaturnCourse
-                    : ui::actions::flybyContinue,
+                    ? ui::actions::scenarioAction(
+                          challengeObjective.scenarioId,
+                          challengeObjective.stepId,
+                          static_cast<int>(ScenarioActionKind::ClaimReward))
+                    : std::string(ui::actions::flybyContinue),
                 perfectChallengeReadyToClaim
                     ? std::string_view(perfectChallengeClaimLabel)
                     : (scenarioChallenge
@@ -3813,7 +3841,9 @@ std::string buildGamePanelMarkup(
         out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
             << htmlEscape(text::panel::sections::flightControls) << "</span><strong>"
             << htmlEscape(context.flightArmed
-                ? "Choose the next move"
+                ? (context.flightModel.manualControlsEnabled
+                    ? "Choose the next move"
+                    : "Autoguidance engaged")
                 : (!context.droneTransferEnabled ? "Launch corridor clear" : (context.preflightReady ? "Launch corridor clear" : "Securing Mining Rig"))) << "</strong></div>";
         if (!context.flightArmed) {
             const std::string_view preflightCopy = context.launchQueued
@@ -3972,6 +4002,9 @@ std::string buildGamePanelMarkup(
             ? ScenarioObjectivePresentation {}
             : scenarioDepartureChallengeForDestination(state, catalog, arrivalDestination->id);
         const bool arrivalDepartureChallenge = departureScenario.available;
+        const ScenarioObjectivePresentation displayedArrivalObjective = arrivalDepartureChallenge
+            ? departureScenario
+            : arrivalScenario;
         const Destination* routeDestination = nextDestination(state, catalog);
         const bool authoredRoute = routeDestination != nullptr && !routeDestination->routeRequirementKeys.empty();
         const bool flightDataRoute = routeDestination != nullptr &&
@@ -4029,32 +4062,20 @@ std::string buildGamePanelMarkup(
             << resourceChipGrid(arrivalFuelMetrics) << "</div>";
         if (arrivalDestination != nullptr) {
             out << scenarioObjectiveMarkup(
-                scenarioObjectiveForDestination(state, catalog, arrivalDestination->id),
-                false);
-            if (!arrivalDestination->approachBriefTitle.empty()) {
+                displayedArrivalObjective,
+                arrivalDepartureChallenge);
+            if (!arrivalDepartureChallenge && !arrivalDestination->approachBriefTitle.empty()) {
                 out << phaseAdvisory({
                     arrivalDestination->approachBriefTitle,
                     arrivalDestination->approachBriefDetail,
                     arrivalDestination->requiresArrivalSurveySequence ? "info" : "warning"});
             }
         }
-        out << "<p class=\"phase-copy\">Research families are added to future Refit offers when milestones are reached; they are not immediately owned.</p>";
-        out << "<h2>" << htmlEscape(
-            orbitCaptured ? "Resolve captured orbit" : (firstLandingSequence ? "Map first landing" : "Commit approach")) << "</h2>";
-        out << "<div class=\"ops-grid\">";
-        if (arrivalDepartureChallenge) {
-            out << arrivalOperationCard(
-                "JUPITER DEPARTURE — PERFECT SLINGSHOT",
-                "The Saturn route is locked behind this departure pass. Hold the gold corridor through the finish, then lock the Saturn course.",
-                "Required route challenge",
-                "Perfect unlocks Saturn",
-                panelActionButton(
-                    "Launch",
-                    ui::actions::beginSaturnSlingshot,
-                    "ok"),
-                {},
-                true);
-        } else if (orbitCaptured) {
+        if (!arrivalDepartureChallenge) {
+            out << "<h2>" << htmlEscape(
+                orbitCaptured ? "Resolve captured orbit" : (firstLandingSequence ? "Map first landing" : "Commit approach")) << "</h2>";
+            out << "<div class=\"ops-grid\">";
+        if (orbitCaptured) {
             out << arrivalOperationCard(
                 "LAND",
                 "Descend to " + landingTarget + ". Surface hazard +0 from approach mapping. Earns the normal one-step Flight Data contribution. Orbit remains this visit's committed path.",
@@ -4104,7 +4125,8 @@ std::string buildGamePanelMarkup(
                     landingIntroduction);
             }
         }
-        out << "</div>";
+            out << "</div>";
+        }
         out << phaseBoardClose();
         if (showApproachIntroduction) {
             const std::string approachLocation = arrivalScenario.available && !arrivalScenario.location.empty()
@@ -4138,7 +4160,7 @@ std::string buildGamePanelMarkup(
             out << activityIntroductionModal(
                 ui::modals::orbitIntroduction,
                 "ORBIT — CAPTURE",
-                "The insertion begins in a stable Good orbit. Trim deliberately into Perfect for the larger Research Data and credit award.",
+                "The insertion begins on the Perfect orbit. Hold the gold band through one complete loop for the larger Research Data and credit award.",
                 "Capture closes Pass Through and removes the +20 descent hazard for this visit. Then choose mapped landing or depart with science.",
                 "Enter orbit",
                 ui::actions::arrivalOrbit,
@@ -4151,7 +4173,7 @@ std::string buildGamePanelMarkup(
                 orbitCaptured
                     ? "The orbital map removes the +20 approach hazard for this visit."
                     : "Direct Descent intentionally accepts +20 surface hazard and closes both flight paths.",
-                "Surface Ops remains the path to materials, artifacts, campaign objectives, and one step of Flight Data.",
+                "Surface Ops remains the path to materials, artifacts, and campaign objectives.",
                 "Begin landing",
                 ui::actions::arrivalLanding,
                 "danger");
@@ -5124,11 +5146,9 @@ std::string buildGamePanelMarkup(
             state.meta.acknowledgedActivityBriefingIds,
             ui::briefings::flightControlsCalibration);
     const ScenarioObjectivePresentation departureChallenge =
-        scenarioDepartureChallengeForDestination(state, catalog, launchTarget.id);
-    const ScenarioObjectivePresentation launchScenario =
-        scenarioObjectiveForDestination(state, catalog, launchTarget.id);
-    const bool saturnCourseReady =
-        canClaimSaturnCourse(state);
+        scenarioDepartureChallengeForDestination(state, catalog, currentFrontier.id);
+    const CampaignNextStep nextStep = campaignNextStep(state, catalog);
+    const ScenarioObjectivePresentation launchScenario = nextStep.objective;
     const bool scenarioRouteClaimReady =
         scenarioClaimQueuesRoute(state, catalog, launchScenario);
 
@@ -5160,13 +5180,7 @@ std::string buildGamePanelMarkup(
     if (arkDiscovered(state) && !hostileSystemActive(state)) {
         out << button(state.meta.ark.firstJumpComplete ? "Attempt next Ark jump" : "Make first Ark jump", ui::actions::arkJump, "warn");
     }
-    if (saturnCourseReady) {
-        out << button(
-            "Lock Saturn Course",
-            ui::actions::claimSaturnCourse,
-            "ok hangar-launch-prep",
-            true);
-    } else if (scenarioRouteClaimReady) {
+    if (scenarioRouteClaimReady) {
         out << scenarioActionButton(
             launchScenario,
             "ok hangar-launch-prep",
@@ -5202,7 +5216,7 @@ std::string buildGamePanelMarkup(
             out << (launchReadiness.blocked
                 ? modalButton(text::panel::attemptFrontier(next->name), ui::modals::launchBlocked, "danger")
                 : (oneWayCommit
-                      ? modalButton("Commit to " + next->name, "one_way_launch_confirm", "danger")
+                      ? modalButton("Lock course", "one_way_launch_confirm", "danger")
                       : button(text::panel::attemptFrontier(next->name), ui::actions::attemptFrontier, "danger")));
         }
     }
@@ -5231,7 +5245,7 @@ std::string buildGamePanelMarkup(
             "<p class=\"activity-introduction-setup\">The required transfer solution is complete. Crossing this window commits the expedition outward.</p>"
             "<div class=\"activity-introduction-payoff\"><span>Point of no return</span><strong>The inner planets will no longer be reachable after departure.</strong></div>"
             "<div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">" +
-            button("Lock course for " + next->name, ui::actions::attemptFrontier, "danger", true) +
+            button("Lock course", ui::actions::attemptFrontier, "danger", true) +
             "</div></section>";
         out << modalTemplate("one_way_launch_confirm", "CONFIRM OUTER COURSE", oneWayLaunchBody);
     }
@@ -5437,7 +5451,11 @@ std::string variantForContext(const PanelRenderContext& context)
     case Screen::StoryBriefing:
         return state.storyBriefing.pending == StoryBriefingId::StraylightDiscovery
             ? "straylight-discovery"
-            : "campaign-introduction";
+            : (state.storyBriefing.pending == StoryBriefingId::StraylightApproach
+                ? "straylight-approach"
+                : (state.storyBriefing.pending == StoryBriefingId::ActOneComplete
+                    ? "act-one-complete"
+                    : "campaign-introduction"));
     }
     return "unknown";
 }

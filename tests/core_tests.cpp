@@ -2139,25 +2139,6 @@ void fuelRefitsTeachMarsAndFundJupiter()
                 restoredSlingshot.run.pendingTransferAssist.exitCourseOffset,
                 expectedLaunchCourseOffset),
         "an active Mars slingshot must survive save/load until the Jupiter attempt begins");
-    SaveData legacySlingshot = slingshotSave;
-    legacySlingshot.pendingTransferAssist = {};
-    legacySlingshot.jupiterSlingshotActive = true;
-    legacySlingshot.nextLaunchFuelBoost = tuning::flyby::jupiterSlingshotFuelSavings;
-    legacySlingshot.nextLaunchSpeedBoost = tuning::flyby::slingshotSpeedBoost;
-    legacySlingshot.nextLaunchInstabilityPenalty = tuning::flyby::jupiterSlingshotGoodInstabilityPenalty;
-    const std::optional<SaveData> restoredLegacySlingshotSave =
-        deserializeSaveData(serializeSaveData(legacySlingshot));
-    require(restoredLegacySlingshotSave.has_value(), "a legacy Jupiter slingshot projection must deserialize");
-    GameState restoredLegacySlingshot = createNewGame(catalog, 0xF0051);
-    restoreSaveData(restoredLegacySlingshot, catalog, *restoredLegacySlingshotSave);
-    require(restoredLegacySlingshot.run.pendingTransferAssist.definitionId == content::transferAssist::marsJupiter &&
-            restoredLegacySlingshot.run.pendingTransferAssist.targetDestinationId == content::destination::jupiter &&
-            nearlyEqual(restoredLegacySlingshot.run.nextLaunchInstabilityPenalty, 0.0) &&
-            nearlyEqual(
-                pendingLaunchInstabilityPenaltyForDestination(
-                    restoredLegacySlingshot, content::destination::jupiter),
-                tuning::flyby::jupiterSlingshotGoodInstabilityPenalty),
-        "a legacy active Jupiter slingshot must migrate into the canonical target-bound assist record");
 
     const std::optional<SaveData> restoredGoodSave = deserializeSaveData(
         serializeSaveData(captureSaveData(goodSlingshot)));
@@ -3027,6 +3008,8 @@ void solarRouteLegsKeepCampaignProgressSeparateFromShipPosition()
     std::string routeAuditError;
     require(validateRouteCatalog(catalog, &routeAuditError),
         "the authored solar route catalog should pass its source, target, fuel, and recovery-policy audit");
+    require(validateCampaignProgressionCatalog(catalog, &routeAuditError),
+        "the authored scenario catalog should expose reachable keys, executable transitions, and a next step at every campaign beat");
     const std::array<std::string_view, 6> routeIds {{
         content::routeLink::earthMoon,
         content::routeLink::moonMars,
@@ -3533,8 +3516,8 @@ void orbitStartsCircularAndIsSolvableAcrossDestinationTiers()
         }
         require(state.run.orbit.completed, "a baseline orbit should complete within its visible timer");
         require(
-            state.run.orbit.result == OrbitGrade::Good,
-            "a baseline no-input orbit should earn Good outside the Perfect band at "
+            state.run.orbit.result == OrbitGrade::Perfect,
+            "a baseline no-input orbit should preserve the authored Perfect solution at "
                 + std::string(destinations[index]) + " (grade " + std::to_string(static_cast<int>(state.run.orbit.result))
                 + ", perfect seconds " + display::fixed(state.run.orbit.perfectSeconds, 2)
                 + ", good seconds " + display::fixed(state.run.orbit.goodSeconds, 2)
@@ -3562,7 +3545,7 @@ void orbitStartsCircularAndIsSolvableAcrossDestinationTiers()
         trimmed.missSeconds = 0.0;
         trimmed.goodSeconds = std::max(trimmed.goodSeconds, 1.0);
         require(orbitGrade(trimmed) == OrbitGrade::Perfect,
-            "a clean loop that finishes in Perfect should promote a controlled trim above baseline Good");
+            "a clean loop that finishes in Perfect should retain the top grade");
         trimmed.missSeconds = 0.02;
         require(orbitGrade(trimmed) != OrbitGrade::Perfect,
             "entering red must prevent a final Perfect orbit even when the ship recovers the inner band");
@@ -3647,12 +3630,12 @@ void arrivalOrbitMinigameRewardsProgressionOnlyResearch()
     require(missPanelHtml.find("rr-hud-orbit-good") == std::string::npos
             && missPanelHtml.find("rr-hud-orbit-perfect") == std::string::npos,
         "active orbit should keep only timer, zone, loop progress, and reward visible");
-    require(miss.run.orbit.currentZone >= 1, "orbit should begin inside the scalable orbital band");
+    require(miss.run.orbit.currentZone == 2, "orbit should begin inside the gold Perfect band");
     const double expectedOrbitEntryAngle = tuning::orbit::flybyExitAngleRadians();
     require(nearlyEqual(miss.run.orbit.angleRadians, expectedOrbitEntryAngle) &&
             nearlyEqual(std::atan2(miss.run.orbit.shipY, miss.run.orbit.shipX), expectedOrbitEntryAngle) &&
-            std::hypot(miss.run.orbit.shipX, miss.run.orbit.shipY) > miss.run.orbit.targetRadius + miss.run.orbit.perfectBand,
-        "orbit insertion should begin at Flyby's endpoint angle inside Good and outside Perfect");
+            nearlyEqual(std::hypot(miss.run.orbit.shipX, miss.run.orbit.shipY), miss.run.orbit.targetRadius),
+        "orbit insertion should begin at Flyby's endpoint angle on the Perfect solution");
     const double initialAngularMomentum = miss.run.orbit.shipX * miss.run.orbit.velocityY
         - miss.run.orbit.shipY * miss.run.orbit.velocityX;
     require(initialAngularMomentum < 0.0,
@@ -5496,11 +5479,24 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
         catalog,
         arrivalDepartureLaunch,
         arrivalDepartureLaunch});
-    require(arrivalDepartureHtml.find("JUPITER DEPARTURE — PERFECT SLINGSHOT") != std::string::npos
-            && arrivalDepartureHtml.find("rr-button-label\">Launch</span>") != std::string::npos
-            && arrivalDepartureHtml.find("data-rr-action=\"begin_saturn_slingshot\"") != std::string::npos
-            && arrivalDepartureHtml.find("Begin Jupiter Departure Slingshot") == std::string::npos,
-        "an active Jupiter departure challenge must present its required route with a concise Launch action at Arrival Ops");
+    const std::string departureAction = ui::actions::scenarioAction(
+        content::scenario::outerTransfer,
+        "flyby",
+        static_cast<int>(ScenarioActionKind::BeginActivity));
+    require(arrivalDepartureHtml.find("Perfect Slingshot") != std::string::npos,
+        "the active Jupiter departure objective should stay visible at Arrival Ops");
+    require(arrivalDepartureHtml.find("rr-button-label\">Launch</span>") != std::string::npos,
+        "the active Jupiter departure objective should keep its concise Launch action");
+    require(arrivalDepartureHtml.find("data-rr-action=\"" + departureAction + "\"") != std::string::npos,
+        "the authoritative Jupiter departure action should still dispatch the scenario flyby");
+    require(arrivalDepartureHtml.find("Begin Jupiter Departure Slingshot") == std::string::npos,
+        "the Arrival Ops action must stay concise");
+    require(arrivalDepartureHtml.find("IO APPROACH") == std::string::npos,
+        "the active departure objective should replace its stale Io approach advisory");
+    require(arrivalDepartureHtml.find("Research families are added to future Refit offers") == std::string::npos,
+        "Arrival Ops should not repeat out-of-context Research Data copy below an active scenario objective");
+    require(arrivalDepartureHtml.find("arrival-card") == std::string::npos,
+        "the active departure objective should not be repeated as an Arrival Ops card");
 
     require(startSaturnSlingshotRun(state, catalog)
             && state.screen == Screen::Flyby
@@ -5538,8 +5534,12 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
         catalog,
         completedDepartureLaunch,
         completedDepartureLaunch});
+    const std::string claimAction = ui::actions::scenarioAction(
+        content::scenario::outerTransfer,
+        "flyby",
+        static_cast<int>(ScenarioActionKind::ClaimReward));
     require(completedDepartureFlyby.find("Lock Saturn Course") != std::string::npos &&
-            completedDepartureFlyby.find("data-rr-action=\"claim_saturn_course\"") != std::string::npos &&
+            completedDepartureFlyby.find("data-rr-action=\"" + claimAction + "\"") != std::string::npos &&
             completedDepartureFlyby.find("data-auto-modal=\"1\"") == std::string::npos &&
             completedDepartureFlyby.find("Retry Slingshot Run") == std::string::npos,
         "a completed Perfect departure must expose one stable course-claim control without a competing auto-modal");
@@ -5564,33 +5564,6 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
     require(courseClaimHangar.find("Lock Saturn Course") != std::string::npos &&
             courseClaimHangar.find("Launch: Jupiter") == std::string::npos,
         "a secured Perfect pass should make locking Saturn the Hangar's primary action");
-
-    GameState staleReapproachClaim = state;
-    staleReapproachClaim.run.destinationIndex = 2;
-    staleReapproachClaim.run.routeTransit = {
-        content::routeLink::marsJupiter,
-        content::destination::mars,
-        content::destination::jupiter,
-        RouteTransitIntent::Reapproach};
-    require(claimSaturnCourse(staleReapproachClaim, catalog)
-            && currentDestination(staleReapproachClaim, catalog).id == content::destination::jupiter
-            && staleReapproachClaim.run.routeTransit.intent == RouteTransitIntent::Outbound
-            && staleReapproachClaim.run.routeTransit.originDestinationId == content::destination::jupiter
-            && staleReapproachClaim.run.routeTransit.targetDestinationId == content::destination::saturn,
-        "the explicit Saturn reward must queue the physical Jupiter-to-Saturn leg and repair a stale reapproach index");
-    Random staleSaturnLaunchRng(0x10F121);
-    const PreparedLaunch staleSaturnLaunch = prepareLaunch(
-        staleReapproachClaim,
-        catalog,
-        staleSaturnLaunchRng);
-    const std::string staleSaturnHangar = buildGamePanelHtml({
-        staleReapproachClaim,
-        catalog,
-        staleSaturnLaunch,
-        staleSaturnLaunch});
-    require(staleSaturnHangar.find("Transfer: Jupiter \xE2\x86\x92 Saturn") != std::string::npos
-            && staleSaturnHangar.find("Reapproach: Jupiter") == std::string::npos,
-        "the repaired claim must present the authored Jupiter-to-Saturn transfer rather than another Jupiter loop");
 
     require(claimSaturnCourse(state, catalog),
         "the secured Jupiter departure should claim the Saturn route");
@@ -5718,30 +5691,6 @@ void saturnArtifactQueuesPhysicalUranusRoute()
             !state.run.routeTransit.active(),
         "only a successful Saturn-to-Uranus arrival should advance the frontier and clear the leg");
 
-    GameState existing = createNewGame(catalog, 0x51AA);
-    existing.meta.launchLessons.stage = LaunchTrainingStage::Complete;
-    existing.meta.unlockKeys.push_back(content::unlock::routeSaturn);
-    existing.run.destinationIndex = 4;
-    ArtifactRecord recovered;
-    recovered.id = "existing_saturn_artifact";
-    recovered.originDestinationId = content::destination::saturn;
-    recovered.rewardApplied = true;
-    existing.meta.artifacts.push_back(recovered);
-    existing.run.surfaceExpedition.expeditionExperience = 42.0;
-    const std::optional<SaveData> encoded = deserializeSaveData(
-        serializeSaveData(captureSaveData(existing)));
-    require(encoded.has_value() && encoded->version == save_schema::currentVersion,
-        "the existing-artifact fixture should remain a valid current-schema save");
-    GameState restored = createNewGame(catalog, 0x51AB);
-    restoreSaveData(restored, catalog, *encoded);
-    const ScenarioObjectivePresentation restoredObjective = scenarioObjectiveForDestination(
-        restored,
-        catalog,
-        content::destination::saturn);
-    require(restoredObjective.state == ScenarioStepState::ReadyToClaim &&
-            restoredObjective.current == 1 &&
-            std::abs(restored.run.surfaceExpedition.expeditionExperience - 42.0) < 0.001,
-        "a valid v15 Saturn artifact should reconcile to ready without replaying objective XP");
 }
 
 void uranusFlightDataQueuesPhysicalNeptuneRoute()
@@ -5775,14 +5724,14 @@ void uranusFlightDataQueuesPhysicalNeptuneRoute()
         catalog,
         content::destination::neptune);
     require(gate.kind == FrontierGateKind::ScenarioRequirement && !gate.satisfied &&
-            gate.current == 0 && gate.required == 8,
-        "Neptune should begin behind the visible 0/8 Flight Data gate");
+            gate.current == 0 && gate.required == 2,
+        "Neptune should begin behind the visible 0/2 Flight Data gate");
 
     Random panelRng(0x6E7075);
     const PreparedLaunch panelLaunch = prepareLaunch(state, catalog, panelRng);
     const std::string arrivalPanel = buildGamePanelHtml({state, catalog, panelLaunch, panelLaunch});
     require(arrivalPanel.find("Signal Beyond Neptune") != std::string::npos &&
-            arrivalPanel.find("OBJECTIVE // 8 FLIGHT DATA") != std::string::npos &&
+            arrivalPanel.find("OBJECTIVE // 2 FLIGHT DATA") != std::string::npos &&
             arrivalPanel.find("Track Signal") != std::string::npos,
         "Arrival Ops should render the mandatory Uranus story briefing and action");
 
@@ -5794,21 +5743,58 @@ void uranusFlightDataQueuesPhysicalNeptuneRoute()
                 ScenarioActionKind::AcknowledgeBriefing).applied,
         "the Uranus signal briefing should acknowledge through the scenario action");
     objective = scenarioObjectiveForDestination(state, catalog, content::destination::uranus);
-    require(objective.stepId == "vector" && objective.current == 0 && objective.required == 8 &&
+    require(objective.stepId == "artifact" && objective.current == 0 && objective.required == 1 &&
             objective.state == ScenarioStepState::Active,
-        "acknowledging the signal should expose the saved Neptune Vector counter");
+        "acknowledging the signal should expose the one-time Uranus artifact objective");
 
-    require(bankArrivalLandingFlightData(state, catalog),
-        "a safe Uranus landing should add one Flight Data to the route solution");
+    require(!bankArrivalLandingFlightData(state, catalog),
+        "repeated Uranus landings must not grind Flight Data");
+    state.run.surfaceExpedition.active = true;
+    state.run.surfaceExpedition.destinationId = content::destination::uranus;
+    state.run.surfaceExpedition.temporaryArtifacts.push_back(
+        {"uranus_route_artifact", content::destination::uranus, false});
+    const SurfaceActionOutcome extracted = extractSurfacePayload(state, catalog);
+    require(extracted.applied && extracted.artifactFound &&
+            state.meta.artifacts.size() == 1,
+        "safe Uranus extraction should permanently recover its authored artifact");
     objective = scenarioObjectiveForDestination(state, catalog, content::destination::uranus);
-    require(objective.current == 1 && objective.required == 8,
-        "the Uranus departure objective should mirror the landing's Flight Data");
-    require(bankFlybyRouteClearance(state, catalog),
-        "a Good or Perfect Uranus Pass Through should finish the authored Flight Data route");
+    require(objective.stepId == "vector" && objective.current == 1 &&
+            objective.required == 2 && objective.state == ScenarioStepState::Active,
+        "the first permanent Uranus artifact should supply exactly one Flight Data key");
+    require(!bankFlybyRouteClearance(state, catalog),
+        "Pass Through must not substitute for the authored Uranus Orbit key");
+
+    state.screen = Screen::ArrivalOps;
+    state.run.arrivalOps.active = true;
+    state.run.arrivalOps.destinationId = content::destination::uranus;
+    state.run.arrivalOps.commitment = ApproachCommitment::Uncommitted;
+    startArrivalOrbitRun(state, catalog);
+    require(state.run.orbit.active && state.run.orbit.currentZone == 2 &&
+            nearlyEqual(std::hypot(state.run.orbit.shipX, state.run.orbit.shipY),
+                        state.run.orbit.targetRadius),
+        "Orbit should begin directly on the gold Perfect solution");
+    state.run.orbit.completed = true;
+    state.run.orbit.result = OrbitGrade::Good;
+    completeOrbitRun(state, catalog);
     objective = scenarioObjectiveForDestination(state, catalog, content::destination::uranus);
-    require(objective.current == 8 && objective.state == ScenarioStepState::ReadyToClaim &&
+    require(objective.current == 2 && objective.required == 2 &&
+            objective.state == ScenarioStepState::ReadyToClaim &&
             objective.actionLabel == "Lock Neptune Course",
-        "a solved vector should expose the explicit Neptune course claim");
+        "the recovered artifact plus one stable Orbit should expose the Neptune course claim");
+
+    state.run.surfaceExpedition = {};
+    state.run.surfaceExpedition.active = true;
+    state.run.surfaceExpedition.destinationId = content::destination::uranus;
+    state.run.surfaceExpedition.rigFuel = 3.0;
+    state.run.surfaceExpedition.prospectArtifacts = 1;
+    const SurfaceActionOutcome repeatMining = startMiningRun(state, catalog);
+    require(repeatMining.applied && state.run.mining.active,
+        "the repeat Uranus mining fixture should start normally");
+    require(!state.run.mining.artifact.present,
+        "an authored Uranus artifact must not respawn as an incidental repeat after recovery");
+    state.run.mining = {};
+    state.run.surfaceExpedition = {};
+    state.screen = Screen::Hangar;
 
     require(performScenarioAction(
                 state,
@@ -5821,7 +5807,7 @@ void uranusFlightDataQueuesPhysicalNeptuneRoute()
                 catalog,
                 content::scenario::uranusDeparture,
                 "vector"),
-        "claiming the Uranus departure should queue its authored physical route");
+        "claiming the concise 2/2 Uranus departure should queue its authored physical route");
     require(hasUnlock(state.meta, content::unlock::routeNeptune) &&
             currentDestination(state, catalog).id == content::destination::uranus &&
             state.run.routeTransit.intent == RouteTransitIntent::Outbound &&
@@ -5838,29 +5824,15 @@ void uranusFlightDataQueuesPhysicalNeptuneRoute()
     applyLaunchOutcome(state, catalog, arrived);
     require(currentDestination(state, catalog).id == content::destination::neptune &&
             !state.run.routeTransit.active() &&
-            state.storyBriefing.pending == StoryBriefingId::StraylightDiscovery,
-        "successful Neptune arrival should advance once and queue the existing Straylight reveal");
+            state.storyBriefing.pending == StoryBriefingId::None,
+        "successful Neptune arrival should stop at Neptune until its explicit discovery claim");
+    const ScenarioObjectivePresentation neptuneDiscovery = scenarioObjectiveForDestination(
+        state, catalog, content::destination::neptune);
+    require(neptuneDiscovery.stepId == "arrival" &&
+            neptuneDiscovery.state == ScenarioStepState::ReadyToClaim &&
+            neptuneDiscovery.transition.kind == ScenarioTransitionKind::PresentStoryTakeover,
+        "Neptune arrival should expose the authored Straylight discovery claim");
 
-    GameState reconciled = createNewGame(catalog, 0x6E7076);
-    reconciled.meta.launchLessons.stage = LaunchTrainingStage::Complete;
-    reconciled.meta.unlockKeys.push_back(content::unlock::routeUranus);
-    reconciled.run.destinationIndex = 5;
-    reconciled.run.frontierReadiness = 8;
-    ensureScenarioInstances(reconciled, catalog);
-    require(performScenarioAction(
-                reconciled,
-                catalog,
-                content::scenario::uranusDeparture,
-                "briefing",
-                ScenarioActionKind::AcknowledgeBriefing).applied,
-        "a current save with banked Flight Data should still acknowledge the new briefing");
-    const ScenarioObjectivePresentation reconciledObjective = scenarioObjectiveForDestination(
-        reconciled,
-        catalog,
-        content::destination::uranus);
-    require(reconciledObjective.stepId == "vector" && reconciledObjective.current == 8 &&
-            reconciledObjective.state == ScenarioStepState::ReadyToClaim,
-        "current-schema Uranus saves should reconcile existing Flight Data without replaying launches");
 }
 
 void campaignStateRoundTripsAtCurrentVersion()
@@ -5953,29 +5925,6 @@ void scenarioUiActionsDoNotAwardExpeditionExperience()
             state.run.surfaceExpedition.pendingRunUpgradeChoices == 0,
         "briefings, manual actions, equipment assignment, and other UI actions must not grant expedition XP");
 
-    ScenarioInstance* volcanic = findScenarioInstance(state.meta, content::scenario::volcanicDescent);
-    require(volcanic != nullptr, "the Io reward repair fixture requires its authored scenario instance");
-    volcanic->awardedRewardIds = {
-        std::string(content::scenario::volcanicDescent) + "/commission/0",
-        std::string(content::scenario::volcanicDescent) + "/commission/1"};
-    state.meta.unlockKeys.erase(
-        std::remove(state.meta.unlockKeys.begin(), state.meta.unlockKeys.end(), content::unlock::droneBay),
-        state.meta.unlockKeys.end());
-    state.meta.droneBaySlots = 0;
-    state.meta.ownedDroneIds.clear();
-    state.meta.equippedDroneIds.clear();
-
-    ensureScenarioInstances(state, catalog);
-    require(hasUnlock(state.meta, content::unlock::droneBay)
-            && state.meta.droneBaySlots == 1
-            && state.meta.ownedDroneIds == std::vector<std::string>{content::drone::hazardDrone}
-            && state.meta.equippedDroneIds == std::vector<std::string>{content::drone::hazardDrone},
-        "a claimed Io commission should repair missing permanent bay and Hazard rewards from a partial save");
-
-    state.meta.equippedDroneIds.clear();
-    ensureScenarioInstances(state, catalog);
-    require(state.meta.equippedDroneIds.empty(),
-        "persistent reward repair should preserve a player's later choice to unequip an owned frame");
 }
 
 
@@ -10621,14 +10570,39 @@ void miningSwarmNestPreviewAndPersistence()
     mining.droneY = static_cast<double>(mining.terrain.height) * 0.25;
     mining.enemies.clear();
     updateMiningRun(state, catalog, 0.08);
+
+    GameState debugState = state;
+    require(enterMiningSwarmArenaForDebug(debugState, catalog),
+        "the Swarm debug arena should enter the authored chamber");
+    require(debugState.run.mining.enemies.empty() &&
+            debugState.run.mining.swarm.spawnedInWave == 0 &&
+            debugState.run.mining.swarm.spawnCooldownSeconds >=
+                tuning::mining::swarmWaveInitialDelayMinimumSeconds &&
+            debugState.run.mining.swarm.spawnCooldownSeconds <=
+                tuning::mining::swarmWaveInitialDelayMaximumSeconds,
+        "the debug arena should use the real staggered ingress instead of materializing a full horde");
+    updateMiningRun(debugState, catalog, 0.08);
+    require(debugState.run.mining.swarm.spawnedInWave == 0,
+        "the debug arena's seeded initial delay should remain visible for at least one frame");
+
     mining.droneX = static_cast<double>(mining.swarm.triggerX);
     mining.droneY = static_cast<double>(mining.swarm.chamberY);
     mining.droneHealth = 100000.0;
     mining.oxygenSeconds = 1000.0;
     mining.miniDrones.clear();
-    for (int step = 0; step < 80 && mining.swarm.spawnedInWave == 0; ++step) {
-        updateMiningRun(state, catalog, 0.08);
-    }
+    GameState sameSeedState = state;
+    GameState differentSeedState = state;
+    differentSeedState.run.mining.swarm.seed ^= 0x9E3779B97F4A7C15ULL;
+    const auto advanceToFirstSpawn = [&](GameState& target) {
+        for (int step = 0;
+             step < 80 && target.run.mining.swarm.spawnedInWave == 0;
+             ++step) {
+            updateMiningRun(target, catalog, 0.08);
+        }
+    };
+    advanceToFirstSpawn(state);
+    advanceToFirstSpawn(sameSeedState);
+    advanceToFirstSpawn(differentSeedState);
     const auto firstSwarmEnemy = std::find_if(
         mining.enemies.begin(),
         mining.enemies.end(),
@@ -10638,6 +10612,66 @@ void miningSwarmNestPreviewAndPersistence()
         firstSwarmEnemy->x < 0.0 || firstSwarmEnemy->x > static_cast<double>(mining.terrain.width) ||
             firstSwarmEnemy->y < 0.0 || firstSwarmEnemy->y > static_cast<double>(mining.terrain.height),
         "Swarm enemies should begin beyond the visible mine bounds instead of appearing beside the player");
+    require(sameSeedState.run.mining.enemies.size() == mining.enemies.size() &&
+            nearlyEqual(sameSeedState.run.mining.enemies.front().x, firstSwarmEnemy->x) &&
+            nearlyEqual(sameSeedState.run.mining.enemies.front().y, firstSwarmEnemy->y) &&
+            nearlyEqual(sameSeedState.run.mining.swarm.spawnCooldownSeconds,
+                mining.swarm.spawnCooldownSeconds),
+        "identical Swarm seeds should reproduce entrance position and timing");
+    require(!differentSeedState.run.mining.enemies.empty() &&
+            (!nearlyEqual(differentSeedState.run.mining.enemies.front().x, firstSwarmEnemy->x) ||
+                !nearlyEqual(differentSeedState.run.mining.enemies.front().y, firstSwarmEnemy->y)),
+        "different Swarm seeds should vary the first entrance point");
+
+    std::vector<double> observedSpawnIntervals {mining.swarm.spawnCooldownSeconds};
+    std::vector<std::pair<double, double>> observedSpawnPoints {{
+        firstSwarmEnemy->x - firstSwarmEnemy->velocityX * 0.08,
+        firstSwarmEnemy->y - firstSwarmEnemy->velocityY * 0.08}};
+    int previousSpawnCount = mining.swarm.spawnedInWave;
+    for (int step = 0; step < 80 && mining.swarm.spawnedInWave < 8; ++step) {
+        updateMiningRun(state, catalog, 0.08);
+        if (mining.swarm.spawnedInWave > previousSpawnCount) {
+            observedSpawnIntervals.push_back(mining.swarm.spawnCooldownSeconds);
+            const MiningEnemy& newest = mining.enemies.back();
+            observedSpawnPoints.push_back({
+                newest.x - newest.velocityX * 0.08,
+                newest.y - newest.velocityY * 0.08});
+            previousSpawnCount = mining.swarm.spawnedInWave;
+        }
+    }
+    require(observedSpawnIntervals.size() >= 6,
+        "the opening Swarm should expose several staggered spawn intervals");
+    require(std::all_of(observedSpawnIntervals.begin(), observedSpawnIntervals.end(), [](double interval) {
+            return interval >= tuning::mining::swarmSpawnIntervalMinimumSeconds &&
+                interval <= tuning::mining::swarmSpawnIntervalMaximumSeconds;
+        }),
+        "every seeded Swarm spawn interval should remain inside its authored range");
+    require(std::any_of(
+                observedSpawnIntervals.begin() + 1,
+                observedSpawnIntervals.end(),
+                [&](double interval) {
+                    return !nearlyEqual(interval, observedSpawnIntervals.front());
+                }),
+        "Swarm arrivals should not use a visibly fixed cadence");
+    require(std::all_of(observedSpawnPoints.begin(), observedSpawnPoints.end(), [&](const auto& point) {
+            return point.first <= -tuning::mining::swarmOffscreenSpawnMarginCells ||
+                point.first >= static_cast<double>(mining.terrain.width) +
+                    tuning::mining::swarmOffscreenSpawnMarginCells ||
+                point.second <= -tuning::mining::swarmOffscreenSpawnMarginCells ||
+                point.second >= static_cast<double>(mining.terrain.height) +
+                    tuning::mining::swarmOffscreenSpawnMarginCells;
+        }),
+        "jittered Swarm entrance points should remain beyond the visible mine bounds");
+    for (std::size_t first = 0; first < observedSpawnPoints.size(); ++first) {
+        for (std::size_t second = first + 1; second < observedSpawnPoints.size(); ++second) {
+            require(std::hypot(
+                        observedSpawnPoints[first].first - observedSpawnPoints[second].first,
+                        observedSpawnPoints[first].second - observedSpawnPoints[second].second) + 0.001 >=
+                    tuning::mining::swarmSpawnMinimumSpacingCells,
+                "seeded Swarm entrance points should not stack into one geometric origin");
+        }
+    }
+
     for (int step = 0; step < 160 && mining.swarm.spawnedInWave < 32; ++step) {
         updateMiningRun(state, catalog, 0.08);
     }
@@ -10661,6 +10695,126 @@ void miningSwarmNestPreviewAndPersistence()
         }));
     require(swarmEnemiesInsideChamber >= 16,
         "Off-screen Swarm enemies should complete their radial ingress instead of remaining beyond the mine");
+
+    GameState tokenState = state;
+    MiningRunState& tokenMining = tokenState.run.mining;
+    tokenMining.droneX = tokenMining.swarm.cacheX;
+    tokenMining.droneY = tokenMining.swarm.cacheY;
+    tokenMining.gravityStrength = 0.0;
+    tokenMining.rigVelocityX = 0.0;
+    tokenMining.rigVelocityY = 0.0;
+    int configuredMelee = 0;
+    for (MiningEnemy& enemy : tokenMining.enemies) {
+        if (!enemy.active || !enemy.swarmAssociated || configuredMelee >= 6) {
+            enemy.active = false;
+            continue;
+        }
+        const double angle = static_cast<double>(configuredMelee) * 6.28318530718 / 6.0;
+        enemy.type = MiningEnemyType::Ant;
+        enemy.x = tokenMining.droneX +
+            std::cos(angle) * tuning::mining::swarmMeleeHoldingRadiusCells;
+        enemy.y = tokenMining.droneY +
+            std::sin(angle) * tuning::mining::swarmMeleeHoldingRadiusCells;
+        enemy.maxHealth = 1000.0;
+        enemy.health = enemy.maxHealth;
+        enemy.attackCooldownSeconds = 0.0;
+        enemy.swarmAttackCommitSeconds = 0.0;
+        enemy.swarmAttackRequeueSeconds = 0.0;
+        ++configuredMelee;
+    }
+    require(configuredMelee == 6, "the Swarm token fixture requires six melee enemies");
+    updateMiningRun(tokenState, catalog, 0.08);
+    const auto committedCount = [](const MiningRunState& run) {
+        return static_cast<int>(std::count_if(
+            run.enemies.begin(), run.enemies.end(), [](const MiningEnemy& enemy) {
+                return enemy.active && enemy.swarmAssociated &&
+                    enemy.swarmAttackCommitSeconds > 0.0;
+            }));
+    };
+    require(committedCount(tokenMining) == tuning::mining::swarmMeleeAttackTokenCount,
+        "a Swarm should grant exactly three simultaneous melee attack tokens when enough enemies are ready");
+    std::vector<std::size_t> initiallyCommitted;
+    for (std::size_t index = 0; index < tokenMining.enemies.size(); ++index) {
+        if (tokenMining.enemies[index].swarmAttackCommitSeconds > 0.0) {
+            initiallyCommitted.push_back(index);
+        }
+    }
+    tokenMining.enemies[initiallyCommitted.front()].attackCooldownSeconds =
+        tuning::mining::swarmMeleeAttackIntervalSeconds;
+    tokenMining.enemies[initiallyCommitted.front()].swarmAttackCommitSeconds = 0.0;
+    updateMiningRun(tokenState, catalog, 0.08);
+    require(committedCount(tokenMining) == tuning::mining::swarmMeleeAttackTokenCount &&
+            std::any_of(tokenMining.enemies.begin(), tokenMining.enemies.end(), [&](const MiningEnemy& enemy) {
+                const std::size_t index = static_cast<std::size_t>(&enemy - tokenMining.enemies.data());
+                return enemy.swarmAttackCommitSeconds > 0.0 &&
+                    std::find(initiallyCommitted.begin(), initiallyCommitted.end(), index) ==
+                        initiallyCommitted.end();
+            }),
+        "a vacated melee attack token should rotate to another ready enemy");
+
+    const std::optional<SaveData> tokenSave = deserializeSaveData(
+        serializeSaveData(captureSaveData(tokenState)));
+    require(tokenSave.has_value(), "active Swarm attack-token state should serialize safely");
+    GameState tokenRestored = createNewGame(catalog, 0x5A13);
+    restoreSaveData(tokenRestored, catalog, *tokenSave);
+    require(std::none_of(
+                tokenRestored.run.mining.enemies.begin(),
+                tokenRestored.run.mining.enemies.end(),
+                [](const MiningEnemy& enemy) {
+                    return enemy.swarmAttackCommitSeconds > 0.0 ||
+                        enemy.swarmAttackRequeueSeconds > 0.0;
+                }),
+        "transient Swarm attack tokens should not enter the v16 save contract");
+    updateMiningRun(tokenRestored, catalog, 0.08);
+    require(committedCount(tokenRestored.run.mining) ==
+            tuning::mining::swarmMeleeAttackTokenCount,
+        "a loaded active Swarm should deterministically reacquire its melee tokens");
+
+    GameState separationState = state;
+    MiningRunState& separationMining = separationState.run.mining;
+    int separatedEnemies = 0;
+    for (MiningEnemy& enemy : separationMining.enemies) {
+        if (!enemy.active || !enemy.swarmAssociated || separatedEnemies >= 3) {
+            enemy.active = false;
+            continue;
+        }
+        enemy.type = separatedEnemies == 0 ? MiningEnemyType::Ant : MiningEnemyType::Beetle;
+        enemy.elite = separatedEnemies == 2;
+        enemy.x = separationMining.swarm.cacheX;
+        enemy.y = separationMining.swarm.cacheY;
+        enemy.maxHealth = 1000.0;
+        enemy.health = enemy.maxHealth;
+        enemy.attackCooldownSeconds = tuning::mining::swarmMeleeAttackIntervalSeconds;
+        ++separatedEnemies;
+    }
+    for (int step = 0; step < 8; ++step) {
+        updateMiningRun(separationState, catalog, 0.08);
+    }
+    std::vector<const MiningEnemy*> separated;
+    for (const MiningEnemy& enemy : separationMining.enemies) {
+        if (enemy.active && enemy.swarmAssociated) {
+            separated.push_back(&enemy);
+        }
+    }
+    const auto separationRadius = [](const MiningEnemy& enemy) {
+        if (enemy.elite) return tuning::mining::swarmEliteSeparationRadiusCells;
+        if (enemy.type == MiningEnemyType::Beetle || enemy.type == MiningEnemyType::Mammal) {
+            return tuning::mining::swarmLargeSeparationRadiusCells;
+        }
+        return tuning::mining::swarmSmallSeparationRadiusCells;
+    };
+    require(separated.size() == 3, "the mixed Swarm spacing fixture should retain three enemies");
+    for (std::size_t first = 0; first < separated.size(); ++first) {
+        for (std::size_t second = first + 1; second < separated.size(); ++second) {
+            const double distance = std::hypot(
+                separated[first]->x - separated[second]->x,
+                separated[first]->y - separated[second]->y);
+            require(std::isfinite(distance) &&
+                    distance + 0.04 >= separationRadius(*separated[first]) +
+                        separationRadius(*separated[second]),
+                "mixed Swarm enemies should resolve overlap to their type-aware minimum distance");
+        }
+    }
 
     mining.gravityStrength = 0.0;
     mining.rigVelocityX = 0.0;
@@ -10723,6 +10877,7 @@ void miningSwarmNestPreviewAndPersistence()
     state.run.mining.swarm.alerted = true;
     state.run.mining.swarm.wave = 2;
     state.run.mining.swarm.spawnedInWave = 3;
+    state.run.mining.swarm.spawnCooldownSeconds = 0.19;
     state.run.mining.swarm.cacheExposed = true;
     const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(state)));
     require(saved.has_value(), "Swarm mining save should deserialize");
@@ -10730,7 +10885,8 @@ void miningSwarmNestPreviewAndPersistence()
     restoreSaveData(restored, catalog, *saved);
     require(restored.run.mining.swarm.enabled && restored.run.mining.swarm.alerted &&
             restored.run.mining.swarm.wave == 2 && restored.run.mining.swarm.cacheExposed &&
-            restored.run.mining.swarm.seed == state.run.mining.swarm.seed,
+            restored.run.mining.swarm.seed == state.run.mining.swarm.seed &&
+            nearlyEqual(restored.run.mining.swarm.spawnCooldownSeconds, 0.19),
         "active Swarm wave and cache state should survive save/load without rerolling");
 }
 
@@ -12688,7 +12844,7 @@ void progressedSavesSkipTheFirstLaunchIntroduction()
 void saveSchemaConstantsMatchSerializedFields()
 {
     const ContentCatalog catalog = createDefaultContent();
-    require(save_schema::currentVersion == 15, "the current save schema should be version fifteen");
+    require(save_schema::currentVersion == 16, "the current save schema should be version sixteen");
     GameState state = createNewGame(catalog, 12);
     state.run.credits = 123.0;
     state.run.inventoryModuleIds = {content::module::sparrowEngine, content::module::cryoLoop};
@@ -12881,12 +13037,70 @@ void arkDiscoveryAndScriptedJumpProgression()
     neptuneArrival.destinationId = content::destination::neptune;
     neptuneArrival.ejectMultiplier = 4.20;
     neptuneArrival.crashMultiplier = 6.35;
+    state.run.destinationIndex = 5;
+    state.meta.unlockKeys.push_back(content::unlock::routeNeptune);
+    state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
+    state.run.routeTransit = makeRouteTransit(
+        catalog,
+        content::destination::uranus,
+        content::destination::neptune,
+        RouteTransitIntent::Outbound);
+    neptuneArrival.routeTransit = state.run.routeTransit;
     applyLaunchOutcome(state, catalog, neptuneArrival);
 
     require(!arkDiscovered(state), "Neptune arrival must not discover the Ark before the story takeover is acknowledged");
-    require(state.storyBriefing.pending == StoryBriefingId::StraylightDiscovery, "successful Neptune arrival should persist the Straylight takeover");
+    const ScenarioActionOutcome discovery = performScenarioAction(
+        state, catalog, content::scenario::neptuneDiscovery, "arrival", ScenarioActionKind::ClaimReward);
+    require(discovery.applied && discovery.transition.kind == ScenarioTransitionKind::PresentStoryTakeover,
+        "successful Neptune arrival should provide an explicit Straylight story claim");
+    scheduleStoryBriefing(state, discovery.transition.storyBriefing, discovery.transition.screen);
+    require(state.storyBriefing.pending == StoryBriefingId::StraylightDiscovery,
+        "claiming the discovery should persist the Straylight takeover");
     require(acknowledgeStoryBriefing(state, catalog), "the Straylight takeover should acknowledge once");
-    require(arkDiscovered(state), "acknowledging the Neptune discovery should reveal the operable derelict Ark");
+    require(!arkDiscovered(state) && state.storyBriefing.pending == StoryBriefingId::StraylightApproach,
+        "acknowledging the contact should queue the physical Straylight rendezvous before revealing the Ark");
+
+    state.launchConfig.destinationId = content::destination::neptune;
+    state.launchConfig.frontierTransfer = true;
+    state.launchConfig.missionKind = LaunchMissionKind::StraylightApproach;
+    state.launchConfig.burnGoalMultiplier = catalog.findDestination(content::destination::neptune)->targetMultiplier;
+    Random approachRng(62001);
+    const PreparedLaunch approach = prepareLaunch(state, catalog, approachRng);
+    require(!approach.manualControlsEnabled && !approach.heatEnabled && !approach.asteroidsEnabled,
+        "the Straylight rendezvous should use automatic guidance with no failure mechanics");
+    require(std::abs(approach.cruiseFuelCost) < 0.000001,
+        "the ceremonial rendezvous should not consume transfer fuel");
+    LaunchFlightState flight = beginLaunchFlight(
+        approach, *catalog.findDestination(content::destination::neptune));
+    const double startingFuel = flight.fuelRemaining;
+    LaunchFlightStep step;
+    for (int frame = 0; frame < 10000 && !step.reachedDestination; ++frame) {
+        step = updateLaunchFlight(
+            flight,
+            approach,
+            *catalog.findDestination(content::destination::neptune),
+            {},
+            0.05);
+        require(!step.failed, "the ceremonial Straylight rendezvous must have no failure path");
+    }
+    require(step.reachedDestination, "automatic guidance should carry the ship to Straylight");
+    require(std::abs(flight.fuelRemaining - startingFuel) < 0.000001,
+        "the Straylight rendezvous should leave transfer fuel unchanged");
+    LaunchOutcome rendezvous = resolveLaunch(
+        approach,
+        catalog,
+        state,
+        catalog.findDestination(content::destination::neptune)->targetMultiplier,
+        RecoveryMethod::TransferArrival,
+        approachRng,
+        {true, LaunchFailureCause::None, 1.0, 0});
+    applyLaunchOutcome(state, catalog, rendezvous);
+    require(rendezvous.type == LaunchResultType::MissionComplete && rendezvous.payout == 0.0 &&
+            rendezvous.blueprintGain == 0 && rendezvous.shipDamage == 0,
+        "the no-fail story transfer should not grant mechanical rewards or damage the ship");
+    scheduleStoryBriefing(state, StoryBriefingId::ActOneComplete, Screen::Hangar);
+    require(acknowledgeStoryBriefing(state, catalog), "Act I completion should acknowledge explicitly");
+    require(arkDiscovered(state), "boarding after the rendezvous should reveal the operable derelict Ark");
     require(state.meta.campaignMilestone == CampaignMilestone::ArkDiscovered, "Ark discovery should advance the campaign milestone");
     require(state.meta.chapter == GameChapter::Breakthrough, "Ark discovery should enter Breakthrough chapter");
     require(state.meta.ark.condition == ArkCondition::DerelictOperable, "discovered Ark should be derelict but operable");
@@ -12961,8 +13175,23 @@ void numberedChaptersAdvanceMonotonically()
     completeTransfer(content::destination::neptune, 4.20);
     require(state.meta.chapter == GameChapter::Breakthrough, "outer-planet progression should remain in Chapter 4 through Neptune");
     require(!arkDiscovered(state), "Neptune completion should wait for the discovery acknowledgment");
+    state.meta.unlockKeys.push_back(content::unlock::routeNeptune);
+    require(recordScenarioEvent(
+                state,
+                catalog,
+                {ScenarioEventKind::DestinationReached, {}, {}, {}, content::destination::neptune, 1, 0}),
+        "the simulated Neptune arrival should emit the typed discovery event");
+    const ScenarioActionOutcome discovery = performScenarioAction(
+        state, catalog, content::scenario::neptuneDiscovery, "arrival", ScenarioActionKind::ClaimReward);
+    require(discovery.applied && discovery.transition.kind == ScenarioTransitionKind::PresentStoryTakeover,
+        "the authored Neptune discovery should claim through its typed transition");
+    scheduleStoryBriefing(state, discovery.transition.storyBriefing, discovery.transition.screen);
     require(acknowledgeStoryBriefing(state, catalog), "Neptune discovery should acknowledge before the first Ark jump");
-    require(arkDiscovered(state), "Chapter 4 should discover the Ark only after the Neptune takeover");
+    require(!arkDiscovered(state) && state.storyBriefing.pending == StoryBriefingId::StraylightApproach,
+        "Chapter 4 should remain active until the Straylight rendezvous finishes");
+    scheduleStoryBriefing(state, StoryBriefingId::ActOneComplete, Screen::Hangar);
+    require(acknowledgeStoryBriefing(state, catalog), "Act I completion should be acknowledged before the first Ark jump");
+    require(arkDiscovered(state), "Chapter 4 should discover the Ark only after the completed rendezvous");
 
     require(performArkJump(state, catalog), "first Ark jump should enter Straylight");
     require(state.meta.chapter == GameChapter::Straylight, "first Ark jump should enter Chapter 5");
@@ -13524,8 +13753,19 @@ void outerPlanetCampaignSequenceIsExplicitAndUnskippable()
                 "Jupiter through Uranus must not reveal or hint at the Straylight");
         }
     }
+    state.meta.unlockKeys.push_back(content::unlock::routeNeptune);
+    require(recordScenarioEvent(
+                state,
+                catalog,
+                {ScenarioEventKind::DestinationReached, {}, {}, {}, content::destination::neptune, 1, 0}),
+        "the outer-route fixture should emit the authored Neptune arrival event");
+    const ScenarioActionOutcome discovery = performScenarioAction(
+        state, catalog, content::scenario::neptuneDiscovery, "arrival", ScenarioActionKind::ClaimReward);
+    require(discovery.applied && discovery.transition.kind == ScenarioTransitionKind::PresentStoryTakeover,
+        "only successful Neptune arrival should make the saved Straylight reveal claimable");
+    scheduleStoryBriefing(state, discovery.transition.storyBriefing, discovery.transition.screen);
     require(!arkDiscovered(state) && state.storyBriefing.pending == StoryBriefingId::StraylightDiscovery,
-        "only successful Neptune arrival should queue the saved Straylight reveal");
+        "only the explicit Neptune discovery claim should queue the saved Straylight reveal");
     require(nextDestination(state, catalog) == nullptr, "the solar transfer ladder should stop at Neptune until the story beat is acknowledged");
 }
 
@@ -13542,6 +13782,17 @@ void storyBriefingsTakeOverAndPersist()
     neptune.crashMultiplier = 6.35;
     state.run.destinationIndex = 5;
     applyLaunchOutcome(state, catalog, neptune);
+    state.meta.unlockKeys.push_back(content::unlock::routeNeptune);
+    require(recordScenarioEvent(
+                state,
+                catalog,
+                {ScenarioEventKind::DestinationReached, {}, {}, {}, content::destination::neptune, 1, 0}),
+        "the story fixture should emit the authored Neptune arrival event");
+    const ScenarioActionOutcome discovery = performScenarioAction(
+        state, catalog, content::scenario::neptuneDiscovery, "arrival", ScenarioActionKind::ClaimReward);
+    require(discovery.applied && discovery.transition.kind == ScenarioTransitionKind::PresentStoryTakeover,
+        "Neptune arrival should make the authored discovery claim available");
+    scheduleStoryBriefing(state, discovery.transition.storyBriefing, discovery.transition.screen);
     startArrivalOps(state, neptune);
     state.screen = Screen::StoryBriefing;
 
@@ -13549,8 +13800,15 @@ void storyBriefingsTakeOverAndPersist()
     const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
     PanelRenderContext context {state, catalog, launch, launch};
     const std::string html = buildGamePanelHtml(context);
+    require(chapterGate(GameChapter::Breakthrough).find("Ark") == std::string_view::npos &&
+            toString(LaunchMissionKind::StraylightApproach).find("Straylight") == std::string_view::npos,
+        "persistent Chapter 4 and approach labels must not classify the unknown contact early");
     require(html.find("data-panel-mode=\"story-briefing\"") != std::string::npos,
         "Straylight discovery should use the dedicated full-screen story panel");
+    require(html.find("SOMETHING JUST BLOCKED THE STARS") != std::string::npos &&
+            html.find("The Ark") == std::string::npos &&
+            html.find("<h2>Straylight</h2>") == std::string::npos,
+        "the pre-boarding reveal should preserve the contact's unknown identity");
     require(countOccurrences(html, "data-rr-action=") == 1
             && html.find("data-rr-action=\"acknowledge_story_briefing\"") != std::string::npos,
         "the takeover should expose only Approach the Straylight as an action");
@@ -13566,8 +13824,32 @@ void storyBriefingsTakeOverAndPersist()
     require(restored.screen == Screen::StoryBriefing && restored.storyBriefing.pending == StoryBriefingId::StraylightDiscovery,
         "reload during the reveal must return to the takeover");
     require(acknowledgeStoryBriefing(restored, catalog), "the saved takeover should acknowledge once");
-    require(arkDiscovered(restored) && restored.meta.straylightDiscoveryAcknowledged && restored.screen == Screen::ArrivalOps,
-        "approach should atomically discover the Ark and resume Neptune Arrival Ops");
+    require(!arkDiscovered(restored) && restored.meta.straylightDiscoveryAcknowledged &&
+            restored.storyBriefing.pending == StoryBriefingId::StraylightApproach,
+        "approach should persist the rendezvous phase without prematurely discovering the Ark");
+    const std::optional<SaveData> approachSave = deserializeSaveData(
+        serializeSaveData(captureSaveData(restored)));
+    require(approachSave.has_value(), "pending Straylight rendezvous should serialize");
+    GameState resumedApproach = createNewGame(catalog, 2);
+    restoreSaveData(resumedApproach, catalog, *approachSave);
+    require(resumedApproach.screen == Screen::StoryBriefing &&
+            resumedApproach.storyBriefing.pending == StoryBriefingId::StraylightApproach,
+        "reload before or during the ceremonial transfer should offer the safe approach again");
+    const std::string resumedApproachHtml = buildGamePanelHtml(
+        {resumedApproach, catalog, launch, launch});
+    require(resumedApproachHtml.find("THE LIGHT IS STILL ON") != std::string::npos &&
+            resumedApproachHtml.find("The Ark") == std::string::npos,
+        "the resumable approach should retain the grand unknown-contact framing");
+    scheduleStoryBriefing(resumedApproach, StoryBriefingId::ActOneComplete, Screen::Hangar);
+    const std::string finaleHtml = buildGamePanelHtml(
+        {resumedApproach, catalog, launch, launch});
+    require(finaleHtml.find("ACT I COMPLETE") != std::string::npos &&
+            finaleHtml.find("The name on the hull is STRAYLIGHT") != std::string::npos &&
+            finaleHtml.find(">Board<") != std::string::npos,
+        "successful rendezvous should end on an explicit Act I completion beat");
+    require(acknowledgeStoryBriefing(resumedApproach, catalog) && arkDiscovered(resumedApproach) &&
+            resumedApproach.screen == Screen::Hangar,
+        "boarding Straylight should commit Ark discovery and enter the post-Act-I hub");
 }
 
 void miningThermalCutoffAndGuidanceAreExplicit()

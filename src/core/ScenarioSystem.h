@@ -16,6 +16,8 @@ struct ScenarioActionOutcome {
     bool beginsActivity = false;
     ScenarioEventKind activityEvent = ScenarioEventKind::None;
     std::string miningSiteDefinitionId;
+    ScenarioActivityKind activity = ScenarioActivityKind::None;
+    ScenarioTransition transition;
     std::string message;
 };
 
@@ -42,6 +44,9 @@ struct ScenarioObjectivePresentation {
     std::string rewardPreview;
     std::string actionLabel;
     std::string failureExplanation;
+    std::string goal;
+    std::string gate;
+    std::string nextStep;
     int current = 0;
     int required = 0;
     ScenarioEventKind completionEvent = ScenarioEventKind::None;
@@ -59,7 +64,38 @@ struct ScenarioObjectivePresentation {
     bool returnPending = false;
     bool activityStarted = false;
     ScenarioActionKind action = ScenarioActionKind::None;
+    ScenarioActivityKind activity = ScenarioActivityKind::None;
+    ScenarioTransition transition;
+    ScenarioRetryPolicy retryPolicy = ScenarioRetryPolicy::None;
+    ScenarioPresentationMode presentationMode = ScenarioPresentationMode::Card;
     std::string miningSiteDefinitionId;
+};
+
+enum class CampaignProgressionIssue {
+    None,
+    InvalidPhysicalRoute,
+    InvalidScenarioState,
+    MissingPrimaryNextStep,
+    InactivePrimaryAction,
+    InvalidScreenForProgression
+};
+
+struct CampaignProgressionAuditResult {
+    bool valid = true;
+    CampaignProgressionIssue issue = CampaignProgressionIssue::None;
+    std::string detail;
+};
+
+struct CampaignNextStep {
+    bool available = false;
+    bool terminal = false;
+    std::string location;
+    std::string goal;
+    std::string gate;
+    std::string nextStep;
+    std::string destinationId;
+    std::string requiredUnlockKey;
+    ScenarioObjectivePresentation objective;
 };
 
 const ScenarioDefinition* findScenarioDefinition(
@@ -90,6 +126,7 @@ const MiningSiteDefinition* findMiningSiteDefinition(
     std::string_view siteId);
 
 bool validateScenarioCatalog(const ContentCatalog& catalog, std::string* error = nullptr);
+bool validateCampaignProgressionCatalog(const ContentCatalog& catalog, std::string* error = nullptr);
 
 void ensureScenarioInstances(GameState& state, const ContentCatalog& catalog);
 ScenarioInstance* findScenarioInstance(MetaProgress& meta, std::string_view scenarioId);
@@ -155,6 +192,8 @@ ScenarioObjectivePresentation scenarioDepartureChallengeForDestination(
 ScenarioObjectivePresentation scenarioObjectiveForMining(
     const GameState& state,
     const ContentCatalog& catalog);
+CampaignNextStep campaignNextStep(const GameState& state, const ContentCatalog& catalog);
+CampaignProgressionAuditResult auditCampaignProgression(const GameState& state, const ContentCatalog& catalog);
 
 // Creates a deterministic instance from an authored template. The resolved
 // parameters are persisted by SaveData, so generators never reroll a save.

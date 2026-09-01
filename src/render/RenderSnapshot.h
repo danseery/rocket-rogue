@@ -212,6 +212,7 @@ struct RenderSnapshot {
     int debugActOneCheckpoint = -1;
     ArkCondition arkCondition = ArkCondition::NotFound;
     bool straylightStoryReveal = false;
+    bool straylightApproach = false;
     bool campaignStoryIntroduction = false;
     bool frontierTransfer = false;
     bool returningHome = false;

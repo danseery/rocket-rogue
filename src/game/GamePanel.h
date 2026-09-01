@@ -33,6 +33,7 @@ struct PanelRenderContext {
     bool titleLaunchActive = false;
     double sceneFadeToBlack = 0.0;
     bool hasSavedGame = false;
+    bool checkpointRecoveryAvailable = false;
     std::string_view titleNotice;
     bool firstTimeIntroductionsEnabled = true;
     int selectedRefitOfferIndex = 0;

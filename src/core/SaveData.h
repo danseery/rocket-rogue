@@ -28,8 +28,6 @@ struct SaveData {
     double nextLaunchInstabilityPenalty = 0.0;
     PendingTransferAssist pendingTransferAssist;
     RouteTransitState routeTransit;
-    // Compatibility projection retained in the version-14 payload.
-    bool jupiterSlingshotActive = false;
     Screen screen = Screen::Hangar;
     CampaignMilestone campaignMilestone = CampaignMilestone::SolarTutorial;
     GameChapter chapter = GameChapter::ProvingGround;

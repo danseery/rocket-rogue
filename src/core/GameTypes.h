@@ -35,7 +35,9 @@ enum class Screen {
 enum class StoryBriefingId {
     None,
     CampaignIntroduction,
-    StraylightDiscovery
+    StraylightDiscovery,
+    StraylightApproach,
+    ActOneComplete
 };
 
 enum class CampaignMilestone {
@@ -141,7 +143,8 @@ enum class LaunchMissionKind {
     FuelCalibration,
     FlightControlsCalibration,
     ThermalManagement,
-    AsteroidBelt
+    AsteroidBelt,
+    StraylightApproach
 };
 
 enum class FuelSurveyReturnTiming {
@@ -747,6 +750,9 @@ enum class FlybyPurpose {
     TransferAssist = JupiterSlingshot
 };
 
+// Transitional compatibility mirrors. Scenario instances remain the
+// progression authority; these projections are retained until the focused
+// legacy campaign tests are replaced in a follow-up cleanup pass.
 enum class CampaignObjectiveId {
     LunarProspector,
     MarsBayExpansion,
@@ -1042,7 +1048,11 @@ enum class ScenarioEventKind {
     ArtifactRecovered,
     // Appended for authored route solutions that reuse the shared Flight Data
     // ledger. The event carries the physical origin and target route IDs.
-    FlightDataBanked
+    FlightDataBanked,
+    // A transfer arrival is the generic handoff from flight mechanics to an
+    // authored destination beat. It deliberately carries the destination in
+    // ScenarioEvent::targetId rather than teaching launch code story IDs.
+    DestinationReached
 };
 
 enum class ScenarioActionKind {
@@ -1062,7 +1072,41 @@ enum class ScenarioRewardKind {
     // Appended so any future serialized representation retains the existing
     // reward-kind ordinals.
     InventoryResources,
-    RouteAccess
+    RouteAccess,
+    // A story milestone is still authored content, not an app-side campaign
+    // switch. It is intentionally typed so a claim can advance a story beat
+    // without matching a scenario or destination name in UI code.
+    CampaignMilestone
+};
+
+enum class ScenarioActivityKind {
+    None,
+    MiningSite,
+    Flyby
+};
+
+enum class ScenarioTransitionKind {
+    None,
+    OpenScreen,
+    QueueRewardedRoute,
+    PresentStoryTakeover
+};
+
+enum class ScenarioRetryPolicy {
+    None,
+    PlayerConfirmed
+};
+
+enum class ScenarioPresentationMode {
+    Card,
+    Modal,
+    Takeover
+};
+
+struct ScenarioTransition {
+    ScenarioTransitionKind kind = ScenarioTransitionKind::None;
+    Screen screen = Screen::Hangar;
+    StoryBriefingId storyBriefing = StoryBriefingId::None;
 };
 
 enum class ScenarioStepState {
@@ -1081,6 +1125,24 @@ struct ScenarioReward {
     // so a single typed reward record remains sufficient for authored and
     // procedural scenario content.
     MaterialInventory materials;
+    CampaignMilestone milestone = CampaignMilestone::SolarTutorial;
+
+    ScenarioReward() = default;
+    ScenarioReward(
+        ScenarioRewardKind rewardKind,
+        std::string rewardId,
+        int rewardAmount,
+        bool equip,
+        MaterialInventory rewardMaterials = {},
+        CampaignMilestone rewardMilestone = CampaignMilestone::SolarTutorial)
+        : kind(rewardKind),
+          id(std::move(rewardId)),
+          amount(rewardAmount),
+          equipIfSlotAvailable(equip),
+          materials(rewardMaterials),
+          milestone(rewardMilestone)
+    {
+    }
 };
 
 struct ScenarioStepDefinition {
@@ -1103,6 +1165,58 @@ struct ScenarioStepDefinition {
     ScenarioActionKind action = ScenarioActionKind::None;
     std::string miningSiteDefinitionId;
     std::vector<ScenarioReward> rewards;
+    // These fields make the player-facing objective contract explicit instead
+    // of asking every panel to reinterpret descriptive copy and reward text.
+    std::string goalText;
+    std::string gateText;
+    std::string nextStepText;
+    ScenarioActivityKind activity = ScenarioActivityKind::None;
+    ScenarioTransition transition;
+    ScenarioRetryPolicy retryPolicy = ScenarioRetryPolicy::None;
+    ScenarioPresentationMode presentationMode = ScenarioPresentationMode::Card;
+
+    ScenarioStepDefinition() = default;
+    ScenarioStepDefinition(
+        std::string stepId,
+        std::vector<std::string> stepPrerequisites,
+        std::string stepLocation,
+        std::string stepTitle,
+        std::string stepDetail,
+        std::string stepRewardPreview,
+        std::string stepActionLabel,
+        std::string stepFailureExplanation,
+        ScenarioEventKind stepCompletionEvent,
+        std::string stepEventOriginId,
+        std::string stepEventTargetId,
+        int stepRequiredProgress,
+        int stepRequiredGrade,
+        bool stepMandatoryBriefing,
+        bool stepClaimRequired,
+        bool stepFirstFailureExplanation,
+        ScenarioActionKind stepAction,
+        std::string stepMiningSiteDefinitionId,
+        std::vector<ScenarioReward> stepRewards)
+        : id(std::move(stepId)),
+          prerequisites(std::move(stepPrerequisites)),
+          location(std::move(stepLocation)),
+          title(std::move(stepTitle)),
+          detail(std::move(stepDetail)),
+          rewardPreview(std::move(stepRewardPreview)),
+          actionLabel(std::move(stepActionLabel)),
+          failureExplanation(std::move(stepFailureExplanation)),
+          completionEvent(stepCompletionEvent),
+          eventOriginId(std::move(stepEventOriginId)),
+          eventTargetId(std::move(stepEventTargetId)),
+          requiredProgress(stepRequiredProgress),
+          requiredGrade(stepRequiredGrade),
+          mandatoryBriefing(stepMandatoryBriefing),
+          claimRequired(stepClaimRequired),
+          firstFailureExplanation(stepFirstFailureExplanation),
+          action(stepAction),
+          miningSiteDefinitionId(std::move(stepMiningSiteDefinitionId)),
+          rewards(std::move(stepRewards))
+    {
+    }
 };
 
 struct ScenarioDefinition {
@@ -1243,6 +1357,35 @@ struct Destination {
     // gate. The shared calculation can include a matching transfer assist.
     double calibratedTransferMarginRequired = 0.0;
     std::string transferMarginBlockerText;
+
+    Destination() = default;
+    Destination(
+        std::string destinationId,
+        std::string destinationName,
+        int destinationTier,
+        double target,
+        double minimumCrash,
+        double maximumCrash,
+        double reward,
+        double destinationHazard,
+        std::string destinationUnlockKey,
+        double gravityX,
+        double gravityY,
+        double gravity)
+        : id(std::move(destinationId)),
+          name(std::move(destinationName)),
+          tier(destinationTier),
+          targetMultiplier(target),
+          minCrashMultiplier(minimumCrash),
+          maxCrashMultiplier(maximumCrash),
+          baseReward(reward),
+          hazard(destinationHazard),
+          unlockKey(std::move(destinationUnlockKey)),
+          gravityDirectionX(gravityX),
+          gravityDirectionY(gravityY),
+          gravityScale(gravity)
+    {
+    }
 };
 
 // A directed solar route owns its source, target, calibrated powered-fuel
@@ -1655,6 +1798,9 @@ struct MiningCell {
     bool suitOnlyPassage = false;
     // -1 means the cell is not part of a layered cocoon.
     int cocoonLayer = -1;
+    // Presentation-only: refreshed whenever terrain takes a hit and allowed
+    // to decay in the live simulation. It is intentionally not persisted.
+    double damageFlashSeconds = 0.0;
 };
 
 struct MiningTerrain {
@@ -1696,6 +1842,10 @@ struct MiningEnemy {
     bool gateAssociated = false;
     bool swarmAssociated = false;
     bool elite = false;
+    // Swarm attack tokens are transient combat coordination. They are rebuilt
+    // after load instead of becoming part of the campaign save contract.
+    double swarmAttackCommitSeconds = 0.0;
+    double swarmAttackRequeueSeconds = 0.0;
     // Presentation timers do not drive combat outcomes. They select the
     // shared Attack, Hit, and Defeat clips in the scene renderer.
     double attackAnimationSeconds = 0.0;

@@ -33,6 +33,7 @@ inline constexpr const char* volcanicDescent = "volcanic_descent";
 inline constexpr const char* outerTransfer = "outer_transfer";
 inline constexpr const char* saturnDeparture = "saturn_departure";
 inline constexpr const char* uranusDeparture = "uranus_departure";
+inline constexpr const char* neptuneDiscovery = "neptune_straylight_discovery";
 inline constexpr const char* generatedTemplate = "generated_mining_template";
 } // namespace scenario
 

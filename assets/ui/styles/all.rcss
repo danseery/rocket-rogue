@@ -701,7 +701,7 @@ body.controller-connected .story-introduction .story-content {
     width: 100%;
     margin-top: 22px;
 }
-.story-beats article {
+.story-beat {
     box-sizing: border-box;
     width: 31%;
     min-height: 132px;
@@ -711,9 +711,9 @@ body.controller-connected .story-introduction .story-content {
     border-top-width: 1px;
     border-color: rgba(99, 229, 255, 0.38);
 }
-.story-beats article span { color: #63e5ff; font-size: 11px; font-weight: bold; }
-.story-beats article h2 { margin-top: 5px; margin-bottom: 6px; color: #f1f8fa; font-size: 18px; }
-.story-beats article p { color: #b9ced6; font-size: 13px; line-height: 1.35; }
+.story-beat span { color: #63e5ff; font-size: 11px; font-weight: bold; }
+.story-beat h2 { margin-top: 5px; margin-bottom: 6px; color: #f1f8fa; font-size: 18px; }
+.story-beat p { color: #b9ced6; font-size: 13px; line-height: 1.35; }
 .story-action {
     width: 280px;
     min-height: 48px;

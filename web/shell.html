@@ -848,6 +848,15 @@
       clearSave() {
         window.localStorage.removeItem("rocket_rogue_save_v1");
       },
+      loadCheckpoint() {
+        return window.localStorage.getItem("rocket_rogue_checkpoint_v16") || "";
+      },
+      storeCheckpoint(data) {
+        window.localStorage.setItem("rocket_rogue_checkpoint_v16", data || "");
+      },
+      clearCheckpoint() {
+        window.localStorage.removeItem("rocket_rogue_checkpoint_v16");
+      },
       gameSpeedMultiplier
     };
 

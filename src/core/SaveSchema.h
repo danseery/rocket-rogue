@@ -5,9 +5,9 @@
 namespace rocket::save_schema {
 
 inline constexpr std::string_view header = "RR_SAVE_V1";
-// Version fifteen intentionally starts a new campaign generation. Older
+// Version sixteen intentionally starts a new campaign generation. Older
 // payloads are cleared by the application at startup rather than migrated.
-inline constexpr int currentVersion = 15;
+inline constexpr int currentVersion = 16;
 inline constexpr char keyValueDelimiter = '=';
 inline constexpr char listDelimiter = ',';
 inline constexpr char textListDelimiter = '|';
@@ -35,7 +35,6 @@ inline constexpr std::string_view cleanShallowRecoveryStreak = "cleanShallowReco
 inline constexpr std::string_view nextLaunchFuelBoost = "nextLaunchFuelBoost";
 inline constexpr std::string_view nextLaunchSpeedBoost = "nextLaunchSpeedBoost";
 inline constexpr std::string_view nextLaunchInstabilityPenalty = "nextLaunchInstabilityPenalty";
-inline constexpr std::string_view jupiterSlingshotActive = "jupiterSlingshotActive";
 inline constexpr std::string_view pendingTransferAssistId = "pendingTransferAssistId";
 inline constexpr std::string_view pendingTransferAssistSource = "pendingTransferAssistSource";
 inline constexpr std::string_view pendingTransferAssistTarget = "pendingTransferAssistTarget";

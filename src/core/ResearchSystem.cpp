@@ -1521,6 +1521,9 @@ bool flybyClearsGenericNextRoute(const GameState& state, const ContentCatalog& c
 {
     const Destination* next = nextDestination(state, catalog);
     return next != nullptr &&
+        !destinationHasAuthoredProgressionArtifact(
+            catalog,
+            currentDestination(state, catalog).id) &&
         (next->routeRequirementKeys.empty() || scenarioRouteUsesFlightData(state, catalog, *next)) &&
         frontierReadinessCap(state, catalog) > 0;
 }
@@ -1677,24 +1680,50 @@ bool canDepartCapturedArrivalOrbit(const GameState& state, const ContentCatalog&
         && !requiresArrivalOrbitBeforeLanding(state, catalog);
 }
 
-bool bankArrivalLandingFlightData(GameState& state, const ContentCatalog& catalog)
+namespace {
+
+bool bankAuthoredRouteFlightData(
+    GameState& state,
+    const ContentCatalog& catalog,
+    std::string_view originDestinationId)
 {
-    if (!canAttemptArrivalLanding(state, catalog)) {
+    const Destination* target = nextDestination(state, catalog);
+    if (target == nullptr || !scenarioRouteUsesFlightData(state, catalog, *target) ||
+        currentDestination(state, catalog).id != originDestinationId) {
         return false;
     }
     const int before = state.run.frontierReadiness;
     if (!bankFrontierReadiness(state, catalog)) {
         return false;
     }
-    const Destination& origin = currentDestination(state, catalog);
-    const Destination* target = nextDestination(state, catalog);
     recordScenarioEvent(
         state,
         catalog,
-        {ScenarioEventKind::FlightDataBanked, {}, {}, origin.id,
-         target == nullptr ? std::string {} : target->id,
-         state.run.frontierReadiness - before, 0});
+        {ScenarioEventKind::FlightDataBanked,
+         {},
+         {},
+         std::string(originDestinationId),
+         target->id,
+         state.run.frontierReadiness - before,
+         0});
     return true;
+}
+
+} // namespace
+
+bool bankArrivalLandingFlightData(GameState& state, const ContentCatalog& catalog)
+{
+    if (!canAttemptArrivalLanding(state, catalog)) {
+        return false;
+    }
+    const Destination& origin = currentDestination(state, catalog);
+    if (destinationHasAuthoredProgressionArtifact(catalog, origin.id)) {
+        // Artifact-bearing route objectives name their key-producing
+        // activities explicitly. Repeated landings must not become a grindable
+        // substitute for recovering the artifact and completing Orbit.
+        return false;
+    }
+    return bankAuthoredRouteFlightData(state, catalog, origin.id);
 }
 
 std::string arrivalOperationBlockReason(const GameState& state, const ContentCatalog& catalog, std::string_view operation)
@@ -2606,40 +2635,19 @@ bool commitClaimedScenarioRoute(
         return false;
     }
 
-    const auto destination = std::find_if(
-        catalog.destinations.begin(),
-        catalog.destinations.end(),
-        [&](const Destination& candidate) { return candidate.id == route->id; });
-    if (destination == catalog.destinations.end()) {
-        return false;
-    }
-
-    const int routeIndex = static_cast<int>(
-        std::distance(catalog.destinations.begin(), destination));
-    if (routeIndex <= state.run.destinationIndex) {
-        // Valid v15 saves created before physical route claims may already
-        // have selected or reached the rewarded destination. Do not regress
-        // them or manufacture another copy of the leg.
-        state.screen = Screen::Hangar;
-        syncLaunchConfig(state, catalog);
-        return true;
-    }
-
     const Destination* origin = resolved.destinationId.empty()
         ? &currentDestination(state, catalog)
         : catalog.findDestination(resolved.destinationId);
     if (origin == nullptr) {
         return false;
     }
-    const auto originPosition = std::find_if(
-        catalog.destinations.begin(),
-        catalog.destinations.end(),
-        [&](const Destination& candidate) { return candidate.id == origin->id; });
-    if (originPosition == catalog.destinations.end()) {
+    // A route claim is a physical departure authorization, not a save repair.
+    // The ship must still be at the authored origin; if it is not, leave the
+    // already-claimed reward intact and let the progression audit offer the
+    // explicit checkpoint path rather than relocating the campaign.
+    if (currentDestination(state, catalog).id != origin->id) {
         return false;
     }
-    const int originIndex = static_cast<int>(
-        std::distance(catalog.destinations.begin(), originPosition));
     RouteTransitState transit = makeRouteTransit(
         catalog,
         origin->id,
@@ -2649,10 +2657,6 @@ bool commitClaimedScenarioRoute(
         return false;
     }
 
-    // Completing an authored departure is evidence that the ship is at that
-    // departure body, even if an interrupted valid-v15 transaction retained
-    // an older recovery index. Never advance to the target before the flight.
-    state.run.destinationIndex = originIndex;
     state.run.frontierReadiness = 0;
     state.run.routeTransit = std::move(transit);
     state.run.arrivalOps = {};
@@ -2755,10 +2759,9 @@ void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog)
     applyLaunchUpgradeAssistToOrbit(state, orbit);
 
     const double angle = tuning::orbit::flybyExitAngleRadians();
-    // Start in the stable Good band, outside Perfect. A clean radial trim can
-    // promote the capture at the end of the loop without making the player
-    // first survive an intentionally unsafe insertion.
-    const double insertionRadius = orbit.targetRadius + orbit.goodBand * 0.55;
+    // Begin on the authored solution. Perfect now asks the player to preserve
+    // the gold orbit instead of correcting an insertion that starts in green.
+    const double insertionRadius = orbit.targetRadius;
     orbit.shipX = std::cos(angle) * insertionRadius;
     orbit.shipY = std::sin(angle) * insertionRadius;
     const double insertionSpeed = circularOrbitSpeedAtRadius(orbit, insertionRadius);
@@ -2929,6 +2932,10 @@ void completeOrbitRun(GameState& state, const ContentCatalog& catalog)
     const OrbitGrade grade = orbit.result == OrbitGrade::Active ? orbitGrade(orbit) : orbit.result;
     applyOrbitReward(state, catalog, grade);
     const Destination* destination = catalog.findDestination(orbit.destinationId);
+    if (destination != nullptr &&
+        (grade == OrbitGrade::Good || grade == OrbitGrade::Perfect)) {
+        (void)bankAuthoredRouteFlightData(state, catalog, destination->id);
+    }
     preserveArrivalFuelAtDestination(
         state,
         destination == nullptr ? orbit.destinationId : destination->id);
@@ -5291,6 +5298,23 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
     }
     writeLegacyCampaignSaveProjection(state, catalog);
     addMaterials(state.meta.materials, outcome.materialDelta);
+    const bool recoveredNewAuthoredArtifact = std::any_of(
+        expedition.temporaryArtifacts.begin(),
+        expedition.temporaryArtifacts.end(),
+        [&](const ArtifactRecord& recovered) {
+            if (!destinationHasAuthoredProgressionArtifact(
+                    catalog,
+                    recovered.originDestinationId)) {
+                return false;
+            }
+            return std::none_of(
+                state.meta.artifacts.begin(),
+                state.meta.artifacts.end(),
+                [&](const ArtifactRecord& permanent) {
+                    return permanent.originDestinationId ==
+                        recovered.originDestinationId;
+                });
+        });
     applyRecoveredArtifactRewards(
         state,
         catalog,
@@ -5307,6 +5331,12 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
              artifact.id,
              1,
              0});
+    }
+    if (recoveredNewAuthoredArtifact) {
+        (void)bankAuthoredRouteFlightData(
+            state,
+            catalog,
+            expedition.destinationId);
     }
     creditExtractedCompatibilityMiningSiteArtifacts(
         state.meta,

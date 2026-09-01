@@ -6,13 +6,13 @@ The current Moon, Mars, Io, and Jupiter-to-Saturn progression is content authore
 
 ## Boundary
 
-`src/core/Content.cpp` owns authored content. `src/core/ScenarioSystem.*` owns reusable instance state, events, actions, rewards, route requirements, and objective presentation. Mining, Flyby, rewards, route evaluation, and UI do not decide behavior from a scenario ID, destination ID, title, reward copy, or campaign order.
+`src/core/Content.cpp` owns authored content. `src/core/ScenarioSystem.*` owns reusable instance state, events, actions, rewards, typed activities, transitions, route requirements, progression auditing, and objective presentation. Mining, Flyby, rewards, route evaluation, and UI do not decide behavior from a scenario ID, destination ID, title, reward copy, or campaign order.
 
 This division is deliberate:
 
 - Content may say where a scenario is offered, what the player sees, what it rewards, and which existing activity it launches.
 - Mechanics receive typed configuration and typed runtime context. They must not contain an `if` branch for a named campaign beat or destination.
-- Save migration may recognize retired IDs and legacy fields. Compatibility code is the only exception to the no-story-branch rule.
+- A save is either exact-schema valid or a fresh campaign. Runtime validation may restore only an already-validated checkpoint; it never infers an unlock, route, artifact recovery, or narrative step.
 - New content selects an existing mechanic shape first. Add a new mechanic type only when its geometry or behavior is genuinely new and reusable.
 
 `tools/check-scenario-boundaries.mjs` enforces the important part of this boundary for reusable mining, Flyby, route, and reward code. Run it whenever scenario, mining-site, or navigation content changes.
@@ -27,11 +27,11 @@ This division is deliberate:
 | `MiningSiteDefinition` | A reusable fixed mining activity: arena request, biome, gate, oxygen budget, and optional cocoon. | Mining run/site context and `MiningSiteProgress` |
 | `ScenarioFactoryDefinition` | A versioned generator entry point that selects a non-default scenario template. | A procedural `ScenarioInstance` with a seed and resolved parameters |
 
-Definitions use stable string IDs and versions. Do not change the behavior of an already shipped definition in place. Keep the prior meaning available for saves, introduce a versioned migration when necessary, and give materially new content a new stable ID.
+Definitions use stable string IDs and versions. Do not change the behavior of an already shipped definition in place. Give materially new content a new stable ID or definition version; a later fresh-schema boundary may intentionally discard earlier campaign state rather than supporting a compatibility migration.
 
 ### Scenario definitions
 
-A `ScenarioDefinition` has an availability unlock, optional destination association for presentation, and a set of `ScenarioStepDefinition` records. Steps are dependency-linked rather than implicitly linear: a step becomes active only when each prerequisite is complete and, when required, explicitly claimed. This supports a staged encounter, optional branch, or later multi-phase challenge without making the runtime understand a narrative sequence.
+A `ScenarioDefinition` has an availability unlock, optional destination association for presentation, and a set of `ScenarioStepDefinition` records. Steps are dependency-linked rather than implicitly linear: a step becomes active only when each prerequisite is complete and, when required, explicitly claimed. Every nonterminal step supplies `goalText`, `gateText`, `nextStepText`, an activity kind, a typed transition, an explicit retry policy, and a presentation mode. This supports a staged encounter, optional branch, or later multi-phase challenge without making the runtime understand a narrative sequence.
 
 Each step owns:
 
@@ -41,13 +41,13 @@ Each step owns:
 - whether a briefing is mandatory, whether the reward requires an explicit claim, and the next typed action; and
 - typed `ScenarioReward` records.
 
-The valid actions are acknowledgement, claim, begin activity, retry activity, and first-failure acknowledgement. Activities emit `ScenarioEvent` records such as safe material delivery, protected-objective extraction, Flyby completion, a manual action, equipment assignment, or an abort. `performScenarioAction()` and `recordScenarioEvent()` are the authoritative mutation path. A threshold becomes `READY TO CLAIM`; it does not award anything until the authored claim action is pressed.
+The valid actions are acknowledgement, claim, begin activity, retry activity, and first-failure acknowledgement. Activities emit `ScenarioEvent` records such as safe material delivery, protected-objective extraction, Flyby completion, destination arrival, a manual action, equipment assignment, or an abort. `performScenarioAction()` and `recordScenarioEvent()` are the authoritative mutation path. A threshold becomes `READY TO CLAIM`; it does not award anything until the authored claim action is pressed. `ScenarioActionOutcome` carries the transition to one generic application dispatcher; actions, result screens, and retries never auto-dispatch a follow-up.
 
 ### Rewards and route requirements
 
 Current reward kinds grant an unlock key, Drone Bay capacity, a Support Drone, frontier readiness, safely delivered material inventory, or route access. Rewards are idempotent: a saved per-instance reward ledger prevents a reload or repeated event from granting the same reward twice. Completing an authored gameplay objective grants 10 Expedition XP; briefings, manual actions, equipment assignment, claims, and aborts do not.
 
-A destination declares its travel prerequisites with `Destination::routeRequirementKeys`. `scenarioRouteRequirementStatus()` matches a missing key to the scenario step that can award it, so Navigation, Hangar, Solar Map, objective strips, modal copy, and route buttons share one blocker and next action. A reward may grant the key directly, or a `RouteAccess` reward may grant every configured key for a destination. Neither route evaluator needs to recognize a named world, tier, or story beat.
+A destination declares its travel prerequisites with `Destination::routeRequirementKeys`. `scenarioRouteRequirementStatus()` matches a missing key to the scenario step that can award it, so Navigation, Hangar, Solar Map, objective strips, modal copy, and route buttons share one blocker and next action. A reward may grant the key directly, or a `RouteAccess` reward may grant every configured key for a destination and queue the matching physical source-to-target `RouteTransitState`. Neither route evaluator needs to recognize a named world, tier, or story beat; the frontier advances only after successful physical arrival.
 
 Scenario keys supplement the permanent launch-system route gates. Navigation evaluates the content-defined scenario requirement first, then the destination's required Fuel, Controls, Cooling, or Hull rank. Legacy `FrontierReadiness` rewards remain readable for old scenarios and saves but do not replace the four lesson milestones.
 
@@ -101,24 +101,24 @@ The Io mining-site configuration happens to use a Thermal biome, an inert Regoli
 
 Native RmlUi and WebAssembly use the same `assets/ui` templates and RCSS. A scenario action is emitted with semantic scenario-instance ID, step ID, and `ScenarioActionKind` attributes. Templates may choose layout and visual family, but must not infer a claim, route gate, or mandatory-modal behavior from text, a route name, or a markup query. See [RmlUi Template and Component System](RMLUI_TEMPLATE_COMPONENT_SYSTEM.md) for the shared template/focus rules.
 
-## Save version 14 boundary
+## Save version 16 boundary and recovery
 
-Save version 14 is the only accepted schema. It persists scenario instances, launch-upgrade ranks, permanent Survey Array, Bore System, and Rig Fuel Loop ranks, per-chain purchases for an open Refit visit, lesson completion, mining-site provenance, protected-objective state, expedition fuel, Expedition XP, queued Level Up choices, persisted offers, Rig and Drone ranks, slot grafts, and selected synergies.
+Save version 16 is the only accepted schema. It persists scenario instances, launch-upgrade ranks, permanent Survey Array, Bore System, and Rig Fuel Loop ranks, lesson completion, mining-site provenance, protected-objective state, expedition fuel, Expedition XP, queued Level Up choices, persisted offers, Rig and Drone ranks, slot grafts, and selected synergies.
 
-Version 13 and older payloads are rejected before any field is restored. Continue remains disabled with `Progression update requires a new game.` The old file is left untouched until New Game confirmation replaces it; there is no partial scenario or progression migration.
+Every non-v16 or malformed payload is cleared before any field is restored and immediately replaced with a fresh v16 campaign. Preferences remain intact. Validated hub states additionally write a sidecar checkpoint. If a v16 campaign fails the runtime progression audit, the title presents `ROUTE CONTROL // RECOVERY REQUIRED` with explicit checkpoint restoration or a confirmed new campaign; neither path grants progress.
 
-`SaveSchema.h` and `SaveData.*` are authoritative for wire keys and defaults. Test strict version rejection plus v14 round trips for active Arrival, Surface, Mining, protected-objective, and open post-extraction Level Up states whenever scenario, site, cocoon, launch-progression, expedition-fuel, or Expedition XP fields change.
+`SaveSchema.h` and `SaveData.*` are authoritative for wire keys and defaults. Test strict version rejection plus v16 round trips, native/web checkpoint parity, active Arrival, Surface, Mining, protected-objective, and open post-extraction Level Up states whenever scenario, site, cocoon, launch-progression, expedition-fuel, or Expedition XP fields change.
 
 ## Authoring checklist
 
 1. Reuse an existing event, action, reward, requirement, activity, site, or cocoon mechanic whenever it fits.
-2. Add stable content IDs to `ContentIds.h` only when the identity must be shared by content, migrations, or tests.
+2. Add stable content IDs to `ContentIds.h` only when the identity must be shared by content or tests.
 3. Add a versioned typed definition to `Content.cpp`; keep narrative copy there.
 4. Connect any route with keys and scenario rewards, not destination-specific navigation branches.
 5. Use a `MiningSiteDefinition` and `MiningCocoonDefinition` for protected mining rather than adding encounter flags to generic terrain or drone code.
 6. Route every player action through the scenario dispatcher and every result through a typed event.
 7. Render from `ScenarioObjectivePresentation` on native and web; keep semantic action and focus IDs stable.
-8. Add authored, procedural, event/claim, route, cocoon-layer, strict-v14 save, and native/web presentation coverage as applicable.
+8. Add authored, procedural, event/claim, route, cocoon-layer, strict-v16 save/checkpoint, and native/web presentation coverage as applicable.
 9. Run catalog validation, `node tools/check-scenario-boundaries.mjs`, relevant core/mining/UI tests, and `git diff --check`.
 
-If a proposed feature requires a code comparison against a campaign ID, destination ID, title, or reward copy outside content/migration code, stop and express the needed capability in a typed definition instead.
+If a proposed feature requires a code comparison against a campaign ID, destination ID, title, or reward copy outside content code, stop and express the needed capability in a typed definition instead.

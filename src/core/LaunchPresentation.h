@@ -101,6 +101,11 @@ inline void addLaunchLessonCopy(
         presentation.objectiveCopy =
             "Steer through the asteroid gaps. Reaching " + destination.name + " completes the flight and lands the ship.";
         break;
+    case LaunchMissionKind::StraylightApproach:
+        presentation.objectiveTitle = "REACH THE CONTACT";
+        presentation.objectiveCopy =
+            "Autoguidance has the corridor. Cross the quiet beyond Neptune and see what has been waiting in the dark.";
+        break;
     case LaunchMissionKind::Standard:
         presentation.objectiveTitle = "REACH " + destination.name;
         if (launch.asteroidsEnabled) {
@@ -209,6 +214,8 @@ inline std::string launchStatusMessage(
         return "Watch TEMPERATURE. Engines Off always cools the ship.";
     case LaunchMissionKind::AsteroidBelt:
         return "Steer through the gaps. Protect the HULL.";
+    case LaunchMissionKind::StraylightApproach:
+        return "CONTACT LOCKED — automatic approach in progress";
     case LaunchMissionKind::Standard:
         return "Keep the ship inside its visible limits.";
     }
@@ -228,12 +235,16 @@ inline LaunchPanelPresentation launchPanelPresentation(
 {
     LaunchPanelPresentation presentation;
     const Destination& destination = launchDisplayDestination(state, catalog, flightModel);
-    presentation.destinationName = destination.name;
+    const bool straylightApproach =
+        flightModel.config.missionKind == LaunchMissionKind::StraylightApproach;
+    presentation.destinationName = straylightApproach ? "Unknown Contact" : destination.name;
     const RouteTransitState& transit = flightModel.config.routeTransit;
     const Destination* origin = transit.active()
         ? catalog.findDestination(transit.originDestinationId)
         : nullptr;
-    const std::string routeLabel = origin == nullptr
+    const std::string routeLabel = straylightApproach
+        ? "Neptune \xE2\x86\x92 Unknown Contact"
+        : origin == nullptr
         ? destination.name
         : origin->name + " \xE2\x86\x92 " + destination.name;
     if (transit.active() && transit.intent == RouteTransitIntent::Recovery) {
@@ -248,6 +259,10 @@ inline LaunchPanelPresentation launchPanelPresentation(
             : "Reapproach \xE2\x80\xA2 " + routeLabel;
         presentation.objectiveTitle = "REAPPROACH " + destination.name;
         presentation.objectiveCopy = "Re-enter " + destination.name + " from the recovered staging route.";
+    } else if (straylightApproach) {
+        presentation.sectionTitle = launchFlight != nullptr
+            ? "Outbound \xE2\x80\xA2 Neptune \xE2\x86\x92 Unknown Contact"
+            : "Launch \xE2\x80\xA2 Neptune \xE2\x86\x92 Unknown Contact";
     } else {
         presentation.sectionTitle = launchFlight != nullptr
             ? (actions.returningHome ? "Return \xE2\x80\xA2 " : "Outbound \xE2\x80\xA2 ") + routeLabel
@@ -303,7 +318,9 @@ inline LaunchPanelPresentation launchPanelPresentation(
     }
 
     presentation.telemetryMessage = launchStatusMessage(flightModel, flight, actions);
-    presentation.primaryActions = primaryFlightActions(actions);
+    if (!straylightApproach) {
+        presentation.primaryActions = primaryFlightActions(actions);
+    }
     presentation.systemActions = systemFlightActions(flightModel, actions);
     return presentation;
 }

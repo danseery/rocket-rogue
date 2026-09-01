@@ -9,6 +9,7 @@ namespace rocket::ui {
 namespace actions {
 inline constexpr std::string_view newGame = "new_game";
 inline constexpr std::string_view continueGame = "continue_game";
+inline constexpr std::string_view restoreCheckpoint = "restore_checkpoint";
 inline constexpr std::string_view prepareLaunch = "prepare_launch";
 inline constexpr std::string_view startLaunch = "start_launch";
 inline constexpr std::string_view returnHome = "return_home";
@@ -64,16 +65,6 @@ inline constexpr std::string_view miningRepairDrone = "mining_repair_drone";
 inline constexpr std::string_view miningStow = "mining_stow";
 inline constexpr std::string_view miningAbort = "mining_abort";
 inline constexpr std::string_view miningFailureAck = "mining_failure_ack";
-inline constexpr std::string_view acknowledgeProspectorCompletion = "acknowledge_prospector_completion";
-inline constexpr std::string_view acknowledgeLunarMiningBriefing = "acknowledge_lunar_mining_briefing";
-inline constexpr std::string_view claimLunarProspector = "claim_lunar_prospector";
-inline constexpr std::string_view acknowledgeMarsMiningBriefing = "acknowledge_mars_mining_briefing";
-inline constexpr std::string_view claimMarsBayExpansion = "claim_mars_bay_expansion";
-inline constexpr std::string_view commissionIoHazardDrone = "commission_io_hazard_drone";
-inline constexpr std::string_view beginSaturnSlingshot = "begin_saturn_slingshot";
-inline constexpr std::string_view retrySaturnSlingshot = "retry_saturn_slingshot";
-inline constexpr std::string_view acknowledgeSaturnSlingshotFailure = "acknowledge_saturn_slingshot_failure";
-inline constexpr std::string_view claimSaturnCourse = "claim_saturn_course";
 inline constexpr std::string_view acknowledgeJupiterWindow = "acknowledge_jupiter_window";
 inline constexpr std::string_view openJupiterRefit = "open_jupiter_refit";
 inline constexpr std::string_view beginJupiterSlingshot = "begin_jupiter_slingshot";

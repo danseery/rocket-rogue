@@ -954,6 +954,53 @@ void testTransferAssistLaunchUsesItsSourceBody()
     assert(!hasTexture(packet, TextureId::Earth));
 }
 
+void testJupiterSaturnLaunchKeepsJupiterVisibleBesideShip()
+{
+    const auto findTexture = [](const ScenePacket& packet, TextureId texture) {
+        const rocket::SceneAtlasUvRect expected = rocket::mapSceneAtlasUvRect(
+            texture, 0.0F, 0.0F, 1.0F, 1.0F);
+        const auto found = std::find_if(
+            packet.instances.begin(),
+            packet.instances.end(),
+            [&](const PackedSceneInstance& packed) {
+                const SceneInstance instance = rocket::unpackSceneInstance(packed);
+                return instance.textured &&
+                    std::abs(instance.u0 - expected.u0) < 0.001F &&
+                    std::abs(instance.v0 - expected.v0) < 0.001F &&
+                    std::abs(instance.u1 - expected.u1) < 0.001F &&
+                    std::abs(instance.v1 - expected.v1) < 0.001F;
+            });
+        assert(found != packet.instances.end());
+        return rocket::unpackSceneInstance(*found);
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::Jupiter, true);
+    composer.setTextureReady(TextureId::Saturn, true);
+    composer.setTextureReady(TextureId::RocketClosed, true);
+
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::Launch;
+    snapshot.destinationTier = 4;
+    snapshot.frontierTransfer = true;
+    snapshot.launchOriginTier = 3;
+    snapshot.travelProgress = 0.0;
+
+    const ScenePacket& packet = composer.compose(snapshot);
+    const SceneInstance jupiter = findTexture(packet, TextureId::Jupiter);
+    const SceneInstance saturn = findTexture(packet, TextureId::Saturn);
+    const SceneInstance ship = findTexture(packet, TextureId::RocketClosed);
+
+    const float sourceSeparation = std::hypot(
+        jupiter.centerX - ship.centerX,
+        jupiter.centerY - ship.centerY);
+    assert(sourceSeparation > 0.20F);
+    assert(std::hypot(
+        saturn.centerX - ship.centerX,
+        saturn.centerY - ship.centerY) > sourceSeparation);
+}
+
 void testManifestAndLogicalTextureMapping()
 {
     assert(rocket::kSceneAtlasTextures.size() == rocket::textureIndex(TextureId::Count));
@@ -1286,6 +1333,72 @@ void testLaunchUsesAttachedFlameAndSideSteeringTriangleOnly()
     assert(std::abs((-nozzleSide / rocketHalfWidth) - (2.0F * 0.028F / 0.11F)) < 0.03F);
 }
 
+void testOverheatedLaunchFlashesShipRedAtTheCriticalWarningCadence()
+{
+    const auto redShipOverlays = [](const ScenePacket& packet) {
+        std::vector<SceneInstance> result;
+        for (const PackedSceneInstance& packed : packet.instances) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            if (instance.textured
+                && instance.shape == SceneInstanceShape::Rectangle
+                && std::abs(instance.color.r - 1.0F) < 0.01F
+                && std::abs(instance.color.g - 0.10F) < 0.01F
+                && std::abs(instance.color.b - 0.08F) < 0.01F
+                && std::abs(instance.color.a -
+                    rocket::tuning::launch::temperatureShipFlashOpacity) < 0.01F) {
+                result.push_back(instance);
+            }
+        }
+        return result;
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::RocketClosed, true);
+
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::Launch;
+    snapshot.instrumentTemperature =
+        rocket::tuning::launch::temperatureCriticalThreshold;
+    snapshot.animationTime = 0.0;
+    assert(redShipOverlays(
+        rocket::SceneComposerTestAccess::rocketPacket(composer, snapshot)).empty());
+
+    snapshot.instrumentTemperature =
+        rocket::tuning::launch::temperatureCriticalThreshold + 0.01;
+    const ScenePacket warningOn =
+        rocket::SceneComposerTestAccess::rocketPacket(composer, snapshot);
+    const std::vector<SceneInstance> overlays = redShipOverlays(warningOn);
+    assert(overlays.size() == 1U);
+
+    const auto whiteShip = std::find_if(
+        warningOn.instances.begin(),
+        warningOn.instances.end(),
+        [](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return instance.textured
+                && std::abs(instance.color.r - 1.0F) < 0.01F
+                && std::abs(instance.color.g - 1.0F) < 0.01F
+                && std::abs(instance.color.b - 1.0F) < 0.01F
+                && std::abs(instance.color.a - 1.0F) < 0.01F;
+        });
+    assert(whiteShip != warningOn.instances.end());
+    const SceneInstance ship = rocket::unpackSceneInstance(*whiteShip);
+    assert(std::abs(overlays.front().centerX - ship.centerX) < 0.001F);
+    assert(std::abs(overlays.front().centerY - ship.centerY) < 0.001F);
+    assert(std::abs(overlays.front().axisXx - ship.axisXx) < 0.001F);
+    assert(std::abs(overlays.front().axisYy - ship.axisYy) < 0.001F);
+
+    snapshot.animationTime = 0.40;
+    assert(redShipOverlays(
+        rocket::SceneComposerTestAccess::rocketPacket(composer, snapshot)).empty());
+
+    snapshot.screen = rocket::Screen::Hangar;
+    snapshot.animationTime = 0.0;
+    assert(redShipOverlays(
+        rocket::SceneComposerTestAccess::rocketPacket(composer, snapshot)).empty());
+}
+
 void testFlightPlumesScaleContinuouslyWithThrottle()
 {
     const auto thrustSize = [](const ScenePacket& packet, float expectedAlpha) {
@@ -1362,6 +1475,8 @@ void testCampaignIntroductionDrawsHeroicCapybara()
     composer.setViewport({1280, 800, 1280, 800, 1.0F});
     composer.setTextureReady(TextureId::LocalSolarBackground, true);
     composer.setTextureReady(TextureId::HeroicCapybara, true);
+    composer.setTextureReady(TextureId::Neptune, true);
+    composer.setTextureReady(TextureId::ArkOperational, true);
 
     RenderSnapshot introduction;
     introduction.screen = rocket::Screen::StoryBriefing;
@@ -1378,6 +1493,98 @@ void testCampaignIntroductionDrawsHeroicCapybara()
     assert(std::none_of(straylightPacket.draws.begin(), straylightPacket.draws.end(), [](const SceneDraw& draw) {
         return draw.texture == TextureId::HeroicCapybara;
     }));
+    assert(std::none_of(
+        straylightPacket.instances.begin(),
+        straylightPacket.instances.end(),
+        [](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return instance.shape == SceneInstanceShape::Rectangle
+                && std::abs(instance.color.r - 0.25F) < 0.01F
+                && std::abs(instance.color.g - 0.42F) < 0.01F
+                && std::abs(instance.color.b - 0.52F) < 0.01F
+                && std::abs(instance.color.a - 0.22F) < 0.01F;
+        }));
+
+    RenderSnapshot approach;
+    approach.screen = rocket::Screen::Launch;
+    approach.straylightApproach = true;
+    approach.frontierTransfer = true;
+    approach.destinationTier = 6;
+    approach.travelProgress = 0.45;
+    const ScenePacket& approachPacket = composer.compose(approach);
+    assert(std::any_of(approachPacket.draws.begin(), approachPacket.draws.end(), [](const SceneDraw& draw) {
+        return draw.texture == TextureId::Neptune;
+    }));
+    assert(std::any_of(approachPacket.draws.begin(), approachPacket.draws.end(), [](const SceneDraw& draw) {
+        return draw.texture == TextureId::ArkOperational;
+    }));
+    assert(std::none_of(
+        approachPacket.instances.begin(),
+        approachPacket.instances.end(),
+        [](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return instance.shape == SceneInstanceShape::Rectangle
+                && std::abs(instance.color.r - 1.0F) < 0.01F
+                && std::abs(instance.color.g - 0.25F) < 0.01F
+                && std::abs(instance.color.b - 0.20F) < 0.01F
+                && std::abs(instance.color.a - 0.82F) < 0.01F;
+        }));
+}
+
+void testUndiscoveredStraylightIsForeshadowedBehindNeptuneOnly()
+{
+    const auto findTextureInstance = [](const ScenePacket& packet, TextureId texture) {
+        const rocket::SceneAtlasUvRect expected = rocket::mapSceneAtlasUvRect(
+            texture, 0.0F, 0.0F, 1.0F, 1.0F);
+        const auto found = std::find_if(
+            packet.instances.begin(),
+            packet.instances.end(),
+            [&](const PackedSceneInstance& packed) {
+                const SceneInstance instance = rocket::unpackSceneInstance(packed);
+                return instance.textured
+                    && std::abs(instance.u0 - expected.u0) < 0.001F
+                    && std::abs(instance.v0 - expected.v0) < 0.001F
+                    && std::abs(instance.u1 - expected.u1) < 0.001F
+                    && std::abs(instance.v1 - expected.v1) < 0.001F;
+            });
+        assert(found != packet.instances.end());
+        return std::pair {
+            static_cast<std::size_t>(std::distance(packet.instances.begin(), found)),
+            rocket::unpackSceneInstance(*found)};
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::Neptune, true);
+    composer.setTextureReady(TextureId::ArkOperational, true);
+
+    RenderSnapshot neptune;
+    neptune.screen = rocket::Screen::Launch;
+    neptune.destinationTier = 6;
+    neptune.frontierTransfer = true;
+    neptune.arkCondition = rocket::ArkCondition::NotFound;
+    const ScenePacket& neptunePacket = composer.compose(neptune);
+    const auto [arkIndex, ark] = findTextureInstance(
+        neptunePacket, TextureId::ArkOperational);
+    const auto [neptuneIndex, planet] = findTextureInstance(
+        neptunePacket, TextureId::Neptune);
+    const float arkWidth = std::hypot(ark.axisXx, ark.axisXy) * 2.0F;
+    const float planetWidth = std::hypot(planet.axisXx, planet.axisXy) * 2.0F;
+    assert(arkIndex < neptuneIndex);
+    assert(arkWidth < planetWidth);
+    assert(std::hypot(
+        ark.centerX - planet.centerX,
+        ark.centerY - planet.centerY) < 0.30F);
+
+    RenderSnapshot uranus = neptune;
+    uranus.destinationTier = 5;
+    const ScenePacket& uranusPacket = composer.compose(uranus);
+    assert(std::none_of(
+        uranusPacket.draws.begin(),
+        uranusPacket.draws.end(),
+        [](const SceneDraw& draw) {
+            return draw.texture == TextureId::ArkOperational;
+        }));
 }
 
 void testPolygonInstanceMatchesTriangleFan()
@@ -2844,6 +3051,49 @@ void testMiningRigSlerpsVerticalDuringExtraction()
     assert(docked.color.a > 0.10F);
 }
 
+void testMiningDepartureFlameTracksShip()
+{
+    rocket::MiningRunState mining = miningState(20.0, 20.0);
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningExtractionActive = true;
+    snapshot.animationTime = 1.0;
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::RocketOpen, true);
+    composer.setTextureReady(TextureId::Thrust, true);
+
+    snapshot.miningExtractionProgress = 0.76;
+    const ScenePacket earlyPacket = composer.compose(snapshot);
+    const SceneInstance earlyShip = spriteInstance(
+        earlyPacket, TextureId::RocketOpen, 0.0F, 0.0F, 1.0F, 1.0F);
+    const SceneInstance earlyFlame = spriteInstance(
+        earlyPacket, TextureId::Thrust, 0.0F, 0.27F, 1.0F / 6.0F, 1.0F);
+
+    snapshot.miningExtractionProgress = 0.94;
+    const ScenePacket latePacket = composer.compose(snapshot);
+    const SceneInstance lateShip = spriteInstance(
+        latePacket, TextureId::RocketOpen, 0.0F, 0.0F, 1.0F, 1.0F);
+    const SceneInstance lateFlame = spriteInstance(
+        latePacket, TextureId::Thrust, 0.0F, 0.27F, 1.0F / 6.0F, 1.0F);
+
+    const float shipLift = lateShip.centerY - earlyShip.centerY;
+    const float flameLift = lateFlame.centerY - earlyFlame.centerY;
+    const auto visibleFlameHeadY = [](const SceneInstance& flame) {
+        return flame.centerY + std::abs(flame.axisYy);
+    };
+    const auto shipNozzleY = [](const SceneInstance& ship) {
+        return ship.centerY - std::abs(ship.axisYy) * 2.0F * 0.465F;
+    };
+    assert(shipLift > 0.10F);
+    assert(std::abs(visibleFlameHeadY(earlyFlame) - shipNozzleY(earlyShip)) < 0.001F);
+    assert(std::abs(visibleFlameHeadY(lateFlame) - shipNozzleY(lateShip)) < 0.001F);
+    assert(std::abs(
+        (visibleFlameHeadY(lateFlame) - visibleFlameHeadY(earlyFlame)) -
+        shipLift) < 0.001F);
+    assert(flameLift > 0.0F);
+}
+
 void testMiningRigStaysVisibleAndTracksHeading()
 {
     rocket::MiningRunState mining = miningState(20.0, 20.0);
@@ -3996,13 +4246,16 @@ int main()
     testOrbitGuideBandsHighlightActiveZone();
     testFlybyGuideBandsHighlightActiveZone();
     testTransferAssistLaunchUsesItsSourceBody();
+    testJupiterSaturnLaunchKeepsJupiterVisibleBesideShip();
     testManifestAndLogicalTextureMapping();
     testEnemyThemesAndAnimationPriorityUseTheSharedSpriteContract();
     testFlightInstrumentClusterUsesAtlasNeedlesAndBlinkingWarning();
     testFlybySteeringTriangleAndThrustFlameRemainDistinct();
     testLaunchUsesAttachedFlameAndSideSteeringTriangleOnly();
+    testOverheatedLaunchFlashesShipRedAtTheCriticalWarningCadence();
     testFlightPlumesScaleContinuouslyWithThrottle();
     testCampaignIntroductionDrawsHeroicCapybara();
+    testUndiscoveredStraylightIsForeshadowedBehindNeptuneOnly();
     testPolygonInstanceMatchesTriangleFan();
     testOrderedBatchingAndWideLineInstancing();
     testUniformAndGradientLineOrdering();
@@ -4025,6 +4278,7 @@ int main()
     testMiningPickupTextUsesTypedColorsAndTwoSecondLifetime();
     testMiningPickupHistoryDoesNotReplayAfterLevelUp();
     testMiningRigSlerpsVerticalDuringExtraction();
+    testMiningDepartureFlameTracksShip();
     testMiningRigStaysVisibleAndTracksHeading();
     testMiningCollisionIndicatorMarksTheContactedEdge();
     testMiningSurveyPulseRechargeRingPersistsWhenReady();

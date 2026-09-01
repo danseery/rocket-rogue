@@ -249,59 +249,6 @@ std::string encodeScenarioAction(
         std::string(stepId) + "|" + std::to_string(static_cast<int>(action));
 }
 
-// These mappings are deliberately an input-bridge compatibility boundary.
-// They preserve the old exported web/native actions while the live UI emits
-// semantic scenario actions. No campaign reward, route, or activity logic is
-// implemented here.
-struct LegacyScenarioActionTranslation {
-    std::string_view legacyAction;
-    std::string_view scenarioId;
-    std::string_view stepId;
-    ScenarioActionKind action = ScenarioActionKind::None;
-};
-
-constexpr std::array<LegacyScenarioActionTranslation, 7> kLegacyScenarioActionTranslations {{
-    {ui::actions::acknowledgeProspectorCompletion,
-     content::scenario::lunarProspector,
-     "delivery",
-     ScenarioActionKind::ClaimReward},
-    {ui::actions::acknowledgeLunarMiningBriefing,
-     content::scenario::lunarProspector,
-     "briefing",
-     ScenarioActionKind::AcknowledgeBriefing},
-    {ui::actions::claimLunarProspector,
-     content::scenario::lunarProspector,
-     "delivery",
-     ScenarioActionKind::ClaimReward},
-    {ui::actions::acknowledgeMarsMiningBriefing,
-     content::scenario::marsBayExpansion,
-     "briefing",
-     ScenarioActionKind::AcknowledgeBriefing},
-    {ui::actions::claimMarsBayExpansion,
-     content::scenario::marsBayExpansion,
-     "delivery",
-     ScenarioActionKind::ClaimReward},
-    {ui::actions::commissionIoHazardDrone,
-     content::scenario::volcanicDescent,
-     "commission",
-     ScenarioActionKind::BeginActivity},
-    {ui::actions::beginSaturnSlingshot,
-     content::scenario::outerTransfer,
-     "flyby",
-     ScenarioActionKind::BeginActivity}
-}};
-
-const LegacyScenarioActionTranslation* legacyScenarioActionTranslation(std::string_view action)
-{
-    const auto found = std::find_if(
-        kLegacyScenarioActionTranslations.begin(),
-        kLegacyScenarioActionTranslations.end(),
-        [&](const LegacyScenarioActionTranslation& translation) {
-            return translation.legacyAction == action;
-        });
-    return found == kLegacyScenarioActionTranslations.end() ? nullptr : &*found;
-}
-
 void recordActiveMiningScenarioAbort(GameState& state, const ContentCatalog& catalog)
 {
     const MiningRunState& mining = state.run.mining;
@@ -476,6 +423,8 @@ void RocketGameApp::maybeOpenLevelUpDraft()
         const bool priorityTransition = state_.screen == Screen::StoryBriefing
             || state_.screen == Screen::Results
             || state_.screen == Screen::ArrivalFanfare
+            || (state_.screen == Screen::Launch &&
+                state_.launchConfig.missionKind == LaunchMissionKind::StraylightApproach)
             || (state_.screen == Screen::Flyby && state_.run.flyby.completed)
             || (state_.screen == Screen::Orbit && state_.run.orbit.completed)
             || (state_.screen == Screen::Mining && state_.run.mining.failurePending)
@@ -693,32 +642,48 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
     keyboardRealtimeInput_ = {};
     controllerRealtimeInput_ = {};
     hasSavedGame_ = false;
+    checkpointRecoveryAvailable_ = false;
     titleNotice_.clear();
     panelDirty_ = true;
 
     const std::string storedSave = services_.saves.load();
     if (const auto saveData = deserializeSaveData(storedSave)) {
         restoreSaveData(state_, catalog_, *saveData);
-        rng_ = Random(saveData->seed + 0xA51CE5ULL + static_cast<std::uint64_t>(saveData->blueprintProgress));
-        if (state_.screen == Screen::Upgrade && !openRefitIfAvailable(false)) {
-            state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
+        const CampaignProgressionAuditResult audit = auditCampaignProgression(state_, catalog_);
+        if (!audit.valid) {
+            state_ = createNewGame(catalog_, 0x524F434B45544ULL);
+            const std::string checkpoint = services_.saves.loadCheckpoint();
+            if (const auto checkpointSave = deserializeSaveData(checkpoint)) {
+                GameState checkpointState = createNewGame(catalog_, checkpointSave->seed);
+                restoreSaveData(checkpointState, catalog_, *checkpointSave);
+                checkpointRecoveryAvailable_ = auditCampaignProgression(checkpointState, catalog_).valid;
+            }
+            titleNotice_ = checkpointRecoveryAvailable_
+                ? "ROUTE CONTROL // RECOVERY REQUIRED. Restore the last validated checkpoint or begin a new campaign."
+                : "ROUTE CONTROL // RECOVERY REQUIRED. No valid checkpoint is available; begin a new campaign.";
+        } else {
+            rng_ = Random(saveData->seed + 0xA51CE5ULL + static_cast<std::uint64_t>(saveData->blueprintProgress));
+            if (state_.screen == Screen::Upgrade && !openRefitIfAvailable(false)) {
+                state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
+            }
+            state_.statusLine = std::string(text::status::saveRestored);
+            hasSavedGame_ = true;
         }
-        state_.statusLine = std::string(text::status::saveRestored);
-        hasSavedGame_ = true;
     } else if (!storedSave.empty()) {
         // This revision is a deliberate fresh-campaign boundary. Never
         // reconstruct an older progression state: delete it, then leave a
-        // brand-new v15 payload in its place for the next launch.
+        // brand-new v16 payload in its place for the next launch.
         const bool cleared = services_.saves.clear();
         if (!cleared) {
             services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
         }
-        const bool storedFresh = services_.saves.storeAtomic(
-            serializeSaveData(captureSaveData(state_)));
+        const std::string freshPayload = serializeSaveData(captureSaveData(state_));
+        const bool storedFresh = services_.saves.storeAtomic(freshPayload);
         if (!storedFresh) {
             services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
             titleNotice_ = "Previous campaign was cleared, but the fresh save could not be stored.";
         } else {
+            (void)services_.saves.storeCheckpointAtomic(freshPayload);
             titleNotice_ = "Previous campaign cleared for this revision.";
         }
         // The title screen must never offer Continue for the rejected
@@ -2044,7 +2009,8 @@ void RocketGameApp::launchMove(double steerAxis, double throttleAxis)
 void RocketGameApp::returnHome()
 {
     if (state_.screen != Screen::Launch || !session_.flightArmed ||
-        session_.lunarImpact.active || session_.controls.actions.returningHome) {
+        session_.lunarImpact.active || session_.controls.actions.returningHome ||
+        session_.preparedLaunch.config.missionKind == LaunchMissionKind::StraylightApproach) {
         return;
     }
 
@@ -2082,10 +2048,47 @@ void RocketGameApp::skipArrivalFanfare()
 
 void RocketGameApp::acknowledgeStoryBriefing()
 {
-    if (state_.screen != Screen::StoryBriefing || !rocket::acknowledgeStoryBriefing(state_, catalog_)) {
+    if (state_.screen != Screen::StoryBriefing) {
+        return;
+    }
+    if (state_.storyBriefing.pending == StoryBriefingId::StraylightApproach) {
+        beginStraylightApproach();
+        return;
+    }
+    const StoryBriefingId acknowledged = state_.storyBriefing.pending;
+    if (!rocket::acknowledgeStoryBriefing(state_, catalog_)) {
+        return;
+    }
+    if (acknowledged == StoryBriefingId::StraylightDiscovery) {
+        beginStraylightApproach();
         return;
     }
     save();
+    refreshPanel();
+}
+
+void RocketGameApp::beginStraylightApproach()
+{
+    if (state_.storyBriefing.pending != StoryBriefingId::StraylightApproach ||
+        currentDestination(state_, catalog_).id != content::destination::neptune) {
+        return;
+    }
+
+    // Realtime flights are intentionally not restored mid-flight. Persist the
+    // explicit approach beat first so a reload returns to a safe, player-driven
+    // launch point instead of replaying the discovery or skipping the transfer.
+    state_.statusLine = "UNKNOWN CONTACT LOCKED — ceremonial approach ready.";
+    save();
+
+    state_.run.active = true;
+    state_.run.routeTransit = {};
+    state_.launchConfig.routeTransit = {};
+    state_.launchConfig.destinationId = content::destination::neptune;
+    state_.launchConfig.frontierTransfer = true;
+    state_.launchConfig.missionKind = LaunchMissionKind::StraylightApproach;
+    state_.launchConfig.burnGoalMultiplier = currentDestination(state_, catalog_).targetMultiplier;
+    beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
+    state_.screen = Screen::Launch;
     refreshPanel();
 }
 
@@ -2190,57 +2193,6 @@ void RocketGameApp::acknowledgeApproachIntroduction()
     ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
     save();
     panelDirty_ = true;
-}
-
-void RocketGameApp::acknowledgeProspectorCompletion()
-{
-    // Kept as a compatibility alias for older web/native bindings.
-    claimLunarProspector();
-}
-
-void RocketGameApp::acknowledgeLunarMiningBriefing()
-{
-    (void)runLegacyScenarioUiAction(ui::actions::acknowledgeLunarMiningBriefing);
-}
-
-void RocketGameApp::claimLunarProspector()
-{
-    (void)runLegacyScenarioUiAction(ui::actions::claimLunarProspector);
-}
-
-void RocketGameApp::acknowledgeMarsMiningBriefing()
-{
-    (void)runLegacyScenarioUiAction(ui::actions::acknowledgeMarsMiningBriefing);
-}
-
-void RocketGameApp::claimMarsBayExpansion()
-{
-    (void)runLegacyScenarioUiAction(ui::actions::claimMarsBayExpansion);
-}
-
-void RocketGameApp::commissionIoHazardDrone()
-{
-    (void)runLegacyScenarioUiAction(ui::actions::commissionIoHazardDrone);
-}
-
-void RocketGameApp::beginSaturnSlingshot()
-{
-    (void)runLegacyScenarioUiAction(ui::actions::beginSaturnSlingshot);
-}
-
-void RocketGameApp::retrySaturnSlingshot()
-{
-    (void)runLegacyScenarioUiAction(ui::actions::retrySaturnSlingshot);
-}
-
-void RocketGameApp::acknowledgeSaturnSlingshotFailure()
-{
-    (void)runLegacyScenarioUiAction(ui::actions::acknowledgeSaturnSlingshotFailure);
-}
-
-void RocketGameApp::claimSaturnCourse()
-{
-    (void)runLegacyScenarioUiAction(ui::actions::claimSaturnCourse);
 }
 
 void RocketGameApp::acknowledgeJupiterWindow()
@@ -4126,7 +4078,11 @@ void RocketGameApp::resetSave()
         panelDirty_ = true;
         return;
     }
+    if (!services_.saves.clearCheckpoint()) {
+        services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
+    }
     hasSavedGame_ = false;
+    checkpointRecoveryAvailable_ = false;
     titleNotice_ = titleScreenActive_ ? "Local campaign save cleared." : std::string();
     state_ = createNewGame(catalog_, 0x524F434B45544ULL);
     rng_ = Random(state_.seed);
@@ -4150,7 +4106,11 @@ void RocketGameApp::newGame()
 
 void RocketGameApp::startNewGame()
 {
-
+    // A confirmed new campaign must never retain a recovery path into the
+    // campaign it deliberately replaced.
+    if (!services_.saves.clearCheckpoint()) {
+        services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
+    }
     GameState freshState = createNewGame(catalog_, 0x524F434B45544ULL);
     ensureDroneBayState(freshState, catalog_);
     syncLaunchConfig(freshState, catalog_);
@@ -4182,6 +4142,7 @@ void RocketGameApp::startNewGame()
     releaseRealtimeInputs(true);
     disableDebugToolsForFreshCampaign();
     hasSavedGame_ = stored;
+    checkpointRecoveryAvailable_ = false;
     titleScreenActive_ = false;
     titleNotice_.clear();
     refreshPanel();
@@ -4212,6 +4173,88 @@ void RocketGameApp::continueGame()
         return;
     }
     beginTitleLaunch(false);
+}
+
+bool RocketGameApp::restoreCheckpoint()
+{
+    if (!titleScreenActive_ || !checkpointRecoveryAvailable_ ||
+        titleLaunchActive_ || sceneTransition_.active()) {
+        return false;
+    }
+    const auto checkpoint = deserializeSaveData(services_.saves.loadCheckpoint());
+    if (!checkpoint) {
+        checkpointRecoveryAvailable_ = false;
+        titleNotice_ = "ROUTE CONTROL // CHECKPOINT UNREADABLE. Begin a new campaign.";
+        panelDirty_ = true;
+        return false;
+    }
+    GameState restored = createNewGame(catalog_, checkpoint->seed);
+    restoreSaveData(restored, catalog_, *checkpoint);
+    const CampaignProgressionAuditResult audit = auditCampaignProgression(restored, catalog_);
+    if (!audit.valid) {
+        checkpointRecoveryAvailable_ = false;
+        titleNotice_ = "ROUTE CONTROL // CHECKPOINT INVALID. Begin a new campaign.";
+        panelDirty_ = true;
+        return false;
+    }
+    state_ = std::move(restored);
+    rng_ = Random(checkpoint->seed + 0xA51CE5ULL + static_cast<std::uint64_t>(checkpoint->blueprintProgress));
+    session_ = {};
+    miningExtraction_ = {};
+    miningEvaDeathPresentation_ = {};
+    levelUp_ = {};
+    hasSavedGame_ = true;
+    checkpointRecoveryAvailable_ = false;
+    titleScreenActive_ = false;
+    titleNotice_.clear();
+    state_.statusLine = "ROUTE CONTROL // CHECKPOINT RESTORED.";
+    if (!services_.saves.storeAtomic(serializeSaveData(captureSaveData(state_)))) {
+        services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
+        state_.statusLine = "Checkpoint restored in memory, but active save storage failed.";
+    }
+    panelDirty_ = true;
+    return true;
+}
+
+bool RocketGameApp::stateCanBecomeCheckpoint() const
+{
+    switch (state_.screen) {
+    case Screen::Hangar:
+    case Screen::ArrivalOps:
+    case Screen::DroneOps:
+    case Screen::Research:
+    case Screen::Navigation:
+        return !state_.run.routeTransit.active() && state_.storyBriefing.pending == StoryBriefingId::None;
+    case Screen::Launch:
+    case Screen::Results:
+    case Screen::ArrivalFanfare:
+    case Screen::Flyby:
+    case Screen::Orbit:
+    case Screen::SurfaceExpedition:
+    case Screen::SurfaceUpgrade:
+    case Screen::SurfaceScan:
+    case Screen::SurfacePush:
+    case Screen::Mining:
+    case Screen::Upgrade:
+    case Screen::Legacy:
+    case Screen::StoryBriefing:
+        return false;
+    }
+    return false;
+}
+
+bool RocketGameApp::validateProgressionStateOrRestore(const GameState& previous, std::string_view action)
+{
+    const CampaignProgressionAuditResult audit = auditCampaignProgression(state_, catalog_);
+    if (audit.valid) {
+        return true;
+    }
+    state_ = previous;
+    state_.statusLine = "ROUTE CONTROL // ACTION REJECTED. " + audit.detail;
+    services_.host.log(PlatformLogLevel::Error,
+        "Progression action rejected (" + std::string(action) + "): " + audit.detail);
+    panelDirty_ = true;
+    return false;
 }
 
 void RocketGameApp::beginTitleLaunch(bool newCampaign)
@@ -4464,6 +4507,7 @@ void RocketGameApp::completeLaunch(
     RecoveryMethod method,
     LaunchFailureCause failureCause)
 {
+    const GameState stateBefore = state_;
     const PreparedLaunch flightModel = currentFlightModel();
     const bool wasReturningHome = session_.controls.actions.returningHome;
     const double frozenTravelProgress = session_.flight.travelProgress;
@@ -4489,7 +4533,16 @@ void RocketGameApp::completeLaunch(
     }
     applyLaunchOutcome(state_, catalog_, outcome);
     session_.lunarImpact.active = false;
-    if (shouldOpenArrivalOps(outcome, catalog_)) {
+    const bool completedStraylightApproach =
+        flightModel.config.missionKind == LaunchMissionKind::StraylightApproach &&
+        outcome.type == LaunchResultType::MissionComplete &&
+        outcome.failureCause == LaunchFailureCause::None;
+    if (completedStraylightApproach) {
+        state_.storyBriefing = {};
+        scheduleStoryBriefing(state_, StoryBriefingId::ActOneComplete, Screen::Hangar);
+        state_.screen = Screen::StoryBriefing;
+        state_.statusLine = "Straylight has opened a docking corridor.";
+    } else if (shouldOpenArrivalOps(outcome, catalog_)) {
         if (state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery) {
             // Neptune is the one arrival whose ordinary fanfare gives way to a
             // saved, input-blocking story beat after the player reviews results.
@@ -4507,6 +4560,9 @@ void RocketGameApp::completeLaunch(
     session_.result.travelProgress = frozenTravelProgress;
     session_.result.elapsed = 0.0;
     clearFlightControls();
+    if (!validateProgressionStateOrRestore(stateBefore, "launch outcome")) {
+        return;
+    }
     save();
     panelDirty_ = true;
 }
@@ -4516,10 +4572,20 @@ void RocketGameApp::save()
     if (debugSessionActive_) {
         return;
     }
-    if (!services_.saves.storeAtomic(serializeSaveData(captureSaveData(state_)))) {
+    const CampaignProgressionAuditResult audit = auditCampaignProgression(state_, catalog_);
+    if (!audit.valid) {
+        services_.host.log(PlatformLogLevel::Error, "Progression audit blocked save: " + audit.detail);
+        state_.statusLine = "ROUTE CONTROL // RECOVERY REQUIRED.";
+        panelDirty_ = true;
+        return;
+    }
+    const std::string payload = serializeSaveData(captureSaveData(state_));
+    if (!services_.saves.storeAtomic(payload)) {
         services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
         state_.statusLine = "Save failed; the previous save was preserved.";
         panelDirty_ = true;
+    } else if (stateCanBecomeCheckpoint() && !services_.saves.storeCheckpointAtomic(payload)) {
+        services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
     }
 }
 
@@ -4546,6 +4612,7 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         titleLaunchActive_ || sceneTransition_.active(),
         sceneTransition_.blackoutOpacity(),
         hasSavedGame_,
+        checkpointRecoveryAvailable_,
         titleNotice_,
         firstTimeIntroductionsEnabled_,
         selectedRefitOfferIndex_,
@@ -4662,6 +4729,7 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
     if ((address.action == ScenarioActionKind::BeginActivity ||
          address.action == ScenarioActionKind::RetryActivity) &&
         step->completionEvent == ScenarioEventKind::FlybyFinished) {
+        const GameState stateBefore = state_;
         if (!startScenarioFlybyRun(
                 state_,
                 catalog_,
@@ -4672,31 +4740,24 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
             panelDirty_ = true;
             return true;
         }
+        if (!validateProgressionStateOrRestore(stateBefore, action)) {
+            return true;
+        }
         save();
         panelDirty_ = true;
         return true;
     }
 
+    const GameState stateBefore = state_;
     const ScenarioActionOutcome outcome = performScenarioAction(
         state_, catalog_, address.scenarioId, address.stepId, address.action);
     if (!outcome.applied) {
         return true;
     }
 
-    const bool marsExpansionClaimed = address.action == ScenarioActionKind::ClaimReward &&
-        address.scenarioId == content::scenario::marsBayExpansion &&
-        address.stepId == "delivery";
     const Destination* claimedRoute = address.action == ScenarioActionKind::ClaimReward
         ? scenarioRouteRewardDestination(catalog_, *step)
         : nullptr;
-    const bool explicitCourseClaim = claimedRoute != nullptr &&
-        (step->completionEvent == ScenarioEventKind::FlybyFinished ||
-         std::any_of(
-             step->rewards.begin(),
-             step->rewards.end(),
-             [](const ScenarioReward& reward) {
-                 return reward.kind == ScenarioRewardKind::RouteAccess;
-             }));
     const bool supportDroneNeedsAssignment = grantsAutoAssignedSupportDrone &&
         state_.meta.equippedDroneIds.size() <= equippedDroneCountBefore;
     if (outcome.beginsActivity && !outcome.miningSiteDefinitionId.empty()) {
@@ -4715,28 +4776,19 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
             expedition.pendingMiningSiteDefinitionId = outcome.miningSiteDefinitionId;
             mineSurface();
         }
-    } else if (address.action == ScenarioActionKind::ClaimReward &&
-               address.scenarioId == content::scenario::lunarProspector &&
-               address.stepId == "delivery") {
-        // The Moon contract opens the Drone Bay and funds the first frame,
-        // but deliberately leaves fabrication/assignment to the player.
-        state_.screen = Screen::DroneOps;
-        state_.statusLine = "Drone Ops unlocked. Fabricate and assign Prospector Mk I to learn the bay.";
-    } else if (explicitCourseClaim) {
-        if (commitClaimedScenarioRoute(
-                state_,
-                catalog_,
-                address.scenarioId,
-                address.stepId)) {
+    } else if (outcome.transition.kind == ScenarioTransitionKind::QueueRewardedRoute) {
+        if (claimedRoute != nullptr && commitClaimedScenarioRoute(
+                state_, catalog_, address.scenarioId, address.stepId)) {
             state_.statusLine = claimedRoute->name + " course locked. Launch when ready.";
         } else {
-            state_.statusLine = claimedRoute->name +
-                " route is secured, but its physical launch leg could not be queued.";
+            state_.statusLine = "Route reward is secured, but its physical launch leg could not be queued.";
         }
-    } else if (marsExpansionClaimed) {
-        state_.screen = Screen::Hangar;
-        state_.statusLine =
-            "The Jupiter window is open. Review permanent tanks, the Mars slingshot, or both.";
+    } else if (outcome.transition.kind == ScenarioTransitionKind::OpenScreen) {
+        state_.screen = outcome.transition.screen;
+        state_.statusLine = outcome.message;
+    } else if (outcome.transition.kind == ScenarioTransitionKind::PresentStoryTakeover) {
+        scheduleStoryBriefing(state_, outcome.transition.storyBriefing, outcome.transition.screen);
+        state_.statusLine = outcome.message;
     } else if (supportDroneNeedsAssignment) {
         // The reward is owned, but no capacity was available for its
         // content-authored automatic assignment. Drone Ops provides the
@@ -4748,93 +4800,14 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
         state_.statusLine = outcome.message;
     }
 
+    if (!validateProgressionStateOrRestore(stateBefore, action)) {
+        return true;
+    }
+
     syncLaunchConfig(state_, catalog_);
     save();
     panelDirty_ = true;
     return true;
-}
-
-bool RocketGameApp::runLegacyScenarioUiAction(std::string_view action)
-{
-    if (const LegacyScenarioActionTranslation* translation = legacyScenarioActionTranslation(action)) {
-        return runScenarioUiAction(encodeScenarioAction(
-            translation->scenarioId,
-            translation->stepId,
-            translation->action));
-    }
-
-    // The remaining pre-scenario actions operated directly from the old
-    // Flyby result panel. Translate their result-close/retry sequence into
-    // the exact same scenario event/action flow used by current UI controls.
-    constexpr std::string_view scenarioId = content::scenario::outerTransfer;
-    constexpr std::string_view stepId = "flyby";
-    const bool isLegacyResultAction = action == ui::actions::retrySaturnSlingshot ||
-        action == ui::actions::acknowledgeSaturnSlingshotFailure ||
-        action == ui::actions::claimSaturnCourse;
-    if (!isLegacyResultAction) {
-        return false;
-    }
-
-    const auto completedMatchingChallenge = [&]() {
-        const FlybyRunState& flyby = state_.run.flyby;
-        return state_.screen == Screen::Flyby && flyby.active && flyby.completed &&
-            flyby.purpose == FlybyPurpose::ScenarioChallenge &&
-            flyby.scenarioId == scenarioId && flyby.scenarioStepId == stepId;
-    };
-    const auto completeMatchingChallenge = [&]() {
-        if (!completedMatchingChallenge()) {
-            return false;
-        }
-        completeFlybyRun(state_, catalog_);
-        return true;
-    };
-    const auto hasRecordedFailure = [&]() {
-        const ScenarioInstance* instance = findScenarioInstance(state_.meta, scenarioId);
-        const ScenarioStepProgress* progress = instance == nullptr
-            ? nullptr
-            : findScenarioStepProgress(*instance, stepId);
-        return progress != nullptr && progress->failureSeen && !progress->completed;
-    };
-
-    if (action == ui::actions::claimSaturnCourse) {
-        if (completedMatchingChallenge()) {
-            if (state_.run.flyby.result != FlybyGrade::Perfect) {
-                return true;
-            }
-            (void)completeMatchingChallenge();
-        }
-        // The result action is deliberately idempotent. A previous build
-        // could award the route but fail before selecting Saturn, leaving a
-        // visible Lock Saturn Course button whose generic ClaimReward retry
-        // was rejected as already claimed. Finish the authored route
-        // transaction directly in both ReadyToClaim and already-claimed
-        // states.
-        (void)rocket::claimSaturnCourse(state_, catalog_);
-        syncLaunchConfig(state_, catalog_);
-        save();
-        panelDirty_ = true;
-        return true;
-    }
-
-    if (completedMatchingChallenge()) {
-        if (state_.run.flyby.result == FlybyGrade::Perfect) {
-            return true;
-        }
-        (void)completeMatchingChallenge();
-    }
-    if (!hasRecordedFailure()) {
-        return true;
-    }
-
-    const std::string acknowledge = encodeScenarioAction(
-        scenarioId, stepId, ScenarioActionKind::AcknowledgeFailure);
-    if (action == ui::actions::acknowledgeSaturnSlingshotFailure) {
-        return runScenarioUiAction(acknowledge);
-    }
-
-    (void)runScenarioUiAction(acknowledge);
-    return runScenarioUiAction(encodeScenarioAction(
-        scenarioId, stepId, ScenarioActionKind::BeginActivity));
 }
 
 void RocketGameApp::runUiAction(const std::string& action)
@@ -4844,7 +4817,7 @@ void RocketGameApp::runUiAction(const std::string& action)
     }
 
     int index = 0;
-    if (runScenarioUiAction(action) || runLegacyScenarioUiAction(action)) {
+    if (runScenarioUiAction(action)) {
         return;
     } else if (action.starts_with(ui::actions::acknowledgeResearchBreakthroughPrefix)) {
         const std::string key = action.substr(ui::actions::acknowledgeResearchBreakthroughPrefix.size());
@@ -4861,6 +4834,8 @@ void RocketGameApp::runUiAction(const std::string& action)
         newGame();
     } else if (action == ui::actions::continueGame) {
         continueGame();
+    } else if (action == ui::actions::restoreCheckpoint) {
+        (void)restoreCheckpoint();
     } else if (consumeIndexedAction(action, ui::actions::selectRefitOfferPrefix, index)) {
         selectRefitOffer(index);
     } else if (consumeIndexedAction(action, ui::actions::buyOfferPrefix, index)) {
@@ -5108,8 +5083,12 @@ RenderSnapshot RocketGameApp::snapshot() const
     }
     result.debugActOneCheckpoint = debugActOneCheckpoint_;
     result.arkCondition = state_.meta.ark.condition;
-    result.straylightStoryReveal = state_.screen == Screen::StoryBriefing
-        && state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery;
+    result.straylightStoryReveal = state_.screen == Screen::StoryBriefing &&
+        (state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery ||
+         state_.storyBriefing.pending == StoryBriefingId::StraylightApproach ||
+         state_.storyBriefing.pending == StoryBriefingId::ActOneComplete);
+    result.straylightApproach = state_.screen == Screen::Launch &&
+        flightModel.config.missionKind == LaunchMissionKind::StraylightApproach;
     result.campaignStoryIntroduction = state_.screen == Screen::StoryBriefing
         && state_.storyBriefing.pending == StoryBriefingId::CampaignIntroduction;
     if (result.straylightStoryReveal) {

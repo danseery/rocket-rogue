@@ -54,6 +54,11 @@ bool missionUsesAsteroids(LaunchMissionKind kind, const Destination& destination
         (kind == LaunchMissionKind::Standard && destination.tier >= 3);
 }
 
+bool isStraylightApproach(LaunchMissionKind kind)
+{
+    return kind == LaunchMissionKind::StraylightApproach;
+}
+
 std::string warningMessage(const TelemetryEvent& event)
 {
     if (event.heat >= tuning::launch::pilotingCriticalThreshold) {
@@ -428,12 +433,22 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     if (launch.cruiseFuelCost <= 0.0) {
         launch.cruiseFuelCost = launchCruiseFuelCostForTier(destination.tier);
     }
+    if (isStraylightApproach(launch.config.missionKind)) {
+        // The Act I rendezvous is story motion, not a final mechanical exam.
+        // Autoguidance carries the ship to the Ark without consuming the
+        // expedition's transfer fuel or exposing a hidden failure condition.
+        launch.cruiseFuelCost = 0.0;
+        launch.slingshotFuelSavings = 0.0;
+        launch.slingshotSpeedBoost = 0.0;
+        launch.slingshotInstabilityPenalty = 0.0;
+    }
     // Frontier transfers land as soon as the ship reaches the destination.
     // Fuel remains a range constraint, not a hidden landing-reserve check.
     launch.arrivalReserveFuel = 0.0;
     launch.trainingMission = isTrainingMission(launch.config.missionKind) &&
         !launch.config.frontierTransfer;
-    launch.manualControlsEnabled = launch.config.missionKind != LaunchMissionKind::FuelCalibration;
+    launch.manualControlsEnabled = launch.config.missionKind != LaunchMissionKind::FuelCalibration &&
+        !isStraylightApproach(launch.config.missionKind);
     launch.heatEnabled = missionUsesHeat(launch.config.missionKind, destination);
     launch.asteroidsEnabled = missionUsesAsteroids(launch.config.missionKind, destination);
     launch.controlChaos = std::clamp(
@@ -992,6 +1007,12 @@ LaunchOutcome resolveLaunch(
 
     if (method == RecoveryMethod::TransferArrival) {
         outcome.type = LaunchResultType::MissionComplete;
+        if (launch.config.missionKind == LaunchMissionKind::StraylightApproach) {
+            outcome.payout = 0.0;
+            outcome.shipDamage = 0;
+            outcome.blueprintGain = 0;
+            return outcome;
+        }
         outcome.payout = destination->baseReward * outcome.ejectMultiplier *
             payoutMultiplier * tuning::rewards::transferArrivalPayoutFactor;
         if (resolution.pilotedFlight) {

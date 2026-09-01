@@ -110,6 +110,6 @@ Io is the current deliberate exception and tutorial: its soil never pays, it gen
 
 ## Future Hooks
 
-Save version 14 is an intentional fresh-start boundary. It persists permanent Survey/Bore ranks and Drone ownership and slots separately from Transport-run XP, temporary Mk ranks, slot grafts, selected synergies, and active Mining-agent runtime. Version 13 and older saves are rejected without partial restoration or migration.
+Save version 16 is an intentional fresh-start boundary. It persists permanent Survey/Bore ranks and Drone ownership and slots separately from Transport-run XP, temporary Mk ranks, slot grafts, selected synergies, and active Mining-agent runtime. Every non-v16 or malformed campaign is cleared and replaced without partial restoration or migration.
 
 Future passes can add branching per-unit upgrade trees, Support Drone repair, rarity-specific visual treatments, and more signature-specific effects. Keep enemy combat post-solar and swarm execution autonomous: the EVA sidearm protects the vulnerable operator, while buildcraft remains the source of sustained combat strength.

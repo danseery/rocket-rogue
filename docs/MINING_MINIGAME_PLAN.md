@@ -219,6 +219,6 @@ The player's operator sidearm is a vulnerable recovery tool rather than the prim
 - `src/core/ScenarioSystem.*` owns scenario actions/events, claims, rewards, route requirements, and state-derived objective presentation. Mining receives a generic scenario/site context and reports typed results; it does not branch on campaign, destination, or narrative IDs.
 - `src/game/RocketGameApp.*` owns screen transitions and platform-neutral routed aim, fire, drill, scan, tether, operator-toggle, and stow/leave actions.
 - `src/render/SceneComposer.*` turns mining snapshots into backend-neutral scene packets consumed by native Vulkan and browser WebGL2, including the parked rig, static operator, independently moving Support Drones, reticle, tracer, tether, thrust, and active-actor-centered shield/scanner effects. Rendering must not decide gameplay outcomes.
-- Save version 14 persists current Mining runtime plus Expedition XP, pending choices, run ranks, grafts, selected synergies, and permanent Survey/Bore ranks. Version 13 and older saves are rejected and require New Game; no legacy progression migration runs.
+- Save version 16 persists current Mining runtime plus Expedition XP, pending choices, run ranks, grafts, selected synergies, and permanent Survey/Bore ranks. Every non-v16 or malformed campaign is cleared and immediately replaced with a fresh campaign; no legacy progression migration runs.
 
 When changing mining, keep the fuel/oxygen tradeoff visible and test both Surface Ops availability and direct mining outcomes.

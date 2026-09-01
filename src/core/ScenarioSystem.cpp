@@ -61,6 +61,7 @@ bool parseScenarioEventKind(std::string_view text, ScenarioEventKind& value)
     else if (text == "equipment_assigned") value = ScenarioEventKind::EquipmentAssigned;
     else if (text == "artifact_recovered") value = ScenarioEventKind::ArtifactRecovered;
     else if (text == "flight_data_banked") value = ScenarioEventKind::FlightDataBanked;
+    else if (text == "destination_reached") value = ScenarioEventKind::DestinationReached;
     else return false;
     return true;
 }
@@ -73,6 +74,7 @@ bool awardsAuthoredObjectiveExperience(ScenarioEventKind kind)
     case ScenarioEventKind::ArtifactRecovered:
     case ScenarioEventKind::FlybyFinished:
     case ScenarioEventKind::MiningSiteCompleted:
+    case ScenarioEventKind::DestinationReached:
         return true;
     case ScenarioEventKind::None:
     case ScenarioEventKind::ManualAction:
@@ -111,6 +113,7 @@ bool parseScenarioRewardKind(std::string_view text, ScenarioRewardKind& value)
     else if (text == "frontier_readiness") value = ScenarioRewardKind::FrontierReadiness;
     else if (text == "inventory_resources") value = ScenarioRewardKind::InventoryResources;
     else if (text == "route_access") value = ScenarioRewardKind::RouteAccess;
+    else if (text == "campaign_milestone") value = ScenarioRewardKind::CampaignMilestone;
     else return false;
     return true;
 }
@@ -202,6 +205,9 @@ bool validateScenarioReward(
         }
         return true;
     }
+    case ScenarioRewardKind::CampaignMilestone:
+        return reward.milestone != CampaignMilestone::SolarTutorial ||
+            failResolvedParameter(error, "A scenario campaign milestone requires a non-default milestone.");
     case ScenarioRewardKind::FrontierReadiness:
         return true;
     }
@@ -497,6 +503,13 @@ void applyReward(
         }
         break;
     }
+    case ScenarioRewardKind::CampaignMilestone:
+        // A takeover milestone is deliberately committed by its explicit
+        // story acknowledgement, not by the claim that opens the takeover.
+        // The reward ledger still records the claimed step, preventing a
+        // reload from duplicating the discovery while preserving the choice
+        // to read the beat before campaign state advances.
+        break;
     }
     instance.awardedRewardIds.push_back(id);
 }
@@ -513,62 +526,6 @@ void applyStepRewards(
     }
 }
 
-void repairClaimedPersistentRewards(GameState& state, const ContentCatalog& catalog)
-{
-    for (ScenarioInstance& instance : state.meta.scenarios) {
-        const ScenarioDefinition* definition = definitionForInstance(catalog, instance);
-        if (definition == nullptr) {
-            continue;
-        }
-        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
-        for (const ScenarioStepDefinition& step : resolved.steps) {
-            const ScenarioStepProgress* progress = findScenarioStepProgress(instance, step.id);
-            if (progress == nullptr || !progress->claimed) {
-                continue;
-            }
-            for (const ScenarioReward& reward : step.rewards) {
-                switch (reward.kind) {
-                case ScenarioRewardKind::UnlockKey:
-                    appendUniqueId(state.meta.unlockKeys, reward.id);
-                    break;
-                case ScenarioRewardKind::DroneBaySlots:
-                    state.meta.droneBaySlots = std::max(
-                        state.meta.droneBaySlots,
-                        std::max(0, reward.amount));
-                    ensureDroneBayState(state, catalog);
-                    break;
-                case ScenarioRewardKind::SupportDrone: {
-                    const bool alreadyOwned = containsId(state.meta.ownedDroneIds, reward.id);
-                    appendUniqueId(state.meta.ownedDroneIds, reward.id);
-                    ensureDroneBayState(state, catalog);
-                    const bool repairedOwnership = !alreadyOwned &&
-                        containsId(state.meta.ownedDroneIds, reward.id);
-                    if (repairedOwnership && reward.equipIfSlotAvailable &&
-                        state.meta.equippedDroneIds.size() <
-                            static_cast<std::size_t>(state.meta.droneBaySlots)) {
-                        state.meta.equippedDroneIds.emplace_back(reward.id);
-                    }
-                    break;
-                }
-                case ScenarioRewardKind::RouteAccess: {
-                    const Destination* destination = catalog.findDestination(reward.id);
-                    if (destination != nullptr) {
-                        for (const std::string& key : destination->routeRequirementKeys) {
-                            appendUniqueId(state.meta.unlockKeys, key);
-                        }
-                    }
-                    break;
-                }
-                case ScenarioRewardKind::FrontierReadiness:
-                case ScenarioRewardKind::InventoryResources:
-                    // Consumable rewards and run-state refills are never replayed.
-                    break;
-                }
-            }
-        }
-    }
-}
-
 void refreshScenarioCompletion(const ScenarioDefinition& definition, ScenarioInstance& instance)
 {
     instance.completed = std::all_of(
@@ -577,110 +534,6 @@ void refreshScenarioCompletion(const ScenarioDefinition& definition, ScenarioIns
         [&](const ScenarioStepDefinition& step) {
             return stepSatisfied(definition, instance, step.id);
         });
-}
-
-void reconcileRecoveredArtifactObjectives(GameState& state, const ContentCatalog& catalog)
-{
-    // Valid v15 saves already own their safely returned artifacts. New
-    // scenario content may recognize that canonical inventory without
-    // replaying extraction rewards or objective XP at load time.
-    for (ScenarioInstance& instance : state.meta.scenarios) {
-        const ScenarioDefinition* definition = definitionForInstance(catalog, instance);
-        if (definition == nullptr) {
-            continue;
-        }
-        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
-        if (!definitionAvailable(state, resolved)) {
-            continue;
-        }
-
-        bool changed = false;
-        for (const ScenarioStepDefinition& step : resolved.steps) {
-            if (step.completionEvent != ScenarioEventKind::ArtifactRecovered) {
-                continue;
-            }
-            ScenarioStepProgress* progress = findScenarioStepProgress(instance, step.id);
-            if (progress == nullptr || progress->completed ||
-                !prerequisitesSatisfied(resolved, instance, step)) {
-                continue;
-            }
-
-            const int recovered = static_cast<int>(std::count_if(
-                state.meta.artifacts.begin(),
-                state.meta.artifacts.end(),
-                [&](const ArtifactRecord& artifact) {
-                    return (step.eventOriginId.empty() ||
-                            step.eventOriginId == artifact.originDestinationId) &&
-                        (step.eventTargetId.empty() || step.eventTargetId == artifact.id);
-                }));
-            const int required = std::max(1, step.requiredProgress);
-            const int reconciled = std::min(required, recovered);
-            if (reconciled <= progress->progress) {
-                continue;
-            }
-            progress->progress = reconciled;
-            if (progress->progress >= required) {
-                progress->completed = true;
-                if (!step.claimRequired) {
-                    progress->claimed = true;
-                    applyStepRewards(state, catalog, instance, resolved, step);
-                }
-            }
-            changed = true;
-        }
-        if (changed) {
-            refreshScenarioCompletion(resolved, instance);
-        }
-    }
-}
-
-void reconcileFlightDataObjectives(GameState& state, const ContentCatalog& catalog)
-{
-    const Destination& origin = currentDestination(state, catalog);
-    const Destination* target = nextDestination(state, catalog);
-    if (target == nullptr) {
-        return;
-    }
-    for (ScenarioInstance& instance : state.meta.scenarios) {
-        const ScenarioDefinition* definition = definitionForInstance(catalog, instance);
-        if (definition == nullptr) {
-            continue;
-        }
-        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
-        if (!definitionAvailable(state, resolved)) {
-            continue;
-        }
-        bool changed = false;
-        for (const ScenarioStepDefinition& step : resolved.steps) {
-            if (step.completionEvent != ScenarioEventKind::FlightDataBanked ||
-                (!step.eventOriginId.empty() && step.eventOriginId != origin.id) ||
-                (!step.eventTargetId.empty() && step.eventTargetId != target->id)) {
-                continue;
-            }
-            ScenarioStepProgress* progress = findScenarioStepProgress(instance, step.id);
-            if (progress == nullptr || progress->completed ||
-                !prerequisitesSatisfied(resolved, instance, step)) {
-                continue;
-            }
-            const int required = std::max(1, step.requiredProgress);
-            const int reconciled = std::min(required, std::max(0, state.run.frontierReadiness));
-            if (reconciled <= progress->progress) {
-                continue;
-            }
-            progress->progress = reconciled;
-            if (progress->progress >= required) {
-                progress->completed = true;
-                if (!step.claimRequired) {
-                    progress->claimed = true;
-                    applyStepRewards(state, catalog, instance, resolved, step);
-                }
-            }
-            changed = true;
-        }
-        if (changed) {
-            refreshScenarioCompletion(resolved, instance);
-        }
-    }
 }
 
 bool eventMatches(
@@ -928,6 +781,171 @@ bool validateScenarioCatalog(const ContentCatalog& catalog, std::string* error)
     return true;
 }
 
+bool validateCampaignProgressionCatalog(const ContentCatalog& catalog, std::string* error)
+{
+    const auto fail = [&](std::string message) {
+        if (error != nullptr) {
+            *error = std::move(message);
+        }
+        return false;
+    };
+    if (!validateScenarioCatalog(catalog, error) || !validateRouteCatalog(catalog, error)) {
+        return false;
+    }
+
+    const auto stepGrantsKey = [&](const ScenarioStepDefinition& step, std::string_view key) {
+        return std::any_of(step.rewards.begin(), step.rewards.end(), [&](const ScenarioReward& reward) {
+            return rewardGrantsRouteRequirementKey(catalog, reward, key) ||
+                (reward.kind == ScenarioRewardKind::UnlockKey && reward.id == key);
+        });
+    };
+    const auto hasProducer = [&](std::string_view key, std::string_view excludingScenario) {
+        if (key.empty() || key == content::unlock::starter) {
+            return true;
+        }
+        return std::any_of(catalog.scenarios.begin(), catalog.scenarios.end(), [&](const ScenarioDefinition& definition) {
+            return definition.id != excludingScenario && std::any_of(
+                definition.steps.begin(), definition.steps.end(), [&](const ScenarioStepDefinition& step) {
+                    return stepGrantsKey(step, key);
+                });
+        });
+    };
+
+    // Availability is another prerequisite graph. A pair of scenarios that
+    // promise to unlock one another has producers on paper but no first
+    // player action, so reject that soft lock at catalog construction time.
+    std::vector<std::string> authoredScenarioIds;
+    for (const ScenarioDefinition& definition : catalog.scenarios) {
+        if (definition.instantiateByDefault) {
+            authoredScenarioIds.push_back(definition.id);
+        }
+    }
+    const auto authoredIndex = [&](std::string_view id) {
+        const auto found = std::find(authoredScenarioIds.begin(), authoredScenarioIds.end(), id);
+        return found == authoredScenarioIds.end()
+            ? -1
+            : static_cast<int>(std::distance(authoredScenarioIds.begin(), found));
+    };
+    std::vector<int> availabilityVisit(authoredScenarioIds.size(), 0);
+    const auto availabilityDependsOn = [&](std::string_view key) {
+        std::vector<int> producers;
+        if (key.empty() || key == content::unlock::starter) {
+            return producers;
+        }
+        for (const ScenarioDefinition& candidate : catalog.scenarios) {
+            const int index = authoredIndex(candidate.id);
+            if (index < 0) {
+                continue;
+            }
+            const bool produces = std::any_of(
+                candidate.steps.begin(), candidate.steps.end(), [&](const ScenarioStepDefinition& step) {
+                    return stepGrantsKey(step, key);
+                });
+            if (produces) {
+                producers.push_back(index);
+            }
+        }
+        return producers;
+    };
+    const auto visitAvailability = [&](auto&& self, int index) -> bool {
+        if (availabilityVisit[static_cast<std::size_t>(index)] == 1) {
+            return false;
+        }
+        if (availabilityVisit[static_cast<std::size_t>(index)] == 2) {
+            return true;
+        }
+        availabilityVisit[static_cast<std::size_t>(index)] = 1;
+        const ScenarioDefinition* definition =
+            findScenarioDefinition(catalog, authoredScenarioIds[static_cast<std::size_t>(index)]);
+        if (definition != nullptr) {
+            for (const int producer : availabilityDependsOn(definition->availabilityUnlockKey)) {
+                if (!self(self, producer)) {
+                    return false;
+                }
+            }
+        }
+        availabilityVisit[static_cast<std::size_t>(index)] = 2;
+        return true;
+    };
+    for (std::size_t index = 0; index < authoredScenarioIds.size(); ++index) {
+        if (!visitAvailability(visitAvailability, static_cast<int>(index))) {
+            return fail("Scenario availability prerequisites form a cycle.");
+        }
+    }
+
+    for (const ScenarioDefinition& definition : catalog.scenarios) {
+        if (!definition.instantiateByDefault) {
+            continue;
+        }
+        if (!hasProducer(definition.availabilityUnlockKey, definition.id)) {
+            return fail("Scenario '" + definition.id + "' has an unavailable unlock with no producer.");
+        }
+        for (const ScenarioStepDefinition& step : definition.steps) {
+            if (step.goalText.empty() || step.gateText.empty() || step.nextStepText.empty()) {
+                return fail("Scenario '" + definition.id + "/" + step.id + "' needs goal, gate, and next-step text.");
+            }
+            if (step.activity == ScenarioActivityKind::MiningSite && step.miningSiteDefinitionId.empty()) {
+                return fail("Scenario mining activity requires a mining-site definition.");
+            }
+            if (step.activity == ScenarioActivityKind::Flyby &&
+                step.completionEvent != ScenarioEventKind::FlybyFinished) {
+                return fail("Scenario Flyby activity must complete from FlybyFinished.");
+            }
+            if (step.activity != ScenarioActivityKind::None &&
+                step.action != ScenarioActionKind::BeginActivity &&
+                step.action != ScenarioActionKind::RetryActivity) {
+                return fail("Scenario activity has no executable begin action.");
+            }
+            // Activities may use BeginActivity for their first interaction
+            // and become ClaimReward only after the emitted completion event.
+            // A passive claim-required step must name ClaimReward directly.
+            if (step.claimRequired && step.activity == ScenarioActivityKind::None &&
+                step.action != ScenarioActionKind::ClaimReward) {
+                return fail("Scenario claim-required step has no executable claim action.");
+            }
+            if (step.retryPolicy == ScenarioRetryPolicy::PlayerConfirmed &&
+                step.activity == ScenarioActivityKind::None) {
+                return fail("Scenario retry policy requires an authored activity.");
+            }
+            if (step.transition.kind == ScenarioTransitionKind::QueueRewardedRoute) {
+                const auto routeReward = std::find_if(step.rewards.begin(), step.rewards.end(), [](const ScenarioReward& reward) {
+                    return reward.kind == ScenarioRewardKind::RouteAccess;
+                });
+                if (routeReward == step.rewards.end() ||
+                    catalog.findRouteLink(definition.destinationId, routeReward->id) == nullptr) {
+                    return fail("Scenario route claim must reward a physical route from its authored destination.");
+                }
+            }
+            if (step.transition.kind == ScenarioTransitionKind::PresentStoryTakeover &&
+                step.transition.storyBriefing == StoryBriefingId::None) {
+                return fail("Scenario story takeover requires a typed briefing id.");
+            }
+            const bool isTerminalClaim = std::any_of(
+                step.rewards.begin(), step.rewards.end(), [](const ScenarioReward& reward) {
+                    return reward.kind == ScenarioRewardKind::UnlockKey ||
+                        reward.kind == ScenarioRewardKind::RouteAccess ||
+                        reward.kind == ScenarioRewardKind::CampaignMilestone;
+                });
+            const bool hasDependentStep = std::any_of(
+                definition.steps.begin(), definition.steps.end(), [&](const ScenarioStepDefinition& later) {
+                    return containsId(later.prerequisites, step.id);
+                });
+            if (!hasDependentStep && !isTerminalClaim && step.completionEvent != ScenarioEventKind::None &&
+                definition.instantiateByDefault) {
+                return fail("Scenario '" + definition.id + "/" + step.id + "' ends without a route, milestone, or successor.");
+            }
+        }
+    }
+    for (const Destination& destination : catalog.destinations) {
+        for (const std::string& key : destination.routeRequirementKeys) {
+            if (!hasProducer(key, {})) {
+                return fail("Route key '" + key + "' has no authored scenario producer.");
+            }
+        }
+    }
+    return true;
+}
+
 ScenarioInstance* findScenarioInstance(MetaProgress& meta, std::string_view scenarioId)
 {
     const auto found = std::find_if(
@@ -1007,18 +1025,38 @@ void ensureScenarioInstances(GameState& state, const ContentCatalog& catalog)
             instance->definitionVersion = definition.version;
         }
         for (const ScenarioStepDefinition& step : definition.steps) {
-            (void)ensureStepProgress(*instance, step.id);
+            ScenarioStepProgress& progress = ensureStepProgress(*instance, step.id);
+            if (step.completionEvent != ScenarioEventKind::ArtifactRecovered ||
+                progress.completed || !prerequisitesSatisfied(definition, *instance, step)) {
+                continue;
+            }
+            const bool permanentArtifactAlreadyRecovered = std::any_of(
+                state.meta.artifacts.begin(),
+                state.meta.artifacts.end(),
+                [&](const ArtifactRecord& artifact) {
+                    return (step.eventOriginId.empty() ||
+                            artifact.originDestinationId == step.eventOriginId) &&
+                        (step.eventTargetId.empty() || artifact.id == step.eventTargetId);
+                });
+            if (!permanentArtifactAlreadyRecovered) {
+                continue;
+            }
+            // Current-schema saves may outlive an authored content revision.
+            // Permanent inventory is the source of truth for a newly-authored
+            // one-time artifact step; recognizing it is idempotent and never
+            // duplicates the artifact, XP, or a reward claim.
+            progress.progress = std::max(1, step.requiredProgress);
+            progress.completed = true;
+            if (!step.claimRequired) {
+                progress.claimed = true;
+            }
         }
+        refreshScenarioCompletion(definition, *instance);
     }
 
-    // Claimed steps are authoritative evidence that their permanent unlocks
-    // were earned. Reconcile those idempotent rewards so content evolution or
-    // an older partial save cannot leave a later scenario activity impossible.
-    // Do not replay resources, readiness refills, or automatic assignment for
-    // a frame the player already owns.
-    reconcileRecoveredArtifactObjectives(state, catalog);
-    reconcileFlightDataObjectives(state, catalog);
-    repairClaimedPersistentRewards(state, catalog);
+    // v16 is an exact-schema campaign boundary. Scenario instances and their
+    // ledgers are authoritative; loading never infers rewards or advances
+    // objectives from a different persistence projection.
 }
 
 ScenarioStepState scenarioStepState(
@@ -1098,9 +1136,9 @@ ScenarioActionOutcome performScenarioAction(
             progress->claimed = true;
             applyStepRewards(state, catalog, *instance, resolved, *step);
             refreshScenarioCompletion(resolved, *instance);
-            reconcileFlightDataObjectives(state, catalog);
         }
         outcome.applied = true;
+        outcome.transition = step->transition;
         outcome.message = step->detail;
         return outcome;
     }
@@ -1110,6 +1148,7 @@ ScenarioActionOutcome performScenarioAction(
         }
         progress->failureAcknowledged = true;
         outcome.applied = true;
+        outcome.transition = step->transition;
         outcome.message = step->failureExplanation;
         return outcome;
     }
@@ -1121,6 +1160,7 @@ ScenarioActionOutcome performScenarioAction(
         applyStepRewards(state, catalog, *instance, resolved, *step);
         refreshScenarioCompletion(resolved, *instance);
         outcome.applied = true;
+        outcome.transition = step->transition;
         outcome.message = step->rewardPreview;
         return outcome;
     }
@@ -1161,6 +1201,8 @@ ScenarioActionOutcome performScenarioAction(
             outcome.activityEvent = step->completionEvent;
         }
         outcome.miningSiteDefinitionId = step->miningSiteDefinitionId;
+        outcome.activity = step->activity;
+        outcome.transition = step->transition;
         outcome.message = step->detail;
         return outcome;
     }
@@ -1359,6 +1401,9 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
     presentation.rewardPreview = step->rewardPreview;
     presentation.actionLabel = step->actionLabel;
     presentation.failureExplanation = step->failureExplanation;
+    presentation.goal = step->goalText.empty() ? step->title : step->goalText;
+    presentation.gate = step->gateText;
+    presentation.nextStep = step->nextStepText;
     presentation.current = std::clamp(progress->progress, 0, std::max(1, step->requiredProgress));
     presentation.required = std::max(1, step->requiredProgress);
     presentation.completionEvent = step->completionEvent;
@@ -1379,6 +1424,10 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
     presentation.briefingAcknowledged = progress->briefingAcknowledged;
     presentation.firstFailurePending = progress->failureSeen && !progress->failureAcknowledged;
     presentation.activityStarted = progress->activityStarted;
+    presentation.activity = step->activity;
+    presentation.transition = step->transition;
+    presentation.retryPolicy = step->retryPolicy;
+    presentation.presentationMode = step->presentationMode;
     presentation.miningSiteDefinitionId = step->miningSiteDefinitionId;
     if (presentation.returnPending || departureBlockedBySurfaceLoop) {
         presentation.action = ScenarioActionKind::None;
@@ -1557,6 +1606,107 @@ ScenarioObjectivePresentation scenarioObjectiveForMining(
         return scenarioObjectivePresentation(state, catalog, mining.scenarioId, mining.scenarioStepId);
     }
     return scenarioObjectiveForDestination(state, catalog, mining.destinationId);
+}
+
+CampaignNextStep campaignNextStep(const GameState& state, const ContentCatalog& catalog)
+{
+    CampaignNextStep result;
+    if (state.run.routeTransit.active()) {
+        const Destination* target = catalog.findDestination(state.run.routeTransit.targetDestinationId);
+        result.available = target != nullptr;
+        result.location = "OUTBOUND TRANSFER";
+        result.goal = target == nullptr ? "Complete the queued transfer." : "Reach " + target->name + ".";
+        result.gate = "Course is locked.";
+        result.nextStep = "Launch when ready.";
+        result.destinationId = state.run.routeTransit.targetDestinationId;
+        return result;
+    }
+    if (state.storyBriefing.pending != StoryBriefingId::None) {
+        result.available = true;
+        result.location = "STORY BEAT";
+        result.goal = "Review the active discovery.";
+        result.gate = "Acknowledgement is required before operations resume.";
+        result.nextStep = "Continue the briefing.";
+        return result;
+    }
+
+    const Destination& current = currentDestination(state, catalog);
+    ScenarioObjectivePresentation objective = scenarioDepartureChallengeForDestination(state, catalog, current.id);
+    if (!objective.available) {
+        objective = scenarioObjectiveForDestination(state, catalog, current.id);
+    }
+    if (objective.available && objective.state != ScenarioStepState::Complete) {
+        result.available = true;
+        result.location = objective.location;
+        result.goal = objective.goal;
+        result.gate = objective.gate;
+        result.nextStep = objective.nextStep;
+        result.destinationId = current.id;
+        result.objective = std::move(objective);
+        return result;
+    }
+
+    if (const Destination* next = nextDestination(state, catalog)) {
+        const ScenarioRouteRequirementStatus route = scenarioRouteRequirementStatus(state, catalog, *next);
+        result.available = true;
+        result.location = current.name + " DEPARTURE";
+        result.goal = "Reach " + next->name + ".";
+        result.destinationId = next->id;
+        result.requiredUnlockKey = route.requiredUnlockKey;
+        result.gate = route.satisfied
+            ? "Route requirements are complete."
+            : "Route locked: " + (route.scenarioId.empty() ? unlockDisplayName(route.requiredUnlockKey) : "complete the active scenario");
+        result.nextStep = route.satisfied ? "Launch when ready." : "Complete the listed objective.";
+        return result;
+    }
+
+    result.terminal = arkDiscovered(state);
+    result.available = result.terminal;
+    result.location = result.terminal ? "STRAYLIGHT" : current.name;
+    result.goal = result.terminal ? "Approach the Straylight." : "No authored destination is available.";
+    result.gate = result.terminal ? "Discovery complete." : "Progression data is incomplete.";
+    result.nextStep = result.terminal ? "Open Navigation." : "Restore a safe checkpoint.";
+    return result;
+}
+
+CampaignProgressionAuditResult auditCampaignProgression(const GameState& state, const ContentCatalog& catalog)
+{
+    CampaignProgressionAuditResult result;
+    if (state.run.routeTransit.active()) {
+        const RouteLinkDefinition* route = routeLinkForTransit(catalog, state.run.routeTransit);
+        if (route == nullptr || currentDestination(state, catalog).id != state.run.routeTransit.originDestinationId) {
+            return {false, CampaignProgressionIssue::InvalidPhysicalRoute,
+                "Queued route does not begin at the ship's physical destination."};
+        }
+    }
+    for (const ScenarioInstance& instance : state.meta.scenarios) {
+        std::string error;
+        if (!validateScenarioInstance(catalog, instance, &error)) {
+            return {false, CampaignProgressionIssue::InvalidScenarioState, std::move(error)};
+        }
+        for (const ScenarioStepProgress& step : instance.steps) {
+            if (step.claimed && !step.completed) {
+                return {false, CampaignProgressionIssue::InvalidScenarioState,
+                    "A scenario reward is claimed before its objective is complete."};
+            }
+        }
+    }
+    const CampaignNextStep next = campaignNextStep(state, catalog);
+    if (!next.available && !next.terminal) {
+        return {false, CampaignProgressionIssue::MissingPrimaryNextStep,
+            "No reachable campaign objective or destination is available."};
+    }
+    // Passive objectives are completed by a registered activity result (for
+    // example SafeMaterialDelivered from Surface Ops), so they intentionally
+    // have no direct scenario button while active. A briefing, claim, or
+    // activity with no action remains a hard error.
+    if (next.objective.available && next.objective.action == ScenarioActionKind::None &&
+        next.objective.state != ScenarioStepState::Complete &&
+        next.objective.completionEvent == ScenarioEventKind::None) {
+        return {false, CampaignProgressionIssue::InactivePrimaryAction,
+            "The primary scenario objective has no executable action."};
+    }
+    return result;
 }
 
 ScenarioInstance makeProceduralScenarioInstance(

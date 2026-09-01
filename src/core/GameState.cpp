@@ -1996,7 +1996,18 @@ bool acknowledgeStoryBriefing(GameState& state, const ContentCatalog& catalog)
         state.statusLine = "Mission brief acknowledged. Build a flight profile and open the route to the Moon.";
     } else if (briefing == StoryBriefingId::StraylightDiscovery) {
         state.meta.straylightDiscoveryAcknowledged = true;
+        state.storyBriefing.pending = StoryBriefingId::StraylightApproach;
+        state.statusLine = "Unknown contact locked. Begin the approach from Neptune.";
+        syncLaunchConfig(state, catalog);
+        return true;
+    } else if (briefing == StoryBriefingId::StraylightApproach) {
+        // This acknowledgement is executed by RocketGameApp because it starts
+        // a realtime, save-safe ceremonial transfer rather than changing only
+        // campaign data.
+        return false;
+    } else if (briefing == StoryBriefingId::ActOneComplete) {
         discoverArk(state, catalog);
+        state.statusLine = "ACT I COMPLETE — Straylight is now the expedition's home among the stars.";
     }
     state.storyBriefing = {};
     state.screen = continuation;
@@ -2389,6 +2400,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
     const int readinessBefore = state.run.frontierReadiness;
     const LaunchTrainingStage trainingStage = state.meta.launchLessons.stage;
     const LaunchMissionKind missionKind = state.launchConfig.missionKind;
+    const bool ceremonialTransfer = missionKind == LaunchMissionKind::StraylightApproach;
     const double lessonTargetMultiplier = state.launchConfig.burnGoalMultiplier;
     LaunchOutcome outcome = rawOutcome;
     const bool lessonMissionActive = launchLessonMissionActive(trainingStage, missionKind);
@@ -2445,7 +2457,8 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         && outcomeDestinationIndex == state.run.destinationIndex;
     const bool solarFrontierRevisit = !hostileSystemActive(state)
         && outcomeDestinationIndex == state.run.destinationIndex;
-    const bool validDestinationSuccess = !recoveryTransit && outcome.type == LaunchResultType::MissionComplete
+    const bool validDestinationSuccess = !ceremonialTransfer && !recoveryTransit &&
+        outcome.type == LaunchResultType::MissionComplete
         && outcomeDestination != nullptr
         && (!lessonMissionActive || lessonArrivalSucceeded)
         && (!outcome.frontierTransfer || solarFrontierAdvance || solarFrontierRevisit || selectedHostileSortie);
@@ -2649,16 +2662,15 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
             catalog,
             {ScenarioEventKind::FlightDataBanked, {}, {}, origin.id,
              target == nullptr ? std::string {} : target->id,
-             state.run.frontierReadiness - readinessBefore, 0});
+              state.run.frontierReadiness - readinessBefore, 0});
+    }
+    if (validDestinationSuccess && outcome.frontierTransfer && outcomeDestination != nullptr) {
+        (void)recordScenarioEvent(
+            state,
+            catalog,
+            {ScenarioEventKind::DestinationReached, {}, {}, {}, outcomeDestination->id, 1, 0});
     }
     syncLaunchTrainingProgress(state, catalog);
-
-    if (outcome.type == LaunchResultType::MissionComplete &&
-        outcomeDestination != nullptr &&
-        outcomeDestination->id == content::destination::neptune &&
-        !state.meta.straylightDiscoveryAcknowledged) {
-        scheduleStoryBriefing(state, StoryBriefingId::StraylightDiscovery, Screen::ArrivalOps);
-    }
 
     syncLaunchConfig(state, catalog);
 }

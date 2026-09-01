@@ -54,6 +54,7 @@ public:
     void arrivalOps();
     void skipArrivalFanfare();
     void acknowledgeStoryBriefing();
+    void beginStraylightApproach();
     void cutEngines();
     void next();
     void attemptFrontierTransfer();
@@ -64,16 +65,6 @@ public:
     void buyOffer(int index);
     void rerollOffers();
     void acknowledgeApproachIntroduction();
-    void acknowledgeProspectorCompletion();
-    void acknowledgeLunarMiningBriefing();
-    void claimLunarProspector();
-    void acknowledgeMarsMiningBriefing();
-    void claimMarsBayExpansion();
-    void commissionIoHazardDrone();
-    void beginSaturnSlingshot();
-    void retrySaturnSlingshot();
-    void acknowledgeSaturnSlingshotFailure();
-    void claimSaturnCourse();
     void acknowledgeJupiterWindow();
     void openJupiterRefit();
     void beginTransferAssist(std::string_view definitionId);
@@ -294,14 +285,14 @@ private:
     bool miningEvaDeathModalReady() const noexcept;
     void startMiningRunAfterFade();
     void startNewGame();
+    bool restoreCheckpoint();
+    bool stateCanBecomeCheckpoint() const;
+    bool validateProgressionStateOrRestore(const GameState& previous, std::string_view action);
     PanelRenderContext panelRenderContext(const PreparedLaunch& flightModel) const;
     void refreshPanel();
     void refreshRealtimeHud();
     void runUiAction(const std::string& action);
     bool runScenarioUiAction(std::string_view action);
-    // Temporary adapters for external bindings that still send pre-scenario
-    // action IDs. All state changes still flow through runScenarioUiAction.
-    bool runLegacyScenarioUiAction(std::string_view action);
     RenderSnapshot snapshot() const;
     PreparedLaunch currentFlightModel() const;
     void recordTelemetryPeak(const TelemetryEvent& event);
@@ -377,6 +368,7 @@ private:
     double titleLaunchElapsedSeconds_ = 0.0;
     SceneTransition sceneTransition_;
     bool hasSavedGame_ = false;
+    bool checkpointRecoveryAvailable_ = false;
     std::string titleNotice_;
     bool panelDirty_ = true;
     bool realtimeHudDirty_ = true;

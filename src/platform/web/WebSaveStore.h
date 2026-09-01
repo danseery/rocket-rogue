@@ -11,6 +11,9 @@ public:
     std::string load() override;
     bool storeAtomic(std::string_view data) override;
     bool clear() override;
+    std::string loadCheckpoint() override;
+    bool storeCheckpointAtomic(std::string_view data) override;
+    bool clearCheckpoint() override;
     std::string lastError() const override;
     std::string_view description() const override { return "Browser localStorage (save_v1)"; }
 

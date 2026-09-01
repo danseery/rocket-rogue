@@ -491,6 +491,8 @@ int storyBriefingToInt(StoryBriefingId briefing)
     switch (briefing) {
     case StoryBriefingId::CampaignIntroduction: return 1;
     case StoryBriefingId::StraylightDiscovery: return 2;
+    case StoryBriefingId::StraylightApproach: return 3;
+    case StoryBriefingId::ActOneComplete: return 4;
     case StoryBriefingId::None:
     default: return 0;
     }
@@ -500,6 +502,8 @@ StoryBriefingId storyBriefingFromInt(int value)
 {
     if (value == 1) return StoryBriefingId::CampaignIntroduction;
     if (value == 2) return StoryBriefingId::StraylightDiscovery;
+    if (value == 3) return StoryBriefingId::StraylightApproach;
+    if (value == 4) return StoryBriefingId::ActOneComplete;
     return StoryBriefingId::None;
 }
 
@@ -2551,80 +2555,6 @@ std::vector<MiningDepthLayerState> parseMiningDepthLayers(std::string_view text)
     return layers;
 }
 
-void normalizeRestoredMiningArtifact(MiningRunState& mining)
-{
-    if (!mining.active) {
-        return;
-    }
-    bool foundArtifactTile = false;
-    const int persistedArtifactX = mining.artifact.present
-        ? static_cast<int>(std::floor(mining.artifact.x))
-        : -1;
-    const int persistedArtifactY = mining.artifact.present
-        ? static_cast<int>(std::floor(mining.artifact.y))
-        : -1;
-    for (int y = 0; y < mining.terrain.height; ++y) {
-        for (int x = 0; x < mining.terrain.width; ++x) {
-            const std::size_t index = static_cast<std::size_t>(y * mining.terrain.width + x);
-            if (index >= mining.terrain.cells.size()) {
-                continue;
-            }
-            MiningCell& cell = mining.terrain.cells[index];
-            if (cell.material != MiningCellMaterial::ArtifactCache) {
-                continue;
-            }
-            const bool matchesPersistedArtifact =
-                mining.artifact.present &&
-                mining.artifact.state == MiningArtifactState::Embedded &&
-                x == persistedArtifactX &&
-                y == persistedArtifactY;
-            if (matchesPersistedArtifact) {
-                foundArtifactTile = true;
-                mining.artifact.revealed =
-                    mining.artifact.revealed || cell.revealed;
-                continue;
-            }
-            if (!mining.artifact.present && !foundArtifactTile) {
-                mining.artifact = {};
-                mining.artifact.present = true;
-                mining.artifact.id = mining.destinationId + "_mining_artifact_" + std::to_string(mining.depthZone) + "_legacy";
-                mining.artifact.kind = ArtifactKind::Boost;
-                mining.artifact.rewardType = ArtifactRewardType::BlueprintInsight;
-                mining.artifact.state = MiningArtifactState::Embedded;
-                mining.artifact.x = static_cast<double>(x) + 0.5;
-                mining.artifact.y = static_cast<double>(y) + 0.5;
-                mining.artifact.health = tuning::mining::artifactMaxHealth;
-                mining.artifact.maxHealth = tuning::mining::artifactMaxHealth;
-                mining.artifact.embedStrength = 1.0;
-                mining.artifact.revealed = cell.revealed;
-                foundArtifactTile = true;
-                continue;
-            }
-            cell.material = mining.depthZone >= 2 ? MiningCellMaterial::ExoticVein : MiningCellMaterial::RareOre;
-            cell.hazard = false;
-        }
-    }
-}
-
-void normalizeRestoredMiningReturnZone(MiningRunState& mining)
-{
-    if (!mining.active) {
-        return;
-    }
-    const bool invalidZone = mining.returnZoneX <= 0.0 ||
-        mining.returnZoneY <= 0.0 ||
-        mining.returnZoneX >= static_cast<double>(std::max(1, mining.terrain.width)) ||
-        mining.returnZoneY >= static_cast<double>(std::max(1, mining.terrain.height));
-    if (invalidZone) {
-        mining.returnZoneX = static_cast<double>(std::max(1, mining.terrain.width)) * 0.5;
-        mining.returnZoneY = 4.0;
-    }
-    mining.droneHealth = std::clamp(mining.droneHealth, 0.0, 1.0);
-    mining.drillIntegrity = std::clamp(mining.drillIntegrity, 0.0, 1.0);
-    mining.stowedCargo = std::max(0, mining.stowedCargo);
-    mining.cargo = std::max(0, mining.cargo);
-}
-
 MiningElementalAffinity inferredHazardAffinity(const MiningRunState& mining, int x)
 {
     if (mining.destinationId == content::destination::moon ||
@@ -2755,7 +2685,6 @@ SaveData captureSaveData(const GameState& state)
     save.nextLaunchInstabilityPenalty = state.run.nextLaunchInstabilityPenalty;
     save.pendingTransferAssist = state.run.pendingTransferAssist;
     save.routeTransit = state.run.routeTransit;
-    save.jupiterSlingshotActive = state.run.pendingTransferAssist.definitionId == content::transferAssist::marsJupiter;
     if ((state.screen == Screen::ArrivalFanfare || state.screen == Screen::Flyby || state.screen == Screen::Orbit) && state.run.arrivalOps.active) {
         save.screen = Screen::ArrivalOps;
     } else if (state.screen == Screen::Flyby) {
@@ -2884,37 +2813,8 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         -tuning::launch::pilotingCourseLost,
         tuning::launch::pilotingCourseLost);
     state.run.routeTransit = save.routeTransit;
-    if (!state.run.pendingTransferAssist.active() && save.jupiterSlingshotActive) {
-        state.run.pendingTransferAssist = {
-            content::transferAssist::marsJupiter,
-            content::destination::mars,
-            content::destination::jupiter,
-            save.nextLaunchInstabilityPenalty > 0.0 ? FlybyGrade::Good : FlybyGrade::Perfect,
-            std::max(save.nextLaunchFuelBoost, tuning::flyby::jupiterSlingshotFuelSavings),
-            std::max(0.0, save.nextLaunchSpeedBoost),
-            std::clamp(save.nextLaunchInstabilityPenalty, 0.0, 1.0)
-        };
-        // Older saves stored the physical Mars momentum in the generic
-        // next-launch fields. The canonical assist now owns those values, so
-        // clear the projection to avoid applying Good instability twice.
-        state.run.nextLaunchFuelBoost = 0.0;
-        state.run.nextLaunchSpeedBoost = 0.0;
-        state.run.nextLaunchInstabilityPenalty = 0.0;
-    }
-    const auto legacyInboundRoute = [&]() -> RouteTransitState {
-        const int targetIndex = state.run.destinationIndex;
-        if (targetIndex <= 0 || targetIndex >= static_cast<int>(catalog.destinations.size())) {
-            return {};
-        }
-        const Destination& source = catalog.destinations[static_cast<std::size_t>(targetIndex - 1)];
-        const Destination& target = catalog.destinations[static_cast<std::size_t>(targetIndex)];
-        return makeRouteTransit(catalog, source.id, target.id, RouteTransitIntent::Reapproach);
-    };
     if (routeLinkForTransit(catalog, state.run.routeTransit) == nullptr) {
         state.run.routeTransit = {};
-        if (save.screen == Screen::Hangar && !hostileSystemActive(state)) {
-            state.run.routeTransit = legacyInboundRoute();
-        }
     }
     if (state.run.pendingTransferAssist.active()) {
         state.run.routeTransit = makeRouteTransit(
@@ -2930,10 +2830,6 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.offerCrewUpgradeIds = vectorToOfferArray(save.offerCrewUpgradeIds);
     state.run.researchProjectIds = vectorToOfferArray(save.researchProjectIds);
     state.run.arrivalOps = save.arrivalOps;
-    if (state.run.arrivalOps.active &&
-        routeLinkForTransit(catalog, state.run.arrivalOps.incomingRoute) == nullptr) {
-        state.run.arrivalOps.incomingRoute = legacyInboundRoute();
-    }
     state.run.surfaceExpedition = save.surfaceExpedition;
     state.run.surfaceExpedition.droneModuleAssignments = save.droneModuleAssignments;
     state.run.surfaceExpedition.scannerCooldownSeconds = save.scannerCooldownSeconds;
@@ -3119,8 +3015,6 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
             state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
         }
     }
-    normalizeRestoredMiningArtifact(state.run.mining);
-    normalizeRestoredMiningReturnZone(state.run.mining);
     normalizeRestoredMiningHazards(state.run.mining);
     normalizeRestoredHazardDroneAssignments(state.run.mining);
     state.meta.unlockKeys = save.unlockKeys.empty() ? std::vector<std::string>{content::unlock::starter} : save.unlockKeys;
@@ -3132,16 +3026,10 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.ownedDroneIds = save.ownedDroneIds;
     state.meta.equippedDroneIds = save.equippedDroneIds;
     state.meta.scenarios = save.scenarios;
-    state.meta.prospectorCommonOreRecovered = std::clamp(
-        save.prospectorCommonOreRecovered,
-        0,
-        tuning::research::prospectorCommonOreGoal);
+    state.meta.prospectorCommonOreRecovered = std::clamp(save.prospectorCommonOreRecovered, 0, tuning::research::prospectorCommonOreGoal);
     state.meta.lunarMiningBriefingAcknowledged = save.lunarMiningBriefingAcknowledged;
     state.meta.lunarProspectorClaimed = save.lunarProspectorClaimed;
-    state.meta.marsCommonOreRecovered = std::clamp(
-        save.marsCommonOreRecovered,
-        0,
-        tuning::research::marsBayCommonOreGoal);
+    state.meta.marsCommonOreRecovered = std::clamp(save.marsCommonOreRecovered, 0, tuning::research::marsBayCommonOreGoal);
     state.meta.marsMiningBriefingAcknowledged = save.marsMiningBriefingAcknowledged;
     state.meta.marsBayExpansionClaimed = save.marsBayExpansionClaimed;
     state.meta.ioVolcanicBriefingAcknowledged = save.ioVolcanicBriefingAcknowledged;
@@ -3326,7 +3214,6 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::nextLaunchFuelBoost, save.nextLaunchFuelBoost);
     writeField(out, save_schema::field::nextLaunchSpeedBoost, save.nextLaunchSpeedBoost);
     writeField(out, save_schema::field::nextLaunchInstabilityPenalty, save.nextLaunchInstabilityPenalty);
-    writeField(out, save_schema::field::jupiterSlingshotActive, save.jupiterSlingshotActive ? 1 : 0);
     writeField(out, save_schema::field::pendingTransferAssistId, save.pendingTransferAssist.definitionId);
     writeField(out, save_schema::field::pendingTransferAssistSource, save.pendingTransferAssist.sourceDestinationId);
     writeField(out, save_schema::field::pendingTransferAssistTarget, save.pendingTransferAssist.targetDestinationId);
@@ -3718,8 +3605,6 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.nextLaunchSpeedBoost = parseDouble(value, save.nextLaunchSpeedBoost);
         } else if (key == save_schema::field::nextLaunchInstabilityPenalty) {
             save.nextLaunchInstabilityPenalty = parseDouble(value, save.nextLaunchInstabilityPenalty);
-        } else if (key == save_schema::field::jupiterSlingshotActive) {
-            save.jupiterSlingshotActive = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::pendingTransferAssistId) {
             save.pendingTransferAssist.definitionId = std::string(value);
         } else if (key == save_schema::field::pendingTransferAssistSource) {

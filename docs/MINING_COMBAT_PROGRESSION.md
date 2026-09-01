@@ -21,7 +21,9 @@ Each act has ten difficulty levels split into four teaching bands:
 
 A tutorial callout appears at a band transition, not at every number. Swarm combat remains autonomous, while the EVA operator can aim a limited sidearm for vulnerable self-defense. The player pilots, drills, scans, tethers, manages endurance, and chooses routes. Mining remains the single fuel-only deployment opened by Survey Site or Push Deeper in a surface loop.
 
-Optional Swarm Nests are horde set-pieces rather than ordinary room encounters. Their simultaneous enemy cap starts at 24, reaches 32 in the Act 2 Combine band used by the debug Swarm Arena, and scales to 64 in Act 3 Mastery. Each nest sends three rapid waves containing 1x, 1.5x, and 2x the simultaneous cap. Each wave begins beyond evenly distributed radial points outside the visible mine bounds, then moves quickly inward before entering the nest chamber; enemies never materialize around the player. Swarm enemies have reduced individual health and damage so the threat comes from crowd movement, target saturation, and sustained replacement rather than four oversized enemies. The pack occupies rotating slots around the player instead of collapsing into one point: melee creatures stagger their dives, bite, and retreat to the ring, while ranged creatures fire from a wider band and pull back between shots.
+Optional Swarm Nests are horde set-pieces rather than ordinary room encounters. Their simultaneous enemy cap starts at 24, reaches 32 in the Act 2 Combine band used by the debug Swarm Arena, and scales to 64 in Act 3 Mastery. Each nest sends three rapid waves containing 1x, 1.5x, and 2x the simultaneous cap. Every wave begins after a short seeded delay and enters at irregular seeded intervals. Golden-angle perimeter coverage remains the hidden distribution base, but angular, tangential, and outward jitter keep the off-screen starting points from exposing a geometric pattern; nearby entrants are rejected and retried before spawning. The debug arena skips discovery but uses this same staged entrance instead of materializing a complete wave.
+
+Swarm enemies have reduced individual health and damage so the threat comes from crowd movement, target saturation, and sustained replacement rather than four oversized enemies. Inside the chamber, type-aware local separation and terrain-safe overlap correction preserve readable silhouettes and create queues through narrow openings. The pack still occupies rotating golden-angle formation slots around the player, but only three melee creatures may hold attack tokens at once. Token holders commit, bite, and retreat; the remaining melee creatures hold the ring, while ranged creatures fire from a wider band and pull back between shots. Token ownership is transient and is reconstructed after load; the authored wave, spawn count, and next staggered entrance remain save-backed.
 
 ### Coherent enemy ecologies
 
@@ -148,9 +150,9 @@ The stable shared types live in `GameTypes.h`:
 
 The stable resolver and query API lives in `MiningProgression.h`. Consumers should use the whitelist helpers instead of indexing the fixed arrays directly.
 
-Active version-14 saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies, and restore never rerolls serialized terrain. The same payload persists in-progress XP, pending choices, run ranks, grafts, synergies, permanent Survey/Bore ranks, and each Support Drone's haul provenance. Version 13 and older saves are rejected at the fresh-start boundary instead of being migrated.
+Active version-16 saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies, and restore never rerolls serialized terrain. The same payload persists in-progress XP, pending choices, run ranks, grafts, synergies, permanent Survey/Bore ranks, and each Support Drone's haul provenance. Every non-v16 payload is cleared at the fresh-start boundary instead of being migrated.
 
-The current `miningArenaRulesVersion` is `3`. Increment it only when a rule change can alter deterministic generation or reward allocation, and preserve old serialized active arenas during migration.
+The current `miningArenaRulesVersion` is `3`. Increment it only when a rule change can alter deterministic generation or reward allocation. Exact v16 active arenas retain their serialized terrain; new schema boundaries do not migrate older arenas.
 
 ## Integration invariants
 

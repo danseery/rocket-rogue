@@ -28,12 +28,16 @@ public:
     std::string load() override;
     bool storeAtomic(std::string_view data) override;
     bool clear() override;
+    std::string loadCheckpoint() override;
+    bool storeCheckpointAtomic(std::string_view data) override;
+    bool clearCheckpoint() override;
     std::string lastError() const override;
     std::string_view description() const override { return "Native profile (save_v1.txt)"; }
     const std::filesystem::path& path() const;
 
 private:
     AtomicTextFile file_;
+    AtomicTextFile checkpointFile_;
 };
 
 class NativePreferenceStore final : public IPreferenceStore {

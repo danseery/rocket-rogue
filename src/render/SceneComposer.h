@@ -146,6 +146,7 @@ private:
         MiningCellMaterial material = MiningCellMaterial::Empty;
         double maxToughness = 0.0;
         double remainingToughness = 0.0;
+        double damageFlashSeconds = 0.0;
         MiningElementalAffinity hazardAffinity = MiningElementalAffinity::None;
         bool revealed = false;
         bool hazard = false;

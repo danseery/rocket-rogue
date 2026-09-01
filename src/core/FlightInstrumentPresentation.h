@@ -53,7 +53,7 @@ inline FlightInstrumentPresentation launchFlightInstruments(
         display::percent(std::clamp(flight.heat, 0.0, 1.0)),
         display::fixed(std::max(0.0, flight.fuelRemaining), 0) + " / " +
             display::fixed(flight.fuelCapacity, 0),
-        flight.heat > 0.80,
+        flight.heat > tuning::launch::temperatureCriticalThreshold,
         launch.manualControlsEnabled &&
             courseMagnitude >= tuning::launch::pilotingCourseCaution,
         launch.manualControlsEnabled &&
@@ -87,7 +87,7 @@ inline FlightInstrumentPresentation flybyFlightInstruments(const FlybyRunState& 
         display::fixed(speed * 100.0, 0) + " m/s",
         display::percent(temperature),
         display::percent(fuel),
-        temperature > 0.80,
+        temperature > tuning::launch::temperatureCriticalThreshold,
         flyby.currentZone <= 0,
         false,
         throttle,
@@ -123,7 +123,7 @@ inline FlightInstrumentPresentation orbitFlightInstruments(const OrbitRunState& 
         display::fixed(speed * 100.0, 0) + " m/s",
         display::percent(temperature),
         display::percent(fuel),
-        temperature > 0.80,
+        temperature > tuning::launch::temperatureCriticalThreshold,
         orbit.currentZone <= 0,
         false,
         throttle,
