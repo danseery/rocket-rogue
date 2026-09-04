@@ -13,6 +13,15 @@
 
 namespace rocket {
 
+namespace orbital_laser {
+inline constexpr double secondsPerLayer = 3.0;
+// Twice the original five-cell shaft. Even-width cuts sit between two cells.
+inline constexpr int shaftWidthCells = 10;
+inline constexpr int shaftLeftCells = shaftWidthCells / 2;
+inline constexpr int shaftRightCells = shaftWidthCells - shaftLeftCells - 1;
+inline constexpr double shaftCenterOffset = 0.5 + (shaftRightCells - shaftLeftCells) * 0.5;
+}
+
 struct MiningDrillStats {
     double power = 0.0;
     double speed = 0.0;
@@ -80,6 +89,7 @@ struct SurfaceLandingBuildRequest {
     std::string scenarioId;
     std::string scenarioStepId;
     std::string miningSiteDefinitionId;
+    std::string zoneId = "zone_1";
 };
 
 struct PreparedSurfaceLanding {
@@ -93,7 +103,21 @@ struct PreparedSurfaceLanding {
     std::vector<PostSolarSystemRoster> postSolarSystemRosters;
     bool valid = false;
     std::string error;
+    // Session-only orbital preparation. Modified terrain already uses the
+    // existing Mining layer persistence when the landing is committed.
+    std::vector<OrbitalSurveyLayer> surveyLayers;
+    int surveyedDepth = -1;
+    int laserDepth = 0;
+    int laserRow = 0;
+    int shaftX = 0;
+    double laserRowWork = 0.0;
+    bool laserBlocked = false;
+    bool laserComplete = false;
 };
+
+bool prepareOrbitalSurvey(const GameState&, const ContentCatalog&, PreparedSurfaceLanding&, int depth);
+std::uint64_t surfaceLandingBuildKey(const GameState&, const ContentCatalog&, const SurfaceLandingBuildRequest&);
+void excavateOrbitalShaft(PreparedSurfaceLanding&, int maximumDepth, double seconds);
 
 PreparedSurfaceLanding prepareSurfaceLanding(
     const GameState& state,
@@ -110,6 +134,25 @@ bool commitPreparedSurfaceLanding(
 bool surfaceLandingStaging(const MiningRunState& mining, double shipX, double shipY,
     double& rigX, double& rigY);
 bool positionSurfaceLandingTeam(MiningRunState& mining, double shipX, double shipY);
+
+// A read-only, site-wide Cartesian projection of authoritative cached layers.
+// The flattened terrain is a session cache, never a second saved world.
+struct LandingLayerPlacement {
+    int depth = 0;
+    int topRow = 0;
+    int height = 0;
+};
+struct LandingSiteView {
+    MiningRunState world;
+    std::vector<LandingLayerPlacement> layers;
+    int depthAt(double row) const;
+    int topRow(int depth) const;
+};
+bool prepareLandingLayers(const GameState&, const ContentCatalog&, MiningRunState&, int throughDepth);
+bool activateLandingLayer(MiningRunState&, int depth);
+LandingSiteView buildLandingSiteView(const MiningRunState&);
+bool positionSurfaceLandingTeam(MiningRunState&, const LandingSiteView&, double shipX, double siteRow);
+bool revealLandingSurroundings(MiningRunState&, const LandingSiteView&, double gridX, double siteRow);
 
 // The physical object selected by the shared T/Y tether action. This is
 // intentionally independent of presentation so the command label, input, and

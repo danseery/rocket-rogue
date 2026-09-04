@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -87,6 +88,9 @@ public:
     void selectResearchProject(int index);
     void skipResearch();
     void surveySurface();
+    void orbitalWorkInput(bool held);
+    void landFromOrbit();
+    void resumeOrbitalFlight();
     void mineSurface();
     void pushSurface();
     void scanSurfacePulse();
@@ -224,6 +228,10 @@ private:
     struct SurfaceArrivalSequenceState {
         SurfaceArrivalPhase phase = SurfaceArrivalPhase::None;
         std::optional<PreparedSurfaceLanding> prepared;
+        // Active site plus dormant entries share the same destination/visit/
+        // zone/site preparation key. No extra zones are generated speculatively.
+        std::unordered_map<std::uint64_t, PreparedSurfaceLanding> siteCache;
+        std::string selectedZoneId = "zone_1";
         double elapsed = 0.0;
         bool deployQueued = false;
         bool landingCommitted = false;
@@ -306,6 +314,7 @@ private:
         FlightControlState controls;
         ResultViewState result;
         ArrivalFanfareState arrivalFanfare;
+        OrbitalWorkState orbitalWork;
 
         explicit LaunchSessionState(FlightRunState& authoritativeFlight)
             : flight(authoritativeFlight)
@@ -331,6 +340,7 @@ private:
             controls = {};
             result = {};
             arrivalFanfare = {};
+            orbitalWork = {};
         }
     };
 
@@ -338,7 +348,9 @@ private:
         double burnMultiplier,
         RecoveryMethod method,
         LaunchFailureCause failureCause = LaunchFailureCause::None);
-    void prepareSurfaceArrivalIfNeeded(const Destination& destination);
+    void prepareSurfaceArrivalIfNeeded(const Destination& destination, std::string_view zoneId = {});
+    bool shipInsideOrbitalWorkZone() const;
+    bool advanceOrbitalWork(double seconds, const Destination& destination);
     bool commitSurfaceTouchdown(const Destination& destination, bool hardTouchdown);
     void advanceSurfaceArrival(double deltaSeconds);
     void completeSurfaceDeployment();
@@ -423,6 +435,10 @@ private:
     LaunchSessionState session_;
     SurfaceBaySequenceState surfaceBaySequence_;
     SurfaceArrivalSequenceState surfaceArrival_;
+    std::optional<LandingSiteView> landingSiteView_;
+    double manualAscentCameraSeconds_ = 1.25;
+    void refreshLandingSiteView(bool force = false);
+    void beginManualSurfaceAscent();
     MiningEvaDeathPresentationState miningEvaDeathPresentation_;
     MiningSceneHandoff miningSceneHandoff_ = MiningSceneHandoff::None;
     bool miningSceneHandoffCommitted_ = false;

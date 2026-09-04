@@ -1,4 +1,5 @@
 #include "core/MiningSystem.h"
+#include "core/FlightSystem.h"
 #include "core/ArtifactProgression.h"
 #include "core/PostSolarSystem.h"
 #include "core/PayloadTransfer.h"
@@ -246,7 +247,7 @@ double controlledDrillOriginOffset(const MiningRunState& mining)
 
 bool controlledActorAtReturnZone(const MiningRunState& mining)
 {
-    if (!mining.active || mining.depthZone != mining.entryDepthZone) {
+    if (!mining.active || mining.depthZone != mining.shipDepthZone) {
         return false;
     }
     const double dx = controlledActorX(mining) - mining.returnZoneX;
@@ -257,7 +258,7 @@ bool controlledActorAtReturnZone(const MiningRunState& mining)
 
 bool rigAtReturnZone(const MiningRunState& mining)
 {
-    if (!mining.active || mining.rigDepthZone != mining.entryDepthZone) {
+    if (!mining.active || mining.rigDepthZone != mining.shipDepthZone) {
         return false;
     }
     const double dx = mining.droneX - mining.returnZoneX;
@@ -269,7 +270,7 @@ bool rigAtReturnZone(const MiningRunState& mining)
 bool operatorAtReturnZone(const MiningRunState& mining)
 {
     if (!mining.active || !mining.operatorPresent ||
-        mining.depthZone != mining.entryDepthZone) {
+        mining.depthZone != mining.shipDepthZone) {
         return false;
     }
     const double dx = mining.operatorX - mining.returnZoneX;
@@ -283,8 +284,8 @@ bool tetheredRigRecoverableAtShip(const MiningRunState& mining)
     return operatorControlled(mining) &&
         operatorAtReturnZone(mining) &&
         mining.operatorRigTethered &&
-        mining.depthZone == mining.entryDepthZone &&
-        mining.rigDepthZone == mining.entryDepthZone;
+        mining.depthZone == mining.shipDepthZone &&
+        mining.rigDepthZone == mining.shipDepthZone;
 }
 
 bool miningExtractionReady(const MiningRunState& mining)
@@ -1228,6 +1229,17 @@ bool applyMiningPocketReward(
     return false;
 }
 
+// Topology-only fracture. Collection, pockets, progression and rewards belong
+// to the caller; orbital excavation uses this without a live actor.
+void fractureMiningTerrainCell(MiningRunState& mining, int x, int y)
+{
+    auto* cell = miningCellAt(mining.terrain, x, y);
+    if (!cell) return;
+    *cell = makeCell(MiningCellMaterial::Empty, mining.depthZone);
+    cell->revealed = true;
+    markDirty(mining.terrain, x, y);
+}
+
 bool completeBrokenMiningCell(
     GameState& state,
     const MiningDrillStats& stats,
@@ -1253,8 +1265,7 @@ bool completeBrokenMiningCell(
         state.run.planetaryExpedition.treasureMarks.erase(markIt);
     }
     const bool gateAssociated = target->gateAssociated || target->cocoonLayer >= 0;
-    *target = makeCell(MiningCellMaterial::Empty, mining.depthZone);
-    target->revealed = true;
+    fractureMiningTerrainCell(mining, x, y);
     mining.cellsBroken += 1;
     if (brokenMaterial == MiningCellMaterial::ArtifactCache) {
         releaseEmbeddedArtifact(mining);
@@ -1909,7 +1920,7 @@ bool loadOneResourceChunk(GameState& state, MiningRunState& mining, MiningMiniDr
 
 double miniDroneShipTransitSeconds(const MiningRunState& mining)
 {
-    return 0.80 + static_cast<double>(std::max(0, mining.depthZone - mining.entryDepthZone)) * 0.55;
+    return 0.80 + static_cast<double>(std::abs(mining.depthZone - mining.shipDepthZone)) * 0.55;
 }
 
 void beginMiniDroneShipDelivery(MiningRunState& mining, MiningMiniDroneAgent& agent)
@@ -1920,6 +1931,7 @@ void beginMiniDroneShipDelivery(MiningRunState& mining, MiningMiniDroneAgent& ag
     agent.taskProgressSeconds = 0.0;
     agent.finishTargetBeforeReturn = false;
     agent.behavior = MiningMiniDroneBehavior::DeliveringToShip;
+    if (agent.transitDepthZone < 0) agent.transitDepthZone=mining.depthZone;
     agent.actionCooldownSeconds = miniDroneShipTransitSeconds(mining);
 }
 
@@ -2231,6 +2243,7 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
     SurveyDroneCoordinator surveyCoordinator(mining);
     surveyCoordinator.synchronizeAssignments();
     const MiniDroneLoadoutEffects loadoutEffects = miniDroneLoadoutEffects(state, catalog);
+    std::optional<LandingSiteView> deliveryWorld;
 
     for (MiningMiniDroneAgent& agent : mining.miniDrones) {
         const MiniDroneAnchorFrame anchor = resolveMiniDroneAnchor(mining, agent.anchorTarget);
@@ -2286,6 +2299,30 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
             agent.behavior = MiningMiniDroneBehavior::Returning;
         }
         const MiniDroneHomePoint home = miniDroneHomePoint(mining, agent);
+        if (logisticsTransit && mining.surfaceOriginBound) {
+            if (!deliveryWorld) deliveryWorld=buildLandingSiteView(mining);
+            auto& world=deliveryWorld->world;
+            if (agent.transitDepthZone<0) agent.transitDepthZone=mining.depthZone;
+            agent.y+=deliveryWorld->topRow(agent.transitDepthZone);
+            const bool returning=agent.behavior==MiningMiniDroneBehavior::ReturningFromShip;
+            const double targetX=returning ? home.x : world.returnZoneX;
+            const double targetY=returning ? home.y+deliveryWorld->topRow(mining.depthZone) : world.returnZoneY-1.0;
+            moveMiniDroneTowardOpenPoint(agent,world,targetX,targetY,
+                tuning::mining::miniDroneCatchUpSpeedCellsPerSecond,dt);
+            const bool arrived=std::hypot(agent.x-targetX,agent.y-targetY)<1.0;
+            agent.transitDepthZone=deliveryWorld->depthAt(agent.y);
+            agent.y-=deliveryWorld->topRow(agent.transitDepthZone);
+            if (arrived && returning) {
+                agent.behavior=MiningMiniDroneBehavior::Following;
+                agent.transitDepthZone=-1;
+            } else if (arrived) {
+                const auto owned=unloadMiniDroneCargoAtShip(state,catalog,agent);
+                awardExpeditionExperience(state,miningMaterialExperience(owned),Screen::Mining);
+                if (materialCargoMass(agent.haulMaterials)==0)
+                    agent.behavior=MiningMiniDroneBehavior::ReturningFromShip;
+            }
+            continue;
+        }
         // Ship delivery is intentionally independent of the controlled actor.  A
         // support drone uses the known shaft/return route as a timed transit so
         // a player never has to escort a full drone back to the shuttle.
@@ -6048,6 +6085,30 @@ void updateMiningSwarm(
     }
 }
 
+// Shared by actual depth travel and offscreen orbital site preparation. Does
+// not advance actors, resources, campaign progression, or application RNG.
+void initializeMiningDepth(GameState& state, const ContentCatalog& catalog, const Destination& destination, int depth)
+{
+    auto& mining = state.run.mining;
+    const auto stats = miningDrillStats(state, catalog);
+    const auto rules = activeMiningArenaRules(mining);
+    mining.depthZone = depth;
+    mining.terrain = generateMiningTerrainForRules(state, destination, mining.siteProfile, depth,
+        mining.surfaceOriginBound ? mining.terrain.width : stats.terrainWidth,
+        mining.surfaceOriginBound ? mining.terrain.height : stats.terrainHeight,
+        rules, mining.miningSiteBiome);
+    normalizeRichTerrainDeposits(mining.terrain, rules, mining.rewardBudget, 0, 0);
+    applyMiningTerrainToughnessScale(mining.terrain, rules.terrainToughnessScale);
+    mining.enemies.clear();
+    mining.artifact = {};
+    mining.looseObjects.clear();
+    mining.gate = {};
+    mining.downwardTransitionX = 0.0;
+    mining.hasDownwardTransition = false;
+    spawnMiningEnemies(mining, destination, rules);
+    carveMiningSwarmArena(mining);
+}
+
 void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int direction)
 {
     MiningRunState& mining = state.run.mining;
@@ -6064,6 +6125,22 @@ void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int di
     const bool tetheredRigTravels = suitTravels && mining.operatorRigTethered &&
         mining.rigDepthZone == mining.depthZone;
     const double transitionX = controlledActorX(mining);
+    if (mining.surfaceOriginBound) {
+        prepareLandingLayers(state,catalog,mining,targetDepth);
+        const auto target=std::find_if(mining.depthLayers.begin(),mining.depthLayers.end(),
+            [targetDepth](const auto& layer){return layer.depthZone==targetDepth;});
+        if (target==mining.depthLayers.end()) return;
+        const double radius=suitTravels ? tuning::mining::operatorColliderRadiusCells : tuning::mining::rigColliderRadiusCells;
+        const double arrivalY=direction>0 ? 4.0 : target->terrain.height-3.5;
+        if (!canOccupyActor(target->terrain,transitionX,arrivalY,radius,suitTravels)) return;
+        // Check the adjoining lips, not just the destination spawn point.
+        for (double y=radius+0.01; y<=4.0; y+=0.25) {
+            const double nextY=direction>0 ? y : target->terrain.height-y;
+            const double oldY=direction>0 ? mining.terrain.height-y : y;
+            if (!canOccupyActor(target->terrain,transitionX,nextY,radius,suitTravels) ||
+                !canOccupyActor(mining.terrain,transitionX,oldY,radius,suitTravels)) return;
+        }
+    }
     MiningArtifactObject travelingArtifact;
     const bool artifactTravels =
         mining.artifact.present &&
@@ -6077,50 +6154,32 @@ void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int di
         mining.hasDownwardTransition = true;
         // Only a layer the player has left behind becomes a return route. A
         // fresh deployment depth remains ordinary mining terrain.
-        carveMiningReturnShaft(mining.terrain);
+        if (!mining.surfaceOriginBound) carveMiningReturnShaft(mining.terrain);
     }
     storeActiveDepthLayer(mining);
 
     const bool revisiting = restoreDepthLayer(mining, targetDepth);
-    const MiningDrillStats stats = miningDrillStats(state, catalog);
-    const MiningArenaRules arenaRules = activeMiningArenaRules(mining);
     if (!revisiting) {
-    mining.depthZone = targetDepth;
-        mining.terrain = generateMiningTerrainForRules(
-            state,
-            *destination,
-            mining.siteProfile,
-            mining.depthZone,
-            stats.terrainWidth,
-            stats.terrainHeight,
-            arenaRules,
-            mining.miningSiteBiome);
-        normalizeRichTerrainDeposits(mining.terrain, arenaRules, mining.rewardBudget, 0, 0);
-        applyMiningTerrainToughnessScale(mining.terrain, arenaRules.terrainToughnessScale);
-        mining.enemies.clear();
-        spawnMiningEnemies(mining, *destination, arenaRules);
-        carveMiningSwarmArena(mining);
-        mining.artifact = {};
-        mining.looseObjects.clear();
-        mining.gate = {};
-        mining.downwardTransitionX = 0.0;
-        mining.hasDownwardTransition = false;
-        if (direction > 0) {
-            mining.hazardDelta += tuning::mining::depthHazardRisk;
-            mining.deepestDepthZone = std::max(mining.deepestDepthZone, mining.depthZone);
-        }
+        initializeMiningDepth(state, catalog, *destination, targetDepth);
+    }
+    // Orbital preparation caches terrain, not a visit. Apply exploration costs
+    // only when the actor first reaches a deeper layer, cached or otherwise.
+    if (direction > 0 && targetDepth > mining.deepestDepthZone) {
+        mining.hazardDelta += tuning::mining::depthHazardRisk;
+        mining.deepestDepthZone = targetDepth;
     }
 
     if (direction < 0) {
         // A new layer generated while climbing is already behind the deeper
         // mining level, so it receives the clear route up to the ship.
-        carveMiningReturnShaft(mining.terrain);
+        if (!mining.surfaceOriginBound) carveMiningReturnShaft(mining.terrain);
     }
 
     double arrivalX = 0.0;
     double arrivalY = 0.0;
     if (direction > 0) {
-        arrivalX = static_cast<double>(mining.terrain.width) * 0.5;
+        arrivalX = revisiting && mining.hasDownwardTransition
+            ? mining.downwardTransitionX : static_cast<double>(mining.terrain.width) * 0.5;
         arrivalY = 4.0;
     } else {
         arrivalX = mining.hasDownwardTransition
@@ -6129,6 +6188,7 @@ void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int di
         arrivalY = std::max(2.0, static_cast<double>(mining.terrain.height) - 3.5);
     }
     if (suitTravels) {
+        if (mining.surfaceOriginBound) arrivalX=transitionX;
         mining.operatorX = arrivalX;
         mining.operatorY = arrivalY;
         if (tetheredRigTravels) {
@@ -6142,6 +6202,7 @@ void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int di
             mining.rigDepthZone = mining.depthZone;
         }
     } else {
+        if (mining.surfaceOriginBound) arrivalX=transitionX;
         mining.droneX = arrivalX;
         mining.droneY = arrivalY;
         mining.rigDepthZone = mining.depthZone;
@@ -6169,22 +6230,16 @@ void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int di
     }
     mining.depthTransitionCooldownSeconds = 0.65;
     resetMiningFollowersAfterDepthTransition(mining);
-    if (mining.depthZone == mining.entryDepthZone) {
+    if (mining.depthZone == mining.shipDepthZone) {
         revealAround(mining, mining.returnZoneX, mining.returnZoneY, tuning::mining::passiveLightRadius);
     }
     revealAround(mining, arrivalX, arrivalY, tuning::mining::passiveLightRadius);
     markMiningGateDerivedStateDirty(mining);
     refreshTargetCell(mining);
-    const int levelsFromShip = std::max(0, mining.depthZone);
-    if (direction > 0) {
-        state.statusLine = "Descended to depth +" + std::to_string(levelsFromShip) +
-            ". Ship is " + std::to_string(levelsFromShip) + (levelsFromShip == 1 ? " level" : " levels") + " above.";
-    } else if (levelsFromShip == 0) {
-        state.statusLine = "Surface reached. Return to the ship.";
-    } else {
-        state.statusLine = "Ascended to depth +" + std::to_string(levelsFromShip) +
-            ". Ship is " + std::to_string(levelsFromShip) + (levelsFromShip == 1 ? " level" : " levels") + " above.";
-    }
+    const int levelsFromShip = std::abs(mining.depthZone-mining.shipDepthZone);
+    state.statusLine = levelsFromShip == 0 ? "Ship level reached. Return to the shuttle."
+        : "Ship is " + std::to_string(levelsFromShip) + (levelsFromShip == 1 ? " level" : " levels") +
+          (mining.depthZone > mining.shipDepthZone ? " above." : " below.");
 }
 
 void approachVelocity(
@@ -7262,7 +7317,7 @@ bool repairMiningDrone(GameState& state)
         mining.rigDisabled = false;
         mining.droneX = mining.returnZoneX;
         mining.droneY = mining.returnZoneY;
-        mining.rigDepthZone = mining.entryDepthZone;
+        mining.rigDepthZone = mining.shipDepthZone;
         mining.rigVelocityX = 0.0;
         mining.rigVelocityY = 0.0;
         mining.rigTethered = false;
@@ -7442,7 +7497,7 @@ bool bankMiningPayloadAtShip(GameState& state, const ContentCatalog& catalog)
         mining.droneY = mining.returnZoneY;
         mining.rigVelocityX = 0.0;
         mining.rigVelocityY = 0.0;
-        mining.rigDepthZone = mining.entryDepthZone;
+        mining.rigDepthZone = mining.shipDepthZone;
         mining.operatorRigTethered = false;
     }
     const bool hasPayload = mining.cargo > 0 ||
@@ -8222,6 +8277,8 @@ SurfaceLandingBuildRequest resolvedSurfaceLandingRequest(
         hashCombine(request.siteSeed == 0 ? state.seed : request.siteSeed,
             hashString(request.destinationId)),
         hashCombine(static_cast<std::uint64_t>(request.landingOrdinal), identity));
+    // Do not perturb the established Zone 1 geology.
+    if (request.zoneId != "zone_1") request.siteSeed = hashCombine(request.siteSeed, hashString(request.zoneId));
     return request;
 }
 
@@ -8237,6 +8294,7 @@ std::uint64_t surfaceLandingPreparationKey(
         }
     };
     mixBytes(request.destinationId);
+    mixBytes(request.zoneId);
     mixBytes(request.scenarioId);
     mixBytes(request.scenarioStepId);
     mixBytes(request.miningSiteDefinitionId);
@@ -8386,11 +8444,262 @@ bool positionSurfaceLandingTeam(MiningRunState& mining, double shipX, double shi
     if (!surfaceLandingStaging(mining,shipX,shipY,rigX,rigY)) return false;
     const double shiftX=rigX-mining.droneX,shiftY=rigY-mining.droneY;
     mining.returnZoneX=shipX; mining.returnZoneY=shipY;
+    mining.shipDepthZone=mining.depthZone;
+    mining.rigDepthZone=mining.depthZone;
     mining.droneX=rigX; mining.droneY=rigY;
     mining.operatorX=rigX; mining.operatorY=rigY;
     mining.aimX=rigX; mining.aimY=rigY+1.0;
-    for(auto& drone:mining.miniDrones) {drone.x+=shiftX;drone.y+=shiftY;}
+    for(auto& drone:mining.miniDrones) {
+        drone.x+=shiftX;drone.y+=shiftY;drone.transitDepthZone=-1;
+        drone.behavior=MiningMiniDroneBehavior::Following;
+    }
     return true;
+}
+
+int LandingSiteView::depthAt(double row) const
+{
+    for (const auto& layer : layers)
+        if (row < layer.topRow + layer.height) return layer.depth;
+    return layers.empty() ? 0 : layers.back().depth;
+}
+
+bool positionSurfaceLandingTeam(MiningRunState& mining, const LandingSiteView& view,
+    double shipX, double siteRow)
+{
+    double rigX=0.0,rigY=0.0;
+    if (!surfaceLandingStaging(view.world,shipX,siteRow,rigX,rigY)) return false;
+    const int shipDepth=view.depthAt(siteRow), rigDepth=view.depthAt(rigY);
+    const double localRigY=rigY-view.topRow(rigDepth);
+    if (!activateLandingLayer(mining,rigDepth)) return false;
+    const double shiftX=rigX-mining.droneX,shiftY=localRigY-mining.droneY;
+    mining.shipDepthZone=shipDepth;
+    mining.rigDepthZone=rigDepth;
+    mining.returnZoneX=shipX;mining.returnZoneY=siteRow-view.topRow(shipDepth);
+    mining.droneX=mining.operatorX=rigX;
+    mining.droneY=mining.operatorY=localRigY;
+    mining.aimX=rigX;mining.aimY=localRigY+1.0;
+    for (auto& drone:mining.miniDrones) {
+        drone.x+=shiftX;drone.y+=shiftY;drone.transitDepthZone=-1;
+        drone.behavior=MiningMiniDroneBehavior::Following;
+    }
+    return true;
+}
+
+bool revealLandingSurroundings(MiningRunState& mining, const LandingSiteView& view,
+    double gridX, double siteRow)
+{
+    bool changed=false;
+    const auto illuminate=[&](MiningTerrain& terrain,int depth) {
+        const double localRow=siteRow-view.topRow(depth);
+        for (int y=std::max(0,static_cast<int>(localRow)-9);y<std::min(terrain.height,static_cast<int>(localRow)+10);++y)
+            for (int x=std::max(0,static_cast<int>(gridX)-9);x<std::min(terrain.width,static_cast<int>(gridX)+10);++x) {
+                if (std::hypot(x-gridX,y-localRow)>9.0) continue;
+                auto* cell=miningCellAt(terrain,x,y);
+                if (!cell || cell->revealed || cell->gateAssociated || cell->suitOnlyPassage || cell->cocoonLayer>=0 ||
+                    cell->material==MiningCellMaterial::ArtifactCache) continue;
+                cell->revealed=true;
+                markDirty(terrain,x,y);
+                changed=true;
+            }
+    };
+    illuminate(mining.terrain,mining.depthZone);
+    for (auto& layer:mining.depthLayers) illuminate(layer.terrain,layer.depthZone);
+    return changed;
+}
+
+int LandingSiteView::topRow(int depth) const
+{
+    for (const auto& layer : layers) if (layer.depth == depth) return layer.topRow;
+    return 0;
+}
+
+bool activateLandingLayer(MiningRunState& mining, int depth)
+{
+    if (mining.depthZone == depth) return true;
+    if (std::none_of(mining.depthLayers.begin(), mining.depthLayers.end(),
+        [depth](const auto& layer) { return layer.depthZone == depth; })) return false;
+    storeActiveDepthLayer(mining);
+    return restoreDepthLayer(mining, depth);
+}
+
+bool prepareLandingLayers(const GameState& state, const ContentCatalog& catalog,
+    MiningRunState& mining, int throughDepth)
+{
+    const auto* destination = catalog.findDestination(mining.destinationId);
+    if (!destination || mining.terrain.cells.empty()) return false;
+    if (!mining.surfaceOriginBound) {
+        mining.surfacePadX = mining.returnZoneX;
+        mining.surfacePadY = mining.returnZoneY;
+        mining.shipDepthZone = mining.entryDepthZone;
+        mining.surfaceOriginBound = true;
+    }
+    // Generation uses a private state and never advances actors, RNG, visits,
+    // rewards, or geological progression. Existing layers are never regenerated.
+    GameState preview = state;
+    preview.run.mining = mining;
+    const int active = mining.depthZone;
+    for (int depth = mining.entryDepthZone; depth <= throughDepth; ++depth) {
+        auto& site = preview.run.mining;
+        if (site.depthZone == depth || std::any_of(site.depthLayers.begin(), site.depthLayers.end(),
+            [depth](const auto& layer) { return layer.depthZone == depth; })) continue;
+        storeActiveDepthLayer(site);
+        initializeMiningDepth(preview, catalog, *destination, depth);
+    }
+    activateLandingLayer(preview.run.mining, active);
+    mining = std::move(preview.run.mining);
+    return true;
+}
+
+LandingSiteView buildLandingSiteView(const MiningRunState& mining)
+{
+    LandingSiteView result;
+    result.world = mining;
+    auto& world = result.world;
+    std::vector<std::pair<int, const MiningTerrain*>> terrains{{mining.depthZone, &mining.terrain}};
+    for (const auto& layer : mining.depthLayers) terrains.emplace_back(layer.depthZone, &layer.terrain);
+    std::sort(terrains.begin(), terrains.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    world.terrain.cells.clear();
+    world.terrain.height = 0;
+    for (const auto& [depth, terrain] : terrains) {
+        if (terrain->width != world.terrain.width || terrain->cells.empty()) continue;
+        result.layers.push_back({depth, world.terrain.height, terrain->height});
+        world.terrain.cells.insert(world.terrain.cells.end(), terrain->cells.begin(), terrain->cells.end());
+        world.terrain.height += terrain->height;
+    }
+    world.depthLayers.clear();
+    world.terrain.dirtyChunks.assign(world.terrain.cells.size(), 1);
+    const double actorOffset = result.topRow(mining.depthZone);
+    world.returnZoneY += result.topRow(mining.shipDepthZone);
+    world.droneY += result.topRow(mining.rigDepthZone);
+    world.operatorY += actorOffset;
+    world.aimY += actorOffset;
+    for (auto& drone : world.miniDrones) drone.y += actorOffset;
+    // Arrival suppresses actors; carry all physical loose objects into the
+    // shared projection so their locations still agree after deployment.
+    for (auto& object : world.looseObjects) object.y += actorOffset;
+    for (const auto& layer : mining.depthLayers) {
+        for (auto object : layer.looseObjects) {
+            object.y += result.topRow(layer.depthZone);
+            world.looseObjects.push_back(std::move(object));
+        }
+    }
+    return result;
+}
+
+bool prepareOrbitalSurvey(const GameState& state, const ContentCatalog& catalog,
+    PreparedSurfaceLanding& prepared, int depth)
+{
+    if (!prepared.valid) return false;
+    const auto* destination = catalog.findDestination(prepared.request.destinationId);
+    if (!destination) return false;
+    depth = std::clamp(depth, 0, tuning::surfaceDepthProgression::maximumDepthRating);
+    GameState preview = state;
+    preview.run.planetaryExpedition = prepared.expeditionTemplate;
+    preview.run.mining = prepared.miningTemplate;
+    auto& mining = preview.run.mining;
+    const int entry = mining.depthZone;
+    prepared.surveyLayers.clear();
+    for (int d = entry; d <= entry + depth; ++d) {
+        if (mining.depthZone != d) {
+            storeActiveDepthLayer(mining);
+            if (!restoreDepthLayer(mining, d)) initializeMiningDepth(preview, catalog, *destination, d);
+        }
+        OrbitalSurveyLayer summary;
+        summary.depth = d - entry;
+        for (const auto& cell : mining.terrain.cells) {
+            summary.common |= cell.material == MiningCellMaterial::CommonOre;
+            summary.rare |= cell.material == MiningCellMaterial::RareOre;
+            summary.exotic |= cell.material == MiningCellMaterial::ExoticVein;
+            summary.thermal |= cell.hazardAffinity == MiningElementalAffinity::Thermal;
+            summary.cryo |= cell.hazardAffinity == MiningElementalAffinity::Cryo;
+            summary.radiation |= cell.hazardAffinity == MiningElementalAffinity::Radiation;
+            summary.toxic |= cell.hazardAffinity == MiningElementalAffinity::Toxic;
+        }
+        // Orbital recon never spoils the Moon's bank-ore-then-scan revelation.
+        summary.artifact = mining.artifact.present && destination->id != "moon";
+        prepared.surveyLayers.push_back(summary);
+    }
+    if (mining.depthZone != entry) {
+        storeActiveDepthLayer(mining);
+        (void)restoreDepthLayer(mining, entry);
+    }
+    prepared.miningTemplate = std::move(mining);
+    prepared.surveyedDepth = depth;
+    return true;
+}
+
+void excavateOrbitalShaft(PreparedSurfaceLanding& prepared, int maximumDepth, double seconds)
+{
+    if (!prepared.valid || prepared.laserBlocked || prepared.laserComplete || seconds <= 0.0) return;
+    auto& mining = prepared.miningTemplate;
+    const int entry = mining.entryDepthZone;
+    const int maximum = entry + std::min(prepared.surveyedDepth, maximumDepth);
+    const int active = mining.depthZone;
+    prepared.laserRowWork += seconds;
+    for (int budget = 0; budget < 512 && !prepared.laserBlocked && !prepared.laserComplete; ++budget) {
+        if (mining.depthZone != prepared.laserDepth) {
+            storeActiveDepthLayer(mining);
+            if (!restoreDepthLayer(mining, prepared.laserDepth)) { prepared.laserBlocked = true; break; }
+        }
+        const int y = prepared.laserRow;
+        const int lastRow = mining.terrain.height - (prepared.laserDepth == maximum ? 4 : 1);
+        if (y > lastRow) {
+            if (prepared.laserDepth >= maximum) { prepared.laserComplete = true; break; }
+            ++prepared.laserDepth;
+            prepared.laserRow = 0;
+            continue;
+        }
+        bool solid = false;
+        for (int x = prepared.shaftX - orbital_laser::shaftLeftCells;
+             x <= prepared.shaftX + orbital_laser::shaftRightCells; ++x) {
+            const auto* cell = miningCellAt(mining.terrain, x, y);
+            if (!cell) { prepared.laserBlocked = true; break; }
+            solid |= miningMaterialSolid(cell->material);
+            const bool pocket = cell->material == MiningCellMaterial::FuelPocket || cell->material == MiningCellMaterial::OxygenPocket;
+            const bool artifact = mining.artifact.present && std::abs(x - mining.artifact.x) < 5.0 && std::abs(y - mining.artifact.y) < 5.0;
+            bool suitBarrier = false;
+            for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+                const auto* near = miningCellAt(mining.terrain, x + dx, y + dy);
+                suitBarrier |= near && near->suitOnlyPassage;
+            }
+            if (cell->gateAssociated || cell->cocoonLayer >= 0 || suitBarrier || artifact || pocket ||
+                cell->material == MiningCellMaterial::ArtifactCache ||
+                (cell->material == MiningCellMaterial::Bedrock && y < mining.terrain.height - 3 &&
+                    !(prepared.laserDepth > entry && y < 3))) {
+                prepared.laserBlocked = true; break;
+            }
+        }
+        if (prepared.laserBlocked) break;
+        const double rowSeconds = orbital_laser::secondsPerLayer / std::max(1, mining.terrain.height);
+        if (solid && prepared.laserRowWork < rowSeconds) break;
+        if (solid) prepared.laserRowWork -= rowSeconds;
+        for (int x = prepared.shaftX - orbital_laser::shaftLeftCells;
+             x <= prepared.shaftX + orbital_laser::shaftRightCells; ++x) {
+            auto* cell = miningCellAt(mining.terrain, x, y);
+            MaterialInventory ore;
+            // Fracture only: no rig intake, luck rolls, XP, contracts, or tank effects.
+            if (cell->material == MiningCellMaterial::CommonOre) ore.common = 1;
+            if (cell->material == MiningCellMaterial::RareOre) ore.rare = 1;
+            if (cell->material == MiningCellMaterial::ExoticVein) ore.exotic = 1;
+            spawnLooseMaterialChunks(mining, ore, x + 0.5, y + 0.5);
+            fractureMiningTerrainCell(mining, x, y);
+            cell->feature = MiningCellFeature::MainTunnel;
+        }
+        // Existing saved portal metadata keeps cached layer entrances aligned.
+        mining.hasDownwardTransition = true;
+        mining.downwardTransitionX = prepared.shaftX + orbital_laser::shaftCenterOffset;
+        ++prepared.laserRow;
+    }
+    if (mining.depthZone != active) {
+        storeActiveDepthLayer(mining);
+        (void)restoreDepthLayer(mining, active);
+    }
+}
+
+std::uint64_t surfaceLandingBuildKey(const GameState& state, const ContentCatalog& catalog,
+    const SurfaceLandingBuildRequest& request)
+{
+    return surfaceLandingPreparationKey(state, resolvedSurfaceLandingRequest(state, catalog, request));
 }
 
 PreparedSurfaceLanding prepareSurfaceLanding(
@@ -8402,6 +8711,11 @@ PreparedSurfaceLanding prepareSurfaceLanding(
     prepared.request = request;
     const SurfaceLandingBuildRequest resolved = resolvedSurfaceLandingRequest(state, catalog, request);
     prepared.preparationKey = surfaceLandingPreparationKey(state, resolved);
+    const auto* zone = planetLandingZone(request.zoneId);
+    if (!zone || !zone->enabled) {
+        prepared.error = "Landing zone is unavailable.";
+        return prepared;
+    }
     if (request.destinationId.empty() || catalog.findDestination(request.destinationId) == nullptr) {
         prepared.error = "Landing destination is unavailable.";
         return prepared;
@@ -8452,6 +8766,21 @@ PreparedSurfaceLanding prepareSurfaceLanding(
 
     prepared.expeditionTemplate = std::move(preview.run.planetaryExpedition);
     prepared.miningTemplate = std::move(preview.run.mining);
+    // Lock the shaft beside the cleared staging shelf at site creation, not
+    // when Survey is pressed. Never select a column under the service pad.
+    const auto& site = prepared.miningTemplate;
+    const int halfWidth = std::max(orbital_laser::shaftLeftCells, orbital_laser::shaftRightCells);
+    prepared.laserBlocked = true;
+    for (const int x : {static_cast<int>(std::ceil(site.droneX)) + halfWidth + 2,
+                       static_cast<int>(std::floor(site.droneX)) - halfWidth - 2}) {
+        if (x - halfWidth < 1 || x + halfWidth >= site.terrain.width - 1 ||
+            std::abs(x + orbital_laser::shaftCenterOffset - site.returnZoneX) <= halfWidth + 3.0) continue;
+        prepared.shaftX = x;
+        prepared.laserBlocked = false;
+        break;
+    }
+    prepared.laserDepth = site.entryDepthZone;
+    prepared.laserRow = 4;
     prepared.miningSites = std::move(preview.meta.miningSites);
     prepared.postSolarSystemRosters = std::move(preview.meta.postSolarSystemRosters);
     prepared.valid = true;
@@ -9162,7 +9491,7 @@ void updateMiningArtifact(GameState& state, const ContentCatalog& catalog, doubl
     const auto deliverAtShip = [&]() {
         const double bayDx = artifact.x - mining.returnZoneX;
         const double bayDy = artifact.y - mining.returnZoneY;
-        if (mining.depthZone != mining.entryDepthZone || !artifact.tethered ||
+        if (mining.depthZone != mining.shipDepthZone || !artifact.tethered ||
             bayDx * bayDx + bayDy * bayDy >
                 tuning::mining::artifactDeliveryRadiusCells *
                     tuning::mining::artifactDeliveryRadiusCells) {
@@ -9269,8 +9598,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     if (!mining.active) {
         return;
     }
-    // Keep older active saves aligned with the current visual ship lane.
-    mining.returnZoneX = miningShipStartX(mining);
+    // The accepted touchdown owns the ship location, including underground.
     const double dt = std::clamp(deltaSeconds, 0.0, 0.08);
     mining.depthTransitionCooldownSeconds = std::max(0.0, mining.depthTransitionCooldownSeconds - dt);
     mining.artifactTetherDeniedFlashSeconds = std::max(0.0, mining.artifactTetherDeniedFlashSeconds - dt);
@@ -9306,7 +9634,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         const bool justSecured = mining.operatorRigTethered;
         mining.droneX = mining.returnZoneX;
         mining.droneY = mining.returnZoneY;
-        mining.rigDepthZone = mining.entryDepthZone;
+        mining.rigDepthZone = mining.shipDepthZone;
         mining.rigVelocityX = 0.0;
         mining.rigVelocityY = 0.0;
         mining.rigTethered = false;
@@ -9672,7 +10000,23 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
     expedition.depth = std::max(expedition.depth, mining.deepestDepthZone);
     expedition.hazard = std::clamp(expedition.hazard + std::max(0.0, outcome.hazardDelta), 0.0, 1.0);
     appendSurfaceLog(expedition, surfaceActionSummary(outcome));
-    mining = {};
+    if (state.run.flight.landing.siteCommitted && !abort) {
+        // Keep the modified world, not a pre-banking visual copy. Clear only
+        // manifests whose ownership has just transferred or been lost.
+        mining.active=false;
+        mining.drilling=false;
+        mining.moveX=mining.moveY=0.0;
+        mining.cargo=mining.stowedCargo=0;
+        mining.temporaryMaterials=mining.stowedMaterials={};
+        mining.temporaryArtifacts.clear();
+        mining.stowedArtifacts.clear();
+        for (auto& drone : mining.miniDrones) {
+            drone.haulMaterials=drone.uncreditedHaulMaterials={};
+            drone.carriedLooseObjectId=0;
+        }
+        mining.combatProjectiles.clear();
+        mining.damageNumbers.clear();
+    } else mining = {};
     state.screen = Screen::SurfaceExpedition;
     return outcome;
 }

@@ -3176,6 +3176,13 @@ bool GameRmlUi::mouseDown(int x, int y, int button)
         }
         if (pressedButton_) {
             pressedButtonAtSeconds_ = rr_rml_now_seconds();
+            auto binding = buttonBindingFromElement(*pressedButton_);
+            if (binding.action == "orbital_work") {
+                binding.action = "orbital_work_press";
+                orbitalPointerHeld_ = true;
+                pendingPointerActivations_.push_back(std::move(binding));
+                pressedButton_ = nullptr;
+            }
         }
     }
     return overUi;
@@ -3183,6 +3190,15 @@ bool GameRmlUi::mouseDown(int x, int y, int button)
 
 bool GameRmlUi::mouseUp(int x, int y, int button)
 {
+    if (button == 0 && orbitalPointerHeld_) {
+        orbitalPointerHeld_ = false;
+        RmlButtonBinding binding;
+        binding.action = "orbital_work_release";
+        pendingPointerActivations_.push_back(std::move(binding));
+        pressedButton_ = nullptr;
+        if (g_context) g_context->ProcessMouseButtonUp(0, 0);
+        return true;
+    }
     if (!initialized_ || !g_context) {
         return false;
     }
@@ -3218,7 +3234,7 @@ bool GameRmlUi::mouseUp(int x, int y, int button)
     if (holdSeconds > 0.0 && rr_rml_now_seconds() - pressedAt + 0.001 < holdSeconds) {
         return true;
     }
-    pendingPointerActivation_ = std::move(pressedBinding);
+    pendingPointerActivations_.push_back(std::move(pressedBinding));
     return true;
 }
 
@@ -3655,16 +3671,13 @@ void GameRmlUi::applyPendingModalOpen()
 
 void GameRmlUi::applyPendingPointerActivation()
 {
-    if (!pendingPointerActivation_) {
-        return;
-    }
-    RmlButtonBinding binding = std::move(*pendingPointerActivation_);
-    pendingPointerActivation_.reset();
-    if (dispatchButtonBinding(*this, binding)) {
-        return;
-    }
-    if (!binding.label.empty()) {
-        activateButtonLabel(binding.label);
+    // Preserve both edges of a short click, even when they arrive in one frame.
+    auto pending = std::move(pendingPointerActivations_);
+    pendingPointerActivations_.clear();
+    for (const auto& binding : pending) {
+        if (!dispatchButtonBinding(*this, binding) && !binding.label.empty()) {
+            activateButtonLabel(binding.label);
+        }
     }
 }
 
@@ -4262,7 +4275,7 @@ void GameRmlUi::shutdown()
     presentation_ = {};
     openModalId_.clear();
     pendingModalOpenId_.clear();
-    pendingPointerActivation_.reset();
+    pendingPointerActivations_.clear();
     renderedModalId_.clear();
     modalStack_.clear();
     modalFocusStack_.clear();

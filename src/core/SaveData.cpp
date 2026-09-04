@@ -1444,6 +1444,7 @@ MaterialInventory parseMaterials(std::string_view text)
 std::string serializeFlightState(const FlightRunState& flight)
 {
     std::ostringstream out;
+    out << std::setprecision(17);
     out << encodeSaveBlob(flight.originId) << save_schema::crewFieldDelimiter
         << encodeSaveBlob(flight.destinationId) << save_schema::crewFieldDelimiter
         << (flight.active ? 1 : 0) << save_schema::crewFieldDelimiter
@@ -1474,7 +1475,12 @@ std::string serializeFlightState(const FlightRunState& flight)
         << static_cast<int>(flight.handoff.from) << save_schema::crewFieldDelimiter << static_cast<int>(flight.handoff.to) << save_schema::crewFieldDelimiter
         << flight.handoff.elapsed << save_schema::crewFieldDelimiter << flight.handoff.sourceX << save_schema::crewFieldDelimiter
         << flight.handoff.sourceY << save_schema::crewFieldDelimiter << flight.handoff.sourceHeading << save_schema::crewFieldDelimiter
-        << flight.orbitZoomProgress;
+        << flight.orbitZoomProgress << save_schema::crewFieldDelimiter
+        << flight.landing.depthZone << save_schema::crewFieldDelimiter
+        << flight.landing.touchdownDepthZone << save_schema::crewFieldDelimiter
+        << flight.landing.siteCommitted << save_schema::crewFieldDelimiter
+        << flight.landing.departureActive << save_schema::crewFieldDelimiter
+        << flight.landing.launchSupportActive;
     return out.str();
 }
 
@@ -1482,7 +1488,7 @@ FlightRunState parseFlightState(std::string_view text)
 {
     FlightRunState flight;
     const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
-    if (fields.size() != 51) {
+    if (fields.size() != 56) {
         return flight;
     }
     std::size_t index = 0;
@@ -1537,6 +1543,11 @@ FlightRunState parseFlightState(std::string_view text)
     flight.handoff.sourceY = parseDouble(fields[index++],0.0);
     flight.handoff.sourceHeading = parseDouble(fields[index++],0.0);
     flight.orbitZoomProgress = std::clamp(parseDouble(fields[index++],0.0),0.0,1.0);
+    flight.landing.depthZone = std::max(0, parseInt(fields[index++],0));
+    flight.landing.touchdownDepthZone = std::max(0, parseInt(fields[index++],0));
+    flight.landing.siteCommitted = parseInt(fields[index++],0) != 0;
+    flight.landing.departureActive = parseInt(fields[index++],0) != 0;
+    flight.landing.launchSupportActive = parseInt(fields[index++],0) != 0;
     flight.fuelRemaining = std::min(flight.fuelRemaining, flight.fuelCapacity);
     flight.hullRemaining = std::min(flight.hullRemaining, flight.hullMaximum);
     return flight;
@@ -2178,7 +2189,8 @@ std::string serializeMiningMiniDrones(const std::vector<MiningMiniDroneAgent>& a
             << save_schema::crewFieldDelimiter << agent.uncreditedHaulMaterials.rare
             << save_schema::crewFieldDelimiter << agent.uncreditedHaulMaterials.exotic
             << save_schema::crewFieldDelimiter << agent.returnPathFailureSeconds
-            << save_schema::crewFieldDelimiter << agent.carriedLooseObjectId;
+            << save_schema::crewFieldDelimiter << agent.carriedLooseObjectId
+            << save_schema::crewFieldDelimiter << agent.transitDepthZone;
     }
     return out.str();
 }
@@ -2284,6 +2296,7 @@ std::vector<MiningMiniDroneAgent> parseMiningMiniDrones(std::string_view text)
         if (fields.size() > 31) {
             agent.carriedLooseObjectId = parseU64(fields[31], 0);
         }
+        if (fields.size() > 32) agent.transitDepthZone=parseInt(fields[32],-1);
         agents.push_back(agent);
     }
     return agents;
@@ -2642,10 +2655,15 @@ void parseMiningGravity(std::string_view text, MiningRunState& mining)
 std::string serializeMiningDepthRoute(const MiningRunState& mining)
 {
     std::ostringstream out;
+    out << std::setprecision(17);
     out << mining.entryDepthZone
         << save_schema::crewFieldDelimiter << mining.deepestDepthZone
         << save_schema::crewFieldDelimiter << (mining.hasDownwardTransition ? 1 : 0)
-        << save_schema::crewFieldDelimiter << mining.downwardTransitionX;
+        << save_schema::crewFieldDelimiter << mining.downwardTransitionX
+        << save_schema::crewFieldDelimiter << mining.shipDepthZone
+        << save_schema::crewFieldDelimiter << mining.surfacePadX
+        << save_schema::crewFieldDelimiter << mining.surfacePadY
+        << save_schema::crewFieldDelimiter << mining.surfaceOriginBound;
     return out.str();
 }
 
@@ -2656,6 +2674,10 @@ void parseMiningDepthRoute(std::string_view text, MiningRunState& mining)
     if (fields.size() > 1) mining.deepestDepthZone = std::max(mining.entryDepthZone, parseInt(fields[1], mining.depthZone));
     if (fields.size() > 2) mining.hasDownwardTransition = parseInt(fields[2], 0) != 0;
     if (fields.size() > 3) mining.downwardTransitionX = parseDouble(fields[3], mining.downwardTransitionX);
+    if (fields.size() > 4) mining.shipDepthZone = std::max(0, parseInt(fields[4], 0));
+    if (fields.size() > 5) mining.surfacePadX = parseDouble(fields[5], 0.0);
+    if (fields.size() > 6) mining.surfacePadY = parseDouble(fields[6], 0.0);
+    if (fields.size() > 7) mining.surfaceOriginBound = parseInt(fields[7], 0) != 0;
 }
 
 std::string serializeMiningDepthLayers(const std::vector<MiningDepthLayerState>& layers)
@@ -3057,7 +3079,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
             }
         }
     }
-    if (state.run.mining.active) {
+    if (state.run.mining.active || state.run.flight.landing.siteCommitted) {
         MiningRunState& mining = state.run.mining;
         mining.entryDepthZone = 0;
         mining.deepestDepthZone = std::max({0, mining.depthZone, mining.deepestDepthZone});

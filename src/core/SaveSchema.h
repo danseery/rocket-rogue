@@ -5,9 +5,9 @@
 namespace rocket::save_schema {
 
 inline constexpr std::string_view header = "RR_SAVE_V1";
-// Version nineteen intentionally starts a new campaign generation. Older
+// Version twenty intentionally starts a new campaign generation. Older
 // payloads are rejected and preserved until the player explicitly starts a new campaign.
-inline constexpr int currentVersion = 19;
+inline constexpr int currentVersion = 20;
 inline constexpr char keyValueDelimiter = '=';
 inline constexpr char listDelimiter = ',';
 inline constexpr char textListDelimiter = '|';

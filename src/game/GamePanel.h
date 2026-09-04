@@ -51,6 +51,10 @@ struct PanelRenderContext {
     bool surfaceArrivalLandingCommitted = false;
     bool controllerFlightControls = false;
     bool invertFlightY = false;
+    const OrbitalWorkState* orbitalWork = nullptr;
+    bool orbitalLaserBlocked = false;
+    bool orbitalLaserComplete = false;
+    bool orbitalInsideZone = false;
 };
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);

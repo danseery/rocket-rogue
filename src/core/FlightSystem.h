@@ -4,6 +4,13 @@
 
 namespace rocket {
 
+const std::array<PlanetLandingZone, 6>& planetLandingZones();
+const PlanetLandingZone* planetLandingZone(std::string_view id);
+bool landingZoneContains(const PlanetLandingZone& zone, double bearing);
+const PlanetLandingZone* enabledLandingZoneAt(double bearing);
+double landingZoneSiteBearing(const PlanetLandingZone& zone, double gridX,
+    double padX, double siteWidth);
+
 namespace flight_geometry {
 inline constexpr double startX = -3.40;
 inline constexpr double startY = 1.10;
@@ -32,7 +39,7 @@ inline constexpr double keyboardThrottleRiseSeconds = 0.40;
 
 namespace flight_landing {
 inline constexpr double entryAltitude = 60.0;
-inline constexpr double departureAltitude = 120.0;
+inline constexpr double departureAltitude = 60.0;
 inline constexpr double departureSpeed = 2.0;
 inline constexpr double velocityConversion = 12.0;
 inline constexpr double metersPerOrbitUnit = 250.0;
@@ -42,6 +49,10 @@ inline constexpr double forwardAcceleration = 6.0;
 inline constexpr double reverseAcceleration = 3.0;
 inline constexpr double turnRate = 1.3089969389957472;
 inline constexpr double turnResponseSeconds = 0.15;
+inline constexpr double stickTiltRadians = 0.5235987755982988; // 30 degrees from upright.
+inline constexpr double touchdownSettleSeconds = 0.60;
+inline constexpr double takeoffClearanceMeters = 0.50;
+inline constexpr double takeoffClearSeconds = 0.20;
 inline constexpr double handoffSeconds = 1.25;
 inline constexpr double hullHalfWidth = 5.2;
 inline constexpr double hullHalfHeight = 15.47;
@@ -61,6 +72,12 @@ struct FlightKinematics {
     double tangentialVelocity = 0.0;
     double angle = 0.0;
 };
+
+struct CoastPredictionPose { double x, y, vx, vy; };
+struct OrbitLoopAssessment { bool qualifies = false; bool perfect = false; };
+CoastPredictionPose stepCoastPrediction(CoastPredictionPose pose, double dt);
+OrbitLoopAssessment assessOrbitLoop(const FlightRunState& flight);
+double orbitConfirmationProgress(const FlightRunState& flight);
 
 struct FlightScaleProfile {
     double approachLinear = 0.0;
@@ -112,7 +129,8 @@ struct FlightSurfaceContact {
     double gridY = 0.0;
     bool suitable = false;
 };
-std::vector<FlightSurfaceContact> localLandingContacts(const LandingState&, const MiningRunState&);
+std::vector<FlightSurfaceContact> localLandingContacts(const LandingState&, const MiningRunState&,
+    double hullMarginMeters = 0.0);
 double flightImpactDamage(double impactSpeed);
 double flightContactSpeed(double velocityX, double velocityY, double angularVelocity,
     double armX, double armY, double normalX, double normalY);

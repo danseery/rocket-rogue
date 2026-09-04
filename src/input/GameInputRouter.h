@@ -19,6 +19,7 @@ enum class GameInputAction : std::size_t {
     ReturnHome,
     ToggleEngines,
     DeploySurfaceTeam,
+    ResumeOrbitalFlight,
     DepartSurfaceUndeployed,
     Abort,
     MiningScan,
@@ -45,6 +46,7 @@ struct RoutedGameInput {
     double operatorToggleProgress = 0.0;
     bool firing = false;
     bool drilling = false;
+    bool orbitalHeld = false;
 
     bool has(GameInputAction action) const
     {
@@ -152,9 +154,8 @@ public:
         case InputContext::Launch:
             result.moveX = frame.leftX;
             result.moveY = preferences.invertFlightY ? frame.leftY : -frame.leftY;
-            if (frame.wasPressed(ControllerButton::South)) {
-                add(GameInputAction::ReturnHome);
-            }
+            result.orbitalHeld = frame.down.test(static_cast<std::size_t>(ControllerButton::South));
+            if (frame.wasPressed(ControllerButton::East)) add(GameInputAction::ResumeOrbitalFlight);
             if (frame.wasPressed(ControllerButton::West)) {
                 add(GameInputAction::ToggleEngines);
             }

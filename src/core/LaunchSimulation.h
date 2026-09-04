@@ -63,6 +63,7 @@ struct FlightActionState {
 };
 
 struct LaunchFlightStep {
+    std::string landingZoneId;
     bool reachedDestination = false;
     bool reachedHome = false;
     bool failed = false;

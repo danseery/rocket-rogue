@@ -1,6 +1,7 @@
 #include "game/GamePanel.h"
 #include "core/CrewPresentation.h"
 #include "core/FlightInstrumentPresentation.h"
+#include "core/FlightSystem.h"
 #include "core/GameFormat.h"
 #include "core/GameText.h"
 #include "core/HangarPresentation.h"
@@ -34,6 +35,26 @@ namespace rocket {
 
 namespace {
 
+bool orbitalWorkVisible(const PanelRenderContext& c)
+{
+    const auto* destination = c.launchFlight ? c.catalog.findDestination(c.launchFlight->destinationId) : nullptr;
+    return c.orbitalWork && c.launchFlight && c.launchFlight->active &&
+        destination && destinationSupportsSurface(*destination) &&
+        c.launchFlight->mode == FlightMode::Orbit && c.launchFlight->orbit.captured && c.orbitalWork->captureDelay <= 0.0;
+}
+
+std::string orbitalWorkLabel(const PanelRenderContext& c)
+{
+    const auto& w = *c.orbitalWork;
+    if (w.phase == OrbitalWorkPhase::Surveying) return "SURVEYING";
+    if (!w.surveyComplete) return "PULSE SURVEY";
+    if (!c.orbitalInsideZone) return w.active() ? "RESUME FLIGHT" : "ENTER ZONE 1 TO DIG";
+    if (c.orbitalLaserBlocked) return "SURFACE TOOLS REQUIRED";
+    if (c.orbitalLaserComplete) return "SHAFT READY";
+    if (w.overheated) return "COOLING";
+    return "ORBITAL LASER DIG";
+}
+
 bool surfaceDescentForContext(const PanelRenderContext& context)
 {
     return context.state.screen == Screen::Flight && context.launchFlight != nullptr &&
@@ -56,6 +77,8 @@ std::string landingControlHint(const PanelRenderContext& context)
     const std::string_view control = context.controllerFlightControls
         ? (context.invertFlightY ? "L-stick down" : "L-stick up")
         : "W";
+    if (context.launchFlight && context.launchFlight->landing.departureActive)
+        return "Point the nose up. Hold " + std::string(control) + " to climb out of the shaft.";
     return "Point the nose up. " + std::string(context.controllerFlightControls ? "Ease " : "Pulse ") +
         std::string(control) + " to slow your fall; release to coast.";
 }
@@ -3825,7 +3848,7 @@ std::string buildGamePanelMarkup(
                     ? "Rig and equipped Support Drones are entering the staging lane."
                     : (context.surfaceArrivalDeployQueued
                         ? "Deployment queued. Touchdown checks are finishing."
-                        : "The shuttle is secure on the service pad."));
+                        : "The shuttle is secure on the ground."));
             out << "<div data-surface-arrival=\"1\" data-surface-arrival-phase=\""
                 << context.surfaceArrivalPhase << "\" hidden></div>";
             out << "<section class=\"live-hud-header surface-arrival-hud\"><div><span>PLANETARY ARRIVAL</span><h2>"
@@ -3853,18 +3876,20 @@ std::string buildGamePanelMarkup(
         if (surfaceDescentForContext(context)) {
             const FlightRunState& flight = *context.launchFlight;
             out << "<section class=\"live-hud-header\"><h2>"
-                << (flight.phase == FlightPhase::Impact ? "IMPACT" : "FINAL DESCENT")
+                << (flight.phase == FlightPhase::Impact ? "IMPACT" : (flight.landing.departureActive ? "MANUAL ASCENT" : "FINAL DESCENT"))
                 << "</h2><p class=\"phase-copy\">" << htmlEscape(landingControlHint(context))
                 << "</p></section>"
                 << "<div class=\"flight-status-list\">"
                 << flightStatusRow("rr-landing-fuel", "Fuel", display::fixed(flight.fuelRemaining, 1))
                 << flightStatusRow("rr-landing-hull", "Hull", flightHullReadout(flight))
-                << flightStatusRow("rr-landing-altitude", "Altitude", display::fixed(flight.landing.altitude, 1) + " m")
+                << flightStatusRow("rr-landing-altitude", flight.landing.altitude < 0.0 ? "Depth" : "Altitude", display::fixed(std::abs(flight.landing.altitude), 1) + " m")
                 << flightStatusRow("rr-landing-vertical", "Vertical", display::fixed(flight.landing.verticalVelocity, 1) + " m/s")
                 << flightStatusRow("rr-landing-lateral", "Lateral", display::fixed(flight.landing.lateralVelocity, 1) + " m/s")
                 << flightStatusRow("rr-landing-tilt", "Tilt", display::fixed(flight.landing.surfaceAngle * 57.29577951308232, 0) + " deg")
                   << "</div><p class=\"phase-copy\">" << htmlEscape(physicalFlightControlHint(context))
-                  << "</p><p class=\"phase-copy\">Climb above 120 m to return to Orbit.</p>";
+                  << "</p><p class=\"phase-copy\">Climb above "
+                  << display::fixed(flight_landing::departureAltitude, 0)
+                  << " m to return to Orbit.</p>";
             out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
             return out.str();
         }
@@ -3916,6 +3941,29 @@ std::string buildGamePanelMarkup(
         out << "<p id=\"rr-hud-launch-status\" class=\"" << launchStatusSeverity(context) << "\">"
             << htmlEscape(launchPanel.telemetryMessage) << "</p>";
         const bool hasAdvancedFlightControls = !launchPanel.systemActions.empty();
+        if (orbitalWorkVisible(context)) {
+            const auto& w = *context.orbitalWork;
+            if (w.phase == OrbitalWorkPhase::LandingAlignment) {
+                out << "<p class=\"phase-copy\">ALIGNING FOR DESCENT</p>";
+            } else {
+            const bool ready = w.active() || (context.launchFlight->orbit.loopQualifies &&
+                std::abs(context.launchFlight->selectedThrottle) <= 0.001);
+            const bool outside = w.surveyComplete && !context.orbitalInsideZone;
+            out << "<div data-orbital-work=\"1\" class=\"actions primary-actions\">"
+                << (outside && !w.active() ? panelButton(disabledPanelButton("ENTER ZONE 1 TO DIG"))
+                    : ready ? button(orbitalWorkLabel(context), ui::actions::orbitalWork, "ok", true)
+                    : panelButton(disabledPanelButton("ESTABLISH A SAFE LOOP")))
+                << "</div><p id=\"rr-orbital-heat\" class=\"phase-copy\">"
+                << (w.surveyComplete ? "LASER " + display::fixed(w.heat, 0) + "% · Hold to bore; release to cool."
+                    : "Survey reach +" + std::to_string(surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray)))
+                << "</p>";
+            if (w.active() && w.surveyComplete && !outside)
+                out << button("LAND", ui::actions::landFromOrbit, "ok");
+            if (w.active() && !outside) out << button("RESUME FLIGHT", ui::actions::resumeOrbitalFlight, "ghost");
+            out << "<p class=\"phase-copy\">" << (context.controllerFlightControls ? "South" : "Space / Enter")
+                << " · Optional preparation. Steering or thrust resumes flight.</p>";
+            }
+        }
 
         out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
             << htmlEscape(text::panel::sections::flightControls) << "</span><strong>"
@@ -5793,7 +5841,7 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
             const FlightRunState& flight = *context.launchFlight;
             appendHudText(result, "rr-landing-fuel", display::fixed(flight.fuelRemaining, 1));
             appendHudText(result, "rr-landing-hull", flightHullReadout(flight));
-            appendHudText(result, "rr-landing-altitude", display::fixed(flight.landing.altitude, 1) + " m");
+            appendHudText(result, "rr-landing-altitude", display::fixed(std::abs(flight.landing.altitude), 1) + " m");
             appendHudText(result, "rr-landing-vertical", display::fixed(flight.landing.verticalVelocity, 1) + " m/s");
             appendHudText(result, "rr-landing-lateral", display::fixed(flight.landing.lateralVelocity, 1) + " m/s");
             appendHudText(result, "rr-landing-tilt", display::fixed(flight.landing.surfaceAngle * 57.29577951308232, 0) + " deg");
@@ -5824,6 +5872,9 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
                     display::fixed(context.launchFlight->hullMaximum, 0) + " HP");
         }
         appendHudText(result, "rr-hud-launch-status", launchPanel.telemetryMessage);
+        if (orbitalWorkVisible(context) && context.orbitalWork->surveyComplete)
+            appendHudText(result, "rr-orbital-heat", "LASER " + display::fixed(context.orbitalWork->heat, 0) +
+                "% · Hold to bore; release to cool.");
         appendHudClass(result, "rr-hud-launch-status", launchStatusSeverity(context));
         return;
     }
@@ -5998,6 +6049,14 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
     key << static_cast<int>(state.screen) << '|'
         << (context.sceneFadeToBlack > 0.0) << '|';
     if (state.screen == Screen::Flight) {
+        key << (context.launchFlight && context.launchFlight->landing.altitude < 0.0) << '|';
+        key << (context.launchFlight && context.launchFlight->landing.departureActive) << '|';
+        if (context.orbitalWork) key << orbitalWorkVisible(context) << ':' << context.orbitalWork->active() << ':'
+            << static_cast<int>(context.orbitalWork->phase) << ':' << context.orbitalWork->surveyComplete << ':'
+            << context.orbitalWork->overheated << ':' << context.orbitalLaserBlocked << ':' << context.orbitalLaserComplete << ':'
+            << context.orbitalInsideZone << ':'
+            << (context.launchFlight && context.launchFlight->orbit.loopQualifies) << ':'
+            << (context.launchFlight && std::abs(context.launchFlight->selectedThrottle) > 0.001) << '|';
         key << context.surfaceArrivalActive << '|' << context.surfaceArrivalPhase << '|'
             << context.surfaceArrivalDeployQueued << '|' << context.surfaceArrivalLandingCommitted << '|';
         key << surfaceDescentForContext(context) << '|'

@@ -2058,6 +2058,7 @@ struct MiningMiniDroneAgent {
     MaterialInventory haulMaterials;
     MaterialInventory uncreditedHaulMaterials;
     std::uint64_t carriedLooseObjectId = 0;
+    int transitDepthZone = -1;
     bool finishTargetBeforeReturn = false;
     double returnPathFailureSeconds = 0.0;
     bool defenseAngleInitialized = false;
@@ -2194,6 +2195,11 @@ struct MiningRunState {
     double artifactSecuredCelebrationSeconds = 0.0;
     int depthZone = 0;
     int entryDepthZone = 0;
+    // Geological entry and the parked shuttle are independent locations.
+    int shipDepthZone = 0;
+    double surfacePadX = 0.0;
+    double surfacePadY = 0.0;
+    bool surfaceOriginBound = false;
     int deepestDepthZone = 0;
     double downwardTransitionX = 0.0;
     bool hasDownwardTransition = false;
@@ -2272,6 +2278,10 @@ enum class FlightPhase {
 };
 
 struct OrbitCaptureState {
+    // Session-only recognition; old angular progress remains save-compatible.
+    bool loopQualifies = false;
+    bool loopPerfect = false;
+    double confirmationSeconds = 0.0;
     double targetRadius = 0.44;
     double goodBand = 0.075;
     double perfectBand = 0.030;
@@ -2282,6 +2292,34 @@ struct OrbitCaptureState {
     bool perfectEligible = true;
     bool rewardAwarded = false;
     OrbitGrade grade = OrbitGrade::Active;
+};
+
+enum class OrbitalWorkPhase { Inactive, Surveying, LaserReady, Firing, Cooling, LandingAlignment };
+// Session/presentation definition, not a new save field. Sector zero retains
+// the original inbound site; the remaining definitions are deliberately inert.
+struct PlanetLandingZone {
+    std::string id;
+    int sectorIndex = 0;
+    double centerBearing = 0.0;
+    double halfAngle = 0.5235987755982988;
+    bool enabled = false;
+    std::string siteBinding;
+};
+
+struct OrbitalSurveyLayer {
+    int depth = 0;
+    bool common = false, rare = false, exotic = false, artifact = false;
+    bool thermal = false, cryo = false, radiation = false, toxic = false;
+};
+struct OrbitalWorkState {
+    OrbitalWorkPhase phase = OrbitalWorkPhase::Inactive;
+    double landingStartHeading = 0.0, landingTargetHeading = 0.0;
+    double elapsed = 0.0, heat = 0.0, overlay = 0.0, captureDelay = 0.0;
+    bool held = false, releaseRequired = true, overheated = false, surveyComplete = false;
+    bool touchedSite = false;
+    std::uint64_t preparationKey = 0;
+    int surveyDepth = 0;
+    bool active() const { return phase != OrbitalWorkPhase::Inactive; }
 };
 
 enum class FlightMode { Travel, Orbit, Landing };
@@ -2312,6 +2350,11 @@ struct LandingState {
     double lateralVelocity = 0.0;
     double surfaceAngle = 0.0;
     bool hardLanding = false;
+    int depthZone = 0;
+    int touchdownDepthZone = 0;
+    bool siteCommitted = false;
+    bool departureActive = false;
+    bool launchSupportActive = false;
 };
 
 struct FlightRunState {

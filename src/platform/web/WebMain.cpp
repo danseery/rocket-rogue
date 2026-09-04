@@ -266,6 +266,16 @@ void rr_deploy_surface_team()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_orbital_work(int held) { if (g_app) g_app->orbitalWorkInput(held != 0); }
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_resume_orbital_flight() { if (g_app) g_app->resumeOrbitalFlight(); }
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_depart_surface_undeployed()
 {
     if (g_app) {

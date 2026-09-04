@@ -100,19 +100,19 @@ inline PoiGuidanceTarget miningPoiGuidanceTarget(
         1.0);
     const double drillPressure = std::clamp(1.0 - mining.drillIntegrity, 0.0, 1.0);
     if (std::max({oxygenPressure, actorPressure, drillPressure}) >= cautionThreshold) {
-        if (mining.depthZone == mining.entryDepthZone && atReturnZone) {
+        if (mining.depthZone == mining.shipDepthZone && atReturnZone) {
             return {};
         }
         return {
             true,
             PoiGuidanceKind::Ship,
             "SHIP",
-            mining.entryDepthZone,
+            mining.shipDepthZone,
             mining.returnZoneX,
             mining.returnZoneY,
-            mining.depthZone > mining.entryDepthZone
+            mining.depthZone > mining.shipDepthZone
                 ? PoiGuidanceDirection::Ascend
-                : PoiGuidanceDirection::WorldTarget
+                : (mining.depthZone < mining.shipDepthZone ? PoiGuidanceDirection::Descend : PoiGuidanceDirection::WorldTarget)
         };
     }
 
@@ -199,6 +199,19 @@ struct RenderSnapshot {
     double launchOrbitTargetRadius = 0.44;
     double launchOrbitGoodBand = 0.075;
     double launchOrbitProgress = 0.0;
+    double orbitalOverlay = 0.0;
+    double orbitalSurveyProgress = 0.0;
+    double orbitalLaserHeat = 0.0;
+    double orbitalLaserDepth = 0.0;
+    int orbitalSurveyDepth = 0;
+    bool orbitalLaserFiring = false;
+    bool orbitalSurveying = false;
+    std::vector<OrbitalSurveyLayer> orbitalSurveyLayers;
+    std::array<PlanetLandingZone, 6> landingZones;
+    PlanetLandingZone orbitalZone;
+    double orbitalShaftBearing = 0.0;
+    bool orbitalInsideZone = false;
+    bool orbitalZoneSurveyed = false;
     bool launchOrbitCaptured = false;
     double launchLandingAltitude = 0.0;
     double launchLandingVerticalVelocity = 0.0;
@@ -214,6 +227,13 @@ struct RenderSnapshot {
     double launchHandoffY = 0.0;
     double launchLandingPadX = 0.0;
     double launchLandingPadY = 0.0;
+    double surfaceAnchorX = 0.0;
+    double surfaceAnchorY = 0.0;
+    int miningFrameTopRow = 0;
+    int miningFrameHeight = 0;
+    int miningActiveDepth = 0;
+    bool manualSurfaceDeparture = false;
+    double manualAscentCameraProgress = 1.0;
     bool launchDescentGateArmed = true;
     bool launchTouchdownCelebration = false;
     double launchTouchdownCelebrationProgress = 0.0;

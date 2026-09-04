@@ -114,7 +114,7 @@ private:
     std::string externalRcss_;
     std::string openModalId_;
     std::string pendingModalOpenId_;
-    std::optional<RmlButtonBinding> pendingPointerActivation_;
+    std::vector<RmlButtonBinding> pendingPointerActivations_;
     std::string renderedModalId_;
     std::vector<std::string> modalStack_;
     std::vector<std::string> modalFocusStack_;
@@ -135,6 +135,7 @@ private:
     bool deferModalOpen_ = false;
     ControllerFamily controllerFamily_ = ControllerFamily::Generic;
     Rml::Element* pressedButton_ = nullptr;
+    bool orbitalPointerHeld_ = false;
     double pressedButtonAtSeconds_ = 0.0;
     RmlPanelMode panelMode_ = RmlPanelMode::Control;
     int layoutViewportWidth_ = 0;

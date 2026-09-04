@@ -607,12 +607,183 @@ void RocketGameApp::beginSurfaceExpeditionOrRefit()
     }
 }
 
-void RocketGameApp::prepareSurfaceArrivalIfNeeded(const Destination& destination)
+void RocketGameApp::resumeOrbitalFlight()
 {
+    auto& work = session_.orbitalWork;
+    if (work.phase == OrbitalWorkPhase::LandingAlignment) return;
+    work.phase = OrbitalWorkPhase::Inactive;
+    work.held = false;
+    work.releaseRequired = true;
+    panelDirty_ = true;
+}
+
+void RocketGameApp::landFromOrbit()
+{
+    auto& work = session_.orbitalWork;
+    auto& flight = session_.flight;
+    if (state_.screen != Screen::Flight || services_.ui.modalOpen() ||
+        !flight.active || flight.mode != FlightMode::Orbit || !flight.orbit.captured ||
+        !work.active() || !work.surveyComplete ||
+        work.phase == OrbitalWorkPhase::LandingAlignment || !shipInsideOrbitalWorkZone() ||
+        !surfaceArrival_.prepared || !surfaceArrival_.prepared->valid) return;
+
+    // An explicit arcade deorbit command, not an ongoing braking assist.
+    // Hold the current position while the nose turns along the shortest arc.
+    work.phase = OrbitalWorkPhase::LandingAlignment;
+    work.elapsed = 0.0;
+    work.landingStartHeading = flight.heading;
+    work.landingTargetHeading = std::atan2(flight.positionY, flight.positionX);
+    work.held = false;
+    work.releaseRequired = true;
+    work.touchedSite = true;
+    flight.velocityX = flight.velocityY = flight.angularVelocity = 0.0;
+    flight.selectedThrottle = 0.0;
+    flight.throttleInputActive = false;
+    flight.landing.gateArmed = true;
+    flight.predictedTrajectory.clear();
+    panelDirty_ = realtimeHudDirty_ = true;
+}
+
+bool RocketGameApp::shipInsideOrbitalWorkZone() const
+{
+    const auto* zone = planetLandingZone(surfaceArrival_.selectedZoneId);
+    return zone && zone->enabled && landingZoneContains(*zone,
+        std::atan2(session_.flight.positionY, session_.flight.positionX));
+}
+
+void RocketGameApp::orbitalWorkInput(bool held)
+{
+    auto& work = session_.orbitalWork;
+    const bool fresh = held && !work.held;
+    work.held = held;
+    if (!held) { work.releaseRequired = false; return; }
+    if (!fresh || work.releaseRequired || services_.ui.modalOpen() || state_.screen != Screen::Flight) return;
+    if (work.phase == OrbitalWorkPhase::Surveying || work.phase == OrbitalWorkPhase::LandingAlignment) return;
+    if (work.surveyComplete && !shipInsideOrbitalWorkZone()) {
+        if (work.active()) resumeOrbitalFlight();
+        // A held input crossing into the zone must not become a firing press.
+        work.held = true;
+        work.releaseRequired = true;
+        return;
+    }
+    if (work.overheated) return;
+    auto& flight = session_.flight;
+    if (!flight.active || flight.mode != FlightMode::Orbit || !flight.orbit.captured ||
+        work.captureDelay > 0.0 || std::abs(flight.selectedThrottle) > 0.001 || !assessOrbitLoop(flight).qualifies) return;
+    const auto* destination = catalog_.findDestination(flight.destinationId);
+    if (!destination || !destinationSupportsSurface(*destination)) return;
+    prepareSurfaceArrivalIfNeeded(*destination);
+    if (!surfaceArrival_.prepared || !surfaceArrival_.prepared->valid) return;
+    auto& prepared = *surfaceArrival_.prepared;
+    if (work.preparationKey != prepared.preparationKey) {
+        work = {};
+        work.held = true;
+        work.preparationKey = prepared.preparationKey;
+    }
+    if (!work.surveyComplete) {
+        work.surveyDepth = surfaceDepthRating(state_, SurfaceDepthUpgradeKind::SurveyArray);
+        if (!prepareOrbitalSurvey(state_, catalog_, prepared, work.surveyDepth)) return;
+        work.phase = OrbitalWorkPhase::Surveying;
+        work.elapsed = 0.0;
+        work.touchedSite = true;
+        work.releaseRequired = true;
+        queueControllerHapticCue(ControllerHapticCue::Arrival);
+    } else if (!prepared.laserBlocked && !prepared.laserComplete) {
+        work.phase = OrbitalWorkPhase::Firing;
+    } else {
+        work.phase = OrbitalWorkPhase::LaserReady;
+    }
+    panelDirty_ = true;
+}
+
+bool RocketGameApp::advanceOrbitalWork(double seconds, const Destination& destination)
+{
+    auto& work = session_.orbitalWork;
+    const double dt = std::clamp(seconds, 0.0, 0.1);
+    work.captureDelay = std::max(0.0, work.captureDelay - dt);
+    if (work.phase == OrbitalWorkPhase::LandingAlignment) {
+        work.elapsed = std::min(1.0, work.elapsed + dt);
+        const double t = work.elapsed;
+        const double blend = t*t*t*(t*(t*6.0-15.0)+10.0);
+        session_.flight.heading = work.landingStartHeading +
+            flightWrappedAngleDelta(work.landingStartHeading, work.landingTargetHeading) * blend;
+        work.heat = std::max(0.0, work.heat - 35.0 * dt);
+        work.overlay = std::max(0.0, work.overlay - dt);
+        if (work.elapsed >= 1.0) {
+            work.phase = OrbitalWorkPhase::Inactive;
+            resumeOrbitalFlight();
+        }
+        return true; // Gravity and manual control resume on the next frame.
+    }
+    if (work.preparationKey && (!surfaceArrival_.prepared ||
+        !preparedSurfaceLandingCurrent(state_, catalog_, *surfaceArrival_.prepared))) {
+        work = {};
+        panelDirty_ = true;
+    }
+    if (session_.flight.mode != FlightMode::Orbit || !session_.flight.active) {
+        if (work.active()) resumeOrbitalFlight();
+    }
+    if (work.active() && (std::abs(session_.steerInput) > 0.001 || std::abs(session_.throttleInput) > 0.001))
+        resumeOrbitalFlight();
+    const double oldHeat = work.heat;
+    if (work.phase != OrbitalWorkPhase::Firing || !work.held || work.releaseRequired)
+        work.heat = std::max(0.0, work.heat - 35.0 * dt);
+    if (work.overheated && work.heat <= 25.0) {
+        work.overheated = false;
+        work.releaseRequired = work.held;
+        panelDirty_ = true;
+    }
+    work.overlay = std::clamp(work.overlay + (work.active() ? dt * 3.0 : -dt * 1.5), 0.0, 1.0);
+    if (!work.active()) return false;
+    if (work.phase == OrbitalWorkPhase::Surveying) {
+        work.elapsed = std::min(2.0, work.elapsed + dt);
+        if (work.elapsed >= 2.0) {
+            work.surveyComplete = true;
+            work.phase = OrbitalWorkPhase::LaserReady;
+            work.releaseRequired = work.held;
+            panelDirty_ = true;
+        }
+    } else if (work.phase == OrbitalWorkPhase::Firing && work.held && !work.releaseRequired) {
+        const double firingTime = std::min(dt, (100.0 - work.heat) / 25.0);
+        work.heat = std::min(100.0, work.heat + firingTime * 25.0);
+        auto& prepared = *surfaceArrival_.prepared;
+        excavateOrbitalShaft(prepared,
+            surfaceDepthRating(state_, SurfaceDepthUpgradeKind::BoreSystem), firingTime);
+        landingSiteView_.reset();
+        if (prepared.laserComplete || prepared.laserBlocked) {
+            work.phase = OrbitalWorkPhase::LaserReady;
+            work.releaseRequired = true;
+            panelDirty_ = true;
+        } else if (work.heat >= 100.0) {
+            work.phase = OrbitalWorkPhase::Cooling;
+            work.overheated = true;
+            work.releaseRequired = true;
+            panelDirty_ = true;
+        }
+    } else {
+        const auto phase = work.overheated ? OrbitalWorkPhase::Cooling : OrbitalWorkPhase::LaserReady;
+        if (phase != work.phase) { work.phase = phase; panelDirty_ = true; }
+    }
+    if (static_cast<int>(oldHeat) != static_cast<int>(work.heat)) realtimeHudDirty_ = true;
+    (void)destination;
+    return true;
+}
+
+void RocketGameApp::prepareSurfaceArrivalIfNeeded(const Destination& destination, std::string_view zoneId)
+{
+    if (session_.flight.landing.siteCommitted && state_.run.mining.destinationId == destination.id) {
+        refreshLandingSiteView();
+        return;
+    }
     if (!destinationSupportsSurface(destination)) {
         return;
     }
+    const std::string requestedZone = zoneId.empty() ? surfaceArrival_.selectedZoneId : std::string(zoneId);
+    const auto* zone = planetLandingZone(requestedZone);
+    if (!zone || !zone->enabled) return;
     if (surfaceArrival_.prepared.has_value() &&
+        surfaceArrival_.prepared->request.destinationId == destination.id &&
+        surfaceArrival_.prepared->request.zoneId == requestedZone &&
         (!surfaceArrival_.prepared->valid ||
          preparedSurfaceLandingCurrent(state_, catalog_, *surfaceArrival_.prepared))) {
         return;
@@ -625,16 +796,63 @@ void RocketGameApp::prepareSurfaceArrivalIfNeeded(const Destination& destination
         : 0;
     SurfaceLandingBuildRequest request;
     request.destinationId = destination.id;
+    request.zoneId = requestedZone;
     request.landingOrdinal = completedLandings + 1;
     request.siteSeed = surfaceSiteSeed(state_.seed, destination.id, request.landingOrdinal);
-    PreparedSurfaceLanding prepared = prepareSurfaceLanding(state_, catalog_, request);
+    const auto key = surfaceLandingBuildKey(state_, catalog_, request);
+    if (surfaceArrival_.prepared && surfaceArrival_.prepared->valid &&
+        preparedSurfaceLandingCurrent(state_, catalog_, *surfaceArrival_.prepared)) {
+        const auto oldKey = surfaceArrival_.prepared->preparationKey;
+        surfaceArrival_.siteCache.insert_or_assign(oldKey, std::move(*surfaceArrival_.prepared));
+    }
+    auto cached = surfaceArrival_.siteCache.find(key);
+    PreparedSurfaceLanding prepared;
+    if (cached != surfaceArrival_.siteCache.end()) {
+        prepared = std::move(cached->second);
+        surfaceArrival_.siteCache.erase(cached);
+    } else {
+        prepared = prepareSurfaceLanding(state_, catalog_, request);
+    }
     if (!prepared.valid) {
         services_.host.log(
             PlatformLogLevel::Error,
             "Surface landing preparation failed: " + prepared.error);
     }
     surfaceArrival_.prepared = std::move(prepared);
+    surfaceArrival_.selectedZoneId = requestedZone;
+    session_.orbitalWork = {};
     surfaceArrival_.phase = SurfaceArrivalPhase::SurfaceReveal;
+    refreshLandingSiteView(true);
+}
+
+void RocketGameApp::refreshLandingSiteView(bool force)
+{
+    MiningRunState* mining = session_.flight.landing.siteCommitted ? &state_.run.mining
+        : (surfaceArrival_.prepared && surfaceArrival_.prepared->valid ? &surfaceArrival_.prepared->miningTemplate : nullptr);
+    if (!mining || mining->terrain.cells.empty()) { landingSiteView_.reset(); return; }
+    // Keep enough terrain ahead for the swept hull, the camera, and the entire
+    // local forecast. This is core generation, not renderer-driven generation.
+    const auto& land = session_.flight.landing;
+    const double surfaceRow = mining->surfaceOriginBound ? mining->surfacePadY : mining->returnZoneY;
+    const double row = surfaceRow-land.altitude/flight_landing::metersPerCell;
+    const double lookAhead = 96.0 + std::max(0.0,-land.verticalVelocity)*4.0;
+    int through = mining->entryDepthZone+1;
+    if (session_.flight.mode == FlightMode::Landing)
+        through = std::max(through, mining->entryDepthZone+static_cast<int>(std::max(0.0,row+lookAhead/4.0)/std::max(1,mining->terrain.height))+1);
+    int deepest = mining->depthZone;
+    for (const auto& layer : mining->depthLayers) deepest=std::max(deepest,layer.depthZone);
+    if (force || !mining->surfaceOriginBound || through>deepest || !landingSiteView_ ||
+        landingSiteView_->layers.size()!=mining->depthLayers.size()+1 ||
+        landingSiteView_->world.geologySeed!=mining->geologySeed) {
+        prepareLandingLayers(state_,catalog_,*mining,std::max(through,deepest));
+        landingSiteView_=buildLandingSiteView(*mining);
+    }
+    if (landingSiteView_) {
+        session_.flight.landing.depthZone=landingSiteView_->depthAt(row);
+        if (session_.flight.mode==FlightMode::Landing && revealLandingSurroundings(*mining,*landingSiteView_,
+                mining->surfacePadX+land.horizontalPosition/4.0,row-3.5))
+            landingSiteView_=buildLandingSiteView(*mining);
+    }
 }
 
 bool RocketGameApp::commitSurfaceTouchdown(
@@ -647,7 +865,8 @@ bool RocketGameApp::commitSurfaceTouchdown(
         surfaceArrival_.prepared.reset();
     }
     prepareSurfaceArrivalIfNeeded(destination);
-    if (!surfaceArrival_.prepared.has_value() || !surfaceArrival_.prepared->valid) {
+    if (!session_.flight.landing.siteCommitted &&
+        (!surfaceArrival_.prepared.has_value() || !surfaceArrival_.prepared->valid)) {
         state_.statusLine = "SURFACE SITE UNAVAILABLE - TAKE OFF REMAINS AVAILABLE";
         surfaceArrival_.phase = SurfaceArrivalPhase::AwaitingCommand;
         surfaceArrival_.elapsed = 0.0;
@@ -657,6 +876,10 @@ bool RocketGameApp::commitSurfaceTouchdown(
     }
 
     const GameState stateBefore = state_;
+    refreshLandingSiteView();
+    if (!landingSiteView_) return false;
+    const int touchdownDepth = landingSiteView_->depthAt(session_.flight.landing.touchdownGridY);
+    if (!session_.flight.landing.siteCommitted) {
     const PreparedLaunch flightModel = currentFlightModel();
     LaunchOutcome outcome = resolveLaunch(
         flightModel,
@@ -680,10 +903,10 @@ bool RocketGameApp::commitSurfaceTouchdown(
         outcome.telemetry.back() = launchTelemetryAt(flightModel, session_.flight);
     }
     applyLaunchOutcome(state_, catalog_, outcome);
-    if (!preparedSurfaceLandingCurrent(state_, catalog_, *surfaceArrival_.prepared)) {
-        const SurfaceLandingBuildRequest request = surfaceArrival_.prepared->request;
-        surfaceArrival_.prepared = prepareSurfaceLanding(state_, catalog_, request);
-    }
+    // The site was validated before contact, against the incoming flight.
+    // Recording arrival may advance scenario bindings or change the launch
+    // configuration. That must not regenerate the terrain already surveyed,
+    // excavated and collided with. Transfer that exact prepared world once.
     if (!commitPreparedSurfaceLanding(
             state_,
             std::move(*surfaceArrival_.prepared),
@@ -697,7 +920,9 @@ bool RocketGameApp::commitSurfaceTouchdown(
         return false;
     }
 
-    if (!positionSurfaceLandingTeam(state_.run.mining,
+    session_.currentMultiplier = outcome.ejectMultiplier;
+    }
+    if (!positionSurfaceLandingTeam(state_.run.mining,*landingSiteView_,
             session_.flight.landing.touchdownGridX,session_.flight.landing.touchdownGridY)) {
         state_=stateBefore;
         surfaceArrival_.reset();
@@ -706,6 +931,13 @@ bool RocketGameApp::commitSurfaceTouchdown(
         panelDirty_=true;
         return false;
     }
+    state_.run.mining.active = true;
+    state_.run.planetaryExpedition.active = true;
+    state_.run.shipDamage+=physicalFlightCampaignDamage(session_.flight,state_.run.shipDamage);
+    session_.flight.landing.siteCommitted = true;
+    session_.flight.landing.touchdownDepthZone = touchdownDepth;
+    session_.flight.landing.depthZone = touchdownDepth;
+    refreshLandingSiteView(true);
 
     surfaceArrival_.prepared.reset();
     surfaceArrival_.phase = SurfaceArrivalPhase::Touchdown;
@@ -716,7 +948,6 @@ bool RocketGameApp::commitSurfaceTouchdown(
     surfaceArrival_.surfaceReadyFeedbackPlayed = false;
     surfaceArrival_.audioCueMask = 0;
     surfaceArrival_.droneAudioCueCount = 0;
-    session_.currentMultiplier = outcome.ejectMultiplier;
     session_.peakWarning = 0.0;
     releaseRealtimeInputs(true);
     session_.controls.actions.cutEnginesActive = false;
@@ -792,6 +1023,7 @@ void RocketGameApp::completeSurfaceDeployment()
     clearFlightControls();
     surfaceBaySequence_.reset();
     surfaceArrival_.reset();
+    session_.orbitalWork = {};
     save();
     panelDirty_ = true;
     realtimeHudDirty_ = true;
@@ -799,15 +1031,45 @@ void RocketGameApp::completeSurfaceDeployment()
 
 void RocketGameApp::completeUndeployedTakeoff()
 {
-    state_.run.mining = {};
-    state_.run.planetaryExpedition = {};
-    session_.flightArmed = false;
+    beginManualSurfaceAscent();
+}
+
+void RocketGameApp::beginManualSurfaceAscent()
+{
+    manualAscentCameraSeconds_=surfaceBaySequence_.kind==SurfaceBaySequenceKind::Extract ? 0.0 : flight_landing::handoffSeconds;
+    auto& flight=session_.flight;
+    auto& land=flight.landing;
+    // Packing changes ownership, not position. The original surface basis and
+    // departure altitude remain fixed even when the shuttle is far underground.
+    flight.active=true;
+    flight.mode=FlightMode::Landing;
+    flight.phase=FlightPhase::Landing;
+    flight.failureCause=LaunchFailureCause::None;
+    land.heading=1.5707963267948966;
+    land.altitude=(land.padGridY-land.touchdownGridY)*flight_landing::metersPerCell+0.001;
+    flight.heading=land.basisAngle;
+    land.surfaceAngle=0.0;
+    land.departureActive=true;
+    land.launchSupportActive=true;
+    land.lateralVelocity=land.verticalVelocity=flight.angularVelocity=0.0;
+    flight.contactEpisode=true;
+    flight.contactClearSeconds=0.0;
+    flight.selectedThrottle=flight.burnRatePerSecond=0.0;
+    flight.handoff={FlightMode::Landing,FlightMode::Landing,flight_landing::handoffSeconds,
+        flight.positionX,flight.positionY,flight.heading};
+    flight.touchdownCelebrationPending=false;
+    state_.run.mining.active=false;
+    state_.screen=Screen::Flight;
+    session_.flightArmed=true;
     clearFlightControls();
+    releaseRealtimeInputs(true);
     surfaceBaySequence_.reset();
     surfaceArrival_.reset();
-    finishArrivalVisit("SURFACE DEPARTURE COMPLETE");
+    session_.orbitalWork={};
+    refreshLandingSiteView(true);
+    state_.statusLine="PILOT ASCENT - Hold W to lift off.";
     save();
-    panelDirty_ = true;
+    panelDirty_=realtimeHudDirty_=true;
 }
 
 void RocketGameApp::advanceSurfaceArrival(double deltaSeconds)
@@ -818,6 +1080,9 @@ void RocketGameApp::advanceSurfaceArrival(double deltaSeconds)
         tuning::launch::maxFrameStepSeconds);
     switch (surfaceArrival_.phase) {
     case SurfaceArrivalPhase::Touchdown:
+        session_.flight.landing.altitude=std::lerp(session_.flight.landing.altitude,
+            (session_.flight.landing.padGridY-session_.flight.landing.touchdownGridY)*flight_landing::metersPerCell,
+            1.0-std::exp(-step/0.12));
         surfaceArrival_.elapsed = std::min(
             kTouchdownCelebrationSeconds,
             surfaceArrival_.elapsed + step);
@@ -934,6 +1199,8 @@ bool RocketGameApp::openRefitIfAvailable(bool regenerateOffers)
 
 void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
 {
+    landingSiteView_.reset();
+    manualAscentCameraSeconds_=flight_landing::handoffSeconds;
     surfaceArrival_.reset();
     surfaceBaySequence_.reset();
     session_.preparedLaunch = preparedLaunch;
@@ -981,6 +1248,8 @@ double RocketGameApp::liveBurnMultiplier() const
 
 void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
 {
+    landingSiteView_.reset();
+    manualAscentCameraSeconds_=flight_landing::handoffSeconds;
     surfaceArrival_.reset();
     debugActOneCheckpoint_ = -1;
     state_ = createNewGame(catalog_, 0x524F434B45544ULL);
@@ -1017,7 +1286,7 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
                 : "ROUTE CONTROL // RECOVERY REQUIRED. No valid checkpoint is available; begin a new campaign.";
         } else {
             rng_ = Random(saveData->seed + 0xA51CE5ULL + static_cast<std::uint64_t>(saveData->blueprintProgress));
-            if (state_.screen == Screen::Flight) {
+            if (state_.screen == Screen::Flight || state_.run.flight.landing.siteCommitted) {
                 session_.preparedLaunch = rocket::prepareLaunch(state_, catalog_, rng_);
                 session_.flightArmed = state_.run.flight.active;
                 session_.preflightElapsed = session_.flightArmed
@@ -1031,7 +1300,7 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
             hasSavedGame_ = true;
         }
     } else if (!storedSave.empty()) {
-        // v19 is an intentional fresh-campaign boundary. Preserve the old
+        // v20 is an intentional fresh-campaign boundary. Preserve the old
         // payload byte-for-byte until the player explicitly starts a new
         // campaign; incompatible active and checkpoint saves are never
         // offered as recovery paths.
@@ -1047,6 +1316,7 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
 
 void RocketGameApp::beginDebugSandbox(const std::string& statusLine)
 {
+    landingSiteView_.reset();
     surfaceArrival_.reset();
     surfaceBaySequence_.reset();
     titleScreenActive_ = false;
@@ -1298,6 +1568,7 @@ std::string_view controllerActionName(GameInputAction action)
     case GameInputAction::OpenMap: return "open_map";
     case GameInputAction::OpenInventory: return "open_inventory";
     case GameInputAction::StartOrContinue: return "start_or_continue";
+    case GameInputAction::ResumeOrbitalFlight: return "resume_orbital_flight";
     case GameInputAction::ReturnHome: return "return_home";
     case GameInputAction::ToggleEngines: return "toggle_engines";
     case GameInputAction::DeploySurfaceTeam: return "deploy_surface_team";
@@ -1418,6 +1689,8 @@ bool RocketGameApp::realtimeControllerContext(InputContext context) const
 
 void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
 {
+    session_.orbitalWork.held = false;
+    session_.orbitalWork.releaseRequired = true;
     controllerRealtimeInput_ = {};
     if (releaseKeyboard) {
         keyboardRealtimeInput_ = {};
@@ -1445,6 +1718,8 @@ void RocketGameApp::applyRealtimeInputs()
 
     switch (state_.screen) {
     case Screen::Flight:
+        if (session_.orbitalWork.active() && (std::abs(moveX) > 0.001 || std::abs(moveY) > 0.001))
+            resumeOrbitalFlight();
         session_.steerInput = moveX;
         session_.throttleInput = moveY;
         break;
@@ -1576,6 +1851,9 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
     case GameInputAction::DeploySurfaceTeam:
         deploySurfaceTeam();
         break;
+    case GameInputAction::ResumeOrbitalFlight:
+        resumeOrbitalFlight();
+        break;
     case GameInputAction::DepartSurfaceUndeployed:
         departSurfaceUndeployed();
         break;
@@ -1626,6 +1904,7 @@ void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGa
         // the rendered corridor, matching the raw left-stick X convention.
         controllerRealtimeInput_.moveX = input.moveX;
         controllerRealtimeInput_.moveY = input.moveY;
+        if (activeInputSource_ == InputSource::Controller) orbitalWorkInput(input.orbitalHeld);
     } else if (context == InputContext::MiningActive
         || context == InputContext::MiningService) {
         controllerRealtimeInput_.moveX = input.moveX;
@@ -2006,10 +2285,17 @@ void RocketGameApp::tick(double deltaSeconds)
             ? currentDestination(state_, catalog_)
             : *activeDestination;
         const double clampedDelta = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+        if (advanceOrbitalWork(clampedDelta, destination)) {
+            session_.elapsed += clampedDelta; // Presentation only; authoritative flight stays frozen.
+            realtimeHudDirty_ = true;
+            return;
+        }
         // A resumed local descent needs its exact terrain before the first
         // movement step, not one frame after contact could already occur.
         if (session_.flight.mode == FlightMode::Landing) {
+            manualAscentCameraSeconds_=std::min(flight_landing::handoffSeconds,manualAscentCameraSeconds_+clampedDelta);
             prepareSurfaceArrivalIfNeeded(destination);
+            refreshLandingSiteView();
         }
         session_.asteroidImpactFeedbackSeconds = std::max(
             0.0,
@@ -2025,8 +2311,16 @@ void RocketGameApp::tick(double deltaSeconds)
                 activeInputSource_ == InputSource::Controller,
             },
             clampedDelta,
-            surfaceArrival_.prepared.has_value() && surfaceArrival_.prepared->valid
-                ? &surfaceArrival_.prepared->miningTemplate : nullptr);
+            landingSiteView_ ? &landingSiteView_->world : nullptr);
+        if (!step.landingZoneId.empty()) {
+            // The crossed gate, not survey selection, owns this landing.
+            prepareSurfaceArrivalIfNeeded(destination, step.landingZoneId);
+            if (surfaceArrival_.prepared && surfaceArrival_.prepared->valid) {
+                if (session_.flight.landing.siteKey != surfaceArrival_.prepared->miningTemplate.geologySeed)
+                    session_.flight.landing.siteBound = false;
+                bindLandingSite(session_.flight, surfaceArrival_.prepared->miningTemplate);
+            }
+        }
         session_.elapsed += clampedDelta;
         session_.autosaveElapsed += clampedDelta;
         session_.currentMultiplier = session_.flight.currentMultiplier;
@@ -2050,6 +2344,9 @@ void RocketGameApp::tick(double deltaSeconds)
         }
 
         if (step.orbitCaptured) {
+            session_.orbitalWork.captureDelay = 2.0;
+            session_.orbitalWork.releaseRequired = session_.orbitalWork.held;
+            panelDirty_ = true;
             if (!session_.flight.orbit.rewardAwarded) {
                 awardUnifiedOrbit(
                     state_,
@@ -2058,7 +2355,7 @@ void RocketGameApp::tick(double deltaSeconds)
                     session_.flight.orbit.grade);
                 session_.flight.orbit.rewardAwarded = true;
             }
-            state_.statusLine = "ORBIT CAPTURED — brake against your path to deorbit.";
+            state_.statusLine = "ORBIT CAPTURED — fly inward through the green descent gate.";
             queueControllerHapticCue(ControllerHapticCue::Arrival);
         }
         if (step.failed &&
@@ -2076,8 +2373,16 @@ void RocketGameApp::tick(double deltaSeconds)
             }
         } else if (step.flyby) {
             surfaceArrival_.reset();
-            completeLaunch(destination.targetMultiplier, RecoveryMethod::TransferArrival);
-            finishArrivalVisit("FLYBY RECORDED — trajectory left the destination influence.");
+            if (session_.flight.landing.siteCommitted) {
+                state_.run.shipDamage+=physicalFlightCampaignDamage(session_.flight,state_.run.shipDamage);
+                state_.run.mining={};
+                state_.run.planetaryExpedition.active=false;
+                landingSiteView_.reset();
+                finishArrivalVisit("DEPARTURE COMPLETE - left the destination influence.");
+            } else {
+                completeLaunch(destination.targetMultiplier, RecoveryMethod::TransferArrival);
+                finishArrivalVisit("FLYBY RECORDED — trajectory left the destination influence.");
+            }
             save();
         } else if (step.asteroidHit) {
             state_.statusLine = "ASTEROID IMPACT \xE2\x80\x94 HULL " +
@@ -2100,9 +2405,11 @@ void RocketGameApp::tick(double deltaSeconds)
                 tuning::mining::miningExtractionSequenceSeconds);
             if (surfaceBaySequence_.elapsed >= tuning::mining::miningExtractionSequenceSeconds &&
                 !surfaceBaySequence_.handoffQueued) {
-                queueMiningSceneHandoff(MiningSceneHandoff::DepartPlanet);
-                surfaceBaySequence_.handoffQueued =
-                    miningSceneHandoff_ == MiningSceneHandoff::DepartPlanet;
+                if (session_.flight.landing.siteCommitted) beginManualSurfaceAscent();
+                else {
+                    queueMiningSceneHandoff(MiningSceneHandoff::DepartPlanet);
+                    surfaceBaySequence_.handoffQueued=miningSceneHandoff_==MiningSceneHandoff::DepartPlanet;
+                }
             }
         } else {
             const bool wasActive = state_.run.mining.active;
@@ -3431,7 +3738,7 @@ void RocketGameApp::miningDepart()
     extractionVisual.stowedArtifacts.clear();
     extractionVisual.combatProjectiles.clear();
     extractionVisual.damageNumbers.clear();
-    state_.run.mining = std::move(extractionVisual);
+    if (!session_.flight.landing.siteCommitted) state_.run.mining = std::move(extractionVisual);
     state_.screen = Screen::Mining;
     state_.statusLine = "DEPARTING — Bay secured. Ignition sequence.";
     surfaceBaySequence_ = {SurfaceBaySequenceKind::Extract, false, 0.0};
@@ -4123,7 +4430,7 @@ void RocketGameApp::debugStartLaunchLesson(int lessonIndex)
 void RocketGameApp::debugStartSurfaceArrival(int destinationIndex, int phaseIndex)
 {
     const bool mars = destinationIndex == 1;
-    if ((destinationIndex != 0 && !mars) || phaseIndex < 0 || phaseIndex > 20) {
+    if ((destinationIndex != 0 && !mars) || phaseIndex < 0 || phaseIndex > 28) {
         return;
     }
 
@@ -4160,6 +4467,31 @@ void RocketGameApp::debugStartSurfaceArrival(int destinationIndex, int phaseInde
     flight.orbit.enteredInfluence = true;
     flight.orbit.captured = true;
     flight.orbit.grade = OrbitGrade::Good;
+    if (phaseIndex == 21 || phaseIndex == 22 || phaseIndex == 23) {
+        state_.meta.surfaceDepthUpgrades.surveyArray = phaseIndex == 22 ? 3 : 0;
+        state_.meta.surfaceDepthUpgrades.boreSystem = phaseIndex == 22 ? 3 : 0;
+        flight.mode = FlightMode::Orbit;
+        flight.phase = FlightPhase::TargetApproach;
+        flight.orbit.captured = false;
+        flight.orbit.rewardAwarded = false;
+        flight.orbit.confirmationSeconds = 0.0;
+        flight.positionX = 0.70; flight.positionY = 0.0;
+        flight.velocityX = 0.0; flight.velocityY = 0.33;
+        if (phaseIndex == 23) {
+            const double bearing = planetLandingZones()[0].centerBearing;
+            flight.positionX = 0.70 * std::cos(bearing);
+            flight.positionY = 0.70 * std::sin(bearing);
+            flight.velocityX = -0.33 * std::sin(bearing);
+            flight.velocityY = 0.33 * std::cos(bearing);
+            flight.orbit.captured = true;
+            flight.orbit.rewardAwarded = true;
+        }
+        flight.orbitZoomProgress = 1.0;
+        flight.handoff = {FlightMode::Orbit, FlightMode::Orbit, 1.25, flight.positionX, flight.positionY, flight.heading};
+        state_.screen = Screen::Flight;
+        panelDirty_ = realtimeHudDirty_ = true;
+        return;
+    }
     enterLocalLanding(flight);
     flight.handoff.elapsed = flight_landing::handoffSeconds;
     flight.landing.altitude = 7.5;
@@ -4179,8 +4511,8 @@ void RocketGameApp::debugStartSurfaceArrival(int destinationIndex, int phaseInde
         flight.landing.heading=phaseIndex==10 ? -1.5707963267948966 : 1.5707963267948966;
     }
     if (phaseIndex==12) {flight.landing.altitude=2.0;flight.landing.verticalVelocity=-2.0;}
-    if (phaseIndex==13) {flight.landing.altitude=116.0;flight.landing.verticalVelocity=8.0;}
-    if (phaseIndex>=16) {
+    if (phaseIndex==13) {flight.landing.altitude=flight_landing::departureAltitude-4.0;flight.landing.verticalVelocity=8.0;}
+    if (phaseIndex>=16 && phaseIndex<=20) {
         flight.hullRemaining=phaseIndex==17 ? 40.0 : 85.0;
         flight.landing.altitude=0.001;
         flight.landing.verticalVelocity=-std::sqrt(18.0*18.0-2.0*flight_landing::gravityAcceleration*0.001);
@@ -4225,6 +4557,40 @@ void RocketGameApp::debugStartSurfaceArrival(int destinationIndex, int phaseInde
         bindLandingSite(flight,surfaceArrival_.prepared->miningTemplate);
         flight.landing.touchdownGridX=flight.landing.padGridX;
         flight.landing.touchdownGridY=flight.landing.padGridY;
+    }
+
+    if (phaseIndex>=24 && surfaceArrival_.prepared && surfaceArrival_.prepared->valid) {
+        auto& prepared=*surfaceArrival_.prepared;
+        prepareOrbitalSurvey(state_,catalog_,prepared,3);
+        excavateOrbitalShaft(prepared,3,1000.0);
+        refreshLandingSiteView(true);
+        const double shaft=prepared.shaftX+orbital_laser::shaftCenterOffset-0.5;
+        const double seam=prepared.miningTemplate.terrain.height;
+        double row=seam-8.0;
+        if (phaseIndex>=25) {
+            // Find an actual supporting floor and staging clearance; presets
+            // never stamp a bay or manufacture terrain to get a landing.
+            const auto& world=landingSiteView_->world;
+            for (int y=static_cast<int>(seam); y<world.terrain.height; ++y) {
+                LandingState candidate=flight.landing;
+                candidate.horizontalPosition=(shaft-candidate.padGridX)*4.0;
+                candidate.altitude=(candidate.padGridY-y)*4.0-0.001;
+                const auto contacts=localLandingContacts(candidate,world);
+                if (std::any_of(contacts.begin(),contacts.end(),[](const auto& c){return c.suitable;})) {
+                    row=y-(phaseIndex==25 ? 0.01 : 2.0); break;
+                }
+            }
+        }
+        flight.landing.horizontalPosition=(shaft-flight.landing.padGridX)*4.0;
+        flight.landing.altitude=(flight.landing.padGridY-row)*4.0;
+        flight.landing.verticalVelocity=phaseIndex==26 ? -18.0 : -2.0;
+        flight.landing.lateralVelocity=0.0;
+        if (phaseIndex==27) { flight.landing.verticalVelocity=6.0;flight.landing.departureActive=true; }
+        if (phaseIndex==28) { flight.landing.lateralVelocity=3.0;flight.landing.heading=1.0; }
+        flight.hullRemaining=100.0;
+        state_.statusLine="Underground flight trial - real excavated layers; real save untouched.";
+        panelDirty_=realtimeHudDirty_=true;
+        return;
     }
 
     if (phaseIndex == 0 || phaseIndex >= 9) {
@@ -4872,6 +5238,10 @@ void RocketGameApp::completeMiningSceneHandoff()
         startMiningRunAfterFade();
         break;
     case MiningSceneHandoff::DepartPlanet:
+        if (session_.flight.landing.siteCommitted) {
+            beginManualSurfaceAscent();
+            break;
+        }
         surfaceBaySequence_.reset();
         state_.run.mining = {};
         if (!openRefitIfAvailable()) {
@@ -4947,6 +5317,10 @@ bool RocketGameApp::uiActivateFocused()
 
 bool RocketGameApp::uiCancel()
 {
+    if (session_.orbitalWork.active() && !services_.ui.modalOpen()) {
+        resumeOrbitalFlight();
+        return true;
+    }
     return services_.ui.cancel();
 }
 
@@ -5062,7 +5436,7 @@ void RocketGameApp::completeLaunch(
 
 void RocketGameApp::save()
 {
-    if (debugSessionActive_ || surfaceArrival_.active() || session_.destruction.active) {
+    if (debugSessionActive_ || surfaceArrival_.active() || surfaceBaySequence_.active() || session_.destruction.active || session_.orbitalWork.touchedSite) {
         return;
     }
     const CampaignProgressionAuditResult audit = auditCampaignProgression(state_, catalog_);
@@ -5123,6 +5497,10 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         surfaceArrival_.landingCommitted,
         controllerConnected_ && activeInputSource_ == InputSource::Controller,
         controllerPreferences_.invertFlightY,
+        &session_.orbitalWork,
+        surfaceArrival_.prepared && surfaceArrival_.prepared->laserBlocked,
+        surfaceArrival_.prepared && surfaceArrival_.prepared->laserComplete,
+        shipInsideOrbitalWorkZone(),
     };
 }
 
@@ -5367,6 +5745,14 @@ void RocketGameApp::runUiAction(const std::string& action)
         acknowledgeStoryBriefing();
     } else if (action == ui::actions::cutEngines) {
         cutEngines();
+    } else if (action == ui::actions::orbitalWorkPress || action == ui::actions::orbitalWork) {
+        orbitalWorkInput(true);
+    } else if (action == ui::actions::orbitalWorkRelease) {
+        orbitalWorkInput(false);
+    } else if (action == ui::actions::resumeOrbitalFlight) {
+        resumeOrbitalFlight();
+    } else if (action == ui::actions::landFromOrbit) {
+        landFromOrbit();
     } else if (action == ui::actions::deploySurfaceTeam) {
         deploySurfaceTeam();
     } else if (action == ui::actions::departSurfaceUndeployed) {
@@ -5613,11 +5999,11 @@ RenderSnapshot RocketGameApp::snapshot() const
         visualMining = &state_.run.mining;
         visualExpedition = &state_.run.planetaryExpedition;
     } else if (state_.screen == Screen::Flight) {
-        if (surfaceArrival_.landingCommitted && state_.run.mining.active) {
-            visualMining = &state_.run.mining;
+        if (session_.flight.landing.siteCommitted && landingSiteView_) {
+            visualMining = &landingSiteView_->world;
             visualExpedition = &state_.run.planetaryExpedition;
         } else if (surfaceArrival_.prepared.has_value() && surfaceArrival_.prepared->valid) {
-            visualMining = &surfaceArrival_.prepared->miningTemplate;
+            visualMining = landingSiteView_ ? &landingSiteView_->world : &surfaceArrival_.prepared->miningTemplate;
             visualExpedition = &surfaceArrival_.prepared->expeditionTemplate;
         }
     }
@@ -5644,6 +6030,23 @@ RenderSnapshot RocketGameApp::snapshot() const
             : 0.0;
         result.miningWidth = mining.terrain.width;
         result.miningHeight = mining.terrain.height;
+        result.miningActiveDepth = mining.depthZone;
+        result.manualSurfaceDeparture = session_.flight.landing.siteCommitted;
+        result.manualAscentCameraProgress=manualAscentCameraSeconds_/flight_landing::handoffSeconds;
+        if (state_.screen == Screen::Flight && landingSiteView_) {
+            const int depth = session_.flight.landing.siteCommitted ? state_.run.mining.depthZone
+                : surfaceArrival_.prepared->miningTemplate.depthZone;
+            result.miningFrameTopRow=landingSiteView_->topRow(depth);
+            for (const auto& layer : landingSiteView_->layers)
+                if (layer.depth==depth) result.miningFrameHeight=layer.height;
+        }
+        const auto& land=session_.flight.landing;
+        const double dx=(mining.returnZoneX-land.padGridX)*flight_landing::metersPerCell;
+        const double altitude=(land.padGridY-mining.returnZoneY)*flight_landing::metersPerCell;
+        const double nx=std::cos(land.basisAngle),ny=std::sin(land.basisAngle);
+        const double radial=flight_geometry::bodyRadius+altitude/flight_landing::metersPerOrbitUnit;
+        result.surfaceAnchorX=nx*radial+ny*dx/flight_landing::metersPerOrbitUnit;
+        result.surfaceAnchorY=ny*radial-nx*dx/flight_landing::metersPerOrbitUnit;
         const std::string& activeGeology = mining.depthZone > mining.entryDepthZone
             ? mining.deepGeologyId
             : mining.surfaceGeologyId;
@@ -5658,7 +6061,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningDroneHealth = mining.droneHealth;
         result.miningReturnZoneX = mining.returnZoneX;
         result.miningReturnZoneY = mining.returnZoneY;
-        result.miningShipPresent = mining.depthZone == mining.entryDepthZone;
+        result.miningShipPresent = state_.screen == Screen::Flight || mining.depthZone == mining.shipDepthZone;
         result.miningAtReturnZone = miningAtReturnZone(mining);
         const MiningLoadStats loadStats = surfaceArrival_.prepared.has_value()
             ? MiningLoadStats {}
@@ -5905,10 +6308,31 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.launchLandingBlend = scaleProfile.landingBlend;
         result.launchOrbitTargetRadius = session_.flight.orbit.targetRadius;
         result.launchOrbitGoodBand = session_.flight.orbit.goodBand;
-        result.launchOrbitProgress = std::clamp(
-            session_.flight.orbit.stableAngularProgress / 6.28318530717958647692,
-            0.0,
-            1.0);
+        result.launchOrbitProgress = orbitConfirmationProgress(session_.flight);
+        const auto& work = session_.orbitalWork;
+        result.landingZones = planetLandingZones();
+        result.orbitalZone = *planetLandingZone(surfaceArrival_.selectedZoneId);
+        result.orbitalInsideZone = shipInsideOrbitalWorkZone();
+        result.orbitalZoneSurveyed = work.surveyComplete;
+        result.orbitalShaftBearing = result.orbitalZone.centerBearing;
+        if (surfaceArrival_.prepared) {
+            const auto& prepared = *surfaceArrival_.prepared;
+            result.orbitalShaftBearing = landingZoneSiteBearing(result.orbitalZone,
+                prepared.shaftX + orbital_laser::shaftCenterOffset, prepared.miningTemplate.returnZoneX,
+                prepared.miningTemplate.terrain.width);
+        }
+        result.orbitalOverlay = work.overlay * (1.0 - scaleProfile.landingBlend);
+        result.orbitalSurveyProgress = work.surveyComplete ? 1.0 : std::clamp(work.elapsed / 2.0, 0.0, 1.0);
+        result.orbitalSurveyDepth = work.surveyDepth;
+        result.orbitalSurveying = work.phase == OrbitalWorkPhase::Surveying;
+        result.orbitalLaserFiring = work.phase == OrbitalWorkPhase::Firing && work.held && !work.releaseRequired;
+        result.orbitalLaserHeat = work.heat;
+        if (surfaceArrival_.prepared && (work.surveyComplete || work.active()))
+            result.orbitalSurveyLayers = surfaceArrival_.prepared->surveyLayers;
+        if (surfaceArrival_.prepared) result.orbitalLaserDepth =
+            surfaceArrival_.prepared->laserDepth - surfaceArrival_.prepared->miningTemplate.entryDepthZone +
+            static_cast<double>(surfaceArrival_.prepared->laserRow) /
+                std::max(1, surfaceArrival_.prepared->miningTemplate.terrain.height);
         result.launchOrbitCaptured = session_.flight.orbit.captured;
         result.launchLandingAltitude = session_.flight.landing.altitude;
         result.launchLandingVerticalVelocity = session_.flight.landing.verticalVelocity;

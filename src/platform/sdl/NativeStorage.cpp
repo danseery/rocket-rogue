@@ -155,7 +155,7 @@ const std::filesystem::path& AtomicTextFile::path() const { return path_; }
 
 NativeSaveStore::NativeSaveStore(const std::filesystem::path& directory)
     : file_(directory / "save_v1.txt"),
-      checkpointFile_(directory / "save_v19_checkpoint.txt") {}
+      checkpointFile_(directory / "save_v20_checkpoint.txt") {}
 std::string NativeSaveStore::load() { return file_.load(); }
 bool NativeSaveStore::storeAtomic(std::string_view data) { return file_.store(data); }
 bool NativeSaveStore::clear() { return file_.clear(); }

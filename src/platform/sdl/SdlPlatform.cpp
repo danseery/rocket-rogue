@@ -446,6 +446,7 @@ bool SdlPlatform::handleEvent(RocketGameApp& app, const SDL_Event& event)
         noteKeyboardPointerActivity();
         if (event.key.key == SDLK_SPACE) app.miningKeyboardDrill(false);
         if (event.key.key == SDLK_SPACE || event.key.key == SDLK_RETURN) {
+            app.orbitalWorkInput(false);
             launchOutcomeConfirmReleaseGuard_ = false;
         }
         break;
@@ -586,10 +587,9 @@ void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& eve
         if (event.key == SDLK_SPACE || event.key == SDLK_RETURN) app.startLaunch();
         break;
     case InputContext::Launch:
-        if (event.key == SDLK_R || event.key == SDLK_SPACE) {
-            if (event.key == SDLK_SPACE) launchOutcomeConfirmReleaseGuard_ = true;
-            app.returnHome();
-        }
+        if (event.key == SDLK_SPACE || event.key == SDLK_RETURN) app.orbitalWorkInput(true);
+        else if (event.key == SDLK_ESCAPE) app.resumeOrbitalFlight();
+        else if (event.key == SDLK_R) app.returnHome();
         else if (event.key == SDLK_C) app.cutEngines();
         break;
     case InputContext::SurfaceArrival:

@@ -6,6 +6,111 @@
 
 namespace rocket {
 
+const std::array<PlanetLandingZone, 6>& planetLandingZones()
+{
+    static const auto zones = [] {
+        std::array<PlanetLandingZone, 6> result;
+        constexpr double sector = 1.0471975511965976;
+        const double inbound = std::atan2(flight_geometry::startY, flight_geometry::startX);
+        for (int i = 0; i < 6; ++i) {
+            result[i] = {"zone_" + std::to_string(i + 1), i,
+                std::remainder(inbound + sector * i, 6.283185307179586),
+                sector * 0.5, i == 0, i == 0 ? "inbound_site" : ""};
+        }
+        return result;
+    }();
+    return zones;
+}
+
+const PlanetLandingZone* planetLandingZone(std::string_view id)
+{
+    for (const auto& zone : planetLandingZones()) if (zone.id == id) return &zone;
+    return nullptr;
+}
+
+bool landingZoneContains(const PlanetLandingZone& zone, double bearing)
+{
+    const double delta = flightWrappedAngleDelta(zone.centerBearing, bearing);
+    // Half-open intervals: a shared edge belongs to exactly one sector.
+    return delta >= -zone.halfAngle && delta < zone.halfAngle;
+}
+
+const PlanetLandingZone* enabledLandingZoneAt(double bearing)
+{
+    for (const auto& zone : planetLandingZones())
+        if (zone.enabled && landingZoneContains(zone, bearing)) return &zone;
+    return nullptr;
+}
+
+double landingZoneSiteBearing(const PlanetLandingZone& zone, double gridX,
+    double padX, double siteWidth)
+{
+    const double span = std::max(1.0, std::max(padX, siteWidth - padX));
+    // Local screen-right is clockwise around the pad's outward surface normal.
+    return zone.centerBearing - std::clamp((gridX - padX) / span, -1.0, 1.0)
+        * zone.halfAngle * 0.5;
+}
+
+CoastPredictionPose stepCoastPrediction(CoastPredictionPose p, double dt)
+{
+    const auto acceleration = [](double x, double y) {
+        const double radius = std::max(0.0001, std::hypot(x, y));
+        const double gravity = flightGravityAcceleration(radius, 0.0);
+        return std::pair<double, double>{-x / radius * gravity, -y / radius * gravity};
+    };
+    const auto [ax, ay] = acceleration(p.x, p.y);
+    const auto [mx, my] = acceleration(p.x + p.vx * dt * 0.5, p.y + p.vy * dt * 0.5);
+    return {p.x + (p.vx + ax * dt * 0.5) * dt,
+        p.y + (p.vy + ay * dt * 0.5) * dt, p.vx + mx * dt, p.vy + my * dt};
+}
+
+OrbitLoopAssessment assessOrbitLoop(const FlightRunState& flight)
+{
+    constexpr double tau = 6.28318530717958647692;
+    CoastPredictionPose pose{flight.positionX, flight.positionY, flight.velocityX, flight.velocityY};
+    const double startRadius = std::hypot(pose.x, pose.y);
+    const double momentum = pose.x * pose.vy - pose.y * pose.vx;
+    if (!std::isfinite(startRadius) || !std::isfinite(momentum) || std::abs(momentum) < 1e-8 ||
+        startRadius <= flight_geometry::bodyRadius || startRadius >= flight_geometry::influenceRadius) return {};
+    const double direction = momentum > 0.0 ? 1.0 : -1.0;
+    double travel = 0.0;
+    bool perfect = true;
+    for (int i = 0; i < 300; ++i) {
+        auto next = stepCoastPrediction(pose, 0.2);
+        const double delta = direction * flightWrappedAngleDelta(std::atan2(pose.y, pose.x), std::atan2(next.y, next.x));
+        if (!std::isfinite(delta) || delta <= 0.0) return {};
+        bool closes = travel + delta >= tau;
+        if (closes) {
+            double low = 0.0, high = 0.2;
+            for (int n = 0; n < 16; ++n) {
+                const double mid = (low + high) * 0.5;
+                const auto p = stepCoastPrediction(pose, mid);
+                const double arc = direction * flightWrappedAngleDelta(std::atan2(pose.y, pose.x), std::atan2(p.y, p.x));
+                if (travel + arc < tau) low = mid; else high = mid;
+            }
+            next = stepCoastPrediction(pose, high);
+        }
+        const double dx = next.x - pose.x, dy = next.y - pose.y;
+        const double t = std::clamp(-(pose.x * dx + pose.y * dy) / std::max(1e-15, dx * dx + dy * dy), 0.0, 1.0);
+        if (std::hypot(pose.x + t * dx, pose.y + t * dy) <= flight_geometry::bodyRadius ||
+            std::hypot(next.x, next.y) >= flight_geometry::influenceRadius) return {};
+        for (const auto& p : {pose, next}) {
+            const auto k = flightKinematics(p.x, p.y, p.vx, p.vy);
+            perfect = perfect && flightOrbitStable(k, flight.orbit.targetRadius, flight.orbit.perfectBand);
+        }
+        if (closes) return {std::hypot(next.x - flight.positionX, next.y - flight.positionY) <=
+            std::max(0.03, startRadius * 0.15), perfect};
+        travel += delta;
+        pose = next;
+    }
+    return {};
+}
+
+double orbitConfirmationProgress(const FlightRunState& flight)
+{
+    return flight.orbit.captured ? 1.0 : std::clamp(flight.orbit.confirmationSeconds / 2.0, 0.0, 1.0);
+}
+
 double flightWrappedAngleDelta(double from, double to)
 {
     constexpr double tau = 6.28318530717958647692;
@@ -123,6 +228,8 @@ FlightScaleProfile flightScaleProfile(const FlightRunState& flight)
 
 void enterLocalLanding(FlightRunState& flight)
 {
+    flight.orbit.confirmationSeconds = 0.0;
+    flight.orbit.loopQualifies = false;
     auto& land = flight.landing;
     land.basisAngle = std::atan2(flight.positionY, flight.positionX);
     const double nx = std::cos(land.basisAngle), ny = std::sin(land.basisAngle);
@@ -156,6 +263,7 @@ void leaveLocalLanding(FlightRunState& flight)
     flight.mode = FlightMode::Orbit;
     flight.phase = flight.orbit.captured ? FlightPhase::Orbiting : FlightPhase::TargetApproach;
     flight.orbit.previousAngle = std::atan2(flight.positionY, flight.positionX);
+    flight.landing.departureActive = false;
 }
 
 void bindLandingSite(FlightRunState& flight, const MiningRunState& mining)
@@ -163,11 +271,12 @@ void bindLandingSite(FlightRunState& flight, const MiningRunState& mining)
     if (flight.landing.siteBound) return;
     flight.landing.siteBound = true;
     flight.landing.siteKey = mining.geologySeed;
-    flight.landing.padGridX = mining.returnZoneX;
-    flight.landing.padGridY = mining.returnZoneY;
+    flight.landing.padGridX = mining.surfaceOriginBound ? mining.surfacePadX : mining.returnZoneX;
+    flight.landing.padGridY = mining.surfaceOriginBound ? mining.surfacePadY : mining.returnZoneY;
 }
 
-std::vector<FlightSurfaceContact> localLandingContacts(const LandingState& land, const MiningRunState& mining)
+std::vector<FlightSurfaceContact> localLandingContacts(const LandingState& land, const MiningRunState& mining,
+    double hullMarginMeters)
 {
     std::vector<FlightSurfaceContact> contacts;
     const double unit = flight_landing::metersPerCell;
@@ -175,8 +284,9 @@ std::vector<FlightSurfaceContact> localLandingContacts(const LandingState& land,
     const double centerX=gridX+0.5;
     const double centerY = land.padGridY-(land.altitude+flight_landing::hullHalfHeight)/unit;
     const double c = std::cos(land.heading), s = std::sin(land.heading);
-    const double halfW = flight_landing::hullHalfWidth/unit;
-    const double halfH = flight_landing::hullHalfHeight/unit;
+    const double margin = std::max(0.0, hullMarginMeters);
+    const double halfW = (flight_landing::hullHalfWidth+margin)/unit;
+    const double halfH = (flight_landing::hullHalfHeight+margin)/unit;
     const double extentX = std::abs(s)*halfW+std::abs(c)*halfH;
     const double extentY = std::abs(c)*halfW+std::abs(s)*halfH;
     const auto solid = [&](int x, int y) {
@@ -221,7 +331,7 @@ std::vector<FlightSurfaceContact> localLandingContacts(const LandingState& land,
             contact.pointX=(px-land.padGridX-0.5)*unit;
             contact.pointY=(land.padGridY-py)*unit;
             contact.gridX=gridX;contact.gridY=y;
-            contact.suitable=ny>0.9 && std::abs(centerY+extentY-y)<0.45 &&
+            contact.suitable=margin==0.0 && ny>=std::cos(flight_landing::stickTiltRadians)-1e-9 && std::abs(centerY+extentY-y)<0.45 &&
                 solid(static_cast<int>(std::floor(centerX-halfW*0.85)),y) &&
                 solid(static_cast<int>(std::floor(centerX+halfW*0.85)),y);
             if (contact.suitable) {

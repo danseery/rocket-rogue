@@ -5387,9 +5387,21 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
              0});
     }
 
-    PlanetaryExpeditionState preservedProgression;
-    copyRunProgression(expedition, preservedProgression);
-    expedition = std::move(preservedProgression);
+    if (state.run.flight.landing.siteCommitted) {
+        expedition.active=false;
+        expedition.cargo=0;
+        expedition.temporaryMaterials={};
+        expedition.temporaryArtifacts.clear();
+        expedition.bankedMiningMaterials={};
+        expedition.bankedMiningArenaValid=false;
+        expedition.pendingMiningSiteDefinitionId.clear();
+        expedition.pendingScenarioId.clear();
+        expedition.pendingScenarioStepId.clear();
+    } else {
+        PlanetaryExpeditionState preservedProgression;
+        copyRunProgression(expedition, preservedProgression);
+        expedition = std::move(preservedProgression);
+    }
     return outcome;
 }
 

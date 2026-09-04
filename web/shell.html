@@ -731,7 +731,15 @@
         fatal: 17,
         scrape: 18,
         rest: 19,
-        bodyimpact: 20
+        bodyimpact: 20,
+        orbital: 21,
+        orbitaldeep: 22,
+        orbitalzone: 23,
+        shaft: 24,
+        underground: 25,
+        undergroundimpact: 26,
+        shaftascent: 27,
+        shaftwall: 28
       };
       const destination = query.get("debug_surface_destination") === "mars" ? 1 : 0;
       const phase = phases[rawValue];
@@ -901,6 +909,8 @@
       startLaunch: () => rrCall("rr_start_launch"),
       launchMove: (steerAxis, throttleAxis) => rrCall("rr_launch_move", [steerAxis, throttleAxis], ["number", "number"]),
       deploySurfaceTeam: () => rrCall("rr_deploy_surface_team"),
+      orbitalWork: (held) => rrCall("rr_orbital_work", [held ? 1 : 0], ["number"]),
+      resumeOrbitalFlight: () => rrCall("rr_resume_orbital_flight"),
       departSurfaceUndeployed: () => rrCall("rr_depart_surface_undeployed"),
       surfaceArrivalActive: () => rrCall("rr_surface_arrival_active", [], [], "number") !== 0,
       returnHome: () => rrCall("rr_return_home"),
@@ -1255,6 +1265,7 @@
     }
 
     function releaseRealtimeInputs() {
+      if (window.rr) rr.orbitalWork(false);
       launchKeys.clear();
       miningKeys.clear();
       releaseMiningDrill();
@@ -1279,7 +1290,11 @@
         return true;
       }
       if (isLaunchActive()) {
-        if (movement.includes(key)) {
+        if (key === " " || key === "enter") {
+          if (!event.repeat) rr.orbitalWork(true);
+        } else if (key === "escape") {
+          rr.resumeOrbitalFlight();
+        } else if (movement.includes(key)) {
           launchKeys.add(key);
           updateLaunchMove();
         } else if (!event.repeat && key === "r") {
@@ -1317,6 +1332,7 @@
 
     function handleRealtimeKeyUp(event) {
       const key = event.key.toLowerCase();
+      if (key === " " || key === "enter") rr.orbitalWork(false);
       if (launchKeys.delete(key)) updateLaunchMove();
       if (miningKeys.delete(key)) updateMiningMove();
       if (isMiningActive() && key === " ") rr.miningKeyboardDrill(false);

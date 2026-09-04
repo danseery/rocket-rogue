@@ -2,6 +2,7 @@
 
 #include "core/GameFormat.h"
 #include "core/FlightImpactPresentation.h"
+#include "core/FlightSystem.h"
 #include "core/GameState.h"
 #include "core/GameUi.h"
 #include "core/LaunchSimulation.h"
@@ -128,17 +129,12 @@ inline std::string launchStatusMessage(
     const FlightActionState& actions)
 {
     if (flight.physicalFlight) {
-        const double orbitPercent = std::clamp(
-            flight.orbit.stableAngularProgress / 6.28318530717958647692,
-            0.0,
-            1.0);
         switch (flight.phase) {
         case FlightPhase::Departure:
         case FlightPhase::Transfer:
             return "FLY THE SHIP — rotate, thrust, and release to coast";
         case FlightPhase::TargetApproach:
-            return "CAPTURE ORBIT — enter the ring with a smooth sideways path • " +
-                display::percent(orbitPercent);
+            return "Shape a loop around the planet. Release thrust to confirm.";
         case FlightPhase::Orbiting:
             return "ORBIT CAPTURED — fly inward through the green descent gate";
         case FlightPhase::Descent:
@@ -350,10 +346,9 @@ inline LaunchPanelPresentation launchPanelPresentation(
             "Orbit",
             flight.orbit.captured
                 ? "CAPTURED"
-                : display::percent(std::clamp(
-                      flight.orbit.stableAngularProgress / 6.28318530717958647692,
-                      0.0,
-                      1.0))));
+                : (!flight.orbit.loopQualifies ? "FIND A LOOP"
+                    : (std::abs(flight.selectedThrottle) > 0.001 ? "RELEASE THRUST"
+                        : "CONFIRMING " + display::percent(orbitConfirmationProgress(flight))))));
     } else if (flightModel.manualControlsEnabled) {
         presentation.metrics.push_back(panelMetric(
             "Throttle",
