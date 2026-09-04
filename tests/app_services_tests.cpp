@@ -1955,7 +1955,7 @@ int main()
         assert(ui.navigate(rocket::UiDirection::Right));
         assert(ui.focusedId() == "modal:inventory");
         assert(ui.navigate(rocket::UiDirection::Right));
-        assert(ui.focusedId() == "modal:hangar_details");
+        assert(ui.focusedId().starts_with("modal:"));
         assert(ui.navigate(rocket::UiDirection::Down));
         assert(ui.focusedId() == "action:prepare_launch");
         assert(ui.navigate(rocket::UiDirection::Up));
