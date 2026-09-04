@@ -3,6 +3,7 @@
 #include "performance/BenchmarkScenarioDriver.h"
 #include "performance/NativeBenchmarkOptions.h"
 #include "platform/sdl/NativeStorage.h"
+#include "platform/sdl/SdlGameAudio.h"
 #include "platform/sdl/NativeTextureSource.h"
 #include "platform/sdl/NativeUiBridge.h"
 #include "platform/sdl/SdlPlatform.h"
@@ -220,6 +221,7 @@ int main(int argumentCount, char** arguments)
         }
 
         const std::filesystem::path runtimeRoot = rocket::SdlPlatform::executableDirectory();
+        rocket::SdlGameAudio audio(runtimeRoot, platform);
         rocket::NativeTextureSource textures(runtimeRoot);
         rocket::NativeUiBridge uiBridge;
         rocket::VulkanGraphicsBackend renderer(
@@ -243,7 +245,8 @@ int main(int argumentCount, char** arguments)
             textures,
             renderer,
             ui,
-            uiBridge
+            uiBridge,
+            &audio
         };
         rocket::GameRunner runner(services);
         if (!runner.initialize()) {

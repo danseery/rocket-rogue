@@ -161,6 +161,8 @@ public:
         miningOperatorRigTethered = snapshot.miningOperatorRigTethered;
         miningEvaDeathActive = snapshot.miningEvaDeathActive;
         miningEvaDeathProgress = snapshot.miningEvaDeathProgress;
+        miningExtractionActive = snapshot.miningExtractionActive;
+        miningExtractionProgress = snapshot.miningExtractionProgress;
         flybyInputY = snapshot.flybyInputY;
         launchCourseOffset = snapshot.launchCourseOffset;
         launchCourseVelocity = snapshot.launchCourseVelocity;
@@ -175,8 +177,11 @@ public:
         straylightApproach = snapshot.straylightApproach;
         launchTravelProgress = snapshot.travelProgress;
         launchReturningHome = snapshot.returningHome;
-        launchLunarImpactActive = snapshot.launchLunarImpactActive;
-        launchLunarImpactElapsed = snapshot.launchLunarImpactElapsed;
+        launchDestructionActive = snapshot.launchDestructionActive;
+        launchDestructionElapsed = snapshot.launchDestructionElapsed;
+        launchDestructionCause = snapshot.launchDestructionCause;
+        launchLandingAuthorized = snapshot.launchLandingAuthorized;
+        launchLandingLocalFrame = snapshot.launchLandingLocalFrame;
         lastLaunchFailureCause = snapshot.lastLaunchFailureCause;
         surfacePushSteps = snapshot.surfacePushSteps;
         surfacePushMaterials = snapshot.surfacePushMaterials;
@@ -248,12 +253,13 @@ public:
     double shipDamage = 0.0;
     double miningHeat = 0.0;
     double miningEvaDeathProgress = 0.0;
+    double miningExtractionProgress = 0.0;
     double flybyInputY = 0.0;
     double launchCourseOffset = 0.0;
     double launchCourseVelocity = 0.0;
     double launchFuelCapacity = 0.0;
     double launchTravelProgress = 0.0;
-    double launchLunarImpactElapsed = 0.0;
+    double launchDestructionElapsed = 0.0;
     double miningViewChecksum = 0.0;
     int launchAsteroidCount = 0;
     int launchDestinationTier = 0;
@@ -276,7 +282,10 @@ public:
     bool launchAsteroidsEnabled = false;
     bool launchFrontierTransfer = false;
     bool launchReturningHome = false;
-    bool launchLunarImpactActive = false;
+    bool launchDestructionActive = false;
+    rocket::LaunchFailureCause launchDestructionCause = rocket::LaunchFailureCause::None;
+    bool launchLandingAuthorized = false;
+    bool launchLandingLocalFrame = false;
     rocket::LaunchFailureCause lastLaunchFailureCause = rocket::LaunchFailureCause::None;
     bool miningViewsObserved = false;
     bool miningViewsValid = false;
@@ -284,6 +293,7 @@ public:
     bool miningSwarmAlert = false;
     bool miningOperatorRigTethered = false;
     bool miningEvaDeathActive = false;
+    bool miningExtractionActive = false;
 };
 
 class FakeUi final : public rocket::IGameUi {
@@ -560,10 +570,26 @@ std::string activeMiningSave(double drillHeat)
     rocket::GameState state = rocket::createNewGame(catalog, 0xA11CEULL);
     state.run.destinationIndex = 2;
     rocket::startSurfaceExpedition(state, catalog);
-    state.run.surfaceExpedition.miningSitePrepared = true;
+    state.run.planetaryExpedition.miningSitePrepared = true;
     assert(rocket::startMiningRun(state, catalog).applied);
     state.run.mining.drillHeat = drillHeat;
     state.run.shipDamage = 37;
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
+std::string readyMiningDepartureSave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0xD3A471ULL);
+    state.run.destinationIndex = 2;
+    rocket::startSurfaceExpedition(state, catalog);
+    state.run.planetaryExpedition.miningSitePrepared = true;
+    assert(rocket::startMiningRun(state, catalog).applied);
+    rocket::MiningRunState& mining = state.run.mining;
+    mining.droneX = mining.returnZoneX;
+    mining.droneY = mining.returnZoneY;
+    mining.temporaryMaterials.rare = 1;
+    assert(rocket::miningAtReturnZone(mining));
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
@@ -583,7 +609,7 @@ rocket::GameState readyJupiterDepartureState(const rocket::ContentCatalog& catal
     state.meta.unlockKeys.push_back(rocket::content::unlock::routeJupiter);
     state.meta.unlockKeys.push_back("outer_transfer_ready");
     rocket::startSurfaceExpedition(state, catalog);
-    state.run.arrivalOps = {true, rocket::content::destination::jupiter};
+    state.run.approach = {true, rocket::content::destination::jupiter};
     state.screen = rocket::Screen::ArrivalOps;
     return state;
 }
@@ -611,8 +637,8 @@ rocket::GameState completedPerfectJupiterDepartureState(const rocket::ContentCat
         catalog,
         rocket::content::scenario::outerTransfer,
         "flyby"));
-    state.run.flyby.completed = true;
-    state.run.flyby.result = rocket::FlybyGrade::Perfect;
+    state.run.approach.flyby.completed = true;
+    state.run.approach.flyby.result = rocket::FlybyGrade::Perfect;
     rocket::syncLaunchConfig(state, catalog);
     return state;
 }
@@ -625,11 +651,11 @@ std::string completedPerfectJupiterDepartureSave()
     // save. Persist the equivalent ReadyToClaim Hangar state; the in-memory
     // RmlUi test below covers the result-screen binding itself.
     rocket::completeFlybyRun(state, catalog);
-    state.run.surfaceExpedition.expeditionLevel = 1;
-    state.run.surfaceExpedition.expeditionExperience = 0.0;
-    state.run.surfaceExpedition.pendingRunUpgradeChoices = 0;
-    state.run.surfaceExpedition.runUpgradeOfferPending = false;
-    state.run.surfaceExpedition.runUpgradeOfferCount = 0;
+    state.run.planetaryExpedition.expeditionLevel = 1;
+    state.run.planetaryExpedition.expeditionExperience = 0.0;
+    state.run.planetaryExpedition.pendingRunUpgradeChoices = 0;
+    state.run.planetaryExpedition.runUpgradeOfferPending = false;
+    state.run.planetaryExpedition.runUpgradeOfferCount = 0;
     state.screen = rocket::Screen::Hangar;
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
@@ -708,7 +734,7 @@ std::string evaDeathMiningSave()
     rocket::GameState state = rocket::createNewGame(catalog, 0xDEA7E7AULL);
     state.run.destinationIndex = 2;
     rocket::startSurfaceExpedition(state, catalog);
-    state.run.surfaceExpedition.miningSitePrepared = true;
+    state.run.planetaryExpedition.miningSitePrepared = true;
     assert(rocket::startMiningRun(state, catalog).applied);
     rocket::MiningRunState& mining = state.run.mining;
     mining.operatorMode = rocket::MiningOperatorMode::Jetpack;
@@ -726,7 +752,7 @@ std::string disabledRigEvaTowSave()
     rocket::GameState state = rocket::createNewGame(catalog, 0xE7A70FULL);
     state.run.destinationIndex = 2;
     rocket::startSurfaceExpedition(state, catalog);
-    state.run.surfaceExpedition.miningSitePrepared = true;
+    state.run.planetaryExpedition.miningSitePrepared = true;
     assert(rocket::startMiningRun(state, catalog).applied);
     rocket::MiningRunState& mining = state.run.mining;
     mining.operatorMode = rocket::MiningOperatorMode::Jetpack;
@@ -749,7 +775,7 @@ std::string levelUpExpeditionSave()
         rocket::expeditionExperienceThreshold(1) + rocket::expeditionExperienceThreshold(2),
         rocket::Screen::SurfaceExpedition);
     assert(award.levelsGained == 2);
-    assert(state.run.surfaceExpedition.pendingRunUpgradeChoices == 2);
+    assert(state.run.planetaryExpedition.pendingRunUpgradeChoices == 2);
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
@@ -774,11 +800,21 @@ std::string freshSurfaceExpeditionSave()
          "common",
          rocket::tuning::research::prospectorCommonOreGoal,
          0}));
+    assert(rocket::recordScenarioEvent(
+        state,
+        catalog,
+        {rocket::ScenarioEventKind::ProtectedObjectiveExtracted,
+         rocket::content::scenario::lunarProspector,
+         "anomaly",
+         rocket::content::destination::moon,
+         rocket::content::miningSite::lunarAnomalyCrevice,
+         1,
+         0}));
     assert(rocket::performScenarioAction(
                state,
                catalog,
                rocket::content::scenario::lunarProspector,
-               "delivery",
+               "anomaly",
                rocket::ScenarioActionKind::ClaimReward)
                .applied);
     state.run.destinationIndex = 2;
@@ -787,9 +823,9 @@ std::string freshSurfaceExpeditionSave()
     rocket::ui::briefings::acknowledge(
         state.meta.acknowledgedActivityBriefingIds,
         rocket::ui::briefings::mining);
-    state.run.surfaceExpedition.pendingRunUpgradeChoices = 0;
-    state.run.surfaceExpedition.runUpgradeOfferPending = false;
-    state.run.surfaceExpedition.runUpgradeOffers = {};
+    state.run.planetaryExpedition.pendingRunUpgradeChoices = 0;
+    state.run.planetaryExpedition.runUpgradeOfferPending = false;
+    state.run.planetaryExpedition.runUpgradeOffers = {};
     state.screen = rocket::Screen::SurfaceExpedition;
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
@@ -851,9 +887,9 @@ std::string readyProspectorClaimSave()
          0}));
     rocket::Random rng(0xF002ULL);
     rocket::generateModuleOffers(state, catalog, rng);
-    state.run.surfaceExpedition.pendingRunUpgradeChoices = 0;
-    state.run.surfaceExpedition.runUpgradeOfferPending = false;
-    state.run.surfaceExpedition.runUpgradeOffers = {};
+    state.run.planetaryExpedition.pendingRunUpgradeChoices = 0;
+    state.run.planetaryExpedition.runUpgradeOfferPending = false;
+    state.run.planetaryExpedition.runUpgradeOffers = {};
     state.screen = rocket::Screen::Upgrade;
     rocket::syncLaunchConfig(state, catalog);
     return rocket::serializeSaveData(rocket::captureSaveData(state));
@@ -890,9 +926,9 @@ std::string readyMarsExpansionClaimSave()
          0}));
     rocket::Random rng(0xF003ULL);
     rocket::generateModuleOffers(state, catalog, rng);
-    state.run.surfaceExpedition.pendingRunUpgradeChoices = 0;
-    state.run.surfaceExpedition.runUpgradeOfferPending = false;
-    state.run.surfaceExpedition.runUpgradeOffers = {};
+    state.run.planetaryExpedition.pendingRunUpgradeChoices = 0;
+    state.run.planetaryExpedition.runUpgradeOfferPending = false;
+    state.run.planetaryExpedition.runUpgradeOffers = {};
     state.screen = rocket::Screen::Upgrade;
     rocket::syncLaunchConfig(state, catalog);
     return rocket::serializeSaveData(rocket::captureSaveData(state));
@@ -964,20 +1000,20 @@ std::string pendingStraylightDiscoverySave()
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
-void jupiterDepartureLaunchActionStartsFlyby()
+void retiredJupiterDepartureBoardCannotResume()
 {
     auto fixture = std::make_unique<AppFixture>();
     fixture->saves.value = readyJupiterDepartureSave();
     assert(fixture->runner.initialize());
     fixture->ui.dispatchAction("continue_game");
     completeTitleLaunch(*fixture);
-    assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::ArrivalOps));
+    assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
 
     fixture->ui.dispatchAction(rocket::ui::actions::scenarioAction(
         rocket::content::scenario::outerTransfer,
         "flyby",
         static_cast<int>(rocket::ScenarioActionKind::BeginActivity)));
-    assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flyby));
+    assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
     fixture->runner.shutdown();
 }
 
@@ -1000,7 +1036,7 @@ void perfectJupiterDepartureClaimQueuesSaturn()
     assertJupiterSaturnRoutePersisted(fixture->saves.value);
 
     fixture->ui.dispatchAction(std::string(rocket::ui::actions::attemptFrontier));
-    assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+    assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
     fixture->host.now += 1.0 / 120.0;
     fixture->runner.frame();
     assert(fixture->renderer.launchDestinationTier == 4);
@@ -1053,7 +1089,7 @@ void straylightApproachRunsAndEndsActOne()
     assert(fixture->ui.html.find("data-rr-action=\"acknowledge_story_briefing\"") != std::string::npos);
 
     fixture->ui.dispatchAction("acknowledge_story_briefing");
-    assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+    assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
     assert(fixture->ui.html.find("REACH THE CONTACT") != std::string::npos);
     assert(fixture->ui.html.find("REACH STRAYLIGHT") == std::string::npos);
     fixture->host.now += 1.0 / 60.0;
@@ -1084,7 +1120,7 @@ void straylightApproachRunsAndEndsActOne()
     fixture->runner.frame();
     assert(!fixture->renderer.launchReturningHome);
     for (int frame = 0;
-         frame < 2000 && fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch);
+         frame < 2000 && fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight);
          ++frame) {
         fixture->host.now += 0.05;
         fixture->runner.frame();
@@ -1114,7 +1150,7 @@ int main()
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #endif
 
-    jupiterDepartureLaunchActionStartsFlyby();
+    retiredJupiterDepartureBoardCannotResume();
 #if !defined(__EMSCRIPTEN__)
     perfectJupiterDepartureClaimQueuesSaturn();
     uranusVectorGenericClaimQueuesNeptune();
@@ -1161,6 +1197,32 @@ int main()
         ui.render();
         const rocket::UiDiagnostics initialDiagnostics = ui.diagnostics();
         assert(initialDiagnostics.documentRebuilds == 1);
+
+        // Preflight Launch is mounted in the scene-overlay host. Semantic
+        // focus must cross that persistent-host boundary instead of retaining
+        // a stale Hangar header target such as Menu.
+        hangar.screen = rocket::Screen::Flight;
+        rocket::PanelRenderContext preflightContext {
+            hangar,
+            catalog,
+            hangarLaunch,
+            hangarLaunch};
+        preflightContext.flightArmed = false;
+        preflightContext.preflightReady = false;
+        preflightContext.firstTimeIntroductionsEnabled = false;
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(preflightContext));
+        ui.refresh();
+        ui.requestFocus("action:start_launch");
+        assert(ui.focusedId() == "action:start_launch");
+        dispatchedAction.clear();
+        assert(ui.activateFocused());
+        assert(dispatchedAction == "start_launch");
+
+        hangar.screen = rocket::Screen::Hangar;
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(hangarContext));
+        ui.refresh();
+        ui.requestFocus("action:prepare_launch");
+        assert(ui.focusedId() == "action:prepare_launch");
 
         // Nested modal expansion keeps each layer's semantic focus. Closing
         // Settings returns to its launcher in the non-dismissible System
@@ -1220,7 +1282,7 @@ int main()
         funding->briefingAcknowledged = true;
         rocket::startArrivalOps(flyby, moonArrival);
         rocket::startArrivalFlybyRun(flyby, catalog);
-        assert(flyby.screen == rocket::Screen::Flyby && !flyby.run.flyby.completed);
+        assert(flyby.screen == rocket::Screen::Flyby && !flyby.run.approach.flyby.completed);
         rocket::Random flybyRng(0xF17B7ULL);
         const rocket::PreparedLaunch flybyLaunch =
             rocket::prepareLaunch(flyby, catalog, flybyRng);
@@ -1288,7 +1350,7 @@ int main()
         };
 
         rocket::GameState launch = rocket::createNewGame(catalog, 0x1A0C4ULL);
-        launch.screen = rocket::Screen::Launch;
+        launch.screen = rocket::Screen::Flight;
         rocket::Random launchRng(0x1A0C4ULL);
         const rocket::PreparedLaunch launchModel =
             rocket::prepareLaunch(launch, catalog, launchRng);
@@ -1303,7 +1365,7 @@ int main()
         rocket::GameState mining = rocket::createNewGame(catalog, 0xA11CEULL);
         mining.run.destinationIndex = 2;
         rocket::startSurfaceExpedition(mining, catalog);
-        mining.run.surfaceExpedition.miningSitePrepared = true;
+        mining.run.planetaryExpedition.miningSitePrepared = true;
         assert(rocket::startMiningRun(mining, catalog).applied);
         rocket::Random miningRng(0xA11CEULL);
         const rocket::PreparedLaunch miningLaunch =
@@ -1320,7 +1382,7 @@ int main()
         ioMining.run.destinationIndex = 3;
         ioMining.meta.furthestTier = 3;
         rocket::startSurfaceExpedition(ioMining, catalog);
-        ioMining.run.surfaceExpedition.miningSitePrepared = true;
+        ioMining.run.planetaryExpedition.miningSitePrepared = true;
         assert(rocket::startMiningRun(ioMining, catalog).applied);
         rocket::Random ioMiningRng(0x10A11ULL);
         const rocket::PreparedLaunch ioMiningLaunch =
@@ -1560,11 +1622,21 @@ int main()
             {rocket::ScenarioEventKind::SafeMaterialDelivered,
              {}, {}, rocket::content::destination::moon, "common",
              rocket::tuning::research::prospectorCommonOreGoal, 0}));
+        assert(rocket::recordScenarioEvent(
+            state,
+            catalog,
+            {rocket::ScenarioEventKind::ProtectedObjectiveExtracted,
+             rocket::content::scenario::lunarProspector,
+             "anomaly",
+             rocket::content::destination::moon,
+             rocket::content::miningSite::lunarAnomalyCrevice,
+             1,
+             0}));
         assert(rocket::performScenarioAction(
                    state,
                    catalog,
                    rocket::content::scenario::lunarProspector,
-                   "delivery",
+                   "anomaly",
                    rocket::ScenarioActionKind::ClaimReward).applied);
         assert(rocket::performScenarioAction(
                    state,
@@ -1580,8 +1652,8 @@ int main()
         rocket::ui::briefings::acknowledge(
             state.meta.acknowledgedActivityBriefingIds,
             rocket::ui::briefings::mining);
-        state.run.surfaceExpedition.miningSitePrepared = true;
-        state.run.surfaceExpedition.depthProspects.push_back({1, 1});
+        state.run.planetaryExpedition.miningSitePrepared = true;
+        state.run.planetaryExpedition.depthProspects.push_back({1, 1});
         state.screen = rocket::Screen::SurfaceExpedition;
         rocket::Random rng(0x5A7FACEULL);
         const rocket::PreparedLaunch launch = rocket::prepareLaunch(state, catalog, rng);
@@ -1818,6 +1890,56 @@ int main()
         ui.shutdown();
     }
 
+    // Thermal runaway uses the same physical destruction beat as a collision
+    // while retaining its own failure cause and debrief copy.
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        fixture.runner.app().debugStartLaunchLesson(2);
+        fixture.controllers.frame.connected = true;
+        fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
+        fixture.controllers.frame.meaningfulInput = true;
+        fixture.controllers.frame.leftY = -1.0;
+
+        for (int frame = 0;
+             frame < 2400 && !fixture.renderer.launchDestructionActive;
+             ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
+        assert(fixture.renderer.launchDestructionActive);
+        assert(fixture.renderer.launchDestructionCause == rocket::LaunchFailureCause::ThermalRunaway);
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::Stamp);
+        assert(fixture.host.hapticCount > 0);
+        assert(fixture.renderer.sceneFadeToBlack == 0.0);
+        const double frozenProgress = fixture.renderer.launchTravelProgress;
+        const double frozenCourse = fixture.renderer.launchCourseOffset;
+
+        fixture.runner.app().launchMove(1.0, -1.0);
+        for (int frame = 0; frame < 20; ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.renderer.launchDestructionActive);
+        assert(fixture.renderer.launchDestructionElapsed >
+            rocket::tuning::session::flightDestructionHoldSeconds);
+        assert(std::abs(fixture.renderer.launchTravelProgress - frozenProgress) < 0.000001);
+        assert(std::abs(fixture.renderer.launchCourseOffset - frozenCourse) < 0.000001);
+
+        for (int frame = 0;
+             frame < 120 &&
+             fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight);
+             ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Results));
+        assert(!fixture.renderer.launchDestructionActive);
+        assert(fixture.renderer.lastLaunchFailureCause == rocket::LaunchFailureCause::ThermalRunaway);
+        fixture.runner.shutdown();
+    }
+
     // Hangar keeps Details in the shared titlebar, with operations and launch
     // below it. Keep both axes explicit so a controller can reach the Details
     // gateway and cannot become stranded in the header on the Steam Deck.
@@ -1865,9 +1987,6 @@ int main()
         // Details and the launch actions below it.
         state.run.credits = 0.0;
         state.run.shipDamage = 0;
-        if (rocket::Astronaut* pilot = rocket::activeAstronaut(state)) {
-            pilot->stress = 0;
-        }
         const rocket::PreparedLaunch unavailableOpsLaunch = rocket::prepareLaunch(state, catalog, rng);
         rocket::PanelRenderContext unavailableOpsContext {
             state,
@@ -2159,6 +2278,112 @@ int main()
         fixture.runner.shutdown();
     }
 
+    // Depart Planet keeps the landed scene alive for the complete bay-close,
+    // ignition, and ascent ritual. Settlement happens once in memory, but the
+    // save is not replaced until the cinematic hands off to the next screen.
+    {
+        AppFixture fixture;
+        fixture.saves.value = readyMiningDepartureSave();
+        const std::string preDepartureSave = fixture.saves.value;
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
+        assert(fixture.ui.html.find("data-rr-action=\"mining_depart\"") != std::string::npos);
+        const int storesBeforeDeparture = fixture.saves.storeCount;
+
+        fixture.ui.dispatchAction("mining_depart");
+        fixture.host.now += 1.0 / 120.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
+        assert(fixture.renderer.miningExtractionActive);
+        assert(fixture.renderer.miningExtractionProgress > 0.0);
+        assert(fixture.ui.html.find("data-mining-extraction=\"1\"") != std::string::npos);
+        assert(fixture.ui.html.find("DEPARTING") != std::string::npos);
+        assert(fixture.saves.storeCount == storesBeforeDeparture);
+        assert(fixture.saves.value == preDepartureSave);
+
+        // Repeated activation during the ritual is inert and cannot bank the
+        // recovered Rare Ore a second time.
+        fixture.ui.dispatchAction("mining_depart");
+        assert(fixture.saves.storeCount == storesBeforeDeparture);
+        assert(fixture.saves.value == preDepartureSave);
+
+        for (int frame = 0; frame < 32; ++frame) {
+            fixture.host.now += 0.10;
+            fixture.runner.frame();
+        }
+        assert(fixture.renderer.miningExtractionActive);
+        assert(fixture.renderer.miningExtractionProgress > 0.90);
+        assert(fixture.renderer.miningExtractionProgress < 1.0);
+        assert(fixture.saves.value == preDepartureSave);
+
+        for (int frame = 0; frame < 4 && fixture.renderer.sceneFadeToBlack <= 0.0; ++frame) {
+            fixture.host.now += 0.10;
+            fixture.runner.frame();
+        }
+        assert(fixture.renderer.miningExtractionActive);
+        assert(fixture.renderer.miningExtractionProgress == 1.0);
+        assert(fixture.renderer.sceneFadeToBlack > 0.0);
+        assert(fixture.saves.value == preDepartureSave);
+
+        advanceSceneHandoff(fixture);
+        assert(!fixture.renderer.miningExtractionActive);
+        assert(fixture.runner.app().currentScreen() != static_cast<int>(rocket::Screen::Mining));
+        assert(fixture.runner.app().currentScreen() != static_cast<int>(rocket::Screen::SurfaceExpedition));
+        assert(fixture.saves.storeCount == storesBeforeDeparture + 1);
+        const std::optional<rocket::SaveData> departed = rocket::deserializeSaveData(fixture.saves.value);
+        assert(departed.has_value());
+        assert(departed->materials.rare == 1);
+        assert(!departed->planetaryExpedition.active);
+        assert(!departed->mining.active);
+        fixture.runner.shutdown();
+    }
+
+    // Planet arrival is a short automatic ceremony, not another results
+    // modal. It owns the impact haptic and presentation for two seconds, then
+    // hands control to the prepared Approach exactly once.
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        fixture.controllers.frame.connected = true;
+        fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
+        fixture.controllers.frame.meaningfulInput = true;
+        fixture.host.now += 1.0 / 120.0;
+        fixture.runner.frame();
+        const int storesBeforeArrival = fixture.saves.storeCount;
+        const int hapticsBeforeArrival = fixture.host.hapticCount;
+        fixture.runner.app().debugShowArrivalCelebration();
+        fixture.host.now += 1.0 / 120.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::ArrivalFanfare));
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::Stamp);
+        assert(fixture.ui.html.find("data-arrival-fanfare=\"1\"") != std::string::npos);
+        assert(fixture.ui.html.find("ARRIVAL CONFIRMED") != std::string::npos);
+        assert(fixture.ui.html.find("data-rr-action=") == std::string::npos);
+        assert(fixture.host.hapticCount == hapticsBeforeArrival + 1);
+        assert(fixture.saves.storeCount == storesBeforeArrival);
+
+        // The retired skip action is inert; no key/button can turn this beat
+        // into either a prompt or an early-dismiss path.
+        fixture.ui.dispatchAction("skip_arrival_fanfare");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::ArrivalFanfare));
+
+        for (int frame = 0; frame < 119; ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::ArrivalFanfare));
+
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
+        assert(fixture.runner.app().inputContext() != rocket::InputContext::Stamp);
+        assert(fixture.ui.html.find("data-arrival-fanfare=\"1\"") == std::string::npos);
+        assert(fixture.saves.storeCount == storesBeforeArrival);
+        fixture.runner.shutdown();
+    }
+
     // EVA death gets a presentation-only impact beat and camera blackout
     // before the unchanged mining-failure modal becomes actionable.
     {
@@ -2244,7 +2469,7 @@ int main()
 
         for (int lessonIndex = 0; lessonIndex < static_cast<int>(expected.size()); ++lessonIndex) {
             fixture.runner.app().debugStartLaunchLesson(lessonIndex);
-            assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+            assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
             assert(fixture.runner.app().inputContext() == rocket::InputContext::Launch);
             fixture.host.now += 1.0 / 120.0;
             fixture.runner.frame();
@@ -2296,7 +2521,8 @@ int main()
         fixture.runner.app().prepareForLaunch();
         fixture.host.now += 1.0 / 120.0;
         fixture.runner.frame();
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
+        assert(fixture.ui.requestedFocusId == "action:start_launch");
         assert(fixture.renderer.launchFrontierTransfer);
         assert(fixture.renderer.launchDestinationTier == 1);
         fixture.runner.shutdown();
@@ -2319,7 +2545,7 @@ int main()
     }
 
     // Level Up cards commit directly, then retain the chosen border for the
-    // short resolve beat before returning to Surface Ops.
+    // short resolve beat before returning to the continuous Mining activity.
     {
         AppFixture fixture;
         assert(fixture.runner.initialize());
@@ -2335,348 +2561,7 @@ int main()
         fixture.ui.dispatchAction("surface_upgrade:1");
         fixture.host.now += 0.11;
         fixture.runner.frame();
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-        fixture.runner.shutdown();
-    }
-
-    // Surface minigame Confirm remains useful after D-pad navigation even if
-    // the UI bridge temporarily has no valid focused control.
-    for (const bool scanScreen : {true, false}) {
-        AppFixture fixture;
-        assert(fixture.runner.initialize());
-        if (scanScreen) {
-            fixture.runner.app().debugStartSurfaceScan();
-        } else {
-            fixture.runner.app().debugStartSurfacePush();
-        }
-        fixture.host.now += 1.0 / 60.0;
-        fixture.runner.frame();
-        const std::string initialPanel = fixture.ui.html;
-
-        fixture.ui.activateFocusedResult = false;
-        fixture.controllers.frame.connected = true;
-        fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
-        fixture.controllers.frame.meaningfulInput = true;
-        fixture.controllers.frame.navigation = rocket::UiDirection::Right;
-        fixture.controllers.frame.pressed.set(static_cast<std::size_t>(rocket::ControllerButton::DpadRight));
-        fixture.host.now += 1.0 / 60.0;
-        fixture.runner.frame();
-
-        fixture.controllers.frame.navigation.reset();
-        fixture.controllers.frame.pressed.set(static_cast<std::size_t>(rocket::ControllerButton::South));
-        fixture.host.now += 1.0 / 60.0;
-        fixture.runner.frame();
-        fixture.host.now += 1.0 / 60.0;
-        fixture.runner.frame();
-
-        assert(fixture.ui.activateFocusedCount == 1);
-        assert(fixture.ui.html != initialPanel);
-        fixture.runner.shutdown();
-    }
-
-    // Push Deeper's player-facing renderer must receive both the banked scan
-    // forecast and the confirmed markers produced by the real application
-    // state. Scene-only fixtures cannot catch snapshot handoff regressions.
-    {
-        AppFixture fixture;
-        assert(fixture.runner.initialize());
-        fixture.runner.app().debugStartSurfacePush();
-        fixture.host.now += 1.0 / 60.0;
-        fixture.runner.frame();
-        assert(fixture.renderer.screen == rocket::Screen::SurfacePush);
-        assert(std::find(
-            fixture.renderer.surfacePushForecastMarkers.begin(),
-            fixture.renderer.surfacePushForecastMarkers.end(),
-            rocket::MiningCellMaterial::ArtifactCache) !=
-            fixture.renderer.surfacePushForecastMarkers.end());
-
-        fixture.ui.dispatchAction("surface_push_step");
-        fixture.host.now += 1.0 / 60.0;
-        fixture.runner.frame();
-        assert(fixture.renderer.surfacePushSteps == 1);
-        assert(fixture.renderer.surfacePushMaterials.common >= 1);
-        assert(fixture.renderer.surfacePushMaterials.rare >= 1);
-        assert(fixture.renderer.surfacePushRewardMarkers.size() >= 3);
-        assert(fixture.renderer.surfacePushRewardDepthOffsets.size() ==
-            fixture.renderer.surfacePushRewardMarkers.size());
-        assert(std::all_of(
-            fixture.renderer.surfacePushRewardDepthOffsets.begin(),
-            fixture.renderer.surfacePushRewardDepthOffsets.end(),
-            [](int depth) { return depth == 1; }));
-        fixture.runner.shutdown();
-    }
-
-    // New Game must atomically replace any previous valid save with a fresh,
-    // immediately resumable initial state.
-    {
-        AppFixture fixture;
-        fixture.saves.value = activeMiningSave(0.65);
-        fixture.preferences.value.debugToolsEnabled = true;
-        assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("new_game");
-        completeTitleLaunch(fixture);
-        assert(!fixture.renderer.titleScreen);
-        assert(fixture.renderer.screen == rocket::Screen::StoryBriefing);
-        assert(!fixture.preferences.value.debugToolsEnabled);
-        assert(fixture.bridge.preferenceUpdateCount == 1);
-        assert(!fixture.bridge.lastPreferences.debugToolsEnabled);
-        assert(fixture.saves.storeCount == 1);
-        assert(fixture.saves.clearCount == 0);
-        const std::optional<rocket::SaveData> fresh = rocket::deserializeSaveData(fixture.saves.value);
-        assert(fresh.has_value());
-        assert(fresh->screen == rocket::Screen::StoryBriefing);
-        assert(fresh->storyBriefing.pending == rocket::StoryBriefingId::CampaignIntroduction);
-        assert(fresh->shipDamage == 0);
-        fixture.runner.shutdown();
-    }
-
-    // Starting over also returns the application to its player-facing mode:
-    // debug tooling must not survive a reset into a fresh campaign.
-    {
-        AppFixture fixture;
-        fixture.preferences.value.debugToolsEnabled = true;
-        assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("reset_save");
-        assert(!fixture.preferences.value.debugToolsEnabled);
-        assert(fixture.bridge.preferenceUpdateCount == 1);
-        assert(!fixture.bridge.lastPreferences.debugToolsEnabled);
-        fixture.runner.shutdown();
-    }
-
-    // The first-flight modal's CTA must perform the original action and save
-    // its acknowledgment before entering the non-restorable launch session.
-    {
-        AppFixture fixture;
-        assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("new_game");
-        completeTitleLaunch(fixture);
-        fixture.ui.dispatchAction("acknowledge_story_briefing");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
-        assert(fixture.ui.html.find("data-ui-modal=\"launch_introduction\"") != std::string::npos);
-
-        const std::optional<rocket::SaveData> beforeLaunch = rocket::deserializeSaveData(fixture.saves.value);
-        assert(beforeLaunch.has_value());
-        assert(!rocket::ui::briefings::acknowledged(beforeLaunch->acknowledgedActivityBriefingIds, rocket::ui::briefings::launch));
-
-        fixture.ui.dispatchAction("prepare_launch");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
-        const std::optional<rocket::SaveData> afterLaunch = rocket::deserializeSaveData(fixture.saves.value);
-        assert(afterLaunch.has_value());
-        assert(afterLaunch->screen == rocket::Screen::Hangar);
-        assert(rocket::ui::briefings::acknowledged(afterLaunch->acknowledgedActivityBriefingIds, rocket::ui::briefings::launch));
-        fixture.runner.shutdown();
-    }
-
-    // Surface Ops teaches its shared sequence once, even if optional activity
-    // introductions are disabled. Disabled Dig and Mine actions must remain
-    // inert to direct UI/controller dispatch until their banked prerequisites
-    // are complete.
-    {
-        AppFixture fixture;
-        fixture.saves.value = firstSurfaceTutorialSave();
-        assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("continue_game");
-        completeTitleLaunch(fixture);
-        fixture.runner.app().setFirstTimeIntroductionsEnabled(false);
-        fixture.runner.frame();
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-
-        fixture.ui.dispatchAction("push_surface");
-        fixture.ui.dispatchAction("mine_surface");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-
-        fixture.ui.dispatchAction("survey_surface");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceScan));
-        std::optional<rocket::SaveData> saved = rocket::deserializeSaveData(fixture.saves.value);
-        assert(saved.has_value());
-        assert(rocket::ui::briefings::acknowledged(
-            saved->acknowledgedActivityBriefingIds,
-            rocket::ui::briefings::surfaceSurveyIntroduction));
-
-        fixture.ui.dispatchAction("surface_scan_pulse");
-        fixture.ui.dispatchAction("surface_scan_pulse");
-        fixture.ui.dispatchAction("surface_scan_bank");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-        fixture.runner.frame();
-        saved = rocket::deserializeSaveData(fixture.saves.value);
-        assert(saved.has_value());
-        assert(rocket::ui::briefings::acknowledged(
-            saved->acknowledgedActivityBriefingIds,
-            rocket::ui::briefings::surfaceSurveyComplete));
-
-        fixture.ui.dispatchAction("push_surface");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfacePush));
-        saved = rocket::deserializeSaveData(fixture.saves.value);
-        assert(saved.has_value());
-        assert(rocket::ui::briefings::acknowledged(
-            saved->acknowledgedActivityBriefingIds,
-            rocket::ui::briefings::surfaceDigIntroduction));
-
-        fixture.ui.dispatchAction("surface_push_step");
-        fixture.ui.dispatchAction("surface_push_bank");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-        fixture.runner.frame();
-        saved = rocket::deserializeSaveData(fixture.saves.value);
-        assert(saved.has_value());
-        assert(rocket::ui::briefings::acknowledged(
-            saved->acknowledgedActivityBriefingIds,
-            rocket::ui::briefings::surfaceDigComplete));
-
-        fixture.runner.shutdown();
-    }
-
-    // Mandatory campaign mining cannot start until its explicit story
-    // briefing is accepted. The optional Help preference is not involved.
-    {
-        const auto savedScenario = [](const rocket::SaveData& save, std::string_view id) {
-            const auto found = std::find_if(
-                save.scenarios.begin(),
-                save.scenarios.end(),
-                [id](const rocket::ScenarioInstance& instance) { return instance.id == id; });
-            return found == save.scenarios.end() ? nullptr : &*found;
-        };
-        AppFixture fixture;
-        fixture.saves.value = freshSurfaceExpeditionSave();
-        assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("continue_game");
-        completeTitleLaunch(fixture);
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-        assert(fixture.ui.html.find("data-modal=\"scenario_mars_bay_expansion_briefing\" data-auto-modal=\"1\"") != std::string::npos);
-        assert(fixture.ui.html.find("data-scenario-id=\"mars_bay_expansion\" data-scenario-step-id=\"briefing\"") != std::string::npos);
-        assert(fixture.ui.html.find("data-ui-modal=\"mining_introduction\"") == std::string::npos);
-
-        const std::optional<rocket::SaveData> beforeMining = rocket::deserializeSaveData(fixture.saves.value);
-        assert(beforeMining.has_value());
-        const rocket::ScenarioInstance* beforeMars = savedScenario(
-            *beforeMining,
-            rocket::content::scenario::marsBayExpansion);
-        const rocket::ScenarioStepProgress* beforeBriefing = beforeMars == nullptr
-            ? nullptr
-            : rocket::findScenarioStepProgress(*beforeMars, "briefing");
-        assert(beforeBriefing != nullptr && !beforeBriefing->briefingAcknowledged);
-
-        fixture.ui.dispatchAction("mine_surface");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-
-        fixture.ui.dispatchAction(
-            std::string(rocket::ui::actions::scenarioActionPrefix) +
-            rocket::content::scenario::marsBayExpansion + "|briefing|" +
-            std::to_string(static_cast<int>(rocket::ScenarioActionKind::AcknowledgeBriefing)));
-        const std::optional<rocket::SaveData> acceptedMining = rocket::deserializeSaveData(fixture.saves.value);
-        assert(acceptedMining.has_value());
-        const rocket::ScenarioInstance* acceptedMars = savedScenario(
-            *acceptedMining,
-            rocket::content::scenario::marsBayExpansion);
-        const rocket::ScenarioStepProgress* acceptedBriefing = acceptedMars == nullptr
-            ? nullptr
-            : rocket::findScenarioStepProgress(*acceptedMars, "briefing");
-        assert(acceptedBriefing != nullptr && acceptedBriefing->briefingAcknowledged);
-
-        fixture.ui.dispatchAction("mine_surface");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-        fixture.host.now += 1.0 / 120.0;
-        fixture.runner.frame();
-        assert(fixture.renderer.sceneFadeToBlack > 0.0);
-        advanceSceneHandoff(fixture);
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
-        assert(fixture.renderer.sceneFadeToBlack > 0.0);
-        const std::optional<rocket::SaveData> afterMining = rocket::deserializeSaveData(fixture.saves.value);
-        assert(afterMining.has_value());
-        assert(rocket::ui::briefings::acknowledged(afterMining->acknowledgedActivityBriefingIds, rocket::ui::briefings::mining));
-
-        fixture.host.now += 0.25;
-        fixture.runner.frame();
-        fixture.ui.dispatchAction("mining_abort");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
-        fixture.host.now += 1.0 / 120.0;
-        fixture.runner.frame();
-        assert(fixture.renderer.sceneFadeToBlack > 0.0);
-        advanceSceneHandoff(fixture);
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-        fixture.runner.shutdown();
-    }
-
-    // Drone Ops is a Surface Ops sub-screen: loadout edits persist while it is
-    // open, and both its explicit Done action and controller Cancel return to
-    // the still-active Surface Expedition.
-    {
-        AppFixture fixture;
-        fixture.saves.value = activeDroneBaySurfaceExpeditionSave();
-        assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("continue_game");
-        completeTitleLaunch(fixture);
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-
-        fixture.ui.dispatchAction("drone_ops");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::DroneOps));
-        std::optional<rocket::SaveData> saved = rocket::deserializeSaveData(fixture.saves.value);
-        assert(saved.has_value());
-        assert(saved->screen == rocket::Screen::DroneOps);
-        assert(saved->surfaceExpedition.active);
-
-        fixture.ui.dispatchAction("equip_drone:0");
-        saved = rocket::deserializeSaveData(fixture.saves.value);
-        assert(saved.has_value());
-        assert(std::find(
-            saved->equippedDroneIds.begin(),
-            saved->equippedDroneIds.end(),
-            rocket::content::drone::miningDrone) != saved->equippedDroneIds.end());
-
-        fixture.ui.dispatchAction("back_to_surface_ops");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-        saved = rocket::deserializeSaveData(fixture.saves.value);
-        assert(saved.has_value());
-        assert(saved->screen == rocket::Screen::SurfaceExpedition);
-        assert(saved->surfaceExpedition.active);
-        assert(std::find(
-            saved->equippedDroneIds.begin(),
-            saved->equippedDroneIds.end(),
-            rocket::content::drone::miningDrone) != saved->equippedDroneIds.end());
-
-        fixture.ui.dispatchAction("drone_ops");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::DroneOps));
-        fixture.controllers.frame.connected = true;
-        fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
-        fixture.controllers.frame.meaningfulInput = true;
-        fixture.controllers.frame.pressed.set(static_cast<std::size_t>(rocket::ControllerButton::East));
-        fixture.host.now += 1.0 / 60.0;
-        fixture.runner.frame();
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::SurfaceExpedition));
-        saved = rocket::deserializeSaveData(fixture.saves.value);
-        assert(saved.has_value());
-        assert(saved->screen == rocket::Screen::SurfaceExpedition);
-        assert(saved->surfaceExpedition.active);
-        assert(std::find(
-            saved->equippedDroneIds.begin(),
-            saved->equippedDroneIds.end(),
-            rocket::content::drone::miningDrone) != saved->equippedDroneIds.end());
-        fixture.runner.shutdown();
-    }
-
-    // Completing Prospector onboarding hands the existing earned refit to the
-    // single Fuel Tanks II lesson instead of returning to a dead-end Hangar.
-    {
-        AppFixture fixture;
-        fixture.saves.value = readyProspectorClaimSave();
-        assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("continue_game");
-        completeTitleLaunch(fixture);
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
-
-        fixture.ui.dispatchAction(
-            std::string(rocket::ui::actions::scenarioActionPrefix) +
-            rocket::content::scenario::lunarProspector + "|delivery|" +
-            std::to_string(static_cast<int>(rocket::ScenarioActionKind::ClaimReward)));
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::DroneOps));
-
-        fixture.ui.dispatchAction("back_to_surface_ops");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
-        const std::optional<rocket::SaveData> saved = rocket::deserializeSaveData(fixture.saves.value);
-        assert(saved.has_value());
-        assert(saved->refitEntitled);
-        assert(!saved->offerModuleIds.empty());
-        assert(saved->offerModuleIds.front() == rocket::content::module::fuelTanks2);
-        assert(saved->offerModuleIds.size() == 1);
         fixture.runner.shutdown();
     }
 
@@ -2754,7 +2639,7 @@ int main()
         assert(fixture.ui.html.find("+35% flight instability") != std::string::npos);
 
         fixture.ui.dispatchAction(std::string(rocket::ui::actions::continueJupiterSlingshot));
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
         fixture.host.now += 1.0 / 120.0;
         fixture.runner.frame();
         assert(fixture.renderer.launchDestinationTier == 3);
@@ -2794,26 +2679,28 @@ int main()
         AppFixture fixture;
         fixture.preferences.value.controller.swapConfirmCancel = true;
         assert(fixture.runner.initialize());
-        fixture.runner.app().debugStartFlyby();
+        fixture.runner.app().debugStartMining();
         fixture.host.now += 1.0 / 60.0;
         fixture.runner.frame();
-        assert(fixture.runner.app().inputContext() == rocket::InputContext::FlybyActive);
-        assert(std::abs(fixture.renderer.flybyInputY) < 0.000001);
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::MiningActive);
 
         fixture.ui.openModal("settings");
+        // Give the app one neutral frame to observe the externally opened UI
+        // modal and fence any realtime input before taking the state snapshot.
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        const std::uint64_t stateBeforeModalInput = fixture.runner.app().deterministicStateHash();
         fixture.controllers.frame.connected = true;
         fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
         fixture.controllers.frame.meaningfulInput = true;
         fixture.controllers.frame.leftY = 0.85;
         fixture.controllers.frame.pressed.set(static_cast<std::size_t>(rocket::ControllerButton::East));
-        const std::uint64_t stateBeforeModalInput = fixture.runner.app().deterministicStateHash();
         fixture.host.now += 1.0 / 60.0;
         fixture.runner.frame();
         assert(fixture.runner.app().inputContext() == rocket::InputContext::Paused);
         assert(fixture.ui.activateFocusedCount == 1);
         assert(fixture.ui.cancelCount == 0);
         assert(fixture.ui.modalOpenValue);
-        assert(std::abs(fixture.renderer.flybyInputY) < 0.000001);
         assert(fixture.runner.app().deterministicStateHash() == stateBeforeModalInput);
 
         const int modalOpenCountBeforeShortcut = fixture.ui.openModalCount;
@@ -2837,7 +2724,7 @@ int main()
         fixture.controllers.frame.meaningfulInput = false;
         fixture.host.now += 1.0 / 60.0;
         fixture.runner.frame();
-        assert(fixture.runner.app().inputContext() == rocket::InputContext::FlybyActive);
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::MiningActive);
         assert(fixture.ui.cancelCount == 1);
         fixture.runner.shutdown();
     }
@@ -2864,34 +2751,14 @@ int main()
         fixture.runner.shutdown();
     }
 
-    // Returning to Earth resolves into a non-dismissible launch outcome modal.
-    // D-pad navigation may remain active inside that modal, but it must not
-    // advance the result-scene animation underneath the focused Continue action.
+    // A blocking result modal keeps controller focus without advancing the
+    // result-scene animation underneath the focused Continue action.
     {
         AppFixture fixture;
         assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("new_game");
-        completeTitleLaunch(fixture);
-        fixture.ui.dispatchAction("acknowledge_story_briefing");
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
-
-        fixture.runner.app().prepareForLaunch();
-        fixture.runner.app().startLaunch();
-        for (int frame = 0;
-             frame < 600 && fixture.runner.app().inputContext() != rocket::InputContext::Launch;
-             ++frame) {
-            fixture.host.now += 1.0 / 60.0;
-            fixture.runner.frame();
-        }
-        assert(fixture.runner.app().inputContext() == rocket::InputContext::Launch);
-
-        fixture.runner.app().returnHome();
-        for (int frame = 0;
-             frame < 600 && fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch);
-             ++frame) {
-            fixture.host.now += 1.0 / 60.0;
-            fixture.runner.frame();
-        }
+        fixture.runner.app().debugShowResults();
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Results));
         assert(fixture.ui.html.find("<template data-modal=\"launch_outcome\" data-auto-modal=\"1\"") != std::string::npos);
         assert(fixture.ui.html.find("data-rr-action=\"next\"") != std::string::npos);
@@ -2902,7 +2769,6 @@ int main()
                 return modal.id == rocket::ui::modals::launchOutcome;
             });
         assert(launchOutcomeModal != fixture.ui.presentation.modals.end());
-        assert(launchOutcomeModal->tone == rocket::ModalTone::Negative);
 
         fixture.ui.openModal(std::string(rocket::ui::modals::launchOutcome));
         fixture.ui.focusedIdValue = "action:next";
@@ -2936,7 +2802,7 @@ int main()
         fixture.controllers.frame.meaningfulInput = true;
 
         for (int frame = 0;
-             frame < 1500 && !fixture.renderer.launchLunarImpactActive;
+             frame < 1500 && !fixture.renderer.launchDestructionActive;
              ++frame) {
             const double steer = std::clamp(
                 -fixture.renderer.launchCourseOffset * 5.5 -
@@ -2947,8 +2813,13 @@ int main()
             fixture.host.now += 1.0 / 60.0;
             fixture.runner.frame();
         }
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
-        assert(fixture.renderer.launchLunarImpactActive);
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
+        assert(fixture.renderer.launchDestructionActive);
+        assert(fixture.renderer.launchDestructionCause == rocket::LaunchFailureCause::LunarImpact);
+        assert(!fixture.renderer.launchLandingAuthorized);
+        assert(!fixture.renderer.launchLandingLocalFrame);
+        assert(fixture.renderer.sceneFadeToBlack == 0.0);
+        assert(fixture.ui.presentation.contentMarkup.find("rr-hud-launch-status") != std::string::npos);
         assert(fixture.runner.app().inputContext() == rocket::InputContext::Stamp);
         assert(fixture.host.hapticCount > 0);
         const double collisionProgress = fixture.renderer.launchTravelProgress;
@@ -2961,30 +2832,30 @@ int main()
             fixture.host.now += 1.0 / 60.0;
             fixture.runner.frame();
         }
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
-        assert(fixture.renderer.launchLunarImpactActive);
-        assert(fixture.renderer.launchLunarImpactElapsed > rocket::tuning::session::lunarImpactHoldSeconds);
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
+        assert(fixture.renderer.launchDestructionActive);
+        assert(fixture.renderer.launchDestructionElapsed > rocket::tuning::session::flightDestructionHoldSeconds);
         assert(std::abs(fixture.renderer.launchTravelProgress - collisionProgress) < 0.000001);
         assert(std::abs(fixture.renderer.launchCourseOffset - collisionCourse) < 0.000001);
 
         for (int frame = 0;
              frame < 120 &&
-             fixture.renderer.launchLunarImpactElapsed <
-                 rocket::tuning::session::lunarImpactSequenceSeconds - 2.0 / 60.0;
+             fixture.renderer.launchDestructionElapsed <
+                 rocket::tuning::session::flightDestructionSequenceSeconds - 2.0 / 60.0;
              ++frame) {
             fixture.host.now += 1.0 / 60.0;
             fixture.runner.frame();
         }
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch));
-        assert(fixture.renderer.launchLunarImpactActive);
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
+        assert(fixture.renderer.launchDestructionActive);
         for (int frame = 0;
-             frame < 5 && fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Launch);
+             frame < 5 && fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight);
              ++frame) {
             fixture.host.now += 1.0 / 60.0;
             fixture.runner.frame();
         }
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Results));
-        assert(!fixture.renderer.launchLunarImpactActive);
+        assert(!fixture.renderer.launchDestructionActive);
         assert(fixture.renderer.lastLaunchFailureCause == rocket::LaunchFailureCause::LunarImpact);
         const auto lunarImpactModal = std::find_if(
             fixture.ui.presentation.modals.begin(),
@@ -3068,7 +2939,7 @@ int main()
     assert(renderer.preferenceUpdateCount == 3);
     assert(renderer.preferences.frameLimitMode == rocket::FrameLimitMode::Battery30);
 
-    runner.app().debugStartFlyby();
+    runner.app().debugStartMining();
     host.now += 1.0 / 60.0;
     runner.frame();
     assert(!renderer.titleScreen);
@@ -3113,8 +2984,8 @@ int main()
 
         const std::optional<rocket::SaveData> persisted = rocket::deserializeSaveData(levelUpFixture.saves.value);
         assert(persisted.has_value());
-        assert(persisted->surfaceExpedition.runUpgradeOfferPending);
-        assert(persisted->surfaceExpedition.pendingRunUpgradeChoices == 2);
+        assert(persisted->planetaryExpedition.runUpgradeOfferPending);
+        assert(persisted->planetaryExpedition.pendingRunUpgradeChoices == 2);
 
         const auto advanceLevelUp = [&](double seconds) {
             const int frames = static_cast<int>(std::ceil(seconds * 60.0));
@@ -3139,44 +3010,31 @@ int main()
         levelUpFixture.runner.shutdown();
     }
 
-    // Every incompatible payload is discarded at boot and immediately
-    // replaced with a fresh v16 campaign. The rejected campaign is never a
-    // Continue target.
+    // Incompatible payloads remain untouched until the player explicitly
+    // chooses New Campaign. They are never exposed as a Continue target.
     const auto requireFreshCampaignBoundary = [](std::string payload) {
         AppFixture fixture;
         fixture.saves.value = std::move(payload);
+        const std::string original = fixture.saves.value;
         assert(fixture.runner.initialize());
-        assert(fixture.saves.clearCount == 1);
-        assert(fixture.saves.storeCount == 1);
-        const std::optional<rocket::SaveData> replacement =
-            rocket::deserializeSaveData(fixture.saves.value);
-        assert(replacement.has_value() && replacement->version == rocket::save_schema::currentVersion);
+        assert(fixture.saves.clearCount == 0);
+        assert(fixture.saves.storeCount == 0);
+        assert(fixture.saves.value == original);
         assert(fixture.ui.html.find("data-rr-action=\"continue_game\"") == std::string::npos);
-        assert(fixture.ui.html.find("Previous campaign cleared for this revision.") != std::string::npos);
+        assert(fixture.ui.html.find("CAMPAIGN UPDATE \xC2\xB7 A new campaign is required.") != std::string::npos);
         fixture.runner.shutdown();
     };
-    std::string v15Save = levelUpExpeditionSave();
-    const std::size_t versionOffset = v15Save.find("version=16");
+    std::string v17Save = levelUpExpeditionSave();
+    const std::size_t versionOffset = v17Save.find("version=19");
     assert(versionOffset != std::string::npos);
-    v15Save.replace(versionOffset, 10, "version=15");
-    requireFreshCampaignBoundary(v15Save);
+    v17Save.replace(versionOffset, 10, "version=17");
+    requireFreshCampaignBoundary(v17Save);
     requireFreshCampaignBoundary("RR_SAVE_V0\ncredits=1\n");
     std::string futureSave = levelUpExpeditionSave();
-    const std::size_t futureVersionOffset = futureSave.find("version=16");
+    const std::size_t futureVersionOffset = futureSave.find("version=19");
     assert(futureVersionOffset != std::string::npos);
-    futureSave.replace(futureVersionOffset, 10, "version=17");
+    futureSave.replace(futureVersionOffset, 10, "version=20");
     requireFreshCampaignBoundary(futureSave);
-
-    // A failed clear must still try to overwrite the incompatible payload.
-    {
-        AppFixture fixture;
-        fixture.saves.value = "RR_SAVE_V0\ncredits=1\n";
-        fixture.saves.failClear = true;
-        assert(fixture.runner.initialize());
-        assert(fixture.saves.clearCount == 1 && fixture.saves.storeCount == 1);
-        assert(rocket::deserializeSaveData(fixture.saves.value).has_value());
-        fixture.runner.shutdown();
-    }
 
     assert(host.viewportMetrics().logicalWidth == 1280);
     assert(host.viewportMetrics().drawableWidth == 2560);

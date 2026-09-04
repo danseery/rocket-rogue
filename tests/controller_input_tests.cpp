@@ -438,10 +438,8 @@ void controllerUiFocusKeepsAutonomousLaunchMoving()
         "a visible launch-outcome modal must freeze its results scene even before a separate pause reason is assigned");
     require(!controllerPauseStopsSimulation(PauseReason::ControllerUiFocus, InputContext::Launch, false),
         "D-pad flight-control focus must not silently freeze an autonomous launch");
-    require(controllerPauseStopsSimulation(PauseReason::ControllerUiFocus, InputContext::FlybyActive, false)
-            && controllerPauseStopsSimulation(PauseReason::ControllerUiFocus, InputContext::OrbitActive, false)
-            && controllerPauseStopsSimulation(PauseReason::ControllerUiFocus, InputContext::MiningActive, false),
-        "steering and drilling contexts should retain their safety pause while UI focus is active");
+    require(controllerPauseStopsSimulation(PauseReason::ControllerUiFocus, InputContext::MiningActive, false),
+        "Mining should retain its safety pause while UI focus is active");
     require(controllerPauseStopsSimulation(PauseReason::ControllerUiFocus, InputContext::Launch, true)
             && controllerPauseStopsSimulation(PauseReason::SystemMenu, InputContext::Launch, true)
             && controllerPauseStopsSimulation(PauseReason::BlockingModal, InputContext::Launch, true)
@@ -556,12 +554,6 @@ void globalModalOwnsEveryControllerContext()
         InputContext::Ui,
         InputContext::Preflight,
         InputContext::Launch,
-        InputContext::FlybyActive,
-        InputContext::FlybyComplete,
-        InputContext::OrbitActive,
-        InputContext::OrbitComplete,
-        InputContext::SurfaceScan,
-        InputContext::SurfacePush,
         InputContext::MiningActive,
         InputContext::MiningService,
         InputContext::MiningFailure,
@@ -633,28 +625,6 @@ void routerMapsEveryGameplayContext()
 
     router.reset();
     frame = routedFrame();
-    frame.leftX = 0.4;
-    frame.leftY = -0.6;
-    input = router.route(InputContext::FlybyActive, frame, preferences);
-    require(std::abs(input.moveX - 0.4) < 0.000001 && std::abs(input.moveY - 0.6) < 0.000001, "flyby should route both left-stick axes");
-    preferences.invertFlightY = true;
-    input = router.route(InputContext::OrbitActive, frame, preferences);
-    require(std::abs(input.moveY + 0.6) < 0.000001, "invert-flight preference should reverse routed vertical thrust");
-    preferences.invertFlightY = false;
-
-    router.reset();
-    frame = routedFrame();
-    frame.pressed.set(index(ControllerButton::South));
-    input = router.route(InputContext::SurfaceScan, frame, preferences);
-    require(input.has(GameInputAction::PrimarySurfaceAction), "surface contexts should route the primary action");
-    frame = routedFrame();
-    frame.released.set(index(ControllerButton::East));
-    frame.heldSeconds[index(ControllerButton::East)] = 0.12;
-    input = router.route(InputContext::SurfaceScan, frame, preferences);
-    require(input.has(GameInputAction::BankSurfaceAction), "surface contexts should bank on a short East backout press");
-
-    router.reset();
-    frame = routedFrame();
     frame.leftX = -0.5;
     frame.leftY = 0.25;
     frame.rightX = 0.8;
@@ -687,16 +657,10 @@ void routerTableCoversEveryInputContext()
         GameInputAction southAction;
         bool southShouldAct;
     };
-    const std::array<ContextExpectation, 14> expectations {{
+    const std::array<ContextExpectation, 8> expectations {{
         {InputContext::Ui, GameInputAction::ActivateFocused, true},
         {InputContext::Preflight, GameInputAction::StartOrContinue, true},
         {InputContext::Launch, GameInputAction::ReturnHome, true},
-        {InputContext::FlybyActive, GameInputAction::StartOrContinue, false},
-        {InputContext::FlybyComplete, GameInputAction::StartOrContinue, true},
-        {InputContext::OrbitActive, GameInputAction::StartOrContinue, false},
-        {InputContext::OrbitComplete, GameInputAction::StartOrContinue, true},
-        {InputContext::SurfaceScan, GameInputAction::PrimarySurfaceAction, true},
-        {InputContext::SurfacePush, GameInputAction::PrimarySurfaceAction, true},
         {InputContext::MiningActive, GameInputAction::MiningStow, false},
         {InputContext::MiningService, GameInputAction::MiningStow, false},
         {InputContext::MiningFailure, GameInputAction::MiningFailureAcknowledge, true},
@@ -870,65 +834,6 @@ void routerContextualFocusPreservesDedicatedBindings()
     require(input.has(GameInputAction::ActivateFocused) && !input.has(GameInputAction::StartOrContinue),
         "mission-stamp D-pad navigation should make South activate the focused control");
 
-    router.reset();
-    frame = routedFrame();
-    frame.pressed.set(index(ControllerButton::South));
-    input = router.route(InputContext::SurfaceScan, frame, preferences);
-    require(input.has(GameInputAction::PrimarySurfaceAction) && !input.has(GameInputAction::ActivateFocused),
-        "surface scan South should keep its fixed pulse binding before UI navigation");
-
-    frame = routedFrame();
-    frame.navigation = UiDirection::Left;
-    frame.pressed.set(index(ControllerButton::DpadLeft));
-    router.route(InputContext::SurfaceScan, frame, preferences);
-    frame = routedFrame();
-    frame.pressed.set(index(ControllerButton::South));
-    input = router.route(InputContext::SurfaceScan, frame, preferences);
-    require(input.has(GameInputAction::ActivateFocused) && !input.has(GameInputAction::PrimarySurfaceAction),
-        "surface scan South should activate the D-pad-focused action");
-
-    router.reset();
-    frame = routedFrame();
-    frame.pressed.set(index(ControllerButton::South));
-    input = router.route(InputContext::SurfacePush, frame, preferences);
-    require(input.has(GameInputAction::PrimarySurfaceAction) && !input.has(GameInputAction::ActivateFocused),
-        "surface push South should keep its fixed push binding before UI navigation");
-
-    frame = routedFrame();
-    frame.navigation = UiDirection::Right;
-    frame.pressed.set(index(ControllerButton::DpadRight));
-    router.route(InputContext::SurfacePush, frame, preferences);
-    frame = routedFrame();
-    frame.down.set(index(ControllerButton::East));
-    frame.pressed.set(index(ControllerButton::East));
-    input = router.route(InputContext::SurfacePush, frame, preferences);
-    require(input.has(GameInputAction::CancelFocused) && !input.has(GameInputAction::Abort),
-        "East should leave surface UI focus without aborting the run");
-    frame.pressed.reset();
-    frame.heldSeconds[index(ControllerButton::East)] = 0.45;
-    input = router.route(InputContext::SurfacePush, frame, preferences);
-    require(!input.has(GameInputAction::Abort),
-        "the East press used to leave UI focus must stay suppressed until release");
-    frame.down.reset(index(ControllerButton::East));
-    frame.heldSeconds[index(ControllerButton::East)] = 0.0;
-    router.route(InputContext::SurfacePush, frame, preferences);
-    frame.down.set(index(ControllerButton::East));
-    frame.heldSeconds[index(ControllerButton::East)] = 0.45;
-    input = router.route(InputContext::SurfacePush, frame, preferences);
-    require(input.has(GameInputAction::Abort),
-        "a fresh East hold should retain the fixed surface abort binding outside UI focus");
-
-    router.reset();
-    frame = routedFrame();
-    frame.down.set(index(ControllerButton::East));
-    frame.pressed.set(index(ControllerButton::East));
-    router.route(InputContext::SurfaceScan, frame, preferences);
-    frame = routedFrame();
-    frame.released.set(index(ControllerButton::East));
-    frame.heldSeconds[index(ControllerButton::East)] = 0.12;
-    input = router.route(InputContext::SurfaceScan, frame, preferences);
-    require(input.has(GameInputAction::BankSurfaceAction) && !input.has(GameInputAction::Abort),
-        "a short East backout press should safely log Scan progress without aborting");
 }
 
 void routerHonorsConfirmSwapAndRealTimeHolds()
@@ -964,25 +869,9 @@ void routerHonorsConfirmSwapAndRealTimeHolds()
     router.reset();
     frame = routedFrame();
     frame.down.set(index(ControllerButton::East));
-    frame.heldSeconds[index(ControllerButton::East)] = 0.44;
-    input = router.route(InputContext::FlybyActive, frame, preferences);
-    require(!input.has(GameInputAction::Abort), "abort hold should not fire before 450ms");
-    frame.heldSeconds[index(ControllerButton::East)] = 0.45;
-    input = router.route(InputContext::FlybyActive, frame, preferences);
-    require(input.has(GameInputAction::Abort), "abort hold should fire at 450ms of unscaled hold time");
-    frame.heldSeconds[index(ControllerButton::East)] = 4.50;
-    input = router.route(InputContext::FlybyActive, frame, preferences);
-    require(!input.has(GameInputAction::Abort), "a held action should fire only once");
-
-    input = router.route(InputContext::Launch, frame, preferences);
-    require(input.actions.none(), "a hold carried into launch must not trigger a removed manual-eject action");
-    frame.down.reset(index(ControllerButton::East));
-    frame.heldSeconds[index(ControllerButton::East)] = 0.0;
-    router.route(InputContext::Launch, frame, preferences);
-    frame.down.set(index(ControllerButton::East));
     frame.heldSeconds[index(ControllerButton::East)] = 0.75;
     input = router.route(InputContext::Launch, frame, preferences);
-    require(input.actions.none(), "East must remain unbound during launch now that manual eject is removed");
+    require(input.actions.none(), "East must remain unbound during unified flight");
 }
 
 } // namespace

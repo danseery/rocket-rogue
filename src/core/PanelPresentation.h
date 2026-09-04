@@ -70,7 +70,7 @@ inline PanelLayoutMode panelLayoutMode(Screen screen)
     default:
         break;
     }
-    return screen == Screen::Launch || screen == Screen::ArrivalFanfare || screen == Screen::Flyby || screen == Screen::Orbit
+    return screen == Screen::Flight || screen == Screen::ArrivalFanfare || screen == Screen::Flyby || screen == Screen::Orbit
         ? PanelLayoutMode::ControlPanel
         : PanelLayoutMode::PhaseBoard;
 }
@@ -90,7 +90,7 @@ inline constexpr PanelVisualFamily panelVisualFamily(Screen screen) noexcept
     case Screen::ArrivalOps:
     case Screen::SurfaceExpedition:
         return PanelVisualFamily::Decision;
-    case Screen::Launch:
+    case Screen::Flight:
     case Screen::Flyby:
     case Screen::Orbit:
         return PanelVisualFamily::LiveHud;

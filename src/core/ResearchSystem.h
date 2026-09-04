@@ -322,7 +322,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
 int expeditionDroneRank(const GameState& state, std::string_view droneId);
 int runRigUpgradeRank(const GameState& state, std::string_view upgradeId);
 double expeditionExperienceThreshold(int level);
-void resetExpeditionProgression(SurfaceExpeditionState& expedition);
+void resetExpeditionProgression(PlanetaryExpeditionState& expedition);
 void resetExpeditionProgression(GameState& state);
 ExpeditionExperienceAward awardExpeditionExperience(GameState& state, double amount, Screen returnScreen);
 int miningMaterialExperience(const MaterialInventory& materials);

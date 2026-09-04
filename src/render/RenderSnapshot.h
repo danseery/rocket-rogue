@@ -72,6 +72,11 @@ struct LaunchAsteroidSnapshot {
     bool hit = false;
 };
 
+struct FlightTrajectoryPointSnapshot {
+    double x = 0.0;
+    double y = 0.0;
+};
+
 inline PoiGuidanceTarget miningPoiGuidanceTarget(
     const MiningRunState& mining,
     double activeOxygenSeconds,
@@ -180,6 +185,49 @@ struct RenderSnapshot {
     double launchCourseOffset = 0.0;
     double launchCourseVelocity = 0.0;
     double launchCourseLimit = 1.0;
+    bool launchPhysicalFlight = false;
+    int launchFlightPhase = 0;
+    double launchPositionX = 0.0;
+    double launchPositionY = 0.0;
+    double launchVelocityX = 0.0;
+    double launchVelocityY = 0.0;
+    double launchHeading = 0.0;
+    // Negative means a synthetic/test snapshot did not derive the shared
+    // flight profile. Production Flight snapshots always provide this value.
+    double launchApproachBlend = -1.0;
+    double launchLandingBlend = -1.0;
+    double launchOrbitTargetRadius = 0.44;
+    double launchOrbitGoodBand = 0.075;
+    double launchOrbitProgress = 0.0;
+    bool launchOrbitCaptured = false;
+    double launchLandingAltitude = 0.0;
+    double launchLandingVerticalVelocity = 0.0;
+    double launchLandingLateralVelocity = 0.0;
+    bool launchLandingAuthorized = false;
+    bool launchLandingLocalFrame = false;
+    double launchLandingBasisAngle = 1.5707963267948966;
+    double launchLandingHorizontalPosition = 0.0;
+    int launchFlightMode = 0;
+    int launchHandoffFrom = 0;
+    double launchHandoffProgress = 1.0;
+    double launchHandoffX = 0.0;
+    double launchHandoffY = 0.0;
+    double launchLandingPadX = 0.0;
+    double launchLandingPadY = 0.0;
+    bool launchDescentGateArmed = true;
+    bool launchTouchdownCelebration = false;
+    double launchTouchdownCelebrationProgress = 0.0;
+    // Session-only bridge between the authoritative Flight and Mining states.
+    // Phase values mirror RocketGameApp's private arrival sequence but never
+    // enter GameState or the save schema.
+    bool surfaceArrivalPrepared = false;
+    bool surfaceArrivalActive = false;
+    bool surfaceArrivalLandingCommitted = false;
+    bool surfaceArrivalHardLanding = false;
+    bool surfaceArrivalDeployQueued = false;
+    int surfaceArrivalPhase = 0;
+    double surfaceArrivalProgress = 0.0;
+    std::vector<FlightTrajectoryPointSnapshot> launchPredictedTrajectory;
     double launchMissionTargetProgress = 1.0;
     bool launchMissionTargetReached = false;
     double launchHullRemaining = 100.0;
@@ -201,8 +249,9 @@ struct RenderSnapshot {
     std::array<LaunchAsteroidSnapshot, 24> launchAsteroids {};
     int launchAsteroidCount = 0;
     double launchImpactFlash = 0.0;
-    bool launchLunarImpactActive = false;
-    double launchLunarImpactElapsed = 0.0;
+    bool launchDestructionActive = false;
+    double launchDestructionElapsed = 0.0;
+    LaunchFailureCause launchDestructionCause = LaunchFailureCause::None;
     double shipDamage = 0.0;
     int destinationTier = 0;
     // -1 means the normal home-system departure. A typed route transit (or
@@ -253,6 +302,7 @@ struct RenderSnapshot {
     double miningContactIndicatorDirX = 0.0;
     double miningContactIndicatorDirY = 0.0;
     double miningScannerPulse = 0.0;
+    double miningArtifactSecuredCelebration = 0.0;
     // -1 means no active mining actor. Otherwise this rises from zero after a
     // manual Survey Pulse to one when the shared scanner is ready again.
     double miningScannerRechargeProgress = -1.0;
@@ -315,7 +365,7 @@ struct RenderSnapshot {
     std::span<const MiningMiniDroneAgent> miningMiniDrones;
     std::span<const DroneFrameModuleAssignment> miningDroneModuleAssignments;
     std::span<const TreasureMark> miningTreasureMarks;
-    std::span<const MiningLooseChunk> miningLooseChunks;
+    std::span<const MiningLooseObject> miningLooseObjects;
     std::span<const MiningProjectileVisual> miningProjectiles;
     std::span<const MiningDamageNumber> miningDamageNumbers;
     std::span<const MiningPickupEvent> miningPickupEvents;
@@ -403,7 +453,7 @@ struct RenderSnapshot {
         miningCells = mining.terrain.cells;
         miningEnemies = mining.enemies;
         miningMiniDrones = mining.miniDrones;
-        miningLooseChunks = mining.looseChunks;
+        miningLooseObjects = mining.looseObjects;
         miningProjectiles = mining.combatProjectiles;
         miningDamageNumbers = mining.damageNumbers;
         miningPickupEvents = mining.pickupEvents;

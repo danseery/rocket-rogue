@@ -1,7 +1,10 @@
 #include "core/LaunchSimulation.h"
 
+#include "core/FlightSystem.h"
+
 #include "core/GameMath.h"
 #include "core/GameText.h"
+#include "core/ResearchSystem.h"
 #include "core/Tuning.h"
 
 #include <algorithm>
@@ -11,6 +14,11 @@
 namespace rocket {
 
 namespace {
+
+constexpr double physicalFlightStartX = flight_geometry::startX;
+constexpr double physicalFlightStartY = flight_geometry::startY;
+constexpr double physicalFlightStartVelocityX = 0.26;
+constexpr double physicalFlightStartVelocityY = 0.0;
 
 constexpr double asteroidRouteJitter = 0.012;
 constexpr double asteroidCourseJitter = 0.035;
@@ -25,7 +33,10 @@ double crewEscapeBonus(const GameState& state, const ContentCatalog& catalog)
         return 0.0;
     }
 
-    double bonus = static_cast<double>(astronaut->training) * tuning::crew::escapeBonusPerTraining;
+    double bonus = 0.0;
+    if (const CrewArchetypeDefinition* archetype = catalog.findCrewArchetype(astronaut->archetypeId)) {
+        bonus += archetype->stats.emergencyRecovery;
+    }
     if (astronaut->trait == tuning::traits::improvesEjectionOdds) {
         bonus += tuning::traits::improvesEjectionOddsEscapeBonus *
             (1.0 + std::max(0.0, aggregateCrewUpgradeStats(state, catalog).traitModifier));
@@ -142,7 +153,8 @@ double returnHomeNetRewardFloor(
     const Destination& destination,
     double burnMultiplier)
 {
-    if (launch.config.frontierTransfer) {
+    if (launch.config.frontierTransfer &&
+        !isStraylightApproach(launch.config.missionKind)) {
         return 0.0;
     }
 
@@ -468,6 +480,11 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
         state.run.shipDamage,
         0,
         tuning::damage::destroyedShipDamage);
+    launch.orbitRequired = destination.requiresArrivalSurveySequence &&
+        destinationHistoryValue(
+            state.meta.destinationLandings,
+            catalog,
+            destination.id) == 0;
 
     const int requiredReadiness = frontierReadinessRequired(state, catalog);
     launch.overpreparedData = requiredReadiness <= 0
@@ -486,9 +503,11 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     return launch;
 }
 
-LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destination& destination)
+FlightRunState beginLaunchFlight(const PreparedLaunch& launch, const Destination& destination)
 {
-    LaunchFlightState flight;
+    FlightRunState flight;
+    flight.originId = launch.config.routeTransit.originDestinationId;
+    flight.destinationId = launch.config.destinationId;
     flight.active = true;
     flight.selectedThrottle = tuning::launch::pilotingInitialThrottle;
     flight.throttleAtLastKick = flight.selectedThrottle;
@@ -546,10 +565,37 @@ LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destinat
     flight.hullRemaining = flight.hullMaximum *
         (1.0 - static_cast<double>(launch.existingShipDamage) /
             static_cast<double>(tuning::damage::destroyedShipDamage));
+    if (launch.config.frontierTransfer &&
+        !isStraylightApproach(launch.config.missionKind)) {
+        flight.physicalFlight = true;
+        flight.phase = FlightPhase::Transfer;
+        // Start visibly destination-bound while preserving player agency. The
+        // untouched physical course crosses the outer capture corridor and
+        // continues into a flyby rather than auto-solving orbit or impact.
+        flight.positionX = physicalFlightStartX;
+        flight.positionY = physicalFlightStartY +
+            std::clamp(launch.slingshotCourseOffset, -0.25, 0.25);
+        flight.velocityX = physicalFlightStartVelocityX +
+            std::max(0.0, launch.slingshotSpeedBoost) * 0.025;
+        flight.velocityY = physicalFlightStartVelocityY +
+            launch.slingshotCourseOffset /
+                std::max(0.01, launchCourseLimit(launch)) *
+                tuning::launch::slingshotExitCourseDrift;
+        flight.heading = std::atan2(flight.velocityY, flight.velocityX);
+        flight.angularVelocity = 0.0;
+        flight.orbit = {};
+        flight.orbit.previousAngle = std::atan2(flight.positionY, flight.positionX);
+        flight.landing = {};
+        flight.selectedThrottle = 0.0;
+        flight.travelProgress = 0.0;
+        flight.previousTravelProgress = 0.0;
+        flight.courseOffset = flight.positionY;
+        flight.courseVelocity = flight.velocityY;
+    }
     return flight;
 }
 
-void beginLaunchReturn(LaunchFlightState& flight)
+void beginLaunchReturn(FlightRunState& flight)
 {
     if (flight.active && !flight.returningHome) {
         // The opening lesson teaches the decision to turn back, not a
@@ -579,7 +625,7 @@ void beginLaunchReturn(LaunchFlightState& flight)
     }
 }
 
-CalibrationFuelWarning calibrationFuelWarning(const PreparedLaunch& launch, const LaunchFlightState& flight)
+CalibrationFuelWarning calibrationFuelWarning(const PreparedLaunch& launch, const FlightRunState& flight)
 {
     const bool calibrationFlight =
         launch.config.missionKind == LaunchMissionKind::FuelCalibration ||
@@ -606,13 +652,610 @@ double launchCourseLimit(const PreparedLaunch&)
     return tuning::launch::pilotingCourseLost;
 }
 
+namespace {
+
+// Prediction-only midpoint stepping; live movement keeps its existing integrator.
+struct CoastPredictionPose {
+    double x, y, vx, vy;
+};
+
+CoastPredictionPose stepCoastPrediction(CoastPredictionPose p, double dt)
+{
+    const auto acceleration = [](double x, double y) {
+        const double radius = std::max(0.0001, std::hypot(x, y));
+        const double gravity = flightGravityAcceleration(radius, 0.0);
+        return std::pair<double, double>{-x / radius * gravity, -y / radius * gravity};
+    };
+    const auto [ax, ay] = acceleration(p.x, p.y);
+    const auto [mx, my] = acceleration(p.x + p.vx * dt * 0.5, p.y + p.vy * dt * 0.5);
+    return {p.x + (p.vx + ax * dt * 0.5) * dt,
+        p.y + (p.vy + ay * dt * 0.5) * dt, p.vx + mx * dt, p.vy + my * dt};
+}
+
+void updatePhysicalTrajectoryPrediction(FlightRunState& flight, bool landingAuthorized)
+{
+    constexpr double predictionStep = 0.2;
+    constexpr int futureSamples = 100;
+    flight.predictedTrajectory.clear();
+    flight.predictedTrajectory.reserve(futureSamples + 1);
+    CoastPredictionPose pose{flight.positionX, flight.positionY, flight.velocityX, flight.velocityY};
+    flight.predictedTrajectory.push_back({pose.x, pose.y});
+    const double gateAngle = std::atan2(physicalFlightStartY, physicalFlightStartX);
+    bool gateArmed = flight.landing.gateArmed;
+    for (int index = 0; index < futureSamples; ++index) {
+        const CoastPredictionPose next = stepCoastPrediction(pose, predictionStep);
+        // Sweep this interval, then refine the crossing with the same integrator.
+        double earliest = predictionStep + 1.0;
+        const auto crossing = [&](double boundary, bool inward, bool sectorOnly) {
+            const double dx = next.x - pose.x, dy = next.y - pose.y;
+            const double a = dx*dx + dy*dy;
+            const double b = 2.0*(pose.x*dx + pose.y*dy);
+            const double c = pose.x*pose.x + pose.y*pose.y - boundary*boundary;
+            const double disc = b*b - 4.0*a*c;
+            if (a < 1.0e-14 || disc < 0.0) return;
+            const double t = (-b + (inward ? -1.0 : 1.0)*std::sqrt(disc))/(2.0*a);
+            if (t < 0.0 || t > 1.0) return;
+            double low = 0.0, high = 0.0;
+            bool bracketed = false;
+            // Confirm a real curved-path crossing, not just a chord grazing
+            // the circle. This also brackets enter-and-exit in one interval.
+            for (int probe = 1; probe <= 16; ++probe) {
+                high = predictionStep * probe / 16.0;
+                const auto point = stepCoastPrediction(pose, high);
+                const bool crossed = inward ? std::hypot(point.x,point.y) <= boundary
+                                            : std::hypot(point.x,point.y) >= boundary;
+                if (crossed) { bracketed = true; break; }
+                low = high;
+            }
+            if (!bracketed) return;
+            for (int iteration = 0; iteration < 16; ++iteration) {
+                const double mid = (low + high)*0.5;
+                const auto sample = stepCoastPrediction(pose, mid);
+                const bool before = inward ? std::hypot(sample.x,sample.y) > boundary
+                                           : std::hypot(sample.x,sample.y) < boundary;
+                if (before) low = mid; else high = mid;
+            }
+            const auto contact = stepCoastPrediction(pose, high);
+            if (sectorOnly && std::abs(flightWrappedAngleDelta(
+                    gateAngle, std::atan2(contact.y,contact.x))) > flight_landing::gateHalfAngle) return;
+            earliest = std::min(earliest, high);
+        };
+        crossing(flight_geometry::bodyRadius, true, false);
+        // Travel and Orbit share world coordinates and coasting gravity.
+        // Keep a rolling forecast through their handling/camera boundaries;
+        // only contact or entry into the different local Landing frame ends it.
+        if (landingAuthorized && gateArmed)
+            crossing(flight_geometry::landingBoundary, true, true);
+        if (earliest <= predictionStep) {
+            const auto end = stepCoastPrediction(pose, earliest);
+            flight.predictedTrajectory.push_back({end.x,end.y});
+            break;
+        }
+        pose = next;
+        flight.predictedTrajectory.push_back({pose.x,pose.y});
+        if (std::hypot(pose.x,pose.y) > flight_landing::gateRearmRadius &&
+            flight.handoff.elapsed + (index+1)*predictionStep >= flight_landing::handoffSeconds)
+            gateArmed = true;
+    }
+}
+LaunchFlightStep updateSpaceFlight(
+    FlightRunState& flight,
+    const PreparedLaunch& launch,
+    const FlightInput& input,
+    double deltaSeconds,
+    const MiningRunState* landingSite)
+{
+    LaunchFlightStep result;
+    if (!flight.active) {
+        return result;
+    }
+
+    constexpr double bodyRadius = flight_geometry::bodyRadius;
+    constexpr double influenceRadius = flight_geometry::influenceRadius;
+    constexpr double thrustAcceleration = 0.23;
+    constexpr double turnAcceleration = flight_controls::turnAcceleration;
+    constexpr double turnDamping = 5.2;
+    constexpr double velocityToMetersPerSecond = flight_geometry::velocityToMetersPerSecond;
+    const double realDt = std::clamp(
+        deltaSeconds,
+        0.0,
+        tuning::launch::maxFrameStepSeconds);
+    if (flight.mode == FlightMode::Orbit) {
+        const double start=std::hypot(physicalFlightStartX,physicalFlightStartY)*0.4;
+        const double end=flight.orbit.targetRadius+flight.orbit.goodBand;
+        flight.orbitZoomProgress=std::max(flight.orbitZoomProgress,
+            std::clamp((start-std::hypot(flight.positionX,flight.positionY))/(start-end),0.0,1.0));
+    }
+    const double currentTravelProgress = std::clamp(
+        (flight.positionX - physicalFlightStartX) / -physicalFlightStartX,
+        0.0,
+        1.0);
+    const FlightScaleProfile scaleProfile = flightScaleProfile(flight);
+    (void)currentTravelProgress;
+    const double worldDt = realDt * scaleProfile.timeScale;
+    const double controlDt = realDt * scaleProfile.controlScale;
+    // UI pulses and other presentation use elapsed wall time. Everything
+    // physically consequential below uses the world or player-control clock.
+    flight.elapsedSeconds += realDt;
+    flight.asteroidInvulnerabilitySeconds = std::max(
+        0.0,
+        flight.asteroidInvulnerabilitySeconds - worldDt);
+    flight.orbitCelebrationPending = false;
+    flight.touchdownCelebrationPending = false;
+
+    const double turn = std::clamp(input.steer, -1.0, 1.0);
+    // Input steer is semantic screen direction: negative is left and positive
+    // is right. Mathematical heading angles increase counterclockwise, so the
+    // input sign must be inverted here for A/left to visibly turn left and
+    // D/right to visibly turn right.
+    flight.angularVelocity -= turn * turnAcceleration * controlDt;
+    flight.angularVelocity *= std::exp(-turnDamping * controlDt);
+    flight.heading += flight.angularVelocity * controlDt;
+
+    // W is forward main thrust; S is reverse thrust, not a velocity brake.
+    // With the nose upright, W arrests descent and S accelerates the fall.
+    // Short keyboard presses provide graduated pulses; the stick stays
+    // directly proportional. Releasing both keys coasts and consumes no fuel.
+    double signedThrust = flightThrottleForInput(
+        flight.selectedThrottle, input.enginesCut ? 0.0 : input.throttle,
+        realDt, input.analogThrottle);
+    if (flight.fuelRemaining <= 0.000001) {
+        signedThrust = 0.0;
+    }
+    if (std::abs(signedThrust) > 0.001) {
+        flight.velocityX += std::cos(flight.heading) * signedThrust * thrustAcceleration * controlDt;
+        flight.velocityY += std::sin(flight.heading) * signedThrust * thrustAcceleration * controlDt;
+        flight.fuelRemaining = std::max(
+            0.0,
+            flight.fuelRemaining - std::abs(signedThrust) * 0.13 * controlDt);
+    }
+    flight.selectedThrottle = signedThrust;
+    flight.burnRatePerSecond =
+        std::abs(signedThrust) * 0.13 * scaleProfile.controlScale;
+
+    if (launch.heatEnabled) {
+        if (std::abs(signedThrust) <= 0.001) {
+            flight.heat = std::max(
+                0.0,
+                flight.heat - launchEngineOffCoolingForRank(launch.coolingRank) * worldDt);
+        } else {
+            const double throttleSquared = signedThrust * signedThrust;
+            const double heatInput = tuning::launch::poweredHeatIdleInput +
+                tuning::launch::poweredHeatThrottleInput * throttleSquared;
+            flight.heat = std::clamp(
+                flight.heat +
+                    heatInput * launchPoweredHeatMultiplierForRank(launch.coolingRank) * controlDt -
+                    tuning::launch::poweredHeatCoolingBase * worldDt,
+                0.0,
+                tuning::telemetry::heatMaximum);
+        }
+        if (flight.heat >= tuning::launch::pilotingCriticalThreshold) {
+            flight.heatFailureSeconds += worldDt;
+        } else {
+            flight.heatFailureSeconds = std::max(
+                0.0,
+                flight.heatFailureSeconds - worldDt * 1.5);
+        }
+        if (flight.heatFailureSeconds >= tuning::launch::pilotingHeatFailureSeconds) {
+            flight.active = false;
+            flight.phase = FlightPhase::Impact;
+            flight.failureCause = LaunchFailureCause::ThermalRunaway;
+            result.failed = true;
+            result.failureCause = flight.failureCause;
+            return result;
+        }
+    } else {
+        flight.heat = 0.0;
+    }
+
+    const double previousX = flight.positionX;
+    const double previousY = flight.positionY;
+    const double radiusBefore = std::max(0.0001, std::hypot(flight.positionX, flight.positionY));
+    const double gravity = flightGravityAcceleration(radiusBefore, scaleProfile.landingBlend);
+    flight.velocityX += (-flight.positionX / radiusBefore) * gravity * worldDt;
+    flight.velocityY += (-flight.positionY / radiusBefore) * gravity * worldDt;
+    flight.positionX += flight.velocityX * worldDt;
+    flight.positionY += flight.velocityY * worldDt;
+
+    if (launch.asteroidsEnabled && flight.asteroidInvulnerabilitySeconds <= 0.0) {
+        for (int index = 0; index < launch.asteroidCount; ++index) {
+            if (flight.asteroidHit[static_cast<std::size_t>(index)]) {
+                continue;
+            }
+            const LaunchAsteroid& asteroid = launch.asteroids[static_cast<std::size_t>(index)];
+            const double asteroidX = physicalFlightStartX +
+                asteroid.routeProgress * -physicalFlightStartX;
+            const double asteroidY = asteroid.courseOffset;
+            if (pointToSegmentDistance(
+                    asteroidX,
+                    asteroidY,
+                    previousX,
+                    previousY,
+                    flight.positionX,
+                    flight.positionY) > asteroid.radius + 0.075) {
+                continue;
+            }
+            flight.asteroidHit[static_cast<std::size_t>(index)] = true;
+            flight.asteroidInvulnerabilitySeconds = tuning::launch::asteroidInvulnerabilitySeconds;
+            const double damage = launchAsteroidImpactDamage(launch.hullRank, asteroid.scale);
+            flight.hullRemaining = std::max(0.0, flight.hullRemaining - damage);
+            flight.hullDamageTaken = std::min(
+                tuning::damage::destroyedShipDamage,
+                flight.hullDamageTaken + static_cast<int>(std::round(damage)));
+            result.asteroidHit = true;
+            result.hullDamageTaken = static_cast<int>(std::round(damage));
+            if (flight.hullRemaining <= 0.0) {
+                flight.active = false;
+                flight.phase = FlightPhase::Impact;
+                flight.failureCause = LaunchFailureCause::HullBreach;
+                result.failed = true;
+                result.failureCause = flight.failureCause;
+            }
+            break;
+        }
+        if (result.failed) {
+            return result;
+        }
+    }
+
+    const FlightKinematics kinematics = flightKinematics(
+        flight.positionX,
+        flight.positionY,
+        flight.velocityX,
+        flight.velocityY);
+    const double radius = kinematics.radius;
+    const double radialVelocity = kinematics.radialVelocity;
+    const double tangentialVelocity = kinematics.tangentialVelocity;
+    const double angle = kinematics.angle;
+    const double angularDelta = flightWrappedAngleDelta(flight.orbit.previousAngle, angle);
+    flight.orbit.previousAngle = angle;
+
+    // Keep landing telemetry live throughout approach so presentation can
+    // ease toward the surface frame before the simulation crosses the local
+    // landing boundary. These values do not authorize or resolve a landing.
+    flight.landing.altitude = std::max(0.0, (radius - bodyRadius) * 100.0);
+    flight.landing.verticalVelocity = radialVelocity * velocityToMetersPerSecond;
+    flight.landing.lateralVelocity = tangentialVelocity * velocityToMetersPerSecond;
+    flight.landing.surfaceAngle = std::abs(flightWrappedAngleDelta(angle, flight.heading));
+
+    if (radius < influenceRadius) {
+        flight.orbit.enteredInfluence = true;
+        if (flight.phase == FlightPhase::Transfer) {
+            flight.phase = FlightPhase::TargetApproach;
+        }
+    }
+
+    const double orbitError = std::abs(radius - flight.orbit.targetRadius);
+    const bool stableOrbit = flight.mode == FlightMode::Orbit && flightOrbitStable(
+        kinematics,
+        flight.orbit.targetRadius,
+        flight.orbit.goodBand);
+    if (!flight.orbit.captured && stableOrbit) {
+        if (orbitError > flight.orbit.perfectBand) {
+            flight.orbit.perfectEligible = false;
+        }
+        flight.orbit.stableAngularProgress += std::abs(angularDelta);
+    } else if (!flight.orbit.captured) {
+        flight.orbit.stableAngularProgress = std::max(
+            0.0,
+            flight.orbit.stableAngularProgress - worldDt * 0.22);
+    }
+    if (!flight.orbit.captured &&
+        flight.orbit.stableAngularProgress >= 6.28318530717958647692) {
+        flight.orbit.captured = true;
+        flight.orbit.grade = flight.orbit.perfectEligible
+            ? OrbitGrade::Perfect
+            : OrbitGrade::Good;
+        flight.phase = FlightPhase::Orbiting;
+        flight.orbitCelebrationPending = true;
+        result.orbitCaptured = true;
+    }
+
+    const bool landingAuthorized = flight.orbit.captured || !launch.orbitRequired;
+    const double approachBoundary = std::hypot(physicalFlightStartX,physicalFlightStartY)*0.4;
+    if (flight.mode == FlightMode::Travel && radius <= approachBoundary && radialVelocity < 0.0) {
+        flight.mode = FlightMode::Orbit;
+        flight.orbitZoomProgress=0.0;
+        flight.phase = flight.orbit.captured ? FlightPhase::Orbiting : FlightPhase::TargetApproach;
+        flight.handoff = {FlightMode::Travel,FlightMode::Orbit,0.0,flight.positionX,flight.positionY,flight.heading};
+    }
+    if (!flight.landing.gateArmed && radius > flight_landing::gateRearmRadius &&
+        flight.handoff.elapsed >= flight_landing::handoffSeconds) flight.landing.gateArmed = true;
+    const double gateAngle = std::atan2(physicalFlightStartY,physicalFlightStartX);
+    // Swept segment-circle entry: fast approaches cannot skip the gate.
+    const double dx=flight.positionX-previousX, dy=flight.positionY-previousY;
+    const double a=dx*dx+dy*dy, b=2.0*(previousX*dx+previousY*dy);
+    const double c=previousX*previousX+previousY*previousY-
+        flight_geometry::landingBoundary*flight_geometry::landingBoundary;
+    const double discriminant=b*b-4.0*a*c;
+    const double gateT=a>1e-14 && discriminant>=0.0 ? (-b-std::sqrt(discriminant))/(2.0*a) : -1.0;
+    if (flight.mode == FlightMode::Orbit && landingAuthorized && flight.landing.gateArmed &&
+        gateT>=0.0 && gateT<=1.0 &&
+        std::abs(flightWrappedAngleDelta(gateAngle,std::atan2(previousY+dy*gateT,previousX+dx*gateT))) <= flight_landing::gateHalfAngle) {
+        flight.positionX=previousX+dx*gateT;
+        flight.positionY=previousY+dy*gateT;
+        if (landingSite != nullptr) bindLandingSite(flight,*landingSite);
+        enterLocalLanding(flight);
+        flight.predictedTrajectory.clear();
+        return result;
+    }
+
+    if (pointToSegmentDistance(0.0,0.0,previousX,previousY,flight.positionX,flight.positionY) <= bodyRadius) {
+        // Outside the authorized gate this is an impact, never an alternate
+        // landing path. Keep the explosion on the swept surface contact.
+        const double bodyC=previousX*previousX+previousY*previousY-bodyRadius*bodyRadius;
+        const double bodyDiscriminant=b*b-4.0*a*bodyC;
+        if (a>1e-14 && bodyDiscriminant>=0.0) {
+            const double impactT=std::clamp((-b-std::sqrt(bodyDiscriminant))/(2.0*a),0.0,1.0);
+            flight.positionX=previousX+dx*impactT;
+            flight.positionY=previousY+dy*impactT;
+        }
+        const double contactRadius=std::max(0.00001,std::hypot(flight.positionX,flight.positionY));
+        const double nx=flight.positionX/contactRadius,ny=flight.positionY/contactRadius;
+        const double vx=flight.velocityX*velocityToMetersPerSecond,vy=flight.velocityY*velocityToMetersPerSecond;
+        const double speed=flightContactSpeed(vx,vy,flight.angularVelocity,0.0,0.0,nx,ny);
+        // Planet contact in space is always fatal. Recoverable hull damage
+        // belongs exclusively to the committed local Landing activity.
+        const double hullBefore=flight.hullRemaining;
+        flight.hullRemaining=0.0;
+        flight.impact={true,speed,hullBefore,hullBefore,0.0,
+            flight.positionX*velocityToMetersPerSecond,
+            flight.positionY*velocityToMetersPerSecond,flight.destinationId};
+        flight.impactDisplaySeconds=3.0;
+        flight.active=false;
+        flight.phase=FlightPhase::Impact;
+        flight.failureCause=LaunchFailureCause::LunarImpact;
+        flight.predictedTrajectory.clear();
+        result.surfaceImpact=true;
+        result.failed=true;
+        result.failureCause=flight.failureCause;
+        return result;
+    } else if (flight.mode == FlightMode::Orbit && radius > approachBoundary*1.10 && radialVelocity > 0.0) {
+        flight.mode=FlightMode::Travel;
+        flight.phase=FlightPhase::Transfer;
+        flight.handoff={FlightMode::Orbit,FlightMode::Travel,0.0,flight.positionX,flight.positionY,flight.heading};
+    } else if (flight.mode == FlightMode::Travel && flight.orbit.enteredInfluence &&
+        radius > approachBoundary*1.25 && radialVelocity > 0.0) {
+        flight.active = false;
+        flight.phase = FlightPhase::Flyby;
+        flight.flybyRecorded = true;
+        result.flyby = true;
+    }
+    if (std::hypot(flight.positionX,flight.positionY)>bodyRadius+0.002) {
+        flight.contactEpisode=false;
+    }
+
+    flight.previousTravelProgress = flight.travelProgress;
+    flight.travelProgress = std::clamp(
+        (flight.positionX - physicalFlightStartX) / -physicalFlightStartX,
+        0.0,
+        1.0);
+    flight.courseOffset = flight.positionY;
+    flight.courseVelocity = flight.velocityY;
+    flight.currentMultiplier = 1.0 + flight.travelProgress;
+    flight.peakMultiplier = std::max(flight.peakMultiplier, flight.currentMultiplier);
+    flight.projectedFuelRequired = 0.0;
+    flight.projectedFuelReserve = flight.fuelRemaining;
+    updatePhysicalTrajectoryPrediction(flight, landingAuthorized);
+    (void)launch;
+    return result;
+}
+
+LaunchFlightStep updateLocalLandingFlight(FlightRunState& flight, const PreparedLaunch& launch,
+    const FlightInput& input, double deltaSeconds, const MiningRunState* site)
+{
+    LaunchFlightStep result;
+    if (!flight.active) return result;
+    const double dt=std::clamp(deltaSeconds,0.0,tuning::launch::maxFrameStepSeconds);
+    auto& land=flight.landing;
+    if (site) bindLandingSite(flight,*site);
+    flight.elapsedSeconds+=dt;
+    flight.orbitCelebrationPending=false;
+    flight.touchdownCelebrationPending=false;
+    const double target=-std::clamp(input.steer,-1.0,1.0)*flight_landing::turnRate;
+    flight.angularVelocity=std::lerp(flight.angularVelocity,target,
+        1.0-std::exp(-dt/flight_landing::turnResponseSeconds));
+    double thrust=flightThrottleForInput(flight.selectedThrottle,input.enginesCut?0.0:input.throttle,dt,input.analogThrottle);
+    if (flight.fuelRemaining<=0.0) thrust=0.0;
+    flight.selectedThrottle=thrust;
+    flight.burnRatePerSecond=std::abs(thrust)*0.13;
+    flight.fuelRemaining=std::max(0.0,flight.fuelRemaining-flight.burnRatePerSecond*dt);
+    if (launch.heatEnabled) {
+        const double powered=std::abs(thrust)>0.001
+            ? (tuning::launch::poweredHeatIdleInput+tuning::launch::poweredHeatThrottleInput*thrust*thrust)*launchPoweredHeatMultiplierForRank(launch.coolingRank) : 0.0;
+        const double cooling=std::abs(thrust)>0.001 ? tuning::launch::poweredHeatCoolingBase : launchEngineOffCoolingForRank(launch.coolingRank);
+        flight.heat=std::clamp(flight.heat+(powered-cooling)*dt,0.0,tuning::telemetry::heatMaximum);
+        flight.heatFailureSeconds=flight.heat>=tuning::launch::pilotingCriticalThreshold
+            ? flight.heatFailureSeconds+dt : std::max(0.0,flight.heatFailureSeconds-dt*1.5);
+        if (flight.heatFailureSeconds>=tuning::launch::pilotingHeatFailureSeconds) {
+            flight.active=false; flight.phase=FlightPhase::Impact;
+            flight.failureCause=LaunchFailureCause::ThermalRunaway;
+            result.failed=true; result.failureCause=flight.failureCause; return result;
+        }
+    }
+    const double t=std::clamp(flight.handoff.elapsed/flight_landing::handoffSeconds,0.0,1.0);
+    const double blend=t*t*t*(t*(t*6.0-15.0)+10.0);
+    const double acceleration=thrust*std::lerp(0.23*flight_landing::velocityConversion,
+        thrust>=0.0 ? flight_landing::forwardAcceleration : flight_landing::reverseAcceleration,blend);
+    const double gravity=std::lerp(0.52*0.4*flight_landing::velocityConversion,
+        flight_landing::gravityAcceleration,blend);
+    // Substeps sweep the entire ship footprint through real terrain, even on
+    // dangerous fast entries. These are local metres and real seconds.
+    const double sweepSpeed=std::hypot(land.lateralVelocity,land.verticalVelocity)+
+        std::abs(flight.angularVelocity)*std::hypot(flight_landing::hullHalfWidth,flight_landing::hullHalfHeight)+10.0;
+    const int steps=std::max(1,static_cast<int>(std::ceil(std::max(dt*240.0,sweepSpeed*dt/0.10))));
+    const double step=dt/steps;
+    for (int i=0;i<steps;++i) {
+        const LandingState previousPose=land;
+        const double previousAltitude=land.altitude;
+        land.heading+=flight.angularVelocity*step;
+        land.lateralVelocity+=std::cos(land.heading)*acceleration*step;
+        land.verticalVelocity+=(std::sin(land.heading)*acceleration-gravity)*step;
+        land.horizontalPosition+=land.lateralVelocity*step;
+        land.altitude+=land.verticalVelocity*step;
+        land.surfaceAngle=std::abs(flightWrappedAngleDelta(1.5707963267948966,land.heading));
+        auto contacts=site && land.siteBound ? localLandingContacts(land,*site) : std::vector<FlightSurfaceContact>{};
+        if (!contacts.empty() && localLandingContacts(previousPose,*site).empty()) {
+            // Locate first contact inside this small sweep, before frame-step
+            // penetration adds spurious speed or damage. Includes rotation.
+            const LandingState advanced=land;
+            const auto poseAt=[&](double fraction) {
+                LandingState pose=advanced;
+                pose.horizontalPosition=std::lerp(previousPose.horizontalPosition,advanced.horizontalPosition,fraction);
+                pose.altitude=std::lerp(previousPose.altitude,advanced.altitude,fraction);
+                pose.heading=std::lerp(previousPose.heading,advanced.heading,fraction);
+                pose.lateralVelocity=std::lerp(previousPose.lateralVelocity,advanced.lateralVelocity,fraction);
+                pose.verticalVelocity=std::lerp(previousPose.verticalVelocity,advanced.verticalVelocity,fraction);
+                pose.surfaceAngle=std::abs(flightWrappedAngleDelta(1.5707963267948966,pose.heading));
+                return pose;
+            };
+            double low=0.0,high=1.0;
+            for (int sweep=0;sweep<12;++sweep) {
+                const double mid=(low+high)*0.5;
+                if (localLandingContacts(poseAt(mid),*site).empty()) low=mid; else high=mid;
+            }
+            land=poseAt(high);
+            contacts=localLandingContacts(land,*site);
+        }
+        if (!contacts.empty()) {
+            const bool newContact=!flight.contactEpisode;
+            double speed=0.0;
+            FlightSurfaceContact strongest=contacts.front();
+            for (const auto& contact:contacts) {
+                const double closing=flightContactSpeed(land.lateralVelocity,land.verticalVelocity,flight.angularVelocity,
+                    contact.pointX-land.horizontalPosition,
+                    contact.pointY-land.altitude-flight_landing::hullHalfHeight,contact.normalX,contact.normalY);
+                if (closing>speed) {speed=closing;strongest=contact;}
+            }
+            if (newContact) {
+                applyFlightImpact(flight,speed,strongest.pointX,strongest.pointY);
+                result.surfaceImpact=result.surfaceImpact || speed>1.0;
+            }
+            flight.contactEpisode=true;flight.contactClearSeconds=0.0;
+            if (flight.hullRemaining<=0.0) {
+                flight.active=false;
+                flight.phase=FlightPhase::Impact; flight.failureCause=LaunchFailureCause::LunarImpact;
+                result.failed=true; result.failureCause=flight.failureCause;
+                break;
+            }
+            // One damage episode; several positional corrections may be needed
+            // at a corner. Tile count must not multiply impact damage or drag.
+            if (newContact) {
+                reboundFlightContact(land.lateralVelocity,land.verticalVelocity,flight.angularVelocity,
+                    strongest.normalX,strongest.normalY,strongest.pointX-land.horizontalPosition,
+                    strongest.pointY-land.altitude-flight_landing::hullHalfHeight);
+            } else {
+                // Continued support cancels penetration without repeatedly
+                // halving steering authority or multiplying tangential drag.
+                land.lateralVelocity+=strongest.normalX*speed;
+                land.verticalVelocity+=strongest.normalY*speed;
+            }
+            bool supported=false; double gx=0.0,gy=0.0;
+            for (const auto& contact:contacts) {
+                if (contact.suitable) {supported=true;gx=contact.gridX;gy=contact.gridY;}
+            }
+            for (int separation=0;separation<12 && !contacts.empty();++separation) {
+                const auto deepest=*std::max_element(contacts.begin(),contacts.end(),[](const auto& a,const auto& b){return a.penetration<b.penetration;});
+                land.horizontalPosition+=deepest.normalX*(deepest.penetration+0.001);
+                land.altitude+=deepest.normalY*(deepest.penetration+0.001);
+                const double inward=land.lateralVelocity*deepest.normalX+land.verticalVelocity*deepest.normalY;
+                if (inward<0.0) {land.lateralVelocity-=inward*deepest.normalX;land.verticalVelocity-=inward*deepest.normalY;}
+                contacts=localLandingContacts(land,*site);
+            }
+            if (supported && contacts.empty() && std::abs(land.verticalVelocity)<=1.0 &&
+                std::abs(land.lateralVelocity)<=5.0 && land.surfaceAngle*57.29577951308232<=25.0) {
+                land.touchdownGridX=gx;land.touchdownGridY=gy;
+                land.hardLanding=flight.impact.valid && flight.impact.damage>0.0;
+                land.lateralVelocity=land.verticalVelocity=0.0;
+                flight.active=false;
+                flight.phase=FlightPhase::Landed; flight.touchdownCelebrationPending=true;
+                result.reachedDestination=true; result.hardTouchdown=land.hardLanding; result.safeTouchdown=!land.hardLanding;
+                break;
+            }
+        } else {
+            flight.contactClearSeconds+=step;
+            if (flight.contactClearSeconds>=0.05) flight.contactEpisode=false;
+        }
+        if (previousAltitude<flight_landing::departureAltitude && land.altitude>=flight_landing::departureAltitude &&
+            land.verticalVelocity>=flight_landing::departureSpeed) {
+            leaveLocalLanding(flight); break;
+        }
+        // Leaving the finite site's bottom is an explicit failure, never an
+        // invisible wall or an orbital-mode fallback.
+        if (land.altitude < -400.0) {
+            flight.active=false; flight.phase=FlightPhase::Complete;
+            flight.failureCause=LaunchFailureCause::CourseLost;
+            result.failed=true; result.failureCause=flight.failureCause; break;
+        }
+    }
+    flight.predictedTrajectory.clear();
+    if (flight.mode == FlightMode::Landing && flight.active) {
+        constexpr int samples = 96;
+        constexpr double step = 3.84 / (samples - 1);
+        LandingState predicted = land;
+        const double nx = std::cos(land.basisAngle), ny = std::sin(land.basisAngle);
+        const auto append = [&](const LandingState& point) {
+            const double radius = flight_geometry::bodyRadius +
+                point.altitude / flight_landing::metersPerOrbitUnit;
+            flight.predictedTrajectory.push_back({
+                nx*radius + ny*point.horizontalPosition/flight_landing::metersPerOrbitUnit,
+                ny*radius - nx*point.horizontalPosition/flight_landing::metersPerOrbitUnit});
+        };
+        const auto advance = [](LandingState p, double dt) {
+            p.horizontalPosition += p.lateralVelocity*dt;
+            p.altitude += p.verticalVelocity*dt - 0.5*flight_landing::gravityAcceleration*dt*dt;
+            p.verticalVelocity -= flight_landing::gravityAcceleration*dt;
+            return p;
+        };
+        const auto endsForecast = [&](const LandingState& p) {
+            bool suitable = false; double gx = 0.0, gy = 0.0;
+            return (site && localLandingContact(p,*site,suitable,gx,gy)) ||
+                (p.altitude >= flight_landing::departureAltitude &&
+                 p.verticalVelocity >= flight_landing::departureSpeed);
+        };
+        append(predicted);
+        if (!endsForecast(predicted)) for (int i = 1; i < samples; ++i) {
+            const LandingState next = advance(predicted, step);
+            if (endsForecast(next)) {
+                double low = 0.0, high = step;
+                for (int iteration = 0; iteration < 16; ++iteration) {
+                    const double mid = (low+high)*0.5;
+                    if (endsForecast(advance(predicted,mid))) high = mid; else low = mid;
+                }
+                append(advance(predicted,high));
+                break;
+            }
+            predicted = next;
+            append(predicted);
+        }
+    }
+    return result;
+}
+
+LaunchFlightStep updatePhysicalFlight(FlightRunState& flight,const PreparedLaunch& launch,
+    const FlightInput& input,double dt,const MiningRunState* site)
+{
+    flight.handoff.elapsed=std::min(flight_landing::handoffSeconds,flight.handoff.elapsed+std::max(0.0,dt));
+    flight.impactDisplaySeconds=std::max(0.0,flight.impactDisplaySeconds-std::max(0.0,dt));
+    auto result=flight.mode==FlightMode::Landing ? updateLocalLandingFlight(flight,launch,input,dt,site)
+        : updateSpaceFlight(flight,launch,input,dt,site);
+    flight.hullDamageTaken=physicalFlightCampaignDamage(flight,launch.existingShipDamage);
+    return result;
+}
+
+} // namespace
+
 LaunchFlightStep updateLaunchFlight(
-    LaunchFlightState& flight,
+    FlightRunState& flight,
     const PreparedLaunch& launch,
     const Destination& destination,
-    const LaunchControlInput& input,
-    double deltaSeconds)
+    const FlightInput& input,
+    double deltaSeconds,
+    const MiningRunState* landingSite)
 {
+    if (flight.physicalFlight) {
+        return updatePhysicalFlight(flight, launch, input, deltaSeconds, landingSite);
+    }
     LaunchFlightStep result;
     if (!flight.active || flight.failureCause != LaunchFailureCause::None) {
         result.failed = flight.failureCause != LaunchFailureCause::None;
@@ -903,7 +1546,7 @@ LaunchFlightStep updateLaunchFlight(
     return result;
 }
 
-TelemetryEvent launchTelemetryAt(const PreparedLaunch& launch, const LaunchFlightState& flight)
+TelemetryEvent launchTelemetryAt(const PreparedLaunch& launch, const FlightRunState& flight)
 {
     TelemetryEvent event;
     event.multiplier = flight.currentMultiplier;

@@ -348,10 +348,6 @@ inline std::vector<RefitStatChip> crewUpgradeStatChips(const CrewUpgrade& upgrad
 {
     const CrewUpgradeStats& stats = upgrade.stats;
     std::vector<RefitStatChip> chips;
-    addStatChip(chips, text::moduleStats::trainingChip, static_cast<double>(stats.trainingGain));
-    addBeneficialReductionChip(chips, text::moduleStats::simStressChip, static_cast<double>(stats.trainingStressRelief));
-    addStatChip(chips, text::moduleStats::restChip, static_cast<double>(stats.restStressBonus));
-    addStatChip(chips, text::moduleStats::launchStressChip, static_cast<double>(stats.launchStressRelief));
     addStatChip(chips, text::moduleStats::traitChip, stats.traitModifier * 100.0);
     return chips;
 }
@@ -359,18 +355,6 @@ inline std::vector<RefitStatChip> crewUpgradeStatChips(const CrewUpgrade& upgrad
 inline std::string crewUpgradePrimaryImpact(const CrewUpgrade& upgrade)
 {
     const CrewUpgradeStats& stats = upgrade.stats;
-    if (stats.trainingGain > 0) {
-        return text::panel::trainingImpact(stats.trainingGain);
-    }
-    if (stats.restStressBonus > 0) {
-        return text::panel::restImpact(stats.restStressBonus);
-    }
-    if (stats.launchStressRelief > 0) {
-        return text::panel::launchStressImpact(stats.launchStressRelief);
-    }
-    if (stats.trainingStressRelief > 0) {
-        return text::panel::simulatorStressImpact(stats.trainingStressRelief);
-    }
     if (stats.traitModifier > 0.0) {
         return text::panel::traitModifierImpact(display::signedPercent(stats.traitModifier));
     }

@@ -289,7 +289,7 @@ inline ScenarioObjectivePresentation scenarioSafeDeliveryObjectiveForDestination
 inline ScenarioDeliveryPresentation scenarioSafeDeliveryPresentation(
     const GameState& state,
     const ContentCatalog& catalog,
-    const SurfaceExpeditionState& expedition)
+    const PlanetaryExpeditionState& expedition)
 {
     ScenarioDeliveryPresentation presentation;
     if (!expedition.active) {
@@ -898,7 +898,7 @@ inline std::vector<PanelMetricPresentation> droneCombatForecastChips(const MiniD
 
 inline int tunedDroneCount(const GameState& state)
 {
-    return static_cast<int>(std::count_if(state.run.surfaceExpedition.runDroneRanks.begin(), state.run.surfaceExpedition.runDroneRanks.end(), [](const RunDroneRank& record) {
+    return static_cast<int>(std::count_if(state.run.planetaryExpedition.runDroneRanks.begin(), state.run.planetaryExpedition.runDroneRanks.end(), [](const RunDroneRank& record) {
         return record.rank > 1;
     }));
 }
@@ -963,10 +963,10 @@ inline std::vector<DroneLoadoutSlotPresentation> droneLoadoutSlots(const GameSta
     };
     auto graftForSlot = [&](int slot) -> const DroneFrameModuleAssignment* {
         const auto found = std::find_if(
-            state.run.surfaceExpedition.droneModuleAssignments.begin(),
-            state.run.surfaceExpedition.droneModuleAssignments.end(),
+            state.run.planetaryExpedition.droneModuleAssignments.begin(),
+            state.run.planetaryExpedition.droneModuleAssignments.end(),
             [&](const DroneFrameModuleAssignment& assignment) { return assignment.equippedFrame == slot; });
-        return found == state.run.surfaceExpedition.droneModuleAssignments.end() ? nullptr : &*found;
+        return found == state.run.planetaryExpedition.droneModuleAssignments.end() ? nullptr : &*found;
     };
     auto graftDefinition = [&](const DroneFrameModuleAssignment* assignment) -> const DroneModuleDefinition* {
         if (assignment == nullptr) {
@@ -1102,7 +1102,7 @@ inline DroneBuildRecipePresentation droneBuildRecipe(
 inline std::vector<DroneBuildRecipePresentation> droneBuildRecipes(const GameState& state, const ContentCatalog& catalog)
 {
     std::vector<DroneBuildRecipePresentation> recipes;
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
 
     for (const DroneFrameModuleAssignment& assignment : expedition.droneModuleAssignments) {
         const auto module = std::find_if(
@@ -1261,7 +1261,7 @@ inline std::string droneTunePriority(const GameState& state, const ContentCatalo
 
 inline DroneBuildGuidancePresentation droneBuildGuidance(const GameState& state, const ContentCatalog& catalog, const MiniDroneLoadoutEffects& effects)
 {
-    for (const std::string& synergyId : state.run.surfaceExpedition.selectedSynergyIds) {
+    for (const std::string& synergyId : state.run.planetaryExpedition.selectedSynergyIds) {
         const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(synergyId);
         if (synergy == nullptr) {
             continue;
@@ -1282,7 +1282,7 @@ inline DroneBuildGuidancePresentation droneBuildGuidance(const GameState& state,
             };
         }
     }
-    if (state.run.surfaceExpedition.selectedSynergyIds.empty()) {
+    if (state.run.planetaryExpedition.selectedSynergyIds.empty()) {
         return {
             "Await Level Up",
             "Chosen synergy",
@@ -1364,7 +1364,7 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
                 : (capacityObjective.available
                     ? capacityObjective.title + " // " + capacityObjective.rewardPreview
                     : "Claim a scenario reward that installs a second bay slot.")),
-        detailPresentationRow("Selected synergies", state.run.surfaceExpedition.selectedSynergyIds.empty() ? "None" : miniDroneSynergySummary(effects)),
+        detailPresentationRow("Selected synergies", state.run.planetaryExpedition.selectedSynergyIds.empty() ? "None" : miniDroneSynergySummary(effects)),
         detailPresentationRow("Mining support", effects.passiveMiningRate > 0.0 ? ("+" + display::fixed(effects.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
         detailPresentationRow("Oxygen support", effects.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(effects.oxygenSeconds))) + "s") : "None"),
         detailPresentationRow("Scanner support", effects.scannerRadius > 0.0 ? ("+" + display::fixed(effects.scannerRadius, 1) + " radius") : "None"),
@@ -1376,7 +1376,7 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
             ? display::fixed(effects.sentryDamagePerSecond + effects.areaControlDamagePerSecond, 1) + "/s sentry output, " + display::percent(effects.enemyDamageRelief + effects.environmentalShieldRelief) + " shield relief"
             : "Attack and Defense Support Drones unlock after hostile surface encounters beyond the solar system.")
     };
-    if (state.run.surfaceExpedition.active && !state.run.surfaceExpedition.destinationId.empty()) {
+    if (state.run.planetaryExpedition.active && !state.run.planetaryExpedition.destinationId.empty()) {
         const MiningArenaRules arenaRules = upcomingMiningArenaRules(state, catalog);
         const MiningGateType gateType = selectMiningGateType(arenaRules);
         const MiningGateDefinition gate = resolveMiningGateDefinition(
@@ -1416,7 +1416,7 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
                     ? panelActionButton("Add slot", ui::actions::upgradeDroneSlot, "ok")
                     : disabledPanelButton(blockedSlotLabel)));
     presentation.backAction = panelActionButton(
-        state.run.surfaceExpedition.active ? "Return to Surface Ops" : "Return to Hangar",
+        state.run.planetaryExpedition.active ? "Return to Mining" : "Return to Hangar",
         ui::actions::backToSurfaceOps,
         "drone-done-action");
     return presentation;
@@ -1518,10 +1518,10 @@ inline PanelButtonPresentation surfaceActionButton(std::string_view label, std::
 
 inline PanelButtonPresentation fieldSurfaceActionButton(const GameState& state, std::string_view label, std::string_view actionId, int cost, std::string cssClass = "")
 {
-    if (state.run.surfaceExpedition.miningRunUsed) {
+    if (state.run.planetaryExpedition.miningRunUsed) {
         return disabledPanelButton(text::buttons::unavailable);
     }
-    return surfaceActionButton(label, actionId, state.run.surfaceExpedition.supply, cost, std::move(cssClass));
+    return surfaceActionButton(label, actionId, state.run.planetaryExpedition.supply, cost, std::move(cssClass));
 }
 
 inline PanelButtonPresentation miningSurfaceActionButton(const GameState& state)
@@ -1529,10 +1529,10 @@ inline PanelButtonPresentation miningSurfaceActionButton(const GameState& state)
     if (!surfaceOpsTutorialMiningUnlocked(state)) {
         return {"Dig First", {}, "risk", false};
     }
-    if (state.run.surfaceExpedition.miningRunUsed) {
+    if (state.run.planetaryExpedition.miningRunUsed) {
         return disabledPanelButton(text::buttons::unavailable);
     }
-    if (state.run.surfaceExpedition.rigFuel < 1.0) {
+    if (state.run.planetaryExpedition.rigFuel < 1.0) {
         return disabledPanelButton(text::buttons::unavailable);
     }
     return panelActionButton(text::buttons::mineDeposit, ui::actions::mineSurface, "risk");
@@ -1545,10 +1545,10 @@ inline std::string surfaceActionAvailability(int supply, int cost)
 
 inline std::string fieldSurfaceActionAvailability(const GameState& state, int cost)
 {
-    if (state.run.surfaceExpedition.miningRunUsed) {
+    if (state.run.planetaryExpedition.miningRunUsed) {
         return std::string(text::panel::messages::surfaceFieldworkClosed);
     }
-    return surfaceActionAvailability(state.run.surfaceExpedition.supply, cost);
+    return surfaceActionAvailability(state.run.planetaryExpedition.supply, cost);
 }
 
 inline std::string miningSurfaceActionAvailability(const GameState& state)
@@ -1556,10 +1556,10 @@ inline std::string miningSurfaceActionAvailability(const GameState& state)
     if (!surfaceOpsTutorialMiningUnlocked(state)) {
         return "Set a start depth to unlock";
     }
-    if (state.run.surfaceExpedition.miningRunUsed) {
+    if (state.run.planetaryExpedition.miningRunUsed) {
         return std::string(text::fuel::offline);
     }
-    if (state.run.surfaceExpedition.rigFuel < 1.0) {
+    if (state.run.planetaryExpedition.rigFuel < 1.0) {
         return std::string(text::fuel::offline);
     }
     return text::fuel::availability(arkDiscovered(state));
@@ -1589,13 +1589,13 @@ inline PanelButtonPresentation pushSurfaceActionButton(
     if (!surfaceOpsTutorialDigUnlocked(state)) {
         return {"Survey First", {}, "warn", false};
     }
-    if (state.run.surfaceExpedition.miningRunUsed) {
+    if (state.run.planetaryExpedition.miningRunUsed) {
         return disabledPanelButton(text::buttons::unavailable);
     }
     const SurfaceDepthCapability capability = surfaceDepthCapability(
         state,
         catalog,
-        state.run.surfaceExpedition.depth + 1);
+        state.run.planetaryExpedition.depth + 1);
     if (!capability.canDig) {
         return disabledPanelButton(surfaceDepthBlockerLabel(capability));
     }
@@ -1614,13 +1614,13 @@ inline std::string pushSurfaceActionAvailability(
     if (!surfaceOpsTutorialDigUnlocked(state)) {
         return "Log a Survey to unlock";
     }
-    if (state.run.surfaceExpedition.miningRunUsed) {
+    if (state.run.planetaryExpedition.miningRunUsed) {
         return std::string(text::panel::messages::surfaceFieldworkClosed);
     }
     const SurfaceDepthCapability capability = surfaceDepthCapability(
         state,
         catalog,
-        state.run.surfaceExpedition.depth + 1);
+        state.run.planetaryExpedition.depth + 1);
     if (!capability.canDig) {
         return surfaceDepthBlockerMessage(capability);
     }
@@ -1659,9 +1659,9 @@ inline SurfaceActionPreviewPresentation surfaceActionPreview(
     };
 }
 
-inline SurfaceExpeditionState projectedSurveyExpedition(const SurfaceExpeditionState& expedition, const SurfaceToolEffects& tools, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
+inline PlanetaryExpeditionState projectedSurveyExpedition(const PlanetaryExpeditionState& expedition, const SurfaceToolEffects& tools, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
 {
-    SurfaceExpeditionState projected = expedition;
+    PlanetaryExpeditionState projected = expedition;
     projected.supply = std::max(0, projected.supply - tuning::research::surveySupplyCost);
     const MaterialInventory gain {.common = tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus};
     projected.temporaryMaterials.common += gain.common;
@@ -1669,9 +1669,9 @@ inline SurfaceExpeditionState projectedSurveyExpedition(const SurfaceExpeditionS
     return projected;
 }
 
-inline SurfaceExpeditionState projectedPushExpedition(const SurfaceExpeditionState& expedition)
+inline PlanetaryExpeditionState projectedPushExpedition(const PlanetaryExpeditionState& expedition)
 {
-    SurfaceExpeditionState projected = expedition;
+    PlanetaryExpeditionState projected = expedition;
     projected.supply = std::max(0, projected.supply - tuning::research::pushSupplyCost);
     projected.depth += 1;
     projected.hazard += tuning::research::hazardPerDepth;
@@ -1696,10 +1696,10 @@ inline std::vector<PanelMetricPresentation> pushPayoffChips(const GameState& sta
     std::vector<PanelMetricPresentation> chips;
     chips.push_back(panelMetric("Mining start", "Next layer"));
     const bool nextLayerScanned = std::any_of(
-        state.run.surfaceExpedition.depthProspects.begin(),
-        state.run.surfaceExpedition.depthProspects.end(),
+        state.run.planetaryExpedition.depthProspects.begin(),
+        state.run.planetaryExpedition.depthProspects.end(),
         [&](const SurfaceDepthProspect& prospect) {
-            return prospect.absoluteDepth == state.run.surfaceExpedition.depth + 1;
+            return prospect.absoluteDepth == state.run.planetaryExpedition.depth + 1;
         });
     chips.push_back(panelMetric("Next layer", nextLayerScanned ? "Surveyed" : "Unsurveyed"));
     addPercentChip(chips, text::labels::artifacts, std::min(1.0, tuning::research::artifactChanceBase + crew.artifactChanceBonus + site.artifactChanceBonus));
@@ -1707,7 +1707,7 @@ inline std::vector<PanelMetricPresentation> pushPayoffChips(const GameState& sta
     return chips;
 }
 
-inline std::vector<PanelMetricPresentation> extractPayoffChips(const SurfaceExpeditionState& expedition)
+inline std::vector<PanelMetricPresentation> extractPayoffChips(const PlanetaryExpeditionState& expedition)
 {
     std::vector<PanelMetricPresentation> chips;
     addPositiveChip(chips, text::labels::commonMaterials, expedition.temporaryMaterials.common);
@@ -1717,7 +1717,7 @@ inline std::vector<PanelMetricPresentation> extractPayoffChips(const SurfaceExpe
     return chips;
 }
 
-inline bool hasSurfacePayload(const SurfaceExpeditionState& expedition)
+inline bool hasSurfacePayload(const PlanetaryExpeditionState& expedition)
 {
     return expedition.cargo > 0
         || expedition.temporaryMaterials.common > 0
@@ -1727,7 +1727,7 @@ inline bool hasSurfacePayload(const SurfaceExpeditionState& expedition)
 }
 
 inline bool surfaceUsesOuterExpeditionRecovery(
-    const SurfaceExpeditionState& expedition,
+    const PlanetaryExpeditionState& expedition,
     const ContentCatalog& catalog)
 {
     const Destination* destination = catalog.findDestination(expedition.destinationId);
@@ -1735,7 +1735,7 @@ inline bool surfaceUsesOuterExpeditionRecovery(
 }
 
 inline SurfaceExpeditionPresentation surfacePosturePresentation(
-    const SurfaceExpeditionState& expedition,
+    const PlanetaryExpeditionState& expedition,
     bool arkKnown,
     bool outerExpedition = false)
 {
@@ -1816,7 +1816,7 @@ inline MiningArenaRules upcomingMiningArenaRules(
     const ContentCatalog& catalog,
     int depthOffset)
 {
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     const int completedHostileSorties = destinationHistoryValue(
         state.meta.destinationSuccesses,
         catalog,
@@ -1913,7 +1913,7 @@ inline std::string miningArenaForecastDetail(const MiningArenaRules& rules)
 inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
     const GameState& state,
     const ContentCatalog& catalog,
-    const SurfaceExpeditionState& expedition,
+    const PlanetaryExpeditionState& expedition,
     const SurfaceCrewEffects& crew,
     const SurfaceUpgradeEffects& upgrades,
     bool arkKnown)
@@ -1966,14 +1966,14 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
                 : std::string("Research field probes, drill rigs, and cargo rigs to improve future expeditions."))
     };
     if (expedition.enemyEncountersEnabled) {
-        rows.push_back(detailPresentationRow(text::panel::details::hostileContact, std::string("Enemy contact can consume action kits and cargo beyond the solar system; perimeter drones reduce contact risk.")));
+        rows.push_back(detailPresentationRow(text::panel::details::hostileContact, std::string("Enemy contact can damage exposed cargo beyond the solar system; perimeter drones reduce contact risk.")));
     }
     return rows;
 }
 
-inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameState& state, const ContentCatalog& catalog)
+inline SurfaceExpeditionPresentation planetaryExpeditionPresentation(const GameState& state, const ContentCatalog& catalog)
 {
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
@@ -2245,9 +2245,9 @@ inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameSta
     return presentation;
 }
 
-inline SurfaceExpeditionPresentation surfaceExpeditionPresentation(const GameState& state)
+inline SurfaceExpeditionPresentation planetaryExpeditionPresentation(const GameState& state)
 {
-    return surfaceExpeditionPresentation(state, createDefaultContent());
+    return planetaryExpeditionPresentation(state, createDefaultContent());
 }
 
 } // namespace rocket

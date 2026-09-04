@@ -6,6 +6,9 @@
 #include "core/GameUi.h"
 #include "core/MiningSystem.h"
 #include "core/PanelPresentation.h"
+#include "core/PayloadTransfer.h"
+#include "core/ResearchSystem.h"
+#include "core/RigFuelSystem.h"
 #include "core/ScenarioSystem.h"
 
 #include <algorithm>
@@ -164,8 +167,8 @@ inline int activeMiningCritTextCount(const MiningRunState& mining)
 inline int tunedMiningDroneCount(const GameState& state)
 {
     return static_cast<int>(std::count_if(
-        state.run.surfaceExpedition.runDroneRanks.begin(),
-        state.run.surfaceExpedition.runDroneRanks.end(),
+        state.run.planetaryExpedition.runDroneRanks.begin(),
+        state.run.planetaryExpedition.runDroneRanks.end(),
         [](const RunDroneRank& record) {
             return record.rank > 1;
         }));
@@ -286,22 +289,20 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
     const MiningRunState& mining = state.run.mining;
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     const MiniDroneLoadoutEffects drones = miniDroneLoadoutEffects(state, catalog);
-    const SurfaceExpeditionState& surface = state.run.surfaceExpedition;
     const MiningArenaMetadata& arena = mining.arenaMetadata;
     const MiningArenaRules arenaRules = resolveMiningArenaRules({arena.act, arena.difficulty, arena.seed});
-    const bool arkKnown = arkDiscovered(state);
     const MiningLoadStats load = miningLoadStats(state, catalog);
-    const double fuelCycleSeconds = miningRigFuelCycleSeconds(state);
-    const double effectiveFuelCycleSeconds = fuelCycleSeconds /
-        std::max(1.0, load.fuelConsumptionMultiplier);
     const bool evaActive =
         mining.operatorMode == MiningOperatorMode::Jetpack &&
         mining.operatorPresent;
+    const bool protectedObjectiveNeedsPulse =
+        mining.gate.completeOnShipCapture &&
+        mining.gate.protectedObjective.kind == ProtectedObjectiveKind::Artifact &&
+        mining.artifact.present &&
+        !mining.artifact.revealed;
     const MiningDrillStats operatorStats =
         miningOperatorDrillStats();
-    const double rigOxygenCapacity = std::max(
-        stats.oxygenSeconds,
-        std::max(0.0, mining.siteBaselineOxygenSeconds));
+    const double rigOxygenCapacity = mining.rigOxygen.capacity;
     const double displayedDrillPower = evaActive
         ? operatorStats.power
         : stats.power;
@@ -329,17 +330,13 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         panelMetric("Mode", evaActive ? "EVA" : "Rig"),
         panelMetric("Gravity", display::fixed(mining.gravityStrength, 1) + " cells/s2"),
         panelMetric(text::labels::drillBit, mining.drillIntegrity <= 0.0 ? "Broken" : display::percent(std::clamp(mining.drillIntegrity, 0.0, 1.0))),
-        panelMetric("Rig O2", miningOxygenValue(mining.oxygenSeconds) + "/" + miningOxygenValue(rigOxygenCapacity)),
-        panelMetric("Suit O2", miningOxygenValue(mining.operatorOxygenSeconds) + "/" + miningOxygenValue(tuning::mining::operatorOxygenSeconds)),
+        panelMetric("Rig O2", miningOxygenValue(mining.rigOxygen.current) + "/" + miningOxygenValue(rigOxygenCapacity)),
+        panelMetric("Suit O2", miningOxygenValue(mining.suitOxygen.current) + "/" + miningOxygenValue(mining.suitOxygen.capacity)),
         panelMetric("Rig cargo", std::to_string(carriedCargo)),
         panelMetric("Ship cargo", std::to_string(bankedCargo)),
         panelMetric(text::labels::load, display::fixed(load.currentLoad, 1)),
-        // Rig fuel is spent and collected in whole units. Keep the underlying
-        // value fractional for simulation compatibility, but the compact HUD
-        // must not overflow its tile with unnecessary decimal places.
-        panelMetric(text::fuel::reserveLabel(arkKnown), display::fixed(surface.rigFuel, 0) + "/" + display::fixed(std::max(0.0, surface.rigFuelCapacity), 0)),
-        panelMetric("Fuel cadence", "1 / " + display::fixed(effectiveFuelCycleSeconds, 1) + "s"),
-        panelMetric("Next fuel", miningFuelCycleValue(mining.fuelCycleProgress)),
+        panelMetric("Rig Fuel", display::fixed(mining.rigFuel.current, 1) + "/" + display::fixed(mining.rigFuel.capacity, 1)),
+        panelMetric("Ship Hold", std::to_string(shipHoldUsed(state)) + "/" + std::to_string(shipHoldCapacity(state, catalog))),
         panelMetric(text::labels::depth, std::to_string(mining.depthZone)),
         panelMetric("Arena", std::string(miningActName(arena.act)) + " L" + std::to_string(arena.difficulty)),
         panelMetric("Seed", std::to_string(arena.seed)),
@@ -406,10 +403,10 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
             evaActive
                 ? std::string("WASD/left stick thrusts; mouse/right stick aims; left click/R2 fires; right click/L2 drills; E/X scans; T/Y tethers; F or hold A enters the rig.")
                 : std::string("WASD/left stick thrusts and steers the rig drill; left click/R2 drills; E/X scans; T/Y tethers; F or hold A exits for EVA.")),
-        detailPresentationRow("Site", std::string(surfaceSiteProfileName(surface.siteProfile))),
+        detailPresentationRow("Site", std::string(surfaceSiteProfileName(state.run.planetaryExpedition.siteProfile))),
         detailPresentationRow("Rig health", presentation.rigHealth),
-        detailPresentationRow("Rig O2", miningOxygenValue(mining.oxygenSeconds) + " / " + miningOxygenValue(rigOxygenCapacity)),
-        detailPresentationRow("Suit O2", miningOxygenValue(mining.operatorOxygenSeconds) + " / " + miningOxygenValue(tuning::mining::operatorOxygenSeconds)),
+        detailPresentationRow("Rig O2", miningOxygenValue(mining.rigOxygen.current) + " / " + miningOxygenValue(rigOxygenCapacity)),
+        detailPresentationRow("Suit O2", miningOxygenValue(mining.suitOxygen.current) + " / " + miningOxygenValue(mining.suitOxygen.capacity)),
         detailPresentationRow("Drill power", display::fixed(displayedDrillPower, 1)),
         detailPresentationRow("Drill range", display::fixed(displayedDrillRange, 1) + " cells"),
         detailPresentationRow("Scanner radius", display::fixed(displayedScannerRadius, 1) + " cells"),
@@ -427,23 +424,18 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
                       display::fixed(tuning::mining::operatorSidearmIntervalSeconds, 2) +
                       "s cadence")
                 : std::string("EVA equipment")),
-        detailPresentationRow(text::fuel::reserveLabel(arkKnown), display::fixed(surface.rigFuel, 1) + "/" + display::fixed(std::max(0.0, surface.rigFuelCapacity), 1) + " available for this dig"),
-        detailPresentationRow(text::labels::transferFuel, display::fixed(surface.transferFuelRecovered, 1) + " recovered at touchdown"),
-        detailPresentationRow("Expedition rig pack", display::fixed(surface.expeditionPackFuel, 1)),
-        detailPresentationRow(text::labels::returnStage, std::string("RESERVED")),
-        detailPresentationRow("Fuel spent this dig", std::to_string(mining.fuelSpent)),
+        detailPresentationRow("Rig Fuel", display::fixed(mining.rigFuel.current, 1) + "/" + display::fixed(mining.rigFuel.capacity, 1)),
+        detailPresentationRow("Ship Hold", std::to_string(shipHoldUsed(state)) + "/" + std::to_string(shipHoldCapacity(state, catalog))),
         detailPresentationRow(
             "Rig Fuel Loop",
             (installedRigFuelLoopRank(state) > 0
                  ? "RANK " + std::to_string(installedRigFuelLoopRank(state))
                  : std::string("BASE")) +
-                " / 1 fuel / " + display::fixed(fuelCycleSeconds, 0) + "s"),
+                " / " + display::percent(rigFuelEfficiency(installedRigFuelLoopRank(state))) + " lower powered consumption"),
         detailPresentationRow(
             "Fuel draw",
-            text::fuel::drawDetail(arkKnown) + " Load " +
-                display::fixed(load.fuelConsumptionMultiplier, 2) +
-                "x / effective 1 fuel per " +
-                display::fixed(effectiveFuelCycleSeconds, 1) + "s."),
+            "Powered thrust " + display::fixed(load.fuelConsumptionMultiplier, 2) +
+                "x load; drilling draws independently. Idling and coasting are free."),
         detailPresentationRow("Load burden", display::fixed(load.currentLoad, 1) + " load; " + display::fixed(load.freeBuffer, 1) + " free carry; speed " + display::percent(load.speedMultiplier)),
         detailPresentationRow("Support Drone loadout", miningDroneSummary(drones)),
         detailPresentationRow("Build signature", drones.signatureName.empty() ? "None" : drones.signatureName),
@@ -469,7 +461,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
         detailPresentationRow("Heat control", display::fixed(stats.heatCoolingPerSecond, 2)),
         detailPresentationRow("Drill protection", display::signedPercent(stats.integrityRelief)),
         detailPresentationRow("Survey footprint", std::to_string(stats.terrainWidth) + "x" + std::to_string(stats.terrainHeight)),
-        detailPresentationRow("Run target", text::fuel::miningRunTarget(arkKnown)),
+        detailPresentationRow("Run target", std::string("Explore, recover physical cargo, and return it to the mothership.")),
         detailPresentationRow("Depth pressure", std::string("Deeper zones have tougher terrain and richer pockets. Ship cargo always returns intact."))
     };
     if (mining.artifact.present) {
@@ -505,9 +497,11 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
             presentation.commandTitle = "Ship service";
             presentation.commandDetail = disabledRigAtShip
                 ? "Shuttle umbilical patch restores 35% rig integrity; reboard or leave"
-                : (arenaRules.mechanics.fogAndScanner
+                : (protectedObjectiveNeedsPulse
+                        ? "ANOMALOUS RETURN - PULSE SCANNER [E/X]"
+                        : (arenaRules.mechanics.fogAndScanner
                         ? "Repair, scan the site, then leave"
-                        : "Repair the rig, then leave");
+                        : "Repair the rig, then leave"));
             presentation.actions = {
                 drillRepairCost <= 0
                     ? disabledPanelButton("Bit ready")
@@ -522,20 +516,51 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
                               ? panelActionButton("Repair " + actorName + " (" + std::to_string(actorRepairCost) + " common)", ui::actions::miningRepairDrone, "ok")
                               : disabledPanelButton("Need " + std::to_string(actorRepairCost) + " common for " + actorName)))
             };
-            if (arenaRules.mechanics.fogAndScanner) {
+            if (arenaRules.mechanics.fogAndScanner || protectedObjectiveNeedsPulse) {
                 presentation.actions.push_back(
-                    panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"));
+                    panelActionButton(
+                        protectedObjectiveNeedsPulse ? "ANOMALOUS RETURN - PULSE SCANNER [E/X]" : text::buttons::pulseScanner,
+                        ui::actions::miningScanner,
+                        protectedObjectiveNeedsPulse ? "warn anomaly-action" : "warn"));
+            }
+            if (droneBayUnlocked(state)) {
+                presentation.actions.push_back(
+                    panelActionButton("Drone loadout", ui::actions::droneOps, "ghost"));
             }
             presentation.actions.push_back(
-                panelActionButton(text::buttons::stowPayload, ui::actions::miningStow, "ok"));
+                panelActionButton("Bank payload", ui::actions::miningStow, "ok"));
+            const MiningDroneRecoveryStatus droneRecovery =
+                miningDroneRecoveryStatus(mining);
+            if (droneRecovery.outstandingDrones > 0) {
+                presentation.actions.push_back(panelActionButton(
+                    (droneRecovery.recallInProgress ? "Drones returning (" : "Wait for drones (") +
+                        std::to_string(droneRecovery.outstandingDrones) + ")",
+                    ui::actions::miningWaitForDrones,
+                    "ghost"));
+                presentation.actions.push_back(panelActionButton(
+                    "Leave now - lose " +
+                        std::to_string(droneRecovery.outstandingDrones) +
+                        (droneRecovery.outstandingDrones == 1 ? " drone / " : " drones / ") +
+                        std::to_string(droneRecovery.outstandingCargoMass) + " mass",
+                    ui::actions::miningDepart,
+                    "warn"));
+            } else {
+                presentation.actions.push_back(
+                    panelActionButton("Depart planet", ui::actions::miningDepart, "warn"));
+            }
         } else {
             const MiningArtifactObject& artifact = mining.artifact;
             const MiningTetherTargetResolution tetherTarget = resolveMiningTetherTarget(mining);
             presentation.commandTitle = "Commands";
-            if (arenaRules.mechanics.fogAndScanner) {
-                presentation.commandHints.push_back("Pulse Scanner (E) - Reveals nearby resources");
+            if (arenaRules.mechanics.fogAndScanner || protectedObjectiveNeedsPulse) {
+                presentation.commandHints.push_back(protectedObjectiveNeedsPulse
+                    ? "ANOMALOUS RETURN - PULSE SCANNER [E/X]"
+                    : "Pulse Scanner (E) - Reveals nearby resources");
                 presentation.actions.push_back(
-                    panelActionButton(text::buttons::pulseScanner, ui::actions::miningScanner, "warn"));
+                    panelActionButton(
+                        protectedObjectiveNeedsPulse ? "PULSE SCANNER [E/X]" : text::buttons::pulseScanner,
+                        ui::actions::miningScanner,
+                        protectedObjectiveNeedsPulse ? "warn anomaly-action" : "warn"));
             }
             PanelButtonPresentation tetherAction = disabledPanelButton("No tether target");
             if (artifact.tethered) {
@@ -550,12 +575,16 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
                     mining.rigDisabled ? "Tether disabled Mining Rig" : "Tether Mining Rig",
                     ui::actions::miningTether,
                     "warn");
+            } else if (tetherTarget.target == MiningTetherTarget::FuelCell) {
+                tetherAction = panelActionButton("Tether fuel cell", ui::actions::miningTether, "warn");
             } else if (tetherTarget.blocker == MiningTetherBlocker::ArtifactGateLocked) {
                 tetherAction = disabledPanelButton("Complete gate to tether artifact");
             } else if (tetherTarget.blocker == MiningTetherBlocker::ArtifactUnexposed) {
                 tetherAction = disabledPanelButton("Scan or expose artifact");
             } else if (tetherTarget.blocker == MiningTetherBlocker::ArtifactOutOfRange) {
                 tetherAction = disabledPanelButton("Move within artifact tether range");
+            } else if (tetherTarget.blocker == MiningTetherBlocker::SuitRequired) {
+                tetherAction = disabledPanelButton("EXIT RIG - EVA REQUIRED");
             } else if (tetherTarget.blocker == MiningTetherBlocker::RigDifferentDepth) {
                 tetherAction = disabledPanelButton("Mining Rig is on another depth");
             } else if (tetherTarget.blocker == MiningTetherBlocker::RigOutOfRange) {
@@ -583,13 +612,25 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
 inline MiningHudPresentation miningHudPresentation(const GameState& state, const ContentCatalog& catalog)
 {
     const MiningRunState& mining = state.run.mining;
-    const SurfaceExpeditionState& surface = state.run.surfaceExpedition;
     const MiningRunPresentation run = miningRunPresentation(state, catalog);
     const MiningLoadStats load = miningLoadStats(state, catalog);
-    const bool arkKnown = arkDiscovered(state);
+    const MiningArenaRules arenaRules = resolveMiningArenaRules({
+        mining.arenaMetadata.act,
+        mining.arenaMetadata.difficulty,
+        mining.arenaMetadata.seed});
     const bool evaActive =
         mining.operatorMode == MiningOperatorMode::Jetpack &&
         mining.operatorPresent;
+    const auto loadBandCss = [](RigLoadBand band) -> std::string {
+        switch (band) {
+        case RigLoadBand::Light: return "load load-light";
+        case RigLoadBand::Standard: return "load load-standard";
+        case RigLoadBand::Laden: return "load load-laden";
+        case RigLoadBand::Packrat: return "load load-packrat";
+        case RigLoadBand::Full: return "load load-full";
+        }
+        return "load";
+    };
 
     auto metricValue = [&run](std::string_view label, std::string fallback = "--") {
         const auto found = std::find_if(run.metrics.begin(), run.metrics.end(), [label](const PanelMetricPresentation& metric) {
@@ -683,9 +724,19 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
     presentation.vitals = {{
         {evaActive ? "SUIT O2" : "RIG O2",
             miningOxygenValue(miningActiveOxygenSeconds(mining)), "oxygen", {}, {}},
-        {"RIG FUEL", metricValue(text::fuel::reserveLabel(arkKnown), display::fixed(surface.rigFuel, 0)), "fuel", "NEXT", metricValue("Next fuel", "100%")},
-        {"DRILL", metricValue(text::labels::drillBit), std::move(drillCssClass), "HEAT", metricValue(text::labels::drillHeat, "0%")},
-        {"LOAD", display::fixed(load.currentLoad, 1), "load", {}, {}}
+        {"RIG FUEL", display::fixed(mining.rigFuel.current, 1), "fuel", {}, {}},
+        {evaActive ? "SUIT INTEGRITY" : "RIG INTEGRITY",
+            evaActive ? display::percent(mining.operatorIntegrity) : display::percent(mining.droneHealth),
+            std::move(drillCssClass),
+            (arenaRules.mechanics.drillHeat && (mining.drilling || mining.drillHeat > 0.01)) ? "HEAT" : "",
+            (arenaRules.mechanics.drillHeat && (mining.drilling || mining.drillHeat > 0.01)) ? metricValue(text::labels::drillHeat, "0%") : ""},
+        {"RIG LOAD",
+            std::to_string(static_cast<int>(std::round(load.currentLoad))) + "/" +
+                std::to_string(static_cast<int>(std::round(load.capacity))),
+            loadBandCss(load.band),
+            std::string(rigLoadBandName(load.band)),
+            "SHIP " + std::to_string(shipHoldUsed(state)) + "/" +
+                std::to_string(shipHoldCapacity(state, catalog))}
     }};
     const auto droneOre = [&](auto member) {
         int total = 0;
@@ -757,7 +808,10 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
             presentation.actions.push_back(copyAction(*scanner, "PULSE SCANNER", "mining-scan-action"));
         }
         if (const PanelButtonPresentation* stow = findAction(ui::actions::miningStow)) {
-            presentation.actions.push_back(copyAction(*stow, "STOW / LEAVE", "mining-bank-action"));
+            presentation.actions.push_back(copyAction(*stow, "BANK PAYLOAD", "mining-bank-action"));
+        }
+        if (const PanelButtonPresentation* depart = findAction(ui::actions::miningDepart)) {
+            presentation.actions.push_back(copyAction(*depart, "DEPART PLANET", "mining-depart-action"));
         }
         return presentation;
     }
@@ -766,17 +820,21 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
         presentation.actions.push_back(copyAction(*scanner, "PULSE SCANNER", "mining-scan-action"));
     }
     if (const PanelButtonPresentation* tether = findAction(ui::actions::miningTether)) {
-        std::string hudLabel = "TETHER DRONE";
-        if (tether->label.find("artifact") != std::string::npos || tether->label.find("Artifact") != std::string::npos) {
+        std::string hudLabel = "TETHER TARGET";
+        if (tether->label.find("fuel") != std::string::npos || tether->label.find("Fuel") != std::string::npos) {
+            hudLabel = tether->label.find("Release") != std::string::npos
+                ? "RELEASE FUEL CELL"
+                : "TETHER FUEL CELL";
+        } else if (tether->label.find("artifact") != std::string::npos || tether->label.find("Artifact") != std::string::npos) {
             hudLabel = tether->label.find("Release") != std::string::npos
                 ? "RELEASE ARTIFACT"
                 : "TETHER ARTIFACT";
         } else if (tether->label.find("Release") != std::string::npos) {
-            hudLabel = "RELEASE DRONE";
+            hudLabel = "RELEASE TARGET";
         }
         presentation.actions.push_back(copyAction(*tether, std::move(hudLabel), "mining-tether-action"));
     } else {
-        PanelButtonPresentation unavailableTether = disabledPanelButton("TETHER DRONE");
+        PanelButtonPresentation unavailableTether = disabledPanelButton("TETHER TARGET");
         unavailableTether.actionId = std::string(ui::actions::miningTether);
         unavailableTether.cssClass = "mining-tether-action";
         presentation.actions.push_back(std::move(unavailableTether));

@@ -107,13 +107,13 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
         panelMetric(text::labels::artifacts, std::to_string(artifactCount))
     };
 
-    if (state.run.mining.active || state.run.surfaceExpedition.active) {
+    if (state.run.mining.active || state.run.planetaryExpedition.active) {
         const MaterialInventory& surfaceMaterials = state.run.mining.active
             ? state.run.mining.temporaryMaterials
-            : state.run.surfaceExpedition.temporaryMaterials;
+            : state.run.planetaryExpedition.temporaryMaterials;
         const std::vector<ArtifactRecord>& surfaceArtifacts = state.run.mining.active
             ? state.run.mining.temporaryArtifacts
-            : state.run.surfaceExpedition.temporaryArtifacts;
+            : state.run.planetaryExpedition.temporaryArtifacts;
         InventorySectionPresentation payload {
             "Current payload",
             "Cargo that must still be extracted before it joins the permanent inventory.",

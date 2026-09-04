@@ -315,10 +315,10 @@ inline constexpr double returnDurationPerProgress = 1.40;
 inline constexpr double returnDriftDurationMultiplier = 1.25;
 inline constexpr double returnTurnSeconds = 1.15;
 inline constexpr double launchShakeSeconds = 0.55;
-inline constexpr double lunarImpactHoldSeconds = 0.08;
-inline constexpr double lunarImpactExplosionEndSeconds = 0.92;
-inline constexpr double lunarImpactSequenceSeconds = 0.95;
-inline constexpr double arrivalFanfareSeconds = 2.50;
+inline constexpr double flightDestructionHoldSeconds = 0.08;
+inline constexpr double flightDestructionExplosionEndSeconds = 0.92;
+inline constexpr double flightDestructionSequenceSeconds = 0.95;
+inline constexpr double arrivalFanfareSeconds = 2.00;
 inline constexpr double returnTelemetryProgressDenominator = 0.10;
 inline constexpr double returnTelemetryHeadroomMinimum = 0.04;
 inline constexpr double returnTelemetryOvershootHeadroomScale = 0.22;
@@ -456,10 +456,9 @@ inline constexpr int cleanShallowRecoveryDestructionStreak = 3;
 } // namespace rewards
 
 namespace research {
-inline constexpr double unmappedDescentHazardPenalty = 0.20;
 inline constexpr int firstResearchTier = 2;
-inline constexpr int prospectorCommonOreGoal = 30;
-inline constexpr int marsBayCommonOreGoal = 40;
+inline constexpr int prospectorCommonOreGoal = 20;
+inline constexpr int marsBayCommonOreGoal = 8;
 inline constexpr int enemyEncounterTier = 4;
 inline constexpr int offerCount = 3;
 inline constexpr int baseSupply = 7;
@@ -575,6 +574,9 @@ inline constexpr double pushCollapseHazardIncrease = 0.060;
 namespace mining {
 inline constexpr int terrainWidth = 64;
 inline constexpr int terrainHeight = 40;
+// Expose a readable surface cross-section before landing, without mapping
+// deeper layers or spending the scanner's protected-objective discovery.
+inline constexpr int surfaceVisibleDepthCells = 16;
 inline constexpr int chunkSize = 8;
 inline constexpr double oxygenSeconds = 30.0;
 // The EVA suit is an emergency fallback, not an upgrade track. Its reserve is
@@ -584,8 +586,6 @@ inline constexpr double operatorOxygenSeconds = 15.0;
 inline constexpr double ioArtifactOxygenSeconds = 60.0;
 inline constexpr double maximumOxygenSeconds = 120.0;
 inline constexpr double oxygenPocketRestoreSeconds = 10.0;
-inline constexpr double fuelCycleProgressPerSecond =
-    1.0 / rigFuelLoopProgression::baseCycleSeconds;
 // Presentation reserve for a deliberate return through generated terrain.
 // Ideal straight-line speed badly understates acceleration, gravity, steering,
 // and the time needed to find each layer transition.
@@ -596,7 +596,12 @@ inline constexpr double targetRunSeconds = 120.0;
 inline constexpr double droneSpeedCellsPerSecond = 7.2;
 inline constexpr double rigAccelerationCellsPerSecondSquared = 14.0;
 inline constexpr double rigBrakingCellsPerSecondSquared = 20.0;
+// The authored rig is a long, bulky vehicle. Collision uses the oriented hull
+// below; this legacy radius is retained only for nearby interaction/formation
+// calculations that intentionally treat the rig as a point anchor.
 inline constexpr double rigColliderRadiusCells = 0.48;
+inline constexpr double rigHullHalfLengthCells = 1.32;
+inline constexpr double rigHullHalfWidthCells = 0.72;
 inline constexpr double operatorSpeedCellsPerSecond = 4.6;
 inline constexpr double operatorAccelerationCellsPerSecondSquared = 28.0;
 inline constexpr double operatorBrakingCellsPerSecondSquared = 24.0;
@@ -661,6 +666,7 @@ inline constexpr double maxMiningHazardDelta = 0.26;
 inline constexpr double returnZoneHorizontalFraction = 0.29;
 inline constexpr double returnZoneRadiusCells = 3.0;
 inline constexpr double baseCarryBufferCargo = 3.0;
+inline constexpr int rigCargoCapacityMass = 24;
 inline constexpr double tetheredArtifactCargoWeight = 4.0;
 inline constexpr double rigTetherPullAccelerationCellsPerSecondSquared = 11.0;
 inline constexpr double rigTetherDamping = 1.65;

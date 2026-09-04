@@ -32,17 +32,17 @@ inline constexpr std::string_view moonOrbitRequired = "Moon landing requires a s
 inline constexpr std::string_view landingCommitted = "Landing committed. Surface team is preparing the extraction plan.";
 inline constexpr std::string_view researchCompleted = "Research completed. Research Data logged in the agency archive.";
 inline constexpr std::string_view researchSkipped = "Research skipped. The field team kept the schedule moving.";
-inline constexpr std::string_view surfaceExpeditionStarted = "Surface expedition underway. Gather what you can, then extract before the risk spikes.";
+inline constexpr std::string_view planetaryExpeditionStarted = "Surface expedition underway. Gather what you can, then extract before the risk spikes.";
 inline constexpr std::string_view surfaceSurveyed = "Surface survey logged recoverable samples.";
 inline constexpr std::string_view surfaceMined = "Mining team filled the return canisters.";
 inline constexpr std::string_view surfacePushed = "Expedition pushed into riskier terrain.";
 inline constexpr std::string_view surfaceExtracted = "Surface payload recovered.";
 inline constexpr std::string_view surfaceExtractionRough = "Extraction was rough; only part of the payload survived.";
-inline constexpr std::string_view surfaceSupplyBlocked = "Surface team does not have enough action kits for that move.";
+inline constexpr std::string_view surfaceSupplyBlocked = "That retired surface-board action is unavailable.";
 inline constexpr std::string_view surfaceDustHazard = "Dust interference burned an action kit during the survey.";
 inline constexpr std::string_view surfaceDrillHazard = "Drill chatter damaged cargo canisters.";
 inline constexpr std::string_view surfaceTerrainHazard = "Unstable terrain forced a costly route correction.";
-inline constexpr std::string_view surfaceEquipmentFailure = "Equipment fault consumed spare action kits.";
+inline constexpr std::string_view surfaceEquipmentFailure = "Equipment fault interrupted the operation.";
 inline constexpr std::string_view surfaceUnexpectedDeposit = "Field team uncovered an unexpected deposit.";
 inline constexpr std::string_view surfaceCrewDiscovery = "Crew discovery added Research Data.";
 inline constexpr std::string_view surfaceEnemyContact = "Hostile contact forced the field team into a defensive retreat.";
@@ -472,7 +472,7 @@ inline constexpr std::string_view burnProfile = "Burn profile";
 inline constexpr std::string_view peakTelemetry = "Peak telemetry";
 inline constexpr std::string_view achievements = "Achievements";
 inline constexpr std::string_view research = "Science";
-inline constexpr std::string_view surfaceExpedition = "Surface Ops";
+inline constexpr std::string_view planetaryExpedition = "Surface Ops";
 inline constexpr std::string_view miningRun = "Mining";
 inline constexpr std::string_view refitWindow = "Refit window";
 inline constexpr std::string_view hangarBay = "Hangar Bay";
@@ -668,7 +668,7 @@ inline constexpr std::string_view surfacePostureNarrowingDetail = "Action kits a
 inline constexpr std::string_view surfacePostureGreedy = "Recommended: extract now";
 inline constexpr std::string_view surfacePostureGreedyDetail = "The payload is valuable, but recovery risk is climbing into expensive territory.";
 inline constexpr std::string_view surfacePostureExtract = "Required: extract now";
-inline constexpr std::string_view surfacePostureExtractDetail = "No action kits remain for field work. Bring the payload back to Earth before conditions get worse.";
+inline constexpr std::string_view surfacePostureExtractDetail = "Bring the physical payload back to the ship before conditions get worse.";
 inline constexpr std::string_view surfaceFieldworkClosed = "Extract payload";
 inline constexpr std::string_view surfaceSurveyDetail = "Reveal the ore and artifact forecast at each scanned level before choosing where to dig.";
 inline constexpr std::string_view surfaceMineDetail = "Control the Mining Rig drone at the selected start depth to extract ore and artifacts, then stow them at the ship.";
@@ -677,10 +677,10 @@ inline constexpr std::string_view surfaceExtractDetail = "Return every material 
 inline std::string surfacePostureExtractDetailForHome(bool arkKnown, bool outerExpedition = false)
 {
     if (arkKnown) {
-        return "No action kits remain for field work. Bring the payload back to the Ark before conditions get worse.";
+        return "Bring the physical payload back to the Ark before conditions get worse.";
     }
     if (outerExpedition) {
-        return "No action kits remain for field work. Recover the payload to expedition staging before conditions get worse.";
+        return "Recover the physical payload to expedition staging before conditions get worse.";
     }
     return std::string(surfacePostureExtractDetail);
 }
@@ -697,7 +697,7 @@ inline std::string surfaceExtractDetailForHome(bool arkKnown, bool outerExpediti
 
 inline std::string supplyCost(int cost)
 {
-    return std::to_string(cost) + (cost == 1 ? " action kit" : " action kits");
+    return std::to_string(cost) + (cost == 1 ? " operation" : " operations");
 }
 
 inline std::string needSupply(int cost)

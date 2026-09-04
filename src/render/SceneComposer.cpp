@@ -1,6 +1,8 @@
 #include "render/SceneComposer.h"
 
 #include "core/FlightInstrumentLayout.h"
+#include "core/SurfaceBayTiming.h"
+#include "core/FlightSystem.h"
 #include "core/UiViewportLayout.h"
 
 #include "core/MiningSystem.h"
@@ -59,6 +61,9 @@ constexpr float kLaunchThrustMinimumWidthScale = 0.72F;
 // can be anchored to the moving nozzle without an inferred texture offset.
 constexpr float kThrustSheetLeadingTransparentShare = 0.27F;
 constexpr float kMiningShipExhaustNozzleShare = 0.465F;
+constexpr float kMiningRigSpriteCells = 3.25F;
+constexpr float kMiningRigIdleDrillCells = 2.30F;
+constexpr float kMiningSupportDroneSpriteCells = 1.50F;
 // The bottom dock produces a deliberately shallow scene. The local-system
 // backdrop reaches roughly 1.75 world units below center (the large authored
 // Earth sprite), so this scale keeps that complete body inside sceneRect rather
@@ -85,6 +90,85 @@ constexpr std::size_t kMaxSurfacePushRewardMarkers = 10U;
 // This is far above the largest supported mining scene, while keeping one
 // malformed frame below two megabytes of packed instance storage.
 constexpr std::size_t kMaxFrameInstances = 65'536U;
+
+double trajectoryPointDistance(
+    const FlightTrajectoryPointSnapshot& a,
+    const FlightTrajectoryPointSnapshot& b) noexcept
+{
+    return std::hypot(b.x - a.x, b.y - a.y);
+}
+
+FlightTrajectoryPointSnapshot trajectoryPointLerp(
+    const FlightTrajectoryPointSnapshot& a,
+    const FlightTrajectoryPointSnapshot& b,
+    double amount) noexcept
+{
+    return {
+        std::lerp(a.x, b.x, amount),
+        std::lerp(a.y, b.y, amount)
+    };
+}
+
+double nextCentripetalKnot(
+    double knot,
+    const FlightTrajectoryPointSnapshot& a,
+    const FlightTrajectoryPointSnapshot& b) noexcept
+{
+    // Catmull-Rom alpha = 0.5. A tiny minimum interval keeps stationary or
+    // nearly coincident forecast samples numerically well behaved.
+    return knot + std::sqrt(std::max(trajectoryPointDistance(a, b), 1.0e-8));
+}
+
+// Fixed presentation budgets keep contact-truncated forecasts from resetting
+// damping and provide uniform line density after spline construction.
+std::vector<FlightTrajectoryPointSnapshot> resampleTrajectoryArc(
+    const std::vector<FlightTrajectoryPointSnapshot>& source, std::size_t count)
+{
+    if (source.empty() || count == 0U) return {};
+    std::vector<double> lengths(source.size(), 0.0);
+    for (std::size_t i=1; i<source.size(); ++i)
+        lengths[i] = lengths[i-1] + trajectoryPointDistance(source[i-1],source[i]);
+    std::vector<FlightTrajectoryPointSnapshot> result;
+    result.reserve(count);
+    std::size_t segment=1;
+    for (std::size_t i=0; i<count; ++i) {
+        const double distance=lengths.back()*static_cast<double>(i)/std::max<std::size_t>(1,count-1);
+        while (segment+1<source.size() && lengths[segment]<distance) ++segment;
+        if (source.size()<2 || lengths.back()<1.0e-10) result.push_back(source.front());
+        else result.push_back(trajectoryPointLerp(source[segment-1],source[segment],
+            std::clamp((distance-lengths[segment-1])/
+                std::max(1.0e-10,lengths[segment]-lengths[segment-1]),0.0,1.0)));
+    }
+    result.front()=source.front();
+    result.back()=source.back();
+    return result;
+}
+
+bool trajectoryCircleEntry(
+    const FlightTrajectoryPointSnapshot& start,
+    const FlightTrajectoryPointSnapshot& end,
+    double radius,
+    FlightTrajectoryPointSnapshot& entry) noexcept
+{
+    const double dx = end.x - start.x;
+    const double dy = end.y - start.y;
+    const double a = dx * dx + dy * dy;
+    if (a <= 1.0e-10) {
+        return false;
+    }
+    const double b = 2.0 * (start.x * dx + start.y * dy);
+    const double c = start.x * start.x + start.y * start.y - radius * radius;
+    const double discriminant = b * b - 4.0 * a * c;
+    if (discriminant < 0.0) {
+        return false;
+    }
+    const double root = (-b - std::sqrt(discriminant)) / (2.0 * a);
+    if (root < 0.0 || root > 1.0) {
+        return false;
+    }
+    entry = trajectoryPointLerp(start, end, root);
+    return true;
+}
 
 std::pair<float, float> flybyFinishGateHalfExtents() noexcept
 {
@@ -213,6 +297,78 @@ struct Vec2 {
     float y = 0.0F;
 };
 
+float smootherstep(float value);
+
+struct MiningViewTransform {
+    float left = 0.0F;
+    float right = 0.0F;
+    float top = 0.0F;
+    float bottom = 0.0F;
+    float cellWidth = 0.0F;
+    float cellHeight = 0.0F;
+
+    Vec2 cellCenter(double x, double y, Vec2 offset = {}) const
+    {
+        return {
+            left + static_cast<float>(x) * cellWidth + cellWidth * 0.5F + offset.x,
+            top - static_cast<float>(y) * cellHeight - cellHeight * 0.5F + offset.y
+        };
+    }
+
+    Vec2 gridPoint(double x, double y, Vec2 offset = {}) const
+    {
+        return {
+            left + static_cast<float>(x) * cellWidth + offset.x,
+            top - static_cast<float>(y) * cellHeight + offset.y
+        };
+    }
+};
+
+MiningViewTransform miningViewTransform(
+    const RenderSnapshot& snapshot,
+    float sceneAspect,
+    float normalViewBlend)
+{
+    MiningViewTransform result;
+    result.left = -sceneAspect;
+    result.right = sceneAspect;
+    const int width = std::max(1, snapshot.miningWidth);
+    const int height = std::max(1, snapshot.miningHeight);
+    result.cellWidth = std::lerp(
+        2.40F*static_cast<float>(flight_landing::metersPerCell/flight_landing::metersPerOrbitUnit),
+        (result.right-result.left)/static_cast<float>(width),
+        std::clamp(normalViewBlend,0.0F,1.0F));
+    result.left=-result.cellWidth*static_cast<float>(width)*0.5F;
+    result.right=-result.left;
+    const float normalTop = 0.82F;
+    const float normalBottom = -1.0F;
+    const float normalCellHeight = (normalTop - normalBottom) / static_cast<float>(height);
+    // Arrival is a physical crop of the exact Mining grid, not replacement
+    // scenery. Square-ish cells make the service pad and nearby terrain fill
+    // the frame while all deeper cells simply remain outside the viewport.
+    const float arrivalCellHeight = 2.40F*static_cast<float>(flight_landing::metersPerCell/flight_landing::metersPerOrbitUnit);
+    // Keep the real service pad near the center of the arrival frame. This
+    // leaves room for the descending shuttle while letting the authored
+    // surface fill the lower half of the hero shot instead of reading as a
+    // thin strip at the bottom of a mostly empty sky.
+    constexpr float arrivalPadY = 0.0F;
+    const float arrivalTop = arrivalPadY +
+        static_cast<float>(snapshot.miningReturnZoneY) * arrivalCellHeight;
+    const float blend = std::clamp(normalViewBlend, 0.0F, 1.0F);
+    result.cellHeight = std::lerp(arrivalCellHeight, normalCellHeight, blend);
+    result.top = std::lerp(arrivalTop, normalTop, blend);
+    result.bottom = result.top - static_cast<float>(height) * result.cellHeight;
+    return result;
+}
+
+float miningShuttleSize(const RenderSnapshot& snapshot, const MiningViewTransform& view)
+{
+    const float cellSize = std::min(view.cellWidth, view.cellHeight);
+    const float groundY = view.top - static_cast<float>(snapshot.miningReturnZoneY) * view.cellHeight;
+    return std::min(cellSize * 8.50F, std::max(cellSize * 7.25F,
+        (view.top - groundY - view.cellHeight * 0.85F) / 0.955F));
+}
+
 struct RouteCurve {
     Vec2 a;
     Vec2 b;
@@ -221,7 +377,7 @@ struct RouteCurve {
 
 RouteCurve routeCurve(const RenderSnapshot& snapshot)
 {
-    if (snapshot.screen == Screen::Launch && !snapshot.launchManualControlsEnabled) {
+    if (snapshot.screen == Screen::Flight && !snapshot.launchManualControlsEnabled) {
         const Vec2 start {-0.18F, -0.70F};
         const Vec2 end {0.58F, 0.38F};
         return {start, {(start.x + end.x) * 0.5F, (start.y + end.y) * 0.5F}, end};
@@ -315,6 +471,256 @@ Vec2 routeTangent(const RenderSnapshot& snapshot, float progress)
 {
     const RouteCurve curve = routeCurve(snapshot);
     return normalize(routeDerivative(curve, progress));
+}
+
+struct Camera2D {
+    Vec2 focus;
+    Vec2 anchor;
+    float scale = 1.0F;
+    float rotation = 0.0F;
+
+    Vec2 point(double x, double y) const
+    {
+        const float cosine = std::cos(rotation);
+        const float sine = std::sin(rotation);
+        const float dx = static_cast<float>(x) - focus.x;
+        const float dy = static_cast<float>(y) - focus.y;
+        return {
+            anchor.x + (cosine * dx - sine * dy) * scale,
+            anchor.y + (sine * dx + cosine * dy) * scale
+        };
+    }
+
+    Vec2 vector(double x, double y) const
+    {
+        const float cosine = std::cos(rotation);
+        const float sine = std::sin(rotation);
+        return normalize({
+            cosine * static_cast<float>(x) - sine * static_cast<float>(y),
+            sine * static_cast<float>(x) + cosine * static_cast<float>(y)
+        });
+    }
+
+    Vec2 inversePoint(Vec2 point) const
+    {
+        const float safeScale = std::max(0.0001F, scale);
+        const float dx = (point.x - anchor.x) / safeScale;
+        const float dy = (point.y - anchor.y) / safeScale;
+        const float cosine = std::cos(rotation);
+        const float sine = std::sin(rotation);
+        return {
+            focus.x + cosine * dx + sine * dy,
+            focus.y - sine * dx + cosine * dy
+        };
+    }
+};
+
+struct FlightCameraView {
+    Camera2D transfer;
+    Camera2D camera;
+    float approachBlend = 0.0F;
+    float landingBlend = 0.0F;
+};
+
+float smootherstep(float value)
+{
+    const float t = std::clamp(value, 0.0F, 1.0F);
+    return t * t * t * (t * (t * 6.0F - 15.0F) + 10.0F);
+}
+
+float shortestAngleDelta(float from, float to)
+{
+    return std::remainder(to - from, 2.0F * kPi);
+}
+
+Camera2D blendCamera(const Camera2D& from, const Camera2D& to, float amount)
+{
+    const float t = std::clamp(amount, 0.0F, 1.0F);
+    const float fromScale = std::max(0.0001F, from.scale);
+    const float toScale = std::max(0.0001F, to.scale);
+    return {
+        {
+            std::lerp(from.focus.x, to.focus.x, t),
+            std::lerp(from.focus.y, to.focus.y, t)
+        },
+        {
+            std::lerp(from.anchor.x, to.anchor.x, t),
+            std::lerp(from.anchor.y, to.anchor.y, t)
+        },
+        std::exp(std::lerp(std::log(fromScale), std::log(toScale), t)),
+        from.rotation + shortestAngleDelta(from.rotation, to.rotation) * t
+    };
+}
+
+Camera2D blendCameraTrackingPoint(
+    const Camera2D& from,
+    const Camera2D& to,
+    float amount,
+    Vec2 trackedWorldPoint)
+{
+    const float t = std::clamp(amount, 0.0F, 1.0F);
+    Camera2D result = blendCamera(from, to, t);
+    const Vec2 fromPoint = from.point(trackedWorldPoint.x, trackedWorldPoint.y);
+    const Vec2 toPoint = to.point(trackedWorldPoint.x, trackedWorldPoint.y);
+    const Vec2 desiredPoint {
+        std::lerp(fromPoint.x, toPoint.x, t),
+        std::lerp(fromPoint.y, toPoint.y, t)
+    };
+
+    const float dx = (trackedWorldPoint.x - result.focus.x) * result.scale;
+    const float dy = (trackedWorldPoint.y - result.focus.y) * result.scale;
+    const float cosine = std::cos(result.rotation);
+    const float sine = std::sin(result.rotation);
+    const Vec2 rotatedOffset {
+        cosine * dx - sine * dy,
+        sine * dx + cosine * dy
+    };
+    result.anchor = {
+        desiredPoint.x - rotatedOffset.x,
+        desiredPoint.y - rotatedOffset.y
+    };
+    return result;
+}
+
+FlightCameraView physicalFlightCamera(
+    const RenderSnapshot& snapshot,
+    float approachBlendOverride)
+{
+    FlightCameraView result;
+    constexpr Vec2 orbitalAnchor {0.0F, 0.0F};
+    const Vec2 landingAnchor = snapshot.surfaceArrivalPrepared
+        ? Vec2 {0.0F, 0.05F}
+        : Vec2 {0.0F, -0.30F};
+    constexpr float finalLandingScale = 2.40F;
+    constexpr float outerOrbitScreenRadius = 0.46F;
+    const Vec2 routeTarget = routePoint(snapshot, 1.0F);
+    const Vec2 departure = routePoint(snapshot, 0.0F);
+    const double worldLength = std::hypot(
+        flight_geometry::startX,
+        flight_geometry::startY);
+    const double screenX = static_cast<double>(departure.x - routeTarget.x);
+    const double screenY = static_cast<double>(departure.y - routeTarget.y);
+    const double screenLength = std::hypot(screenX, screenY);
+    if (worldLength <= 0.0001 || screenLength <= 0.0001) {
+        result.transfer = {{0.0F, 0.0F}, routeTarget, 1.0F, 0.0F};
+    } else {
+        const float cosine = static_cast<float>(
+            (flight_geometry::startX * screenX + flight_geometry::startY * screenY) /
+            (worldLength * screenLength));
+        const float sine = static_cast<float>(
+            (flight_geometry::startX * screenY - flight_geometry::startY * screenX) /
+            (worldLength * screenLength));
+        result.transfer = {
+            {0.0F, 0.0F},
+            routeTarget,
+            static_cast<float>(screenLength / worldLength),
+            std::atan2(sine, cosine)
+        };
+    }
+
+    const double radius = std::hypot(snapshot.launchPositionX, snapshot.launchPositionY);
+    const double outerOrbitRadius = std::max(
+        0.0001,
+        snapshot.launchOrbitTargetRadius + snapshot.launchOrbitGoodBand);
+    result.approachBlend = std::clamp(approachBlendOverride, 0.0F, 1.0F);
+
+    const Camera2D orbitCamera {
+        {0.0F, 0.0F},
+        orbitalAnchor,
+        outerOrbitScreenRadius / static_cast<float>(outerOrbitRadius),
+        result.transfer.rotation
+    };
+    result.camera = blendCamera(result.transfer, orbitCamera, result.approachBlend);
+
+    double landingBlend = snapshot.launchLandingBlend;
+    if (!std::isfinite(landingBlend) || landingBlend < 0.0) {
+        // Synthetic snapshots use the same core profile, never a second
+        // camera-only threshold or easing policy.
+        landingBlend = flightScaleProfile(
+            flightKinematics(snapshot.launchPositionX, snapshot.launchPositionY,
+                snapshot.launchVelocityX, snapshot.launchVelocityY),
+            snapshot.travelProgress,
+            snapshot.launchOrbitTargetRadius,
+            snapshot.launchOrbitGoodBand,
+            snapshot.launchOrbitCaptured || snapshot.launchLandingLocalFrame ||
+                radius < flight_geometry::influenceRadius,
+            snapshot.launchLandingAuthorized || snapshot.launchLandingLocalFrame,
+            snapshot.launchLandingLocalFrame).landingBlend;
+    }
+    result.landingBlend = static_cast<float>(std::clamp(landingBlend, 0.0, 1.0));
+    if (result.landingBlend <= 0.0F) {
+        return result;
+    }
+
+    const float radialAngle = static_cast<float>(snapshot.launchLandingBasisAngle);
+    const double altitudeAboveSurface = std::max(
+        0.001,
+        snapshot.launchLandingAltitude/flight_landing::metersPerOrbitUnit);
+    // Early in descent the final close-up cannot contain both the ship and
+    // the horizon. Fit that physical interval first, then naturally converge
+    // on the authored 2.40x landing scale as altitude falls.
+    const float altitudeFitScale = static_cast<float>(
+        0.62 / altitudeAboveSurface);
+    const float landingScale = snapshot.surfaceArrivalPrepared ? finalLandingScale : std::clamp(
+        altitudeFitScale, result.camera.scale, finalLandingScale);
+    const Camera2D landingCamera {
+        {
+            static_cast<float>(snapshot.launchPositionX),
+            static_cast<float>(snapshot.launchPositionY)
+        },
+        landingAnchor,
+        landingScale,
+        0.5F * kPi - radialAngle
+    };
+    const Vec2 trackedSurfacePoint {
+        static_cast<float>(std::cos(radialAngle) * flight_geometry::bodyRadius),
+        static_cast<float>(std::sin(radialAngle) * flight_geometry::bodyRadius)
+    };
+    result.camera = blendCameraTrackingPoint(
+        result.camera,
+        landingCamera,
+        result.landingBlend,
+        trackedSurfacePoint);
+    return result;
+}
+
+Vec2 physicalFlightVector(
+    const RenderSnapshot& snapshot,
+    double x,
+    double y,
+    float approachBlend)
+{
+    return physicalFlightCamera(snapshot, approachBlend).camera.vector(x, y);
+}
+
+Vec2 physicalFlightPoint(
+    const RenderSnapshot& snapshot,
+    double x,
+    double y,
+    float approachBlend)
+{
+    return physicalFlightCamera(snapshot, approachBlend).camera.point(x, y);
+}
+
+Vec2 physicalSurfaceContactPoint(const RenderSnapshot& snapshot, float approachBlend)
+{
+    // A single fixed pad anchors the prepared terrain. It must not follow
+    // the ship's lateral corrections or revolve around the planet.
+    const double nx=std::cos(snapshot.launchLandingBasisAngle),ny=std::sin(snapshot.launchLandingBasisAngle);
+    const double x = snapshot.surfaceArrivalLandingCommitted ? snapshot.launchPositionX : nx*flight_geometry::bodyRadius;
+    const double y = snapshot.surfaceArrivalLandingCommitted ? snapshot.launchPositionY : ny*flight_geometry::bodyRadius;
+    return physicalFlightPoint(
+        snapshot,x,y,approachBlend);
+}
+
+Vec2 physicalFlightBackdropPoint(
+    const RenderSnapshot& snapshot,
+    Vec2 transferPoint,
+    float approachBlend)
+{
+    const FlightCameraView view = physicalFlightCamera(snapshot, approachBlend);
+    const Vec2 worldPoint = view.transfer.inversePoint(transferPoint);
+    return view.camera.point(worldPoint.x, worldPoint.y);
 }
 
 Vec2 launchCorridorPoint(
@@ -1025,7 +1431,13 @@ void SceneComposer::setTextureReady(TextureId texture, bool ready) noexcept
 
 const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
 {
-    if (snapshot.screen != Screen::Mining) {
+    if (snapshot.screen != Screen::Flight || !snapshot.launchPhysicalFlight) {
+        resetFlightTrajectoryPresentation();
+        resetFlightCameraPresentation();
+    } else {
+        updateFlightCameraPresentation(snapshot);
+    }
+    if (snapshot.screen != Screen::Mining && !snapshot.surfaceArrivalPrepared) {
         previousMiningActive_ = false;
         previousMiningWidth_ = 0;
         previousMiningHeight_ = 0;
@@ -1072,6 +1484,27 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
         drawTitleBackdrop(snapshot);
     } else if (snapshot.screen == Screen::Mining) {
         drawMining(snapshot);
+    } else if (snapshot.screen == Screen::Flight && snapshot.surfaceArrivalPrepared) {
+        drawBackdrop(snapshot);
+        RenderSnapshot surface = snapshot;
+        surface.miningShipPresent = false;
+        surface.miningRigPresent = false;
+        surface.miningOperatorPresent = false;
+        surface.miningArtifact.present = false;
+        surface.miningEnemies = {};
+        surface.miningMiniDrones = {};
+        surface.miningLooseObjects = {};
+        surface.miningProjectiles = {};
+        surface.miningDamageNumbers = {};
+        surface.miningPickupEvents = {};
+        drawMining(surface, true);
+        if (!snapshot.surfaceArrivalActive) drawRoute(snapshot);
+        const bool arrivalOwnsShip = snapshot.surfaceArrivalPhase == 4 ||
+            snapshot.surfaceArrivalPhase == 5;
+        if (!arrivalOwnsShip) {
+            drawRocket(snapshot);
+        }
+        drawSurfaceArrival(snapshot);
     } else if (snapshot.screen == Screen::Flyby) {
         drawFlyby(snapshot);
     } else if (snapshot.screen == Screen::Orbit) {
@@ -1084,16 +1517,16 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
         drawBackdrop(snapshot);
         if (snapshot.screen != Screen::StoryBriefing) {
             drawRocket(snapshot);
-            if (snapshot.screen == Screen::Launch && snapshot.launchLunarImpactActive &&
-                snapshot.launchLunarImpactElapsed >= tuning::session::lunarImpactHoldSeconds) {
+            if (snapshot.screen == Screen::Flight && snapshot.launchDestructionActive &&
+                snapshot.launchDestructionElapsed >= tuning::session::flightDestructionHoldSeconds) {
                 const float blastTime = static_cast<float>(
-                    snapshot.launchLunarImpactElapsed - tuning::session::lunarImpactHoldSeconds);
+                    snapshot.launchDestructionElapsed - tuning::session::flightDestructionHoldSeconds);
                 const float whiteFlash = 1.0F - std::clamp(blastTime / 0.18F, 0.0F, 1.0F);
                 const float redWash = 1.0F - std::clamp(
                     blastTime /
                         static_cast<float>(
-                            tuning::session::lunarImpactExplosionEndSeconds -
-                            tuning::session::lunarImpactHoldSeconds),
+                            tuning::session::flightDestructionExplosionEndSeconds -
+                            tuning::session::flightDestructionHoldSeconds),
                     0.0F,
                     1.0F);
                 drawRect(
@@ -1111,11 +1544,11 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
                     {0.82F, 0.05F, 0.02F, 0.13F * redWash},
                     false);
             }
-            if (snapshot.screen == Screen::Launch && snapshot.launchImpactFlash > 0.0) {
+            if (snapshot.screen == Screen::Flight && snapshot.launchImpactFlash > 0.0) {
                 const float impact = static_cast<float>(std::clamp(snapshot.launchImpactFlash, 0.0, 1.0));
                 drawRect(0.0F, 0.0F, 2.0F, 2.0F, {1.0F, 0.20F, 0.08F, 0.14F * impact}, false);
             }
-            if (snapshot.screen != Screen::Launch) {
+            if (snapshot.screen != Screen::Flight) {
                 drawTelemetry(snapshot);
             }
             if (snapshot.screen == Screen::SurfaceUpgrade && snapshot.levelUpFanfare > 0.0) {
@@ -1141,7 +1574,10 @@ void SceneComposer::drawFlightInstruments(const RenderSnapshot& snapshot)
         std::min({flight_instrument_layout::kMaximumWidthPixels, availableWidth, availableHeight / flight_instrument_layout::kAspectRatio}));
     const float clusterHeight = clusterWidth * flight_instrument_layout::kAspectRatio;
     const float clusterLeft = static_cast<float>(scene.x + scene.width) - clusterWidth - flight_instrument_layout::kSceneInsetPixels;
-    const int promptClearance = std::clamp((scene.height * 6) / 100, 28, 64);
+    // Keep the full decorative bezel on-screen. The lower edge contains live
+    // fuel/speed readouts, so allowing it to kiss the viewport edge makes the
+    // cluster look accidentally cropped on tall desktop and Deck layouts.
+    const int promptClearance = std::clamp((scene.height * 12) / 100, 64, 112);
     const float clusterTop = static_cast<float>(scene.y + scene.height - promptClearance) - clusterHeight;
 
     const auto clipX = [&](float pixelX) {
@@ -1284,10 +1720,27 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
     const UiSurfaceKind surface = snapshot.titleScreen || usesCompletedMissionStampSurface(snapshot)
         ? UiSurfaceKind::Fullscreen
         : uiSurfaceKindForScreen(snapshot.screen);
-    const UiViewportLayout layout = resolveUiViewportLayout(
+    UiViewportLayout layout = resolveUiViewportLayout(
         static_cast<int>(cssWidth),
         static_cast<int>(cssHeight),
         surface);
+    const float miningLayoutBlend = snapshot.surfaceArrivalPhase == 4
+        ? smootherstep((static_cast<float>(snapshot.surfaceArrivalProgress) - 0.38F) / 0.49F)
+        : 0.0F;
+    if (miningLayoutBlend > 0.0F) {
+        const UiRect miningRect = resolveUiViewportLayout(
+            static_cast<int>(cssWidth), static_cast<int>(cssHeight), UiSurfaceKind::Mining).sceneRect;
+        const auto blendPixel = [&](int from, int to) {
+            return static_cast<int>(std::lround(std::lerp(
+                static_cast<float>(from), static_cast<float>(to), miningLayoutBlend)));
+        };
+        layout.sceneRect = {
+            blendPixel(layout.sceneRect.x, miningRect.x),
+            blendPixel(layout.sceneRect.y, miningRect.y),
+            blendPixel(layout.sceneRect.width, miningRect.width),
+            blendPixel(layout.sceneRect.height, miningRect.height)
+        };
+    }
     packet_.logicalSceneClip = layout.sceneRect;
     scenePixelLeft_ = static_cast<float>(layout.sceneRect.x);
     scenePixelRight_ = static_cast<float>(uiRectRight(layout.sceneRect));
@@ -1298,11 +1751,12 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
     // bottom-left-origin.
     scenePixelCenterY_ = sceneCssHeight_
         - (static_cast<float>(layout.sceneRect.y) + sceneHeightPixels * 0.5F);
-    const float scenePadding = surface == UiSurfaceKind::Mining
+    const float baseScenePadding = surface == UiSurfaceKind::Mining
         ? 1.0F
         : (layout.layoutClass == UiLayoutClass::BottomDock
             ? kBottomDockSceneViewportPadding
             : kSceneViewportPadding);
+    const float scenePadding = std::lerp(baseScenePadding, 1.0F, miningLayoutBlend);
     sceneWorldUnit_ = std::max(
         1.0F,
         std::min(sceneWidthPixels, sceneHeightPixels) * 0.5F * scenePadding);
@@ -1324,23 +1778,44 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
         scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 72.0F) * shake * 7.0F;
         scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 61.0F) * shake * 5.0F;
     }
-    if (cameraShakeEnabled && snapshot.launchLunarImpactActive &&
-        snapshot.launchLunarImpactElapsed >= tuning::session::lunarImpactHoldSeconds) {
+    if (cameraShakeEnabled && snapshot.launchTouchdownCelebration) {
+        const float age = static_cast<float>(snapshot.launchTouchdownCelebrationProgress * 2.0);
+        const float envelope = 1.0F - std::clamp(age / 0.62F, 0.0F, 1.0F);
+        const float impact = envelope * envelope * (snapshot.surfaceArrivalHardLanding ? 1.45F : 1.0F);
+        scenePixelCenterX_ += std::sin(age * 89.0F) * impact * 8.5F;
+        scenePixelCenterY_ += std::cos(age * 73.0F) * impact * 5.8F;
+    }
+    if (cameraShakeEnabled && snapshot.surfaceArrivalPhase == 4) {
+        const float rigImpactAge = static_cast<float>(snapshot.surfaceArrivalProgress) - 0.40F;
+        if (rigImpactAge >= 0.0F && rigImpactAge < 0.12F) {
+            const float envelope = 1.0F - rigImpactAge / 0.12F;
+            const float impact = envelope * envelope;
+            scenePixelCenterX_ += std::sin(rigImpactAge * 180.0F) * impact * 4.0F;
+            scenePixelCenterY_ += std::cos(rigImpactAge * 155.0F) * impact * 3.2F;
+        }
+    }
+    if (cameraShakeEnabled && snapshot.launchDestructionActive &&
+        snapshot.launchDestructionElapsed >= tuning::session::flightDestructionHoldSeconds) {
         const float impactTime = static_cast<float>(
-            snapshot.launchLunarImpactElapsed - tuning::session::lunarImpactHoldSeconds);
+            snapshot.launchDestructionElapsed - tuning::session::flightDestructionHoldSeconds);
         const float impactDuration = static_cast<float>(
-            tuning::session::lunarImpactSequenceSeconds -
-            tuning::session::lunarImpactHoldSeconds);
+            tuning::session::flightDestructionSequenceSeconds -
+            tuning::session::flightDestructionHoldSeconds);
         const float envelope = 1.0F - std::clamp(impactTime / impactDuration, 0.0F, 1.0F);
         const float shake = envelope * envelope;
         scenePixelCenterX_ += std::sin(impactTime * 108.0F) * shake * 12.0F;
         scenePixelCenterY_ += std::cos(impactTime * 91.0F) * shake * 8.0F;
     }
     if (cameraShakeEnabled && snapshot.screen == Screen::ArrivalFanfare) {
-        const float arrival = 1.0F - static_cast<float>(std::clamp(snapshot.animationTime / tuning::session::arrivalFanfareSeconds, 0.0, 1.0));
-        const float shimmer = arrival * arrival;
-        scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 34.0F) * shimmer * 3.5F;
-        scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 29.0F) * shimmer * 2.5F;
+        // Arrival is a major positive impact: one clear contact jolt followed
+        // by a quick settle. The remaining celebration time belongs to the
+        // planet pulse and radial bursts, not two seconds of camera wobble.
+        constexpr double arrivalImpactSeconds = 0.62;
+        const float arrival = 1.0F - static_cast<float>(
+            std::clamp(snapshot.animationTime / arrivalImpactSeconds, 0.0, 1.0));
+        const float impact = arrival * arrival;
+        scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 52.0F) * impact * 8.0F;
+        scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 43.0F) * impact * 5.5F;
     }
     if (cameraShakeEnabled && snapshot.titleScreen && snapshot.titleLaunchRumble > 0.0) {
         // Ignition rumbles for half a second before the ship commits to its
@@ -1365,7 +1840,13 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
         const float evaDeathImpact = snapshot.miningEvaDeathActive
             ? std::sin(std::min(1.0F, evaDeathProgress / 0.34F) * kPi)
             : 0.0F;
-        const float shake = contactShake * 1.8F + failureShake * 4.5F + evaDeathImpact * 5.8F;
+        const float artifactRecovery = static_cast<float>(
+            std::clamp(snapshot.miningArtifactSecuredCelebration, 0.0, 1.0));
+        const float recoveryImpact = artifactRecovery > 0.68F
+            ? std::pow((artifactRecovery - 0.68F) / 0.32F, 2.0F)
+            : 0.0F;
+        const float shake = contactShake * 1.8F + failureShake * 4.5F +
+            evaDeathImpact * 5.8F + recoveryImpact * 7.0F;
         scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 97.0F) * shake;
         scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 83.0F) * shake;
     }
@@ -1398,7 +1879,7 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
     }
 
     const float heat = static_cast<float>(std::clamp(snapshot.heat, 0.0, 1.0));
-    const float clearHeat = snapshot.screen == Screen::Launch ? 0.0F : heat;
+    const float clearHeat = snapshot.screen == Screen::Flight ? 0.0F : heat;
     const float arrivalGlow = snapshot.screen == Screen::ArrivalFanfare
         ? 0.018F * (1.0F - static_cast<float>(std::clamp(snapshot.animationTime / tuning::session::arrivalFanfareSeconds, 0.0, 1.0)))
         : 0.0F;
@@ -1415,6 +1896,7 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
 
 void SceneComposer::drawRect(float cx, float cy, float w, float h, Color color, bool worldSpace)
 {
+    color.a *= drawOpacity_;
     submitInstance(
         {
             cx, cy,
@@ -1431,6 +1913,7 @@ void SceneComposer::drawRect(float cx, float cy, float w, float h, Color color, 
 
 void SceneComposer::drawLine(float ax, float ay, float bx, float by, Color color, float width, bool worldSpace)
 {
+    color.a *= drawOpacity_;
     std::vector<SceneVertex>& vertices = scratchVertices(16);
     appendLine(vertices, ax, ay, bx, by, color);
     submitLines(vertices, width, worldSpace);
@@ -1438,6 +1921,7 @@ void SceneComposer::drawLine(float ax, float ay, float bx, float by, Color color
 
 void SceneComposer::drawTriangle(float ax, float ay, float bx, float by, float cx, float cy, Color color, bool worldSpace)
 {
+    color.a *= drawOpacity_;
     std::vector<SceneVertex>& vertices = scratchVertices(24);
     pushVertex(vertices, ax, ay, color);
     pushVertex(vertices, bx, by, color);
@@ -1447,6 +1931,7 @@ void SceneComposer::drawTriangle(float ax, float ay, float bx, float by, float c
 
 void SceneComposer::drawCircle(float cx, float cy, float radius, Color color, int segments, bool worldSpace)
 {
+    color.a *= drawOpacity_;
     submitInstance(
         {
             cx, cy,
@@ -1463,6 +1948,7 @@ void SceneComposer::drawCircle(float cx, float cy, float radius, Color color, in
 
 void SceneComposer::drawRadialGlow(float cx, float cy, float radius, Color centerColor, int segments, bool worldSpace)
 {
+    centerColor.a *= drawOpacity_;
     submitInstance(
         {
             cx, cy,
@@ -2135,6 +2621,7 @@ void SceneComposer::drawSprite(float cx, float cy, float w, float h, Color tint,
         return;
     }
 
+    tint.a *= drawOpacity_;
     const int frames = std::max(1, frameCount);
     const int frame = std::clamp(frameIndex, 0, frames - 1);
     const float u0 = static_cast<float>(frame) / static_cast<float>(frames);
@@ -2160,6 +2647,7 @@ void SceneComposer::drawSpriteMirrored(float cx, float cy, float w, float h, Col
         return;
     }
 
+    tint.a *= drawOpacity_;
     const int frames = std::max(1, frameCount);
     const int frame = std::clamp(frameIndex, 0, frames - 1);
     const float frameU0 = static_cast<float>(frame) / static_cast<float>(frames);
@@ -2188,6 +2676,7 @@ void SceneComposer::drawSpriteRotated(float cx, float cy, float w, float h, floa
         return;
     }
 
+    tint.a *= drawOpacity_;
     const Vec2 forward = normalize({forwardX, forwardY});
     const Vec2 right {forward.y, -forward.x};
     const float halfW = w * 0.5F;
@@ -2626,31 +3115,55 @@ void SceneComposer::drawOrbit(const RenderSnapshot& snapshot)
     }
 }
 
-void SceneComposer::drawMining(const RenderSnapshot& snapshot)
+void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalComposite)
 {
+    const float previousOpacity = drawOpacity_;
+    float miningViewOffsetX = 0.0F;
+    float miningViewOffsetY = 0.0F;
+    float arrivalOpacity = 1.0F;
+    float normalViewBlend = 1.0F;
+    if (arrivalComposite) {
+        const float approachBlend = flightCameraPresentation_.approachBlend;
+        const FlightCameraView flightView = physicalFlightCamera(snapshot, approachBlend);
+        arrivalOpacity = smootherstep((flightView.landingBlend - 0.02F) / 0.58F);
+        if (snapshot.surfaceArrivalActive) {
+            arrivalOpacity = 1.0F;
+        }
+        normalViewBlend = snapshot.surfaceArrivalPhase == 4
+            ? smootherstep((static_cast<float>(snapshot.surfaceArrivalProgress) - 0.38F) / 0.49F)
+            : 0.0F;
+        const MiningViewTransform preview = miningViewTransform(snapshot, sceneAspect_, normalViewBlend);
+        const float previewGroundY = preview.top -
+            static_cast<float>(snapshot.miningReturnZoneY) * preview.cellHeight;
+        const float previewShipSize = miningShuttleSize(snapshot, preview);
+        const Vec2 normalShip {
+            preview.cellCenter(snapshot.miningReturnZoneX, snapshot.miningReturnZoneY).x,
+            previewGroundY + previewShipSize * 0.455F
+        };
+        const Vec2 flightShip = physicalSurfaceContactPoint(snapshot, approachBlend);
+        miningViewOffsetX = (flightShip.x - normalShip.x) * (1.0F - normalViewBlend);
+        miningViewOffsetY = (flightShip.y - normalShip.y) * (1.0F - normalViewBlend);
+    }
+    drawOpacity_ = previousOpacity * arrivalOpacity;
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.0F, 0.0F, 0.0F, 1.0F}, false);
     if (snapshot.miningWidth <= 0 || snapshot.miningHeight <= 0) {
+        drawOpacity_ = previousOpacity;
         return;
     }
 
-    const float left = -sceneAspect_;
-    const float right = sceneAspect_;
-    const float top = 0.82F;
-    const float bottom = -1.0F;
-    const float cellW = (right - left) / static_cast<float>(snapshot.miningWidth);
-    const float cellH = (top - bottom) / static_cast<float>(snapshot.miningHeight);
+    const MiningViewTransform view = miningViewTransform(snapshot, sceneAspect_, normalViewBlend);
+    const float left = view.left;
+    const float right = view.right;
+    const float top = view.top;
+    const float bottom = view.bottom;
+    const float cellW = view.cellWidth;
+    const float cellH = view.cellHeight;
     const float cellSize = std::min(cellW, cellH);
     auto cellCenter = [&](double x, double y) {
-        return Vec2 {
-            left + static_cast<float>(x) * cellW + cellW * 0.5F,
-            top - static_cast<float>(y) * cellH - cellH * 0.5F
-        };
+        return view.cellCenter(x, y, {miningViewOffsetX, miningViewOffsetY});
     };
     auto gridPoint = [&](double x, double y) {
-        return Vec2 {
-            left + static_cast<float>(x) * cellW,
-            top - static_cast<float>(y) * cellH
-        };
+        return view.gridPoint(x, y, {miningViewOffsetX, miningViewOffsetY});
     };
     const double activeActorX = snapshot.miningAnchorValid
         ? snapshot.miningAnchorX
@@ -2885,12 +3398,19 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         snapshot.miningPostSolarGeologyRow,
         snapshot.miningGeologySeed,
         sceneAspect_,
+        top,
+        cellH,
+        miningViewOffsetX,
+        miningViewOffsetY,
+        drawOpacity_,
         activeActorX,
         activeActorY,
         scannerPulse,
         scannerRevealRadiusCells,
         scannerSweepRadiusCells,
-        texturedTiles
+        texturedTiles,
+        arrivalComposite,
+        normalViewBlend
     };
     bool terrainCacheMatches = miningTerrainCacheValid_
         && terrainKey == miningTerrainPresentationKey_
@@ -2906,7 +3426,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 cell.damageFlashSeconds,
                 cell.hazardAffinity,
                 cell.revealed,
-                cell.hazard
+                cell.hazard,
+                cell.suitOnlyPassage
             };
             if (!(current == miningTerrainCellStates_[index])) {
                 terrainCacheMatches = false;
@@ -2937,6 +3458,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                                            float u0 = 0.0F, float v0 = 0.0F,
                                            float u1 = 1.0F, float v1 = 1.0F,
                                            bool textured = false) {
+            color.a *= drawOpacity_;
             packedMiningTerrainInstances_.push_back(packSceneInstance({
                 cx, cy,
                 width * 0.5F, 0.0F,
@@ -2949,8 +3471,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             }));
         };
         appendTerrainRect(
-            (left + right) * 0.5F,
-            (top + bottom) * 0.5F,
+            (left + right) * 0.5F + miningViewOffsetX,
+            (top + bottom) * 0.5F + miningViewOffsetY,
             right - left + 0.035F,
             top - bottom + 0.035F,
             {0.0F, 0.0F, 0.0F, 1.0F});
@@ -2964,7 +3486,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 cell.damageFlashSeconds,
                 cell.hazardAffinity,
                 cell.revealed,
-                cell.hazard
+                cell.hazard,
+                cell.suitOnlyPassage
             };
             const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
             const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
@@ -2989,15 +3512,43 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
 
         for (std::size_t index = 0; index < renderedCellCount; ++index) {
             const MiningCell& cell = snapshot.miningCells[index];
-            if (!cell.revealed || cell.material == MiningCellMaterial::Empty) {
+            if (!cell.revealed && !arrivalComposite) {
                 continue;
             }
             const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
             const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
             const int material = static_cast<int>(cell.material);
             const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
-            const float revealFraction = pulseRevealFraction(index, x, y);
+            const bool surfaceExposed = cell.revealed &&
+                y < static_cast<int>(std::floor(snapshot.miningReturnZoneY)) +
+                    tuning::mining::surfaceVisibleDepthCells;
+            const float resourceReveal = arrivalComposite
+                ? std::max(normalViewBlend, surfaceExposed ? 1.0F : 0.0F) : 1.0F;
+            if (arrivalComposite && cell.material != MiningCellMaterial::Empty) {
+                // The known shallow cross-section keeps its real textures
+                // during descent. Only deeper or undiscovered cells retain
+                // the neutral silhouette until the team is ready.
+                appendTerrainRect(
+                    center.x, center.y, cellW * 1.002F, cellH * 1.002F,
+                    {0.14F, 0.15F, 0.18F, 1.0F - resourceReveal});
+            }
+            if (!cell.revealed) {
+                continue;
+            }
+            const float revealFraction = pulseRevealFraction(index, x, y) *
+                resourceReveal;
             if (revealFraction <= 0.0F) {
+                continue;
+            }
+            if (cell.material == MiningCellMaterial::Empty) {
+                if (cell.suitOnlyPassage) {
+                    appendTerrainRect(
+                        center.x,
+                        center.y,
+                        cellW * 0.72F,
+                        cellH * 0.72F,
+                        {0.22F, 0.86F, 1.0F, 0.22F * revealFraction});
+                }
                 continue;
             }
             const float dxCells = static_cast<float>(static_cast<double>(x) + 0.5 - activeActorX);
@@ -3157,45 +3708,9 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     // The authored bay opening sits below the sprite's centerline.
     const Vec2 extractionBay {shipBay.x, shipSpriteY - shipSpriteSize * 0.17F};
     if (snapshot.miningExtractionActive && extractionLaunch > 0.001F) {
-        // Use the shared animated launch flame rather than a blue geometric
-        // stand-in. Crop the transparent leading strip from the thrust sheet,
-        // then parent the visible sprite edge directly to the ship nozzle.
-        // This makes both its position and motion derive from shipSpriteY.
-        const float uncroppedFlameLength =
-            shipSpriteSize * (0.44F + extractionLaunch * 0.70F);
-        const float flameLength = uncroppedFlameLength *
-            (1.0F - kThrustSheetLeadingTransparentShare);
-        const float flameWidth = shipSpriteSize * (0.22F + extractionLaunch * 0.10F);
-        const float visibleNozzleY =
-            shipSpriteY - shipSpriteSize * kMiningShipExhaustNozzleShare;
-        const float flameCenterY = visibleNozzleY - flameLength * 0.50F;
-        const int flameFrame = static_cast<int>(snapshot.animationTime * 18.0) % 6;
-        drawRadialGlow(
-            shipBay.x,
-            visibleNozzleY - flameLength * 0.22F,
-            flameLength * 0.82F,
-            {1.0F, 0.24F, 0.05F, 0.08F + extractionLaunch * 0.14F},
-            36);
-        if (textureReady(ThrustAsset)) {
-            constexpr int flameFrames = 6;
-            const float u0 = static_cast<float>(flameFrame) /
-                static_cast<float>(flameFrames);
-            const float u1 = static_cast<float>(flameFrame + 1) /
-                static_cast<float>(flameFrames);
-            submitInstance(
-                {
-                    shipBay.x, flameCenterY,
-                    flameWidth * 0.5F, 0.0F,
-                    0.0F, flameLength * 0.5F,
-                    {1.0F, 1.0F, 1.0F, 0.74F + extractionLaunch * 0.26F},
-                    u0, kThrustSheetLeadingTransparentShare, u1, 1.0F,
-                    SceneInstanceShape::Rectangle,
-                    4
-                },
-                textureForAsset(ThrustAsset),
-                CoordinateSpace::World,
-                PipelineClass::Textured);
-        }
+        drawSurfaceExhaust(
+            shipBay.x, shipSpriteY - shipSpriteSize * kMiningShipExhaustNozzleShare,
+            shipSpriteSize, extractionLaunch, snapshot.animationTime);
     }
     if (snapshot.miningShipPresent && snapshot.miningExtractionActive && textureReady(RocketOpenAsset)) {
         drawSpriteRotated(
@@ -3227,6 +3742,15 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         miningBaseTerrainTexture_,
         miningBaseTerrainAtlasPage_,
         miningBaseTerrainTexture_ == TextureId::None ? PipelineClass::Solid : PipelineClass::Textured);
+
+    if (arrivalComposite) {
+        // The shared environment is complete. Arrival owns only the staged
+        // actors and ceremony; mining glints, scanner guidance and combat
+        // feedback begin with the normal controllable Mining view.
+        miningSurveyDrones_.clear();
+        drawOpacity_ = previousOpacity;
+        return;
+    }
 
     const float gatePulse = 0.55F + 0.35F * std::sin(static_cast<float>(snapshot.animationTime) * 4.2F);
     for (std::size_t index = 0; index < renderedCellCount; ++index) {
@@ -3491,8 +4015,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     }
     miningPickupBursts_.swap(miningPickupBurstScratch_);
 
-    for (std::size_t index = 0; index < snapshot.miningLooseChunks.size(); ++index) {
-        const MiningLooseChunk& chunk = snapshot.miningLooseChunks[index];
+    for (std::size_t index = 0; index < snapshot.miningLooseObjects.size(); ++index) {
+        const MiningLooseObject& chunk = snapshot.miningLooseObjects[index];
         if (!chunk.active) {
             continue;
         }
@@ -3965,7 +4489,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     }
 
     const Vec2 target = gridPoint(snapshot.miningTargetX, snapshot.miningTargetY);
-    const float droneSize = std::min(cellW, cellH) * 3.25F;
+    const float droneSize = std::min(cellW, cellH) * kMiningRigSpriteCells;
     const float operatorSize = std::min(cellW, cellH) * 2.45F;
     const Vec2 targetHullDirection = normalize({
         static_cast<float>(snapshot.miningHullDirX) * cellW,
@@ -4202,7 +4726,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
                 16);
         }
         if (textureReady(droneAsset)) {
-            const float spriteSize = cellSize * 1.50F;
+            const float spriteSize = cellSize * kMiningSupportDroneSpriteCells;
             const bool miningTask = role == static_cast<int>(MiniDroneRole::Mining) && agent.targetCellX >= 0 && agent.targetCellY >= 0 &&
                 (behavior == MiningMiniDroneBehavior::Traveling || behavior == MiningMiniDroneBehavior::Working);
             const bool attackTargeting = role == static_cast<int>(MiniDroneRole::Attack) &&
@@ -5009,7 +5533,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
         !snapshot.miningRigDisabled &&
         textureReady(DrillBitAsset) &&
         !drillBroken) {
-        float drillH = cellSize * 2.30F;
+        float drillH = cellSize * kMiningRigIdleDrillCells;
         if (snapshot.miningTargetDrillable) {
             const float dx = target.x - drillOrigin.x;
             const float dy = target.y - drillOrigin.y;
@@ -5178,6 +5702,34 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
             snapshot.animationTime);
     }
 
+    const float artifactCelebration = static_cast<float>(
+        std::clamp(snapshot.miningArtifactSecuredCelebration, 0.0, 1.0));
+    if (artifactCelebration > 0.0F) {
+        const float age = (1.0F - artifactCelebration) * 2.0F;
+        const float burst = std::clamp(1.0F - age / 1.25F, 0.0F, 1.0F);
+        const Vec2 ship = cellCenter(snapshot.miningReturnZoneX, snapshot.miningReturnZoneY);
+        drawRadialGlow(
+            ship.x,
+            ship.y,
+            cellSize * (4.0F + age * 2.2F),
+            {0.22F, 0.96F, 1.0F, 0.16F * burst},
+            48);
+        constexpr int rayCount = 16;
+        for (int ray = 0; ray < rayCount; ++ray) {
+            const float angle = static_cast<float>(ray) / static_cast<float>(rayCount) * 2.0F * kPi;
+            const float phase = static_cast<float>((ray * 7) % rayCount) / static_cast<float>(rayCount);
+            const float inner = cellSize * (2.2F + age * (1.7F + phase));
+            const float outer = inner + cellSize * (1.0F + phase * 1.3F) * burst;
+            drawLine(
+                ship.x + std::cos(angle) * inner,
+                ship.y + std::sin(angle) * inner,
+                ship.x + std::cos(angle) * outer,
+                ship.y + std::sin(angle) * outer,
+                {0.48F, 0.94F, 1.0F, 0.86F * burst},
+                1.6F);
+        }
+    }
+
     if (damagePressure > 0.01F) {
         const float heartbeat = miningDamageHeartbeat(damagePressure, snapshot.animationTime);
         const float severityAlpha = 0.08F + damagePressure * 0.28F;
@@ -5206,6 +5758,303 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot)
     // The backing capacity is retained, but frame-lifetime snapshot pointers
     // must not escape the synchronous mining render.
     miningSurveyDrones_.clear();
+    drawOpacity_ = previousOpacity;
+}
+
+void SceneComposer::drawSurfaceExhaust(
+    float nozzleX, float nozzleY, float shipSize, float strength, double animationTime)
+{
+    const float flameLength = shipSize * (0.44F + strength * 0.70F) *
+        (1.0F - kThrustSheetLeadingTransparentShare);
+    const float flameWidth = shipSize * (0.22F + strength * 0.10F);
+    drawRadialGlow(nozzleX, nozzleY - flameLength * 0.22F, flameLength * 0.82F,
+        {1.0F, 0.24F, 0.05F, 0.08F + strength * 0.14F}, 36);
+    if (!textureReady(ThrustAsset)) return;
+    constexpr int flameFrames = 6;
+    const int frame = static_cast<int>(animationTime * 18.0) % flameFrames;
+    const float u0 = static_cast<float>(frame) / static_cast<float>(flameFrames);
+    const float u1 = static_cast<float>(frame + 1) / static_cast<float>(flameFrames);
+    submitInstance(
+        {nozzleX, nozzleY - flameLength * 0.5F,
+            flameWidth * 0.5F, 0.0F, 0.0F, flameLength * 0.5F,
+            {1.0F, 1.0F, 1.0F, 0.74F + strength * 0.26F},
+            u0, kThrustSheetLeadingTransparentShare, u1, 1.0F,
+            SceneInstanceShape::Rectangle, 4},
+        textureForAsset(ThrustAsset), CoordinateSpace::World, PipelineClass::Textured);
+}
+
+void SceneComposer::drawSurfaceArrival(const RenderSnapshot& snapshot)
+{
+    if (!snapshot.surfaceArrivalPrepared || snapshot.miningWidth <= 0 ||
+        snapshot.miningHeight <= 0) {
+        return;
+    }
+
+    constexpr int touchdownPhase = 2;
+    constexpr int awaitingPhase = 3;
+    constexpr int deployingPhase = 4;
+    constexpr int takingOffPhase = 5;
+    const float deploymentProgress = static_cast<float>(
+        std::clamp(snapshot.surfaceArrivalProgress, 0.0, 1.0));
+    const float follow = snapshot.surfaceArrivalPhase == deployingPhase
+        ? smootherstep((deploymentProgress - 0.38F) / 0.49F)
+        : 0.0F;
+    const MiningViewTransform view = miningViewTransform(snapshot, sceneAspect_, follow);
+    const float top = view.top;
+    const float cellW = view.cellWidth;
+    const float cellH = view.cellHeight;
+    const float cellSize = std::min(cellW, cellH);
+    const auto normalCell = [&](double x, double y) {
+        return view.cellCenter(x, y);
+    };
+    const float shipGroundY = top - static_cast<float>(snapshot.miningReturnZoneY) * cellH;
+    const float shipVisibleFootShare = 0.455F;
+    const float shipSize = miningShuttleSize(snapshot, view);
+    const Vec2 normalShip {
+        normalCell(snapshot.miningReturnZoneX, snapshot.miningReturnZoneY).x,
+        shipGroundY + shipSize * shipVisibleFootShare
+    };
+    const float approachBlend = flightCameraPresentation_.approachBlend;
+    const Vec2 landedFlightShip = physicalSurfaceContactPoint(snapshot, approachBlend);
+    const Vec2 viewOffset {
+        (landedFlightShip.x - normalShip.x) * (1.0F - follow),
+        (landedFlightShip.y - normalShip.y) * (1.0F - follow)
+    };
+    const auto cell = [&](double x, double y) {
+        const Vec2 point = normalCell(x, y);
+        return Vec2 {point.x + viewOffset.x, point.y + viewOffset.y};
+    };
+    const Vec2 ship {
+        normalShip.x + viewOffset.x,
+        normalShip.y + viewOffset.y
+    };
+    const Vec2 pad = cell(snapshot.miningReturnZoneX, snapshot.miningReturnZoneY);
+
+    if (snapshot.surfaceArrivalPhase == touchdownPhase) {
+        const float progress = deploymentProgress;
+        const float life = 1.0F - progress;
+        const float burst = std::sin(std::min(1.0F, progress * 3.6F) * kPi);
+        const bool hard = snapshot.surfaceArrivalHardLanding;
+        const Color contactColor = hard
+            ? Color {1.0F, 0.44F, 0.20F, life * 0.88F}
+            : Color {0.62F, 0.94F, 1.0F, life * 0.74F};
+        for (int index = 0; index < 24; ++index) {
+            const float angle = static_cast<float>(index) * (2.0F * kPi / 24.0F);
+            const float inner = shipSize * (0.24F + progress * 0.05F);
+            const float outer = inner + shipSize * (0.18F + progress * 0.34F);
+            drawLine(
+                pad.x + std::cos(angle) * inner,
+                pad.y + std::sin(angle) * inner * 0.46F,
+                pad.x + std::cos(angle) * outer,
+                pad.y + std::sin(angle) * outer * 0.46F + burst * 0.035F,
+                contactColor,
+                1.7F);
+        }
+        for (int index = 0; index < 18; ++index) {
+            const float side = index < 9 ? -1.0F : 1.0F;
+            const float lane = static_cast<float>(index % 9) / 8.0F;
+            const float distance = shipSize * (0.18F + lane * 0.72F) *
+                (0.45F + progress * 0.90F);
+            drawCircle(
+                pad.x + side * distance,
+                pad.y + cellH * (0.12F + lane * 0.42F),
+                cellSize * (0.22F + lane * 0.18F) * (hard ? 1.45F : 1.0F),
+                {0.78F, 0.66F, 0.46F, life * (0.12F + lane * 0.16F)},
+                12);
+        }
+        return;
+    }
+
+    if (snapshot.surfaceArrivalPhase == awaitingPhase) {
+        const float pulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 2.6F);
+        drawEllipseLine(
+            pad.x,
+            pad.y,
+            cellW * 3.1F,
+            cellH * 2.1F,
+            {0.28F, 0.92F, 1.0F, 0.20F + pulse * 0.12F},
+            48,
+            0.0F,
+            2.0F * kPi,
+            1.7F);
+        return;
+    }
+
+    if (snapshot.surfaceArrivalPhase == takingOffPhase) {
+        const float ignition = smootherstep((deploymentProgress - 0.08F) / 0.22F);
+        const float ascent = smootherstep((deploymentProgress - 0.22F) / 0.78F);
+        const Vec2 risingShip {ship.x, ship.y + ascent * 1.65F};
+        if (ignition > 0.001F) {
+            drawSurfaceExhaust(risingShip.x,
+                risingShip.y - shipSize * kMiningShipExhaustNozzleShare,
+                shipSize, ignition, snapshot.animationTime);
+        }
+        if (textureReady(RocketClosedAsset)) {
+            drawSpriteRotated(
+                risingShip.x,
+                risingShip.y,
+                shipSize,
+                shipSize,
+                0.0F,
+                1.0F,
+                {1.0F, 1.0F, 1.0F, 1.0F},
+                RocketClosedAsset);
+        }
+        return;
+    }
+
+    if (snapshot.surfaceArrivalPhase != deployingPhase) {
+        return;
+    }
+
+    const float bayOpen = smootherstep(deploymentProgress / 0.1167F);
+    const float bayClose = smootherstep((deploymentProgress - 0.58F) / 0.24F);
+    const Vec2 bay {ship.x, ship.y - shipSize * 0.17F};
+    if (textureReady(RocketOpenAsset)) {
+        drawSpriteRotated(
+            ship.x,
+            ship.y,
+            shipSize,
+            shipSize,
+            0.0F,
+            1.0F,
+            {1.0F, 1.0F, 1.0F, bayOpen * (1.0F - bayClose)},
+            RocketOpenAsset);
+    }
+
+    const float rigDrop = smootherstep((deploymentProgress - 0.083F) / 0.317F);
+    const Vec2 rigTarget = cell(snapshot.miningDroneX, snapshot.miningDroneY);
+    const Vec2 rigDropTarget = cell(
+        std::min(snapshot.miningDroneX, snapshot.miningReturnZoneX + 1.75),
+        snapshot.miningDroneY);
+    const float rigStaging = smootherstep((deploymentProgress - 0.383F) / 0.484F);
+    const float rigArc = std::sin(rigDrop * kPi) * cellH * 1.35F;
+    const Vec2 rig {
+        bay.x + (rigDropTarget.x - bay.x) * rigDrop +
+            (rigTarget.x - rigDropTarget.x) * rigStaging,
+        bay.y + (rigDropTarget.y - bay.y) * rigDrop + rigArc +
+            (rigTarget.y - rigDropTarget.y) * rigStaging
+    };
+    const float rigSize = cellSize * kMiningRigSpriteCells;
+    const Vec2 rigDirection = normalize({
+        static_cast<float>(snapshot.miningHullDirX) * cellW,
+        -static_cast<float>(snapshot.miningHullDirY) * cellH
+    });
+    if (rigDrop > 0.02F && rigDrop < 0.98F) {
+        const float arrest = smootherstep((rigDrop - 0.62F) / 0.30F);
+        drawTriangle(
+            rig.x - rigSize * 0.08F,
+            rig.y - rigSize * 0.22F,
+            rig.x + rigSize * 0.08F,
+            rig.y - rigSize * 0.22F,
+            rig.x,
+            rig.y - rigSize * (0.38F + arrest * 0.20F),
+            {0.28F, 0.86F, 1.0F, 0.34F + arrest * 0.46F});
+    }
+    if (rigDrop > 0.001F) {
+        if (textureReady(MiningDroneAsset)) {
+            drawSpriteRotated(
+                rig.x,
+                rig.y,
+                rigSize,
+                rigSize,
+                -rigDirection.x,
+                -rigDirection.y,
+                {1.0F, 1.0F, 1.0F, 1.0F},
+                MiningDroneAsset);
+        } else {
+            drawCircle(rig.x, rig.y, rigSize * 0.32F, {0.26F, 0.90F, 1.0F, 0.96F}, 18);
+        }
+        // The bay deploys the same complete rig used by normal Mining: the
+        // drill is a separate authored sprite, not part of the hull texture.
+        if (textureReady(DrillBitAsset)) {
+            const float drillLength = cellSize * kMiningRigIdleDrillCells;
+            const float drillOffset = rigSize * 0.18F + drillLength * 0.5F;
+            drawSpriteRotated(
+                rig.x + rigDirection.x * drillOffset,
+                rig.y + rigDirection.y * drillOffset,
+                drillLength * 0.88F, drillLength,
+                -rigDirection.x, -rigDirection.y,
+                {1.0F, 1.0F, 1.0F, 1.0F}, DrillBitAsset, 0, 6);
+        }
+    }
+    if (rigDrop > 0.82F) {
+        const float impact = 1.0F - smootherstep((rigDrop - 0.82F) / 0.18F);
+        drawRadialGlow(
+            rigDropTarget.x,
+            rigDropTarget.y,
+            rigSize * (0.50F + (1.0F - impact) * 0.30F),
+            {0.92F, 0.64F, 0.28F, impact * 0.18F},
+            28);
+    }
+
+    for (std::size_t index = 0; index < snapshot.miningMiniDrones.size(); ++index) {
+        const MiningMiniDroneAgent& agent = snapshot.miningMiniDrones[index];
+        const float droneElapsed = deploymentProgress *
+            static_cast<float>(surface_bay_timing::deploymentSeconds) -
+            static_cast<float>(surface_bay_timing::droneLaunchSeconds(index, snapshot.miningMiniDrones.size()));
+        const float droneLaunch = smootherstep(droneElapsed /
+            static_cast<float>(surface_bay_timing::droneFlightSeconds));
+        if (droneLaunch <= 0.001F) {
+            continue;
+        }
+        const Vec2 target = cell(agent.x, agent.y);
+        const float fan = (static_cast<float>(index) -
+            static_cast<float>(snapshot.miningMiniDrones.size() - 1U) * 0.5F) * cellW * 2.4F;
+        const Vec2 control {bay.x + fan, bay.y + cellH * 2.2F};
+        const float inverse = 1.0F - droneLaunch;
+        const Vec2 position {
+            inverse * inverse * bay.x + 2.0F * inverse * droneLaunch * control.x + droneLaunch * droneLaunch * target.x,
+            inverse * inverse * bay.y + 2.0F * inverse * droneLaunch * control.y + droneLaunch * droneLaunch * target.y
+        };
+        const Color trail = agent.role == MiniDroneRole::Attack
+            ? Color {1.0F, 0.32F, 0.12F, (1.0F - droneLaunch) * 0.56F}
+            : (agent.role == MiniDroneRole::Resource
+                ? Color {1.0F, 0.78F, 0.20F, (1.0F - droneLaunch) * 0.52F}
+                : Color {0.26F, 0.92F, 1.0F, (1.0F - droneLaunch) * 0.52F});
+        drawLine(bay.x, bay.y, position.x, position.y, trail, 1.5F);
+        const int asset = miningMiniDroneAsset(static_cast<int>(agent.role));
+        if (textureReady(asset)) {
+            // Finish in the ordinary idle sprite orientation, including the
+            // exact endpoint where target-position would otherwise be zero.
+            const Vec2 flightDirection = normalize({target.x - bay.x, target.y - bay.y});
+            const Vec2 droneDirection = slerpDirection(
+                flightDirection, {0.0F, 1.0F}, smootherstep((droneLaunch - 0.65F) / 0.35F));
+            drawSpriteRotated(
+                position.x,
+                position.y,
+                cellSize * kMiningSupportDroneSpriteCells,
+                cellSize * kMiningSupportDroneSpriteCells,
+                droneDirection.x,
+                droneDirection.y,
+                {1.0F, 1.0F, 1.0F, 0.90F},
+                asset);
+        } else {
+            drawCircle(position.x, position.y, cellSize * 0.34F, trail, 12);
+        }
+    }
+
+    const float closedAlpha = std::clamp(1.0F - bayOpen + bayClose, 0.0F, 1.0F);
+    if (textureReady(RocketClosedAsset) && closedAlpha > 0.001F) {
+        drawSpriteRotated(
+            ship.x,
+            ship.y,
+            shipSize,
+            shipSize,
+            0.0F,
+            1.0F,
+            {1.0F, 1.0F, 1.0F, closedAlpha},
+            RocketClosedAsset);
+    }
+    const float ready = smootherstep((deploymentProgress - 0.87F) / 0.10F);
+    if (ready > 0.001F) {
+        drawRadialGlow(
+            rigTarget.x,
+            rigTarget.y,
+            rigSize * (0.70F + ready * 0.45F),
+            {0.22F, 0.96F, 1.0F, (1.0F - ready) * 0.24F},
+            36);
+    }
 }
 
 void SceneComposer::drawSurfaceScan(const RenderSnapshot& snapshot)
@@ -6132,7 +6981,90 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
     const float flash = arrivalFanfare
         ? 0.42F + 0.28F * std::sin(static_cast<float>(snapshot.animationTime) * 18.0F)
         : 0.0F;
-    if (snapshot.screen == Screen::Launch && snapshot.launchManualControlsEnabled) {
+    if (snapshot.screen == Screen::Flight && snapshot.launchPhysicalFlight) {
+        const float approachBlend = flightCameraPresentation_.approachBlend;
+        const FlightCameraView view = physicalFlightCamera(snapshot, approachBlend);
+        const Vec2 center = physicalFlightPoint(snapshot, 0.0, 0.0, approachBlend);
+        const float localScale = view.camera.scale;
+        const float target = static_cast<float>(snapshot.launchOrbitTargetRadius) * localScale;
+        const float band = static_cast<float>(snapshot.launchOrbitGoodBand) * localScale;
+        const Color orbitColor = snapshot.launchOrbitCaptured
+            ? Color{0.34F, 1.0F, 0.66F, 0.78F * (1.0F - view.landingBlend)}
+            : Color{0.36F, 0.82F, 1.0F, 0.52F * (1.0F - view.landingBlend)};
+        drawEllipseLine(center.x, center.y, target - band, target - band, orbitColor, 72, 0.0F, 2.0F * kPi);
+        drawEllipseLine(center.x, center.y, target + band, target + band, orbitColor, 72, 0.0F, 2.0F * kPi);
+        if (!snapshot.launchLandingLocalFrame) {
+            const double gateAngle=std::atan2(flight_geometry::startY,flight_geometry::startX);
+            const Color gateColor=snapshot.launchLandingAuthorized && snapshot.launchDescentGateArmed
+                ? Color{0.30F,1.0F,0.60F,0.90F*(1.0F-view.landingBlend)}
+                : Color{1.0F,0.62F,0.22F,0.65F*(1.0F-view.landingBlend)};
+            Vec2 previous=physicalFlightPoint(snapshot,
+                std::cos(gateAngle-flight_landing::gateHalfAngle)*flight_geometry::landingBoundary,
+                std::sin(gateAngle-flight_landing::gateHalfAngle)*flight_geometry::landingBoundary,approachBlend);
+            for(int i=1;i<=36;++i) {
+                const double angle=gateAngle-flight_landing::gateHalfAngle+2.0*flight_landing::gateHalfAngle*i/36.0;
+                const Vec2 next=physicalFlightPoint(snapshot,std::cos(angle)*flight_geometry::landingBoundary,
+                    std::sin(angle)*flight_geometry::landingBoundary,approachBlend);
+                drawLine(previous.x,previous.y,next.x,next.y,gateColor,3.0F);
+                previous=next;
+            }
+        } else {
+            const double n= snapshot.launchLandingBasisAngle;
+            const double r=flight_geometry::bodyRadius+flight_landing::departureAltitude/flight_landing::metersPerOrbitUnit;
+            const Vec2 left=physicalFlightPoint(snapshot,std::cos(n)*r-std::sin(n)*2.0,
+                std::sin(n)*r+std::cos(n)*2.0,approachBlend);
+            const Vec2 right=physicalFlightPoint(snapshot,std::cos(n)*r+std::sin(n)*2.0,
+                std::sin(n)*r-std::cos(n)*2.0,approachBlend);
+            drawLine(left.x,left.y,right.x,right.y,{0.25F,0.85F,1.0F,0.65F},2.0F);
+        }
+
+        const std::vector<FlightTrajectoryPointSnapshot>& displayedTrajectory =
+            displayedFlightTrajectory(snapshot);
+        if (displayedTrajectory.size() > 1U) {
+            std::vector<SceneVertex>& prediction = scratchVertices(displayedTrajectory.size() * 6);
+            Vec2 previous = physicalFlightPoint(
+                snapshot,
+                displayedTrajectory.front().x,
+                displayedTrajectory.front().y,
+                approachBlend);
+            constexpr float endpointFadeStart = 0.78F;
+            const auto trajectoryColor = [=](float progress) {
+                constexpr Color purple {0.68F, 0.34F, 1.0F, 0.54F};
+                constexpr Color pink {1.0F, 0.38F, 0.72F, 0.54F};
+                constexpr Color teal {0.20F, 0.94F, 0.82F, 0.54F};
+                const Color from = progress < 0.5F ? purple : pink;
+                const Color to = progress < 0.5F ? pink : teal;
+                const float blend = progress < 0.5F ? progress * 2.0F : (progress - 0.5F) * 2.0F;
+                const float fade = std::clamp(
+                    (progress - endpointFadeStart) / (1.0F - endpointFadeStart), 0.0F, 1.0F);
+                return Color {
+                    std::lerp(from.r, to.r, blend),
+                    std::lerp(from.g, to.g, blend),
+                    std::lerp(from.b, to.b, blend),
+                    0.54F * (1.0F - smootherstep(fade))
+                };
+            };
+            Color previousColor = trajectoryColor(0.0F);
+            for (std::size_t index = 1; index < displayedTrajectory.size(); ++index) {
+                const FlightTrajectoryPointSnapshot& point = displayedTrajectory[index];
+                const Vec2 next = physicalFlightPoint(
+                    snapshot,
+                    point.x,
+                    point.y,
+                    approachBlend);
+                const float progress = static_cast<float>(index) /
+                    static_cast<float>(displayedTrajectory.size() - 1U);
+                const Color nextColor = trajectoryColor(progress);
+                pushVertex(prediction, previous.x, previous.y, previousColor);
+                pushVertex(prediction, next.x, next.y, nextColor);
+                previous = next;
+                previousColor = nextColor;
+            }
+            submitLines(prediction, 4.5F);
+        }
+        return;
+    }
+    if (snapshot.screen == Screen::Flight && snapshot.launchManualControlsEnabled) {
         const auto drawCorridorBoundary = [&](double courseOffset, Color color, float width) {
             std::vector<SceneVertex>& vertices = scratchVertices(56 * 16);
             for (float side : {-1.0F, 1.0F}) {
@@ -6213,9 +7145,245 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
     submitLines(overburnVertices, 1.0F);
 }
 
+const std::vector<FlightTrajectoryPointSnapshot>& SceneComposer::displayedFlightTrajectory(
+    const RenderSnapshot& snapshot)
+{
+    // This is an arcade guide: let the forecast settle instead of exposing
+    // every small solver correction. Only the ship endpoint stays exact.
+    constexpr double nearDampingSeconds = 0.100;
+    constexpr double farDampingSeconds = 0.450;
+    constexpr double dampingProgressExponent = 0.65;
+    constexpr double discontinuitySeconds = 0.20;
+    constexpr double discontinuityDistance = 0.50;
+
+    FlightTrajectoryPresentationState& presentation = flightTrajectoryPresentation_;
+    const auto& forecast = snapshot.launchPredictedTrajectory;
+    if (forecast.empty()) {
+        resetFlightTrajectoryPresentation();
+        return presentation.curvePoints;
+    }
+
+    const std::size_t budget = snapshot.launchLandingLocalFrame ? 96U : 101U;
+    std::vector<FlightTrajectoryPointSnapshot> target;
+    target.reserve(budget);
+    // Normalize forecast time, not point count, when contact shortens a path.
+    for (std::size_t i=0; i<budget; ++i) {
+        const double position=static_cast<double>(i)*(forecast.size()-1)/(budget-1);
+        const std::size_t left=static_cast<std::size_t>(position);
+        target.push_back(trajectoryPointLerp(forecast[left],
+            forecast[std::min(left+1,forecast.size()-1)],position-left));
+    }
+    target.front()={snapshot.launchPositionX,snapshot.launchPositionY};
+
+    const double now = presentationTimeSeconds_;
+    const bool routeChanged = presentation.originTier != snapshot.launchOriginTier ||
+        presentation.destinationTier != snapshot.destinationTier ||
+        presentation.frontierTransfer != snapshot.frontierTransfer ||
+        presentation.returningHome != snapshot.returningHome;
+    const bool localFrameChanged = presentation.flightMode != snapshot.launchFlightMode &&
+        (presentation.flightMode == static_cast<int>(FlightMode::Landing) ||
+         snapshot.launchFlightMode == static_cast<int>(FlightMode::Landing));
+    const double shipTravel = std::hypot(
+        snapshot.launchPositionX - presentation.lastShipX,
+        snapshot.launchPositionY - presentation.lastShipY);
+    const double elapsed = now - presentation.lastPresentationTime;
+    const bool invalidTime = now < 0.0 ||
+        presentation.lastPresentationTime < 0.0 ||
+        elapsed < 0.0 ||
+        elapsed > discontinuitySeconds;
+    const bool reset = !presentation.active ||
+        routeChanged ||
+        localFrameChanged ||
+        snapshot.launchImpactFlash > presentation.lastImpactFlash + 0.001 ||
+        target.size() != presentation.points.size() ||
+        invalidTime ||
+        shipTravel > discontinuityDistance;
+
+    if (reset) {
+        presentation.points.assign(target.begin(), target.end());
+    } else {
+        const double clampedElapsed = std::max(0.0, elapsed);
+        const double denominator = static_cast<double>(
+            std::max<std::size_t>(1U, target.size() - 1U));
+        for (std::size_t index = 0; index < target.size(); ++index) {
+            if (index == 0U) {
+                presentation.points[index] = target[index];
+                continue;
+            }
+            const float progress = static_cast<float>(
+                static_cast<double>(index) / denominator);
+            const double damping = std::lerp(
+                nearDampingSeconds,
+                farDampingSeconds,
+                static_cast<double>(smootherstep(static_cast<float>(
+                    std::pow(progress, dampingProgressExponent)))));
+            const double blend = 1.0 - std::exp(-clampedElapsed / damping);
+            presentation.points[index].x = std::lerp(
+                presentation.points[index].x,
+                target[index].x,
+                blend);
+            presentation.points[index].y = std::lerp(
+                presentation.points[index].y,
+                target[index].y,
+                blend);
+        }
+    }
+
+    presentation.lastPresentationTime = now;
+    presentation.lastShipX = snapshot.launchPositionX;
+    presentation.lastShipY = snapshot.launchPositionY;
+    presentation.lastImpactFlash = snapshot.launchImpactFlash;
+    presentation.originTier = snapshot.launchOriginTier;
+    presentation.destinationTier = snapshot.destinationTier;
+    presentation.flightMode = snapshot.launchFlightMode;
+    presentation.frontierTransfer = snapshot.frontierTransfer;
+    presentation.returningHome = snapshot.returningHome;
+    presentation.active = true;
+    rebuildFlightTrajectoryCurve(snapshot);
+    return presentation.curvePoints;
+}
+
+void SceneComposer::rebuildFlightTrajectoryCurve(const RenderSnapshot& snapshot)
+{
+    constexpr double minimumSeparation = 1.0e-6;
+    constexpr int subdivisions = 6;
+    constexpr double bodySilhouetteScale = 1.18;
+    auto& presentation = flightTrajectoryPresentation_;
+    auto& controls = presentation.controlPoints;
+    auto& curve = presentation.curvePoints;
+    controls.clear();
+    curve.clear();
+    const FlightTrajectoryPointSnapshot ship{snapshot.launchPositionX,snapshot.launchPositionY};
+    controls.push_back(ship);
+    for (const auto& point : presentation.points)
+        if (trajectoryPointDistance(controls.back(),point)>minimumSeparation)
+            controls.push_back(point);
+    if (controls.size()<2U) {
+        curve.assign(snapshot.launchLandingLocalFrame ? 96U : 101U,ship);
+        return;
+    }
+
+    std::vector<double> knots(controls.size(),0.0);
+    std::vector<FlightTrajectoryPointSnapshot> tangents(controls.size());
+    for (std::size_t i=1;i<controls.size();++i)
+        knots[i]=nextCentripetalKnot(knots[i-1],controls[i-1],controls[i]);
+    for (std::size_t i=0;i<controls.size();++i) {
+        const std::size_t before=i>0 ? i-1 : i;
+        const std::size_t after=std::min(i+1,controls.size()-1);
+        const double left=i>0 ? knots[i]-knots[before] : knots[after]-knots[i];
+        const double right=i+1<controls.size() ? knots[after]-knots[i] : left;
+        auto& tangent=tangents[i];
+        if (i>0 && i+1<controls.size()) {
+            // Derivative of centripetal Catmull-Rom in the shared knot domain.
+            tangent={
+                (controls[i].x-controls[before].x)/left -
+                (controls[after].x-controls[before].x)/(left+right) +
+                (controls[after].x-controls[i].x)/right,
+                (controls[i].y-controls[before].y)/left -
+                (controls[after].y-controls[before].y)/(left+right) +
+                (controls[after].y-controls[i].y)/right};
+        } else {
+            tangent={(controls[after].x-controls[before].x)/(i==0 ? right : left),
+                     (controls[after].y-controls[before].y)/(i==0 ? right : left)};
+        }
+        const double shortChord = i==0 ? trajectoryPointDistance(controls[i],controls[after]) :
+            i+1==controls.size() ? trajectoryPointDistance(controls[before],controls[i]) :
+            std::min(trajectoryPointDistance(controls[before],controls[i]),
+                     trajectoryPointDistance(controls[i],controls[after]));
+        const double limit=shortChord/std::max(left,right);
+        if (i==0) {
+            const double speed=std::hypot(snapshot.launchVelocityX,snapshot.launchVelocityY);
+            if (speed>minimumSeparation) {
+                // A stale guide behind the nose gets a zero handle, not a hook.
+                const double dot=(snapshot.launchVelocityX*tangent.x+
+                    snapshot.launchVelocityY*tangent.y)/
+                    (speed*std::max(minimumSeparation,std::hypot(tangent.x,tangent.y)));
+                const double strength=limit*std::clamp(dot,0.0,1.0);
+                tangent={snapshot.launchVelocityX/speed*strength,snapshot.launchVelocityY/speed*strength};
+            }
+        }
+        const double length=std::hypot(tangent.x,tangent.y);
+        if (length>limit) {tangent.x*=limit/length;tangent.y*=limit/length;}
+    }
+
+    std::vector<FlightTrajectoryPointSnapshot> dense;
+    dense.reserve(controls.size()*subdivisions);
+    dense.push_back(ship);
+    const double silhouette=flight_geometry::bodyRadius*bodySilhouetteScale;
+    bool clipped=!snapshot.launchLandingLocalFrame && std::hypot(ship.x,ship.y)<=silhouette;
+    for (std::size_t i=0;i+1<controls.size() && !clipped;++i) {
+        const double interval=knots[i+1]-knots[i];
+        for (int sample=1;sample<=subdivisions;++sample) {
+            const double t=static_cast<double>(sample)/subdivisions,t2=t*t,t3=t2*t;
+            const double h00=2*t3-3*t2+1,h10=t3-2*t2+t,h01=-2*t3+3*t2,h11=t3-t2;
+            const FlightTrajectoryPointSnapshot point{
+                h00*controls[i].x+h10*interval*tangents[i].x+
+                    h01*controls[i+1].x+h11*interval*tangents[i+1].x,
+                h00*controls[i].y+h10*interval*tangents[i].y+
+                    h01*controls[i+1].y+h11*interval*tangents[i+1].y};
+            FlightTrajectoryPointSnapshot contact;
+            if (!snapshot.launchLandingLocalFrame &&
+                trajectoryCircleEntry(dense.back(),point,silhouette,contact)) {
+                dense.push_back(contact);clipped=true;break;
+            }
+            dense.push_back(point);
+        }
+    }
+    curve=resampleTrajectoryArc(dense,snapshot.launchLandingLocalFrame ? 96U : 101U);
+}
+
+void SceneComposer::updateFlightCameraPresentation(const RenderSnapshot& snapshot) noexcept
+{
+    // Core flight owns the approach profile so camera motion and handling use
+    // the same smootherstep and the same outward release buffer.
+    double approachBlend = snapshot.launchApproachBlend;
+    if (!std::isfinite(approachBlend) || approachBlend < 0.0) {
+        const FlightKinematics kinematics = flightKinematics(
+            snapshot.launchPositionX,
+            snapshot.launchPositionY,
+            snapshot.launchVelocityX,
+            snapshot.launchVelocityY);
+        approachBlend = flightScaleProfile(
+            kinematics,
+            snapshot.travelProgress,
+            snapshot.launchOrbitTargetRadius,
+            snapshot.launchOrbitGoodBand,
+            snapshot.launchOrbitCaptured ||
+                snapshot.launchLandingLocalFrame ||
+                kinematics.radius < flight_geometry::influenceRadius,
+            snapshot.launchLandingAuthorized || snapshot.launchLandingLocalFrame,
+            snapshot.launchLandingLocalFrame).approachBlend;
+    }
+    flightCameraPresentation_.approachBlend = static_cast<float>(std::clamp(
+        approachBlend,
+        0.0,
+        1.0));
+}
+
+void SceneComposer::resetFlightCameraPresentation() noexcept
+{
+    flightCameraPresentation_ = {};
+}
+
+void SceneComposer::resetFlightTrajectoryPresentation() noexcept
+{
+    flightTrajectoryPresentation_.points.clear();
+    flightTrajectoryPresentation_.controlPoints.clear();
+    flightTrajectoryPresentation_.curvePoints.clear();
+    flightTrajectoryPresentation_.lastPresentationTime = -1.0;
+    flightTrajectoryPresentation_.lastShipX = 0.0;
+    flightTrajectoryPresentation_.lastShipY = 0.0;
+    flightTrajectoryPresentation_.lastImpactFlash = 0.0;
+    flightTrajectoryPresentation_.originTier = -2;
+    flightTrajectoryPresentation_.destinationTier = -1;
+    flightTrajectoryPresentation_.frontierTransfer = false;
+    flightTrajectoryPresentation_.returningHome = false;
+    flightTrajectoryPresentation_.active = false;
+}
+
 void SceneComposer::drawLaunchAsteroids(const RenderSnapshot& snapshot)
 {
-    if (!snapshot.launchAsteroidsEnabled || snapshot.launchAsteroidCount <= 0) {
+    if (snapshot.launchLandingLocalFrame || !snapshot.launchAsteroidsEnabled || snapshot.launchAsteroidCount <= 0) {
         return;
     }
 
@@ -6224,10 +7392,16 @@ void SceneComposer::drawLaunchAsteroids(const RenderSnapshot& snapshot)
         static_cast<int>(snapshot.launchAsteroids.size()));
     for (int index = 0; index < count; ++index) {
         const LaunchAsteroidSnapshot& asteroid = snapshot.launchAsteroids[static_cast<std::size_t>(index)];
-        const Vec2 position = launchCorridorPoint(
-            snapshot,
-            static_cast<float>(asteroid.routeProgress),
-            asteroid.courseOffset);
+        const Vec2 position = snapshot.launchPhysicalFlight
+            ? physicalFlightPoint(
+                  snapshot,
+                  -3.40 + asteroid.routeProgress * 3.40,
+                  asteroid.courseOffset,
+                  flightCameraPresentation_.approachBlend)
+            : launchCorridorPoint(
+                  snapshot,
+                  static_cast<float>(asteroid.routeProgress),
+                  asteroid.courseOffset);
         const float scale = std::clamp(
             static_cast<float>(asteroid.scale),
             static_cast<float>(tuning::launch::asteroidMinimumScale),
@@ -6257,13 +7431,25 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
 {
     const Vec2 centerRoute = routePoint(snapshot, static_cast<float>(snapshot.travelProgress));
     Vec2 routeForward = routeTangent(snapshot, static_cast<float>(snapshot.travelProgress));
-    const Vec2 route = snapshot.screen == Screen::Launch
+    const Vec2 route = snapshot.screen == Screen::Flight && snapshot.launchPhysicalFlight
+        ? physicalFlightPoint(
+              snapshot,
+              snapshot.launchPositionX,
+              snapshot.launchPositionY,
+              flightCameraPresentation_.approachBlend)
+        : snapshot.screen == Screen::Flight
         ? launchCorridorPoint(
             snapshot,
             static_cast<float>(snapshot.travelProgress),
             snapshot.launchCourseOffset)
         : centerRoute;
-    Vec2 forward = routeForward;
+    Vec2 forward = snapshot.screen == Screen::Flight && snapshot.launchPhysicalFlight
+        ? physicalFlightVector(
+            snapshot,
+            std::cos(snapshot.launchHeading),
+            std::sin(snapshot.launchHeading),
+            flightCameraPresentation_.approachBlend)
+        : routeForward;
     if (snapshot.returningHome) {
         const float turn = static_cast<float>(std::clamp(snapshot.returnTurnProgress, 0.0, 1.0));
         const float outboundAngle = std::atan2(forward.y, forward.x);
@@ -6274,7 +7460,19 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
     const float hangarLift = snapshot.screen == Screen::Hangar ? 0.02F : 0.0F;
     const float cx = route.x;
     const float cy = route.y + hangarLift;
-    const float scale = std::clamp(0.26F - static_cast<float>(snapshot.travelProgress) * 0.06F, 0.16F, 0.26F);
+    float scale = snapshot.launchPhysicalFlight
+        ? 0.17F * std::lerp(
+              1.0F,
+              1.35F,
+              flightCameraPresentation_.approachBlend)
+        : std::clamp(0.26F - static_cast<float>(snapshot.travelProgress) * 0.06F, 0.16F, 0.26F);
+    if (snapshot.surfaceArrivalPrepared) {
+        const float landingBlend = physicalFlightCamera(
+            snapshot, flightCameraPresentation_.approachBlend).landingBlend;
+        scale = std::lerp(scale,
+            miningShuttleSize(snapshot, miningViewTransform(snapshot, sceneAspect_, 0.0F)),
+            landingBlend);
+    }
     auto world = [&](float localX, float localY) {
         return Vec2 {
             cx + right.x * localX * scale + forward.x * localY * scale,
@@ -6282,7 +7480,7 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         };
     };
 
-    auto texturedQuad = [&](int assetIndex, float width, float height, Color tint, int frameIndex = 0, int frameCount = 1, float offsetRight = 0.0F, float offsetForward = 0.0F) {
+    auto texturedQuad = [&](int assetIndex, float width, float height, Color tint, int frameIndex = 0, int frameCount = 1, float offsetRight = 0.0F, float offsetForward = 0.0F, bool flipForward = false) {
         if (!textureReady(assetIndex)) {
             return false;
         }
@@ -6301,7 +7499,8 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
                 right.x * halfW, right.y * halfW,
                 forward.x * halfH, forward.y * halfH,
                 tint,
-                u0, 0.0F, u1, 1.0F,
+                u0, flipForward ? 1.0F : 0.0F,
+                u1, flipForward ? 0.0F : 1.0F,
                 SceneInstanceShape::Rectangle,
                 4
             },
@@ -6312,7 +7511,8 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
     };
 
     if (snapshot.lastResult == LaunchResultType::Destroyed) {
-        if (snapshot.lastLaunchFailureCause == LaunchFailureCause::LunarImpact) {
+        if (snapshot.lastLaunchFailureCause == LaunchFailureCause::LunarImpact ||
+            snapshot.lastLaunchFailureCause == LaunchFailureCause::ThermalRunaway) {
             // The dedicated launch-screen cinematic has already played. Keep
             // the result backdrop still beneath the red outcome modal.
             return;
@@ -6326,13 +7526,13 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         return;
     }
 
-    if (snapshot.launchLunarImpactActive &&
-        snapshot.launchLunarImpactElapsed >= tuning::session::lunarImpactHoldSeconds) {
+    if (snapshot.launchDestructionActive &&
+        snapshot.launchDestructionElapsed >= tuning::session::flightDestructionHoldSeconds) {
         const float blastTime = static_cast<float>(
-            snapshot.launchLunarImpactElapsed - tuning::session::lunarImpactHoldSeconds);
+            snapshot.launchDestructionElapsed - tuning::session::flightDestructionHoldSeconds);
         const float blastDuration = static_cast<float>(
-            tuning::session::lunarImpactExplosionEndSeconds -
-            tuning::session::lunarImpactHoldSeconds);
+            tuning::session::flightDestructionExplosionEndSeconds -
+            tuning::session::flightDestructionHoldSeconds);
         const float progress = std::clamp(blastTime / blastDuration, 0.0F, 1.0F);
         const int frame = std::min(7, static_cast<int>(progress * 8.0F));
         const float eased = 1.0F - (1.0F - progress) * (1.0F - progress);
@@ -6366,7 +7566,8 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         return;
     }
 
-    const float launchThrottle = static_cast<float>(std::clamp(snapshot.launchThrottle, 0.0, 1.0));
+    const bool brakingThrust = snapshot.launchPhysicalFlight && snapshot.launchThrottle < -0.01;
+    const float launchThrottle = static_cast<float>(std::clamp(std::abs(snapshot.launchThrottle), 0.0, 1.0));
     if (snapshot.poweredFlight && launchThrottle > 0.01F) {
         if (textureReady(ThrustAsset)) {
             const int thrustFrame = static_cast<int>(snapshot.animationTime * 18.0) % 6;
@@ -6386,13 +7587,15 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
                 thrustFrame,
                 6,
                 0.0F,
-                -(kLaunchThrustNozzlePaddingScale * scale + plumeLength * 0.5F));
+                (brakingThrust ? 1.0F : -1.0F) *
+                    (kLaunchThrustNozzlePaddingScale * scale + plumeLength * 0.5F),
+                brakingThrust);
         }
     }
 
     const float launchSteering = static_cast<float>(
         std::clamp(snapshot.launchSteerInput, -1.0, 1.0));
-    if (snapshot.screen == Screen::Launch
+    if (snapshot.screen == Screen::Flight
         && !snapshot.preflightActive
         && std::abs(launchSteering) > 0.05F) {
         const float movementDirection = launchSteering < 0.0F ? -1.0F : 1.0F;
@@ -6462,7 +7665,7 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         texturedQuad(RocketOpenAsset, 0.86F * scale, 0.86F * scale, {1.0F, 1.0F, 1.0F, 1.0F});
     } else {
         texturedQuad(RocketClosedAsset, 0.86F * scale, 0.86F * scale, {1.0F, 1.0F, 1.0F, 1.0F});
-        const bool temperatureCritical = snapshot.screen == Screen::Launch &&
+        const bool temperatureCritical = snapshot.screen == Screen::Flight &&
             snapshot.instrumentTemperature > tuning::launch::temperatureCriticalThreshold;
         const bool temperatureBlinkOn = static_cast<int>(std::floor(
             snapshot.animationTime * tuning::launch::temperatureWarningBlinkHz)) % 2 == 0;
@@ -6483,7 +7686,7 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
 void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
 {
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
-    drawSolarBackground(snapshot, 0.70F, snapshot.screen != Screen::Launch);
+    drawSolarBackground(snapshot, 0.70F, snapshot.screen != Screen::Flight);
 
     // After discovery, Surface Ops keeps the Ark in view as the team's base away from Earth.
     const bool surfaceArkVisible = snapshot.screen == Screen::SurfaceExpedition
@@ -6503,7 +7706,133 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         }
     };
 
-    if (snapshot.campaignStoryIntroduction) {
+    if (snapshot.screen == Screen::Flight && snapshot.launchPhysicalFlight) {
+        const float approachBlend = flightCameraPresentation_.approachBlend;
+        const FlightCameraView view = physicalFlightCamera(snapshot, approachBlend);
+        const float cameraZoom = std::clamp(
+            view.camera.scale / std::max(0.0001F, view.transfer.scale),
+            1.0F,
+            2.40F);
+        // Keep the destination present until the transformed local horizon is
+        // already readable, then finish the crossfade before the local frame.
+        const float destinationAlpha = 1.0F - smootherstep(
+            (view.landingBlend - 0.72F) / 0.26F);
+        const Vec2 destinationCenter = physicalFlightPoint(
+            snapshot,
+            0.0,
+            0.0,
+            approachBlend);
+        const float tier = static_cast<float>(snapshot.destinationTier);
+        const float baseRadius = 0.065F + tier * 0.010F;
+        float destinationSize = 0.30F;
+        if (snapshot.destinationTier == 1) {
+            destinationSize = 0.34F;
+        } else if (snapshot.destinationTier == 2) {
+            destinationSize = baseRadius * 3.60F;
+        } else if (snapshot.destinationTier >= 3 && snapshot.destinationTier <= 6) {
+            destinationSize = baseRadius * 1.12F * 2.58F;
+        } else if (snapshot.destinationTier >= 7) {
+            destinationSize = baseRadius * 2.55F;
+        }
+        destinationSize *= cameraZoom;
+        if (snapshot.surfaceArrivalPrepared) {
+            // Let the actual body fill and leave the frame as its real local
+            // site becomes readable. This is a visual scale match, not a new
+            // collision surface or a replacement mountain backdrop.
+            destinationSize *= std::exp(std::log(5.0F) *
+                smootherstep(view.landingBlend / 0.72F));
+        }
+        const int destinationAsset = destinationBodyAsset(snapshot);
+        if (destinationAlpha > 0.001F) {
+            drawRadialGlow(
+                destinationCenter.x,
+                destinationCenter.y,
+                destinationSize * 0.58F,
+                {0.24F, 0.64F, 0.88F, 0.10F * destinationAlpha},
+                72);
+            if (textureReady(destinationAsset)) {
+                drawBodySprite(
+                    destinationAsset,
+                    destinationCenter,
+                    destinationSize,
+                    destinationAlpha);
+            } else {
+                drawCircle(
+                    destinationCenter.x,
+                    destinationCenter.y,
+                    destinationSize * 0.38F,
+                    {0.78F, 0.58F, 0.30F, 0.72F * destinationAlpha},
+                    64);
+            }
+        }
+
+        // Source bodies are authored in the wide transfer composition, then
+        // converted back through that camera and into the current one. They
+        // therefore pan and zoom with the ship instead of remaining as static
+        // backdrop duplicates during orbit capture.
+        const float sourceAlpha = 1.0F - smootherstep(
+            (view.approachBlend - 0.35F) / 0.55F);
+        const float sourceZoom = std::clamp(cameraZoom, 1.0F, 1.65F);
+        auto drawSourceBody = [&](int assetIndex, Vec2 transferPoint, float size, float alpha) {
+            const Vec2 position = physicalFlightBackdropPoint(
+                snapshot,
+                transferPoint,
+                approachBlend);
+            const float finalAlpha = alpha * sourceAlpha;
+            if (finalAlpha <= 0.001F) {
+                return;
+            }
+            if (assetIndex >= 0 && textureReady(assetIndex)) {
+                drawBodySprite(assetIndex, position, size * sourceZoom, finalAlpha);
+            } else {
+                drawCircle(
+                    position.x,
+                    position.y,
+                    size * sourceZoom * 0.38F,
+                    {0.22F, 0.62F, 0.96F, finalAlpha * 0.72F},
+                    48);
+            }
+        };
+
+        if (snapshot.launchOriginTier >= 0) {
+            const float originRadius = 0.110F +
+                std::min(4.0F, static_cast<float>(snapshot.launchOriginTier)) * 0.012F;
+            const Vec2 routeOrigin = routePoint(snapshot, 0.0F);
+            const Vec2 departureTangent = routeTangent(snapshot, 0.0F);
+            const Vec2 departureRight {departureTangent.y, -departureTangent.x};
+            const Vec2 origin {
+                routeOrigin.x - departureTangent.x * originRadius * 0.45F -
+                    departureRight.x * originRadius * 1.55F,
+                routeOrigin.y - departureTangent.y * originRadius * 0.45F -
+                    departureRight.y * originRadius * 1.55F
+            };
+            drawSourceBody(
+                originBodyAsset(snapshot.launchOriginTier),
+                origin,
+                originRadius * 2.58F,
+                0.92F);
+        } else if (snapshot.destinationTier == 1) {
+            drawSourceBody(EarthAsset, {-0.36F, -0.92F}, 0.58F, 0.86F);
+        } else if (snapshot.destinationTier == 2) {
+            drawSourceBody(EarthAsset, {-0.34F, -0.89F}, 0.368F, 0.80F);
+            drawSourceBody(MoonAsset, {-0.04F, -0.72F}, 0.078F, 0.68F);
+        } else {
+            drawSourceBody(EarthAsset, {-0.42F, -0.91F}, 0.247F, 0.72F);
+            drawSourceBody(MoonAsset, {-0.22F, -0.68F}, 0.060F, 0.54F);
+        }
+
+        if (arkVisible(snapshot.arkCondition) && snapshot.destinationTier >= 4) {
+            const Vec2 routeOrigin = routePoint(snapshot, 0.0F);
+            const int arkAsset = arkDamaged(snapshot.arkCondition)
+                ? ArkDamagedAsset
+                : ArkOperationalAsset;
+            drawSourceBody(
+                arkAsset,
+                {routeOrigin.x - 0.06F, routeOrigin.y - 0.01F},
+                0.62F,
+                0.88F);
+        }
+    } else if (snapshot.campaignStoryIntroduction) {
         if (textureReady(HeroicCapybaraAsset)) {
             drawRadialGlow(0.64F, 0.10F, 0.64F, {0.98F, 0.70F, 0.22F, 0.12F}, 96);
             drawSprite(0.64F, 0.10F, 1.28F, 1.28F, {1.0F, 1.0F, 1.0F, 1.0F}, HeroicCapybaraAsset);
@@ -6554,7 +7883,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
     } else if (snapshot.destinationTier == 0 && !snapshot.frontierTransfer) {
         // The launch board has ample negative space around its HUD. Use it for
         // a legible Earth and Moon pair instead of a tiny destination dot.
-        const bool launchScene = snapshot.screen == Screen::Launch;
+        const bool launchScene = snapshot.screen == Screen::Flight;
         const float earthX = launchScene ? -0.38F : -0.16F;
         const float earthY = launchScene ? -0.96F : -1.10F;
         const float earthR = launchScene ? 0.70F : 0.58F;
@@ -6576,21 +7905,30 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             drawCircle(distantMoon.x + moonSize * 0.08F, distantMoon.y + moonSize * 0.06F, moonSize * 0.08F, {0.48F, 0.50F, 0.50F, 0.30F}, 12);
         }
     } else if (snapshot.destinationTier == 1) {
+        const bool launchScene = snapshot.screen == Screen::Flight;
+        const float approachProgress = 0.0F;
         const Vec2 moon = routePoint(snapshot, 1.0F);
-        const bool launchScene = snapshot.screen == Screen::Launch;
-        const float earthX = launchScene ? -0.36F : -0.26F;
-        const float earthY = launchScene ? -0.92F : -0.88F;
-        const float earthR = launchScene ? 0.38F : 0.30F;
+        const Vec2 earth = launchScene ? Vec2 {-0.36F, -0.92F} : Vec2 {-0.26F, -0.88F};
+        const float earthR = launchScene ? 0.25F : 0.30F;
         const float moonSize = launchScene ? 0.34F : 0.22F;
         if (textureReady(EarthAsset)) {
-            drawSprite(earthX, earthY, earthR * 2.32F, earthR * 2.32F, {1.0F, 1.0F, 1.0F, 0.86F}, EarthAsset);
+            drawSprite(earth.x, earth.y, earthR * 2.32F, earthR * 2.32F, {1.0F, 1.0F, 1.0F, 0.86F}, EarthAsset);
         } else {
-            drawCircle(earthX, earthY, earthR * 1.20F, {0.24F, 0.62F, 0.96F, 0.08F}, 64);
-            drawCircle(earthX, earthY, earthR, {0.18F, 0.48F, 0.78F, 0.72F}, 64);
-            drawCircle(earthX - 0.08F, earthY + 0.08F, earthR * 0.16F, {0.30F, 0.60F, 0.38F, 0.70F}, 20);
-            drawCircle(earthX + 0.10F, earthY + 0.14F, earthR * 0.12F, {0.30F, 0.60F, 0.38F, 0.58F}, 20);
+            drawCircle(earth.x, earth.y, earthR * 1.20F, {0.24F, 0.62F, 0.96F, 0.08F}, 64);
+            drawCircle(earth.x, earth.y, earthR, {0.18F, 0.48F, 0.78F, 0.72F}, 64);
+            drawCircle(earth.x - 0.08F, earth.y + 0.08F, earthR * 0.16F, {0.30F, 0.60F, 0.38F, 0.70F}, 20);
+            drawCircle(earth.x + 0.10F, earth.y + 0.14F, earthR * 0.12F, {0.30F, 0.60F, 0.38F, 0.58F}, 20);
         }
-        drawEllipseLine(earthX, earthY, 1.08F, 0.76F, {0.40F, 0.62F, 0.78F, 0.20F}, 96, -0.04F * kPi, 0.82F * kPi);
+        const float orbitAlpha = 0.20F * (1.0F - approachProgress);
+        drawEllipseLine(
+            earth.x,
+            earth.y,
+            1.08F * std::lerp(1.0F, 1.18F, approachProgress),
+            0.76F * std::lerp(1.0F, 1.18F, approachProgress),
+            {0.40F, 0.62F, 0.78F, orbitAlpha},
+            96,
+            -0.04F * kPi,
+            0.82F * kPi);
         if (textureReady(MoonAsset)) {
             drawSprite(moon.x, moon.y, moonSize, moonSize, {1.0F, 1.0F, 1.0F, 1.0F}, MoonAsset);
         } else {
@@ -6602,7 +7940,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         const float radius = 0.065F + tier * 0.010F;
         const Color destination = mix({0.42F, 0.66F, 0.88F, 0.60F}, {0.95F, 0.72F, 0.35F, 0.72F}, tier / 5.0F);
         const Vec2 endpoint = routePoint(snapshot, 1.0F);
-        const bool authoredRouteDeparture = snapshot.screen == Screen::Launch &&
+        const bool authoredRouteDeparture = snapshot.screen == Screen::Flight &&
             snapshot.launchOriginTier >= 0;
         if (arkVisible(snapshot.arkCondition) && snapshot.destinationTier >= 4 && !surfaceArkVisible) {
             const Vec2 arkHome = routePoint(snapshot, 0.0F);
@@ -6693,7 +8031,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             }
         }
         if (snapshot.destinationTier == 2 && textureReady(MarsAsset)) {
-            const float marsScale = snapshot.screen == Screen::Launch ? 3.60F : 2.55F;
+            const float marsScale = snapshot.screen == Screen::Flight ? 3.60F : 2.55F;
             drawSprite(endpoint.x, endpoint.y, radius * marsScale, radius * marsScale, {1.0F, 1.0F, 1.0F, 0.86F}, MarsAsset);
         } else if (snapshot.destinationTier >= 3 && snapshot.destinationTier <= 6) {
             const float arrivalBeat = snapshot.screen == Screen::ArrivalFanfare
@@ -6757,14 +8095,16 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
     // Straylight story takeovers are composed as clean cinematic tableaux.
     // The generic travel path cuts through the Ark and distracts from the
     // discovery and Act I completion beats, so retain it only for gameplay.
-    if (!snapshot.straylightStoryReveal) {
+    if (!snapshot.straylightStoryReveal && !snapshot.surfaceArrivalPrepared) {
         drawRoute(snapshot);
     }
-    if (snapshot.screen == Screen::Launch) {
+    if (snapshot.screen == Screen::Flight) {
         drawLaunchAsteroids(snapshot);
     }
 
-    if (snapshot.screen == Screen::Launch && !snapshot.straylightApproach) {
+    if (snapshot.screen == Screen::Flight &&
+        !snapshot.straylightApproach &&
+        !snapshot.launchPhysicalFlight) {
         const float targetProgress = static_cast<float>(std::clamp(
             snapshot.launchMissionTargetProgress,
             0.0,
@@ -6889,6 +8229,7 @@ void SceneComposer::drawEllipseLine(
     float end,
     float width)
 {
+    color.a *= drawOpacity_;
     auto& vertices = scratchVertices(static_cast<std::size_t>(segments) * 16U);
     Vec2 previous {cx + std::cos(start) * rx, cy + std::sin(start) * ry};
     for (int i = 1; i <= segments; ++i) {
@@ -7254,6 +8595,8 @@ void SceneComposer::reset()
     miningSurveyDrones_.clear();
     miningPickupBursts_.clear();
     miningPickupBurstScratch_.clear();
+    resetFlightTrajectoryPresentation();
+    resetFlightCameraPresentation();
     previousMiningWidth_ = 0;
     previousMiningHeight_ = 0;
     previousMiningActive_ = false;

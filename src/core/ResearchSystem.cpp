@@ -62,11 +62,11 @@ namespace {
 
 const Destination* currentResearchDestination(const GameState& state, const ContentCatalog& catalog)
 {
-    if (state.run.surfaceExpedition.active) {
-        return catalog.findDestination(state.run.surfaceExpedition.destinationId);
+    if (state.run.planetaryExpedition.active) {
+        return catalog.findDestination(state.run.planetaryExpedition.destinationId);
     }
-    if (state.run.arrivalOps.active) {
-        return catalog.findDestination(state.run.arrivalOps.destinationId);
+    if (state.run.approach.active) {
+        return catalog.findDestination(state.run.approach.destinationId);
     }
     if (state.run.destinationIndex >= 0 && state.run.destinationIndex < static_cast<int>(catalog.destinations.size())) {
         return &catalog.destinations[static_cast<std::size_t>(state.run.destinationIndex)];
@@ -230,7 +230,7 @@ const MiningSiteDefinition* miningSiteForSurface(
     const GameState& state,
     const ContentCatalog& catalog)
 {
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     if (!expedition.active) {
         return nullptr;
     }
@@ -282,7 +282,7 @@ bool surfaceHasAuthoredArtifactSignalAtDepth(
     int depthOffset)
 {
     const ContentCatalog& catalog = legacyCampaignCatalog();
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     const Destination* destination = catalog.findDestination(expedition.destinationId);
     const auto opportunity = unresolvedProgressionArtifactOpportunity(
         state,
@@ -331,7 +331,7 @@ ArtifactRecord* firstUnidentifiedArtifact(GameState& state)
     return &(*artifact);
 }
 
-std::string artifactId(const SurfaceExpeditionState& expedition)
+std::string artifactId(const PlanetaryExpeditionState& expedition)
 {
     std::ostringstream out;
     out << expedition.destinationId << "_artifact_" << expedition.depth;
@@ -389,7 +389,7 @@ void applyRecoveredArtifactRewards(
     }
 }
 
-SurfaceActionOutcome spendSupply(SurfaceExpeditionState& expedition, int amount)
+SurfaceActionOutcome spendSupply(PlanetaryExpeditionState& expedition, int amount)
 {
     SurfaceActionOutcome outcome;
     if (!expedition.active || expedition.supply < amount) {
@@ -447,13 +447,14 @@ void addDestinationHistoryValue(std::vector<int>& values, const ContentCatalog& 
 
 double landingReconHazardPenalty(const GameState& state)
 {
-    return state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured
-        ? 0.0
-        : tuning::research::unmappedDescentHazardPenalty;
+    // Direct descent is made physically harder by its corridor configuration.
+    // It must never add an invisible percentage penalty to surface play.
+    (void)state;
+    return 0.0;
 }
 
 void applySurfaceHazard(
-    SurfaceExpeditionState& expedition,
+    PlanetaryExpeditionState& expedition,
     SurfaceActionOutcome& outcome,
     Random& rng,
     double scale,
@@ -491,7 +492,7 @@ bool hasSurfaceTooling(const MetaProgress& meta)
 MiningArenaRules activeSurfaceArenaRules(const GameState& state)
 {
     const ContentCatalog catalog = createDefaultContent();
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     const int completedHostileSorties = destinationHistoryValue(
         state.meta.destinationSuccesses,
         catalog,
@@ -511,7 +512,7 @@ MiningArenaRules activeSurfaceArenaRules(const GameState& state)
 
 void applyEnemyContact(GameState& state, SurfaceActionOutcome& outcome, double encounterChance, Random& rng)
 {
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     if (!expedition.enemyEncountersEnabled || !rng.chance(encounterChance)) {
         return;
     }
@@ -540,7 +541,7 @@ void applyEnemyContact(GameState& state, SurfaceActionOutcome& outcome, double e
 
 void applySurfaceEvent(GameState& state, SurfaceActionOutcome& outcome, Random& rng)
 {
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     if (!outcome.applied || outcome.hazardTriggered) {
         return;
     }
@@ -597,7 +598,7 @@ void applySurfaceEvent(GameState& state, SurfaceActionOutcome& outcome, Random& 
     outcome.blueprintDelta = tuning::research::surfaceCrewDiscoveryBlueprintGain;
 }
 
-void appendSurfaceLog(SurfaceExpeditionState& expedition, std::string entry)
+void appendSurfaceLog(PlanetaryExpeditionState& expedition, std::string entry)
 {
     if (entry.empty()) {
         return;
@@ -612,7 +613,7 @@ void appendSurfaceLog(SurfaceExpeditionState& expedition, std::string entry)
 void finalizeSurfaceAction(GameState& state, SurfaceActionOutcome& outcome, Random& rng)
 {
     applySurfaceEvent(state, outcome, rng);
-    appendSurfaceLog(state.run.surfaceExpedition, surfaceActionSummary(outcome));
+    appendSurfaceLog(state.run.planetaryExpedition, surfaceActionSummary(outcome));
 }
 
 std::string signedWhole(int value)
@@ -1348,8 +1349,8 @@ bool canCommissionIoHazardDrone(const GameState& state, const ContentCatalog& ca
     const ScenarioInstance* instance = binding == nullptr
         ? nullptr
         : findScenarioInstance(state.meta, binding->scenarioId);
-    if (binding == nullptr || definition == nullptr || instance == nullptr || state.run.flyby.active ||
-        state.run.surfaceExpedition.active || state.run.mining.active) {
+    if (binding == nullptr || definition == nullptr || instance == nullptr || state.run.approach.flyby.active ||
+        state.run.planetaryExpedition.active || state.run.mining.active) {
         return false;
     }
     const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, *instance);
@@ -1550,7 +1551,7 @@ bool bankFlybyRouteClearance(GameState& state, const ContentCatalog& catalog)
 
 bool queueBlockedArrivalFlybyRecovery(GameState& state, const ContentCatalog& catalog)
 {
-    const ArrivalOpsState& arrival = state.run.arrivalOps;
+    const ApproachRunState& arrival = state.run.approach;
     if (!arrival.active || arrival.destinationId.empty() ||
         !arrival.incomingRoute.active() ||
         arrival.incomingRoute.targetDestinationId != arrival.destinationId) {
@@ -1565,17 +1566,17 @@ bool queueBlockedArrivalFlybyRecovery(GameState& state, const ContentCatalog& ca
         return false;
     }
     state.run.routeTransit = std::move(recovery);
-    state.run.arrivalOps = {};
+    state.run.approach = {};
     state.screen = Screen::Hangar;
     return true;
 }
 
 bool captureArrivalOrbit(GameState& state)
 {
-    if (!state.run.arrivalOps.active || state.run.arrivalOps.commitment != ApproachCommitment::Uncommitted) {
+    if (!state.run.approach.active) {
         return false;
     }
-    state.run.arrivalOps.commitment = ApproachCommitment::OrbitCaptured;
+    state.run.approach.rewards.orbitAwarded = true;
     return true;
 }
 
@@ -1640,7 +1641,7 @@ bool canRunArrivalFlyby(const GameState& state, const ContentCatalog& catalog)
 {
     return currentResearchDestination(state, catalog) != nullptr
         && arrivalFlybyIntroduced(state, catalog)
-        && state.run.arrivalOps.commitment == ApproachCommitment::Uncommitted;
+        && !state.run.approach.rewards.orbitAwarded;
 }
 
 bool canEnterArrivalOrbit(const GameState& state, const ContentCatalog& catalog)
@@ -1649,7 +1650,7 @@ bool canEnterArrivalOrbit(const GameState& state, const ContentCatalog& catalog)
     if (destination == nullptr) {
         return false;
     }
-    return state.run.arrivalOps.commitment == ApproachCommitment::Uncommitted;
+    return !state.run.approach.rewards.orbitAwarded;
 }
 
 bool requiresArrivalOrbitBeforeLanding(const GameState& state, const ContentCatalog& catalog)
@@ -1667,17 +1668,16 @@ bool canAttemptArrivalLanding(const GameState& state, const ContentCatalog& cata
         return false;
     }
     if (requiresArrivalOrbitBeforeLanding(state, catalog) &&
-        state.run.arrivalOps.commitment != ApproachCommitment::OrbitCaptured) {
+        !state.run.approach.rewards.orbitAwarded) {
         return false;
     }
-    return state.run.arrivalOps.commitment == ApproachCommitment::Uncommitted
-        || state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured;
+    return true;
 }
 
 bool canDepartCapturedArrivalOrbit(const GameState& state, const ContentCatalog& catalog)
 {
-    return state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured
-        && !requiresArrivalOrbitBeforeLanding(state, catalog);
+    (void)catalog;
+    return state.run.approach.rewards.orbitAwarded;
 }
 
 namespace {
@@ -1732,7 +1732,7 @@ std::string arrivalOperationBlockReason(const GameState& state, const ContentCat
     if (destination == nullptr) {
         return {};
     }
-    if (state.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured
+    if (state.run.approach.rewards.orbitAwarded
         && (operation == "flyby" || operation == "orbit")) {
         return "Orbit captured. Pass Through and a second capture are closed for this visit.";
     }
@@ -1743,9 +1743,6 @@ std::string arrivalOperationBlockReason(const GameState& state, const ContentCat
         if (operation == "landing") {
             return "Capture Orbit before the first mapped lunar landing.";
         }
-        if (operation == "depart") {
-            return "The first lunar arrival must land after Orbit capture.";
-        }
     }
     return {};
 }
@@ -1753,42 +1750,40 @@ std::string arrivalOperationBlockReason(const GameState& state, const ContentCat
 void clearResearchAndExpeditionState(GameState& state)
 {
     state.run.researchProjectIds = {};
-    state.run.arrivalOps = {};
-    state.run.flyby = {};
-    state.run.orbit = {};
-    state.run.surfaceExpedition = {};
+    state.run.approach = {};
+    state.run.approach.flyby = {};
+    state.run.approach.orbit = {};
+    state.run.planetaryExpedition = {};
 }
 
 namespace {
 
 void preserveArrivalFuelAtDestination(GameState& state, std::string destinationId)
 {
-    const double transferFuelRemaining = state.run.arrivalOps.transferFuelRemaining;
-    const double transferFuelCapacity = state.run.arrivalOps.transferFuelCapacity;
-    const ApproachCommitment commitment = state.run.arrivalOps.commitment;
-    const RouteTransitState incomingRoute = state.run.arrivalOps.incomingRoute;
-    state.run.arrivalOps = {
-        true,
-        std::move(destinationId),
-        transferFuelRemaining,
-        transferFuelCapacity,
-        commitment,
-        incomingRoute
-    };
+    // Fuel preservation is metadata maintenance, not a phase transition.
+    // Reconstructing the aggregate here erased the live Flyby/Orbit solver
+    // immediately after it was initialized while leaving Screen unchanged.
+    ApproachRunState& approach = state.run.approach;
+    approach.active = true;
+    approach.destinationId = std::move(destinationId);
+    approach.transferFuelRemaining = std::clamp(
+        approach.transferFuelRemaining,
+        0.0,
+        std::max(0.0, approach.transferFuelCapacity));
 }
 
 } // namespace
 
 void startArrivalOps(GameState& state, const LaunchOutcome& outcome)
 {
-    state.run.arrivalOps = {
-        true,
-        outcome.destinationId,
-        std::max(0.0, outcome.transferFuelRemaining),
-        std::max(0.0, outcome.transferFuelCapacity),
-        ApproachCommitment::Uncommitted,
-        outcome.routeTransit
-    };
+    ApproachRunState approach;
+    approach.active = true;
+    approach.destinationId = outcome.destinationId;
+    approach.transferFuelRemaining = std::max(0.0, outcome.transferFuelRemaining);
+    approach.transferFuelCapacity = std::max(0.0, outcome.transferFuelCapacity);
+    approach.incomingRoute = outcome.routeTransit;
+    approach.phase = ApproachPhase::Entry;
+    state.run.approach = std::move(approach);
 }
 
 namespace {
@@ -1844,11 +1839,12 @@ void startArrivalFlybyRun(GameState& state, const ContentCatalog& catalog)
         return;
     }
 
-    state.run.flyby = createFlybyRun(
+    state.run.approach.flyby = createFlybyRun(
         state,
         catalog,
         *destination,
         FlybyPurpose::Recon);
+    state.run.approach.phase = ApproachPhase::Flyby;
     preserveArrivalFuelAtDestination(state, destination->id);
     state.screen = Screen::Flyby;
 }
@@ -1988,14 +1984,14 @@ bool canStartScenarioFlyby(
         (step->action == ScenarioActionKind::BeginActivity ||
          step->action == ScenarioActionKind::RetryActivity);
     const bool departingFinishedSurfaceVisit =
-        state.screen == Screen::ArrivalOps && state.run.arrivalOps.active;
+        state.screen == Screen::ArrivalOps && state.run.approach.active;
     return (resolved.destinationId.empty() || resolved.destinationId == destination.id) &&
         (stepIsActive || prerequisitesCanTransition) &&
         (!step->mandatoryBriefing ||
          scenarioStepBriefingAcknowledged(state, scenarioId, stepId) ||
          matchingActivityAcknowledgesBriefing) &&
-        !state.run.flyby.active
-        && (!state.run.surfaceExpedition.active || departingFinishedSurfaceVisit)
+        !state.run.approach.flyby.active
+        && (!state.run.planetaryExpedition.active || departingFinishedSurfaceVisit)
         && !state.run.mining.active;
 }
 
@@ -2037,15 +2033,19 @@ bool startScenarioFlybyRun(
     if (destination == nullptr) {
         return false;
     }
-    state.run.flyby = createFlybyRun(state, catalog, *destination, FlybyPurpose::ScenarioChallenge);
-    state.run.flyby.scenarioId = std::string(scenarioId);
-    state.run.flyby.scenarioStepId = std::string(stepId);
+    FlybyRunState flyby = createFlybyRun(state, catalog, *destination, FlybyPurpose::ScenarioChallenge);
+    flyby.scenarioId = std::string(scenarioId);
+    flyby.scenarioStepId = std::string(stepId);
     // Arrival Ops is the departure boundary for a completed surface visit.
     // The surface record deliberately survives ascent so its settlement can
     // be presented, but it must not keep blocking the authored departure
     // challenge once the player explicitly launches it.
-    state.run.surfaceExpedition = {};
-    state.run.arrivalOps = {};
+    state.run.planetaryExpedition = {};
+    state.run.approach = {};
+    state.run.approach.active = true;
+    state.run.approach.destinationId = destination->id;
+    state.run.approach.phase = ApproachPhase::Flyby;
+    state.run.approach.flyby = std::move(flyby);
     state.screen = Screen::Flyby;
     state.statusLine = actionOutcome.message;
     return true;
@@ -2118,8 +2118,8 @@ bool canStartTransferAssist(
 {
     return availableTransferAssist(state, catalog, definitionId) != nullptr &&
         !state.run.pendingTransferAssist.active() &&
-        !state.run.flyby.active &&
-        !state.run.surfaceExpedition.active &&
+        !state.run.approach.flyby.active &&
+        !state.run.planetaryExpedition.active &&
         !state.run.mining.active;
 }
 
@@ -2137,15 +2137,18 @@ bool startTransferAssistRun(
     if (source == nullptr) {
         return false;
     }
-    state.run.flyby = createFlybyRun(state, catalog, *source, FlybyPurpose::TransferAssist);
-    state.run.flyby.transferAssistId = definition->id;
-    state.run.flyby.impactHullDamage = definition->impactHullDamage;
+    FlybyRunState flyby = createFlybyRun(state, catalog, *source, FlybyPurpose::TransferAssist);
+    flyby.transferAssistId = definition->id;
+    flyby.impactHullDamage = definition->impactHullDamage;
     const Destination* target = catalog.findDestination(definition->targetDestinationId);
     if (target == nullptr) {
-        state.run.flyby = {};
         return false;
     }
-    state.run.arrivalOps = {};
+    state.run.approach = {};
+    state.run.approach.active = true;
+    state.run.approach.destinationId = source->id;
+    state.run.approach.phase = ApproachPhase::Flyby;
+    state.run.approach.flyby = std::move(flyby);
     state.screen = Screen::Flyby;
     const std::string minimumGrade = definition->minimumGrade == FlybyGrade::Perfect ? "Perfect" : "Good";
     state.statusLine = source->name + " departure active. Reach " + minimumGrade +
@@ -2155,7 +2158,7 @@ bool startTransferAssistRun(
 
 bool armTransferAssist(GameState& state, const ContentCatalog& catalog)
 {
-    FlybyRunState& flyby = state.run.flyby;
+    FlybyRunState& flyby = state.run.approach.flyby;
     const TransferAssistDefinition* definition = catalog.findTransferAssist(flyby.transferAssistId);
     const FlybyGrade grade = flyby.result == FlybyGrade::Active ? flybyGrade(flyby) : flyby.result;
     if (!flyby.active || !flyby.completed || definition == nullptr ||
@@ -2210,11 +2213,11 @@ bool armJupiterSlingshot(GameState& state)
 
 void setFlybyMove(GameState& state, double xAxis, double yAxis)
 {
-    if (!state.run.flyby.active || state.run.flyby.completed) {
+    if (!state.run.approach.flyby.active || state.run.approach.flyby.completed) {
         return;
     }
-    state.run.flyby.inputX = std::clamp(xAxis, -1.0, 1.0);
-    state.run.flyby.inputY = std::clamp(yAxis, -1.0, 1.0);
+    state.run.approach.flyby.inputX = std::clamp(xAxis, -1.0, 1.0);
+    state.run.approach.flyby.inputY = std::clamp(yAxis, -1.0, 1.0);
 }
 
 FlybyGrade flybyGrade(const FlybyRunState& flyby)
@@ -2242,7 +2245,7 @@ FlybyGrade flybyGrade(const FlybyRunState& flyby)
 
 void updateFlybyRun(GameState& state, double deltaSeconds)
 {
-    FlybyRunState& flyby = state.run.flyby;
+    FlybyRunState& flyby = state.run.approach.flyby;
     if (!flyby.active || flyby.completed) {
         return;
     }
@@ -2393,39 +2396,39 @@ void applyFlybyReward(GameState& state, const ContentCatalog& catalog, FlybyGrad
     }
 
     const Destination* destination = currentResearchDestination(state, catalog);
-    if (destination == nullptr && !state.run.flyby.destinationId.empty()) {
-        destination = catalog.findDestination(state.run.flyby.destinationId);
+    if (destination == nullptr && !state.run.approach.flyby.destinationId.empty()) {
+        destination = catalog.findDestination(state.run.approach.flyby.destinationId);
     }
     if (destination == nullptr) {
         return;
     }
 
     addDestinationHistoryValue(state.meta.destinationFlybys, catalog, destination->id);
-    populateFlybyRewardPreview(state.run.flyby, destination);
-    const int blueprintGain = state.run.flyby.blueprintGain;
-    const double reward = state.run.flyby.rewardCredits;
+    populateFlybyRewardPreview(state.run.approach.flyby, destination);
+    const int blueprintGain = state.run.approach.flyby.blueprintGain;
+    const double reward = state.run.approach.flyby.rewardCredits;
     state.meta.blueprintProgress += blueprintGain;
     state.run.credits += reward;
     if (grade == FlybyGrade::Perfect) {
-        state.run.nextLaunchFuelBoost = std::max(state.run.nextLaunchFuelBoost, state.run.flyby.slingshotFuelSavings);
-        state.run.nextLaunchSpeedBoost = std::max(state.run.nextLaunchSpeedBoost, state.run.flyby.slingshotSpeedBoost);
+        state.run.nextLaunchFuelBoost = std::max(state.run.nextLaunchFuelBoost, state.run.approach.flyby.slingshotFuelSavings);
+        state.run.nextLaunchSpeedBoost = std::max(state.run.nextLaunchSpeedBoost, state.run.approach.flyby.slingshotSpeedBoost);
     }
     unlockFromBlueprints(state);
 }
 
 void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
 {
-    if (!state.run.flyby.active || !state.run.flyby.completed) {
+    if (!state.run.approach.flyby.active || !state.run.approach.flyby.completed) {
         return;
     }
 
-    const FlybyGrade grade = state.run.flyby.result == FlybyGrade::Active
-        ? flybyGrade(state.run.flyby)
-        : state.run.flyby.result;
-    if (!state.run.flyby.transferAssistId.empty()) {
+    const FlybyGrade grade = state.run.approach.flyby.result == FlybyGrade::Active
+        ? flybyGrade(state.run.approach.flyby)
+        : state.run.approach.flyby.result;
+    if (!state.run.approach.flyby.transferAssistId.empty()) {
         (void)armTransferAssist(state, catalog);
     }
-    FlybyRunState flyby = state.run.flyby;
+    FlybyRunState flyby = state.run.approach.flyby;
     switch (grade) {
     case FlybyGrade::Miss:
         state.meta.totalFlybyMisses += 1;
@@ -2441,8 +2444,11 @@ void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
     }
     const TransferAssistDefinition* transferAssist = catalog.findTransferAssist(flyby.transferAssistId);
     const bool isTransferAssist = transferAssist != nullptr;
-    if (!isTransferAssist) {
+    if (!isTransferAssist && !state.run.approach.rewards.flybyAwarded) {
         applyFlybyReward(state, catalog, grade);
+        if (grade == FlybyGrade::Good || grade == FlybyGrade::Perfect) {
+            state.run.approach.rewards.flybyAwarded = true;
+        }
     }
     const bool scenarioChallenge = flyby.purpose == FlybyPurpose::ScenarioChallenge &&
         !flyby.scenarioId.empty() && !flyby.scenarioStepId.empty();
@@ -2453,7 +2459,7 @@ void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
         const Destination* target = catalog.findDestination(transferAssist->targetDestinationId);
         const std::string sourceName = source == nullptr ? "Departure" : source->name;
         const std::string targetName = target == nullptr ? "target" : target->name;
-        state.run.arrivalOps = {};
+        state.run.approach = {};
         state.screen = Screen::Hangar;
         state.statusLine = grade == FlybyGrade::Perfect
             ? sourceName + " slingshot active. Perfect execution keeps the " + targetName + " transfer stable."
@@ -2482,11 +2488,11 @@ void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
         writeLegacyCampaignSaveProjection(state, catalog);
     }
     const Destination* destination = catalog.findDestination(flyby.destinationId);
-    state.run.flyby = {};
+    state.run.approach.flyby = {};
     if (isTransferAssist) {
         // The physical assist already returned to its Hangar continuation.
     } else if (scenarioChallenge) {
-        state.run.arrivalOps = {};
+        state.run.approach = {};
         state.screen = Screen::Hangar;
         const ScenarioStepState challengeState = scenarioStepState(
             state,
@@ -2508,6 +2514,7 @@ void completeFlybyRun(GameState& state, const ContentCatalog& catalog)
             state,
             destination == nullptr ? flyby.destinationId : destination->id);
         state.screen = Screen::ArrivalOps;
+        state.run.approach.phase = ApproachPhase::Entry;
     }
 }
 
@@ -2518,12 +2525,12 @@ void abortFlybyRun(GameState& state)
 
 void abortFlybyRun(GameState& state, const ContentCatalog& catalog)
 {
-    if (!state.run.flyby.active || state.run.flyby.completed) {
+    if (!state.run.approach.flyby.active || state.run.approach.flyby.completed) {
         return;
     }
 
-    const FlybyRunState flyby = state.run.flyby;
-    state.run.flyby = {};
+    const FlybyRunState flyby = state.run.approach.flyby;
+    state.run.approach.flyby = {};
     const TransferAssistDefinition* transferAssist = catalog.findTransferAssist(flyby.transferAssistId);
     const bool isTransferAssist = transferAssist != nullptr;
     const bool scenarioChallenge = flyby.purpose == FlybyPurpose::ScenarioChallenge &&
@@ -2531,7 +2538,7 @@ void abortFlybyRun(GameState& state, const ContentCatalog& catalog)
     if (isTransferAssist) {
         const Destination* source = catalog.findDestination(transferAssist->sourceDestinationId);
         const Destination* target = catalog.findDestination(transferAssist->targetDestinationId);
-        state.run.arrivalOps = {};
+        state.run.approach = {};
         state.screen = Screen::Hangar;
         state.statusLine = (source == nullptr ? std::string("Departure") : source->name) +
             " slingshot aborted. " + (target == nullptr ? std::string("Transfer") : target->name) +
@@ -2544,7 +2551,7 @@ void abortFlybyRun(GameState& state, const ContentCatalog& catalog)
         event.originId = flyby.scenarioId;
         (void)recordScenarioEvent(state, catalog, event);
         writeLegacyCampaignSaveProjection(state, catalog);
-        state.run.arrivalOps = {};
+        state.run.approach = {};
         state.screen = Screen::Hangar;
         const ScenarioDefinition* definition = scenarioDefinitionForRuntimeId(state, catalog, flyby.scenarioId);
         const ScenarioInstance* instance = findScenarioInstance(state.meta, flyby.scenarioId);
@@ -2565,10 +2572,10 @@ void abortFlybyRun(GameState& state, const ContentCatalog& catalog)
 
 void acknowledgeFlybyResult(GameState& state)
 {
-    if (!state.run.flyby.active || !state.run.flyby.completed) {
+    if (!state.run.approach.flyby.active || !state.run.approach.flyby.completed) {
         return;
     }
-    preserveArrivalFuelAtDestination(state, state.run.flyby.destinationId);
+    preserveArrivalFuelAtDestination(state, state.run.approach.flyby.destinationId);
 }
 
 bool canClaimSaturnCourse(const GameState& state)
@@ -2659,7 +2666,7 @@ bool commitClaimedScenarioRoute(
 
     state.run.frontierReadiness = 0;
     state.run.routeTransit = std::move(transit);
-    state.run.arrivalOps = {};
+    state.run.approach = {};
     state.launchConfig.frontierTransfer = true;
     state.launchConfig.destinationId = route->id;
     state.launchConfig.burnGoalMultiplier = route->targetMultiplier;
@@ -2772,18 +2779,19 @@ void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog)
     orbit.worstZone = orbit.currentZone;
     pushOrbitTrailPoint(orbit, orbit.shipX, orbit.shipY);
 
-    state.run.orbit = orbit;
+    state.run.approach.orbit = orbit;
+    state.run.approach.phase = ApproachPhase::Orbit;
     preserveArrivalFuelAtDestination(state, destination->id);
     state.screen = Screen::Orbit;
 }
 
 void setOrbitMove(GameState& state, double xAxis, double yAxis)
 {
-    if (!state.run.orbit.active || state.run.orbit.completed) {
+    if (!state.run.approach.orbit.active || state.run.approach.orbit.completed) {
         return;
     }
-    state.run.orbit.inputX = std::clamp(xAxis, -1.0, 1.0);
-    state.run.orbit.inputY = std::clamp(yAxis, -1.0, 1.0);
+    state.run.approach.orbit.inputX = std::clamp(xAxis, -1.0, 1.0);
+    state.run.approach.orbit.inputY = std::clamp(yAxis, -1.0, 1.0);
 }
 
 OrbitGrade orbitGrade(const OrbitRunState& orbit)
@@ -2812,7 +2820,7 @@ OrbitGrade orbitGrade(const OrbitRunState& orbit)
 
 void updateOrbitRun(GameState& state, double deltaSeconds)
 {
-    OrbitRunState& orbit = state.run.orbit;
+    OrbitRunState& orbit = state.run.approach.orbit;
     if (!orbit.active || orbit.completed) {
         return;
     }
@@ -2908,29 +2916,34 @@ void applyOrbitReward(GameState& state, const ContentCatalog& catalog, OrbitGrad
     }
 
     const Destination* destination = currentResearchDestination(state, catalog);
-    if (destination == nullptr && !state.run.orbit.destinationId.empty()) {
-        destination = catalog.findDestination(state.run.orbit.destinationId);
+    if (destination == nullptr && !state.run.approach.orbit.destinationId.empty()) {
+        destination = catalog.findDestination(state.run.approach.orbit.destinationId);
     }
     if (destination == nullptr) {
         return;
     }
 
     addDestinationHistoryValue(state.meta.destinationOrbits, catalog, destination->id);
-    populateOrbitRewardPreview(state.run.orbit, destination);
-    state.meta.blueprintProgress += state.run.orbit.blueprintGain;
-    state.run.credits += state.run.orbit.rewardCredits;
+    populateOrbitRewardPreview(state.run.approach.orbit, destination);
+    state.meta.blueprintProgress += state.run.approach.orbit.blueprintGain;
+    state.run.credits += state.run.approach.orbit.rewardCredits;
     unlockFromBlueprints(state);
 }
 
 void completeOrbitRun(GameState& state, const ContentCatalog& catalog)
 {
-    if (!state.run.orbit.active || !state.run.orbit.completed) {
+    if (!state.run.approach.orbit.active || !state.run.approach.orbit.completed) {
         return;
     }
 
-    const OrbitRunState orbit = state.run.orbit;
+    const OrbitRunState orbit = state.run.approach.orbit;
     const OrbitGrade grade = orbit.result == OrbitGrade::Active ? orbitGrade(orbit) : orbit.result;
-    applyOrbitReward(state, catalog, grade);
+    if (!state.run.approach.rewards.orbitAwarded) {
+        applyOrbitReward(state, catalog, grade);
+        if (grade == OrbitGrade::Good || grade == OrbitGrade::Perfect) {
+            state.run.approach.rewards.orbitAwarded = true;
+        }
+    }
     const Destination* destination = catalog.findDestination(orbit.destinationId);
     if (destination != nullptr &&
         (grade == OrbitGrade::Good || grade == OrbitGrade::Perfect)) {
@@ -2939,19 +2952,21 @@ void completeOrbitRun(GameState& state, const ContentCatalog& catalog)
     preserveArrivalFuelAtDestination(
         state,
         destination == nullptr ? orbit.destinationId : destination->id);
-    state.run.orbit = {};
+    state.run.approach.orbit = {};
+    state.run.approach.phase = ApproachPhase::Entry;
     state.screen = Screen::ArrivalOps;
 }
 
 void abortOrbitRun(GameState& state)
 {
-    if (!state.run.orbit.active || state.run.orbit.completed) {
+    if (!state.run.approach.orbit.active || state.run.approach.orbit.completed) {
         return;
     }
 
-    const std::string destinationId = state.run.orbit.destinationId;
+    const std::string destinationId = state.run.approach.orbit.destinationId;
     preserveArrivalFuelAtDestination(state, destinationId);
-    state.run.orbit = {};
+    state.run.approach.orbit = {};
+    state.run.approach.phase = ApproachPhase::Entry;
     state.screen = Screen::ArrivalOps;
 }
 
@@ -3037,33 +3052,25 @@ SurfaceCrewEffects surfaceCrewEffects(const GameState& state)
         return effects;
     }
 
-    const int training = std::max(0, effectiveTrainingLevel(*astronaut));
-    const double trainedRiskRelief = static_cast<double>(training) * 0.003;
-
     if (astronaut->trait == tuning::traits::beastMode) {
-        effects.supplyBonus = 1;
-        effects.hazardRelief = std::min(0.08, 0.025 + trainedRiskRelief);
-        effects.summary = "Capybara survival: extra action kits and lower field hazard.";
+        effects.summary = "Capybara endurance: expanded rig and suit oxygen.";
     } else if (astronaut->trait == tuning::traits::hardReboot) {
-        effects.hazardRelief = std::min(0.09, 0.040 + static_cast<double>(training) * 0.004);
-        effects.summary = "Beaver resilience: fewer equipment scares and steadier surface operations.";
+        effects.hazardRelief = 0.04;
+        effects.summary = "Beaver engineering: stronger rig integrity and field repairs.";
     } else if (astronaut->trait == tuning::traits::outtaHere) {
-        effects.hazardRelief = std::min(0.11, 0.055 + static_cast<double>(training) * 0.005);
-        effects.summary = "Fox navigation: cleaner field routes and lighter loaded handling.";
+        effects.hazardRelief = 0.055;
+        effects.summary = "Fox navigation: cleaner recovery routes and emergency control.";
     } else if (astronaut->trait == tuning::traits::deepFocus) {
-        effects.surveyCommonBonus = 1 + training / 5;
-        effects.artifactChanceBonus = std::min(0.12, 0.030 + static_cast<double>(training) * 0.006);
-        effects.summary = "Prairie Dog scouting: better surveys and sharper reads on buried anomalies.";
+        effects.surveyCommonBonus = 1;
+        effects.artifactChanceBonus = 0.03;
+        effects.summary = "Prairie Dog scouting: longer scans and faster excavation.";
     } else if (astronaut->trait == tuning::traits::rummageSale) {
-        effects.mineCommonBonus = training >= 4 ? 1 : 0;
-        effects.mineRareChanceBonus = std::min(0.22, 0.120 + static_cast<double>(training) * 0.010);
-        effects.summary = "Squirrel hoarding: better odds of rare materials while mining.";
+        effects.mineRareChanceBonus = 0.12;
+        effects.summary = "Squirrel prospecting: better odds of useful resource discoveries.";
     } else if (astronaut->trait == tuning::traits::phaseShift) {
-        effects.supplyBonus = 1;
-        effects.hazardRelief = std::min(0.08, 0.025 + static_cast<double>(training) * 0.005);
-        effects.summary = "Chipmunk exploration: faster site work with fewer field hazards.";
+        effects.summary = "Chipmunk EVA: faster suit traversal through tight shafts.";
     } else if (astronaut->trait == tuning::traits::fieldInstincts) {
-        effects.hazardRelief = std::min(0.06, 0.020 + trainedRiskRelief);
+        effects.hazardRelief = 0.02;
         effects.summary = "Field instincts: fewer surface hazards.";
     } else {
         effects.summary = astronaut->background.empty() ? astronaut->trait : astronaut->background;
@@ -3099,7 +3106,7 @@ constexpr int kMaximumRunUpgradeRank = 3;
 constexpr double kBaseExpeditionExperienceThreshold = 10.0;
 constexpr double kExpeditionExperienceGrowth = 1.55;
 
-void clearRunUpgradeOffers(SurfaceExpeditionState& expedition)
+void clearRunUpgradeOffers(PlanetaryExpeditionState& expedition)
 {
     expedition.runUpgradeOffers = {};
     expedition.runUpgradeOfferCount = 0;
@@ -3202,8 +3209,8 @@ bool synergyRequirementsMet(
 }
 
 void copyRunProgression(
-    const SurfaceExpeditionState& source,
-    SurfaceExpeditionState& destination)
+    const PlanetaryExpeditionState& source,
+    PlanetaryExpeditionState& destination)
 {
     destination.expeditionLevel = std::max(1, source.expeditionLevel);
     destination.expeditionExperience = std::max(0.0, source.expeditionExperience);
@@ -3231,10 +3238,10 @@ struct WeightedRunUpgradeCandidate {
 int runRigUpgradeRank(const GameState& state, std::string_view upgradeId)
 {
     const auto found = std::find_if(
-        state.run.surfaceExpedition.runRigUpgradeRanks.begin(),
-        state.run.surfaceExpedition.runRigUpgradeRanks.end(),
+        state.run.planetaryExpedition.runRigUpgradeRanks.begin(),
+        state.run.planetaryExpedition.runRigUpgradeRanks.end(),
         [&](const RunRigUpgradeRank& record) { return record.upgradeId == upgradeId; });
-    return found == state.run.surfaceExpedition.runRigUpgradeRanks.end()
+    return found == state.run.planetaryExpedition.runRigUpgradeRanks.end()
         ? 0
         : std::clamp(found->rank, 0, kMaximumRunUpgradeRank);
 }
@@ -3242,10 +3249,10 @@ int runRigUpgradeRank(const GameState& state, std::string_view upgradeId)
 int expeditionDroneRank(const GameState& state, std::string_view droneId)
 {
     const auto found = std::find_if(
-        state.run.surfaceExpedition.runDroneRanks.begin(),
-        state.run.surfaceExpedition.runDroneRanks.end(),
+        state.run.planetaryExpedition.runDroneRanks.begin(),
+        state.run.planetaryExpedition.runDroneRanks.end(),
         [&](const RunDroneRank& record) { return record.droneId == droneId; });
-    return found == state.run.surfaceExpedition.runDroneRanks.end()
+    return found == state.run.planetaryExpedition.runDroneRanks.end()
         ? 1
         : std::clamp(found->rank, 1, kMaximumRunUpgradeRank);
 }
@@ -3258,13 +3265,13 @@ double expeditionExperienceThreshold(int level)
         static_cast<double>(safeLevel - 1)));
 }
 
-void resetExpeditionProgression(SurfaceExpeditionState& expedition)
+void resetExpeditionProgression(PlanetaryExpeditionState& expedition)
 {
     expedition.expeditionLevel = 1;
     expedition.expeditionExperience = 0.0;
     expedition.pendingRunUpgradeChoices = 0;
     clearRunUpgradeOffers(expedition);
-    expedition.runUpgradeReturnScreen = Screen::SurfaceExpedition;
+    expedition.runUpgradeReturnScreen = Screen::Mining;
     expedition.runRigUpgradeRanks.clear();
     expedition.runDroneRanks.clear();
     expedition.selectedSynergyIds.clear();
@@ -3275,7 +3282,7 @@ void resetExpeditionProgression(SurfaceExpeditionState& expedition)
 
 void resetExpeditionProgression(GameState& state)
 {
-    resetExpeditionProgression(state.run.surfaceExpedition);
+    resetExpeditionProgression(state.run.planetaryExpedition);
 }
 
 ExpeditionExperienceAward awardExpeditionExperience(
@@ -3283,7 +3290,7 @@ ExpeditionExperienceAward awardExpeditionExperience(
     double amount,
     Screen returnScreen)
 {
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     ExpeditionExperienceAward award;
     award.resultingLevel = std::max(1, expedition.expeditionLevel);
     award.resultingExperience = std::max(0.0, expedition.expeditionExperience);
@@ -3383,7 +3390,7 @@ std::string runUpgradeRankLabel(int rank)
 
 bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
 {
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     if (expedition.runUpgradeOfferPending) {
         const bool containsLockedCombatOffer = !state.meta.hasEncounteredEnemy && std::any_of(
             expedition.runUpgradeOffers.begin(),
@@ -3502,7 +3509,7 @@ bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, R
 
 bool chooseRunUpgrade(GameState& state, const ContentCatalog& catalog, int index)
 {
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     if (!expedition.runUpgradeOfferPending || expedition.pendingRunUpgradeChoices <= 0 ||
         index < 0 || index >= expedition.runUpgradeOfferCount ||
         index >= static_cast<int>(expedition.runUpgradeOffers.size())) {
@@ -3894,7 +3901,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     (void)hazardDrones;
     (void)attackDrones;
     (void)defenseDrones;
-    for (const std::string& synergyId : state.run.surfaceExpedition.selectedSynergyIds) {
+    for (const std::string& synergyId : state.run.planetaryExpedition.selectedSynergyIds) {
         const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(synergyId);
         if (synergy == nullptr || !synergyRequirementsMet(state, catalog, *synergy)) {
             continue;
@@ -4058,14 +4065,14 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
 {
     const Destination* destination = currentResearchDestination(state, catalog);
     if (destination == nullptr || !destinationSupportsSurface(*destination)) {
-        SurfaceExpeditionState preserved;
-        copyRunProgression(state.run.surfaceExpedition, preserved);
-        state.run.surfaceExpedition = std::move(preserved);
+        PlanetaryExpeditionState preserved;
+        copyRunProgression(state.run.planetaryExpedition, preserved);
+        state.run.planetaryExpedition = std::move(preserved);
         return;
     }
 
-    const SurfaceExpeditionState previousExpedition = state.run.surfaceExpedition;
-    SurfaceExpeditionState expedition;
+    const PlanetaryExpeditionState previousExpedition = state.run.planetaryExpedition;
+    PlanetaryExpeditionState expedition;
     copyRunProgression(previousExpedition, expedition);
     expedition.active = true;
     expedition.destinationId = destination->id;
@@ -4075,30 +4082,22 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
     const double baseHazard = tuning::research::baseHazard + destination->tier * tuning::research::hazardPerTier;
     const double reconPenalty = landingReconHazardPenalty(state);
     expedition.supply = tuning::research::baseSupply + destination->tier * tuning::research::supplyPerTier + surfaceToolEffects(state.meta).supplyBonus + crew.supplyBonus + site.supplyBonus;
-    expedition.transferFuelRecovered = std::max(0.0, state.run.arrivalOps.transferFuelRemaining);
+    expedition.transferFuelRecovered = std::max(0.0, state.run.approach.transferFuelRemaining);
     expedition.expeditionPackFuel = tuning::research::expeditionRigPackFuel;
-    if (arkDiscovered(state)) {
-        expedition.expeditionPackFuel = std::min(
-            tuning::research::expeditionRigPackFuel,
-            static_cast<double>(std::max(0, state.meta.ark.fuelReserve)));
-        state.meta.ark.fuelReserve = std::max(
-            0,
-            state.meta.ark.fuelReserve - static_cast<int>(std::round(expedition.expeditionPackFuel)));
-    }
     expedition.rigFuelCapacity = expedition.expeditionPackFuel + expedition.transferFuelRecovered;
     expedition.rigFuel = expedition.rigFuelCapacity;
     expedition.hazard = std::max(baseHazard + reconPenalty, baseHazard + site.hazardDelta + reconPenalty - crew.hazardRelief);
     expedition.enemyEncountersEnabled = destinationAllowsEnemyEncounters(*destination);
     addDestinationHistoryValue(state.meta.destinationLandings, catalog, destination->id);
-    state.run.arrivalOps = {};
+    state.run.approach = {};
     appendSurfaceLog(expedition, std::string(surfaceSiteProfileName(expedition.siteProfile)) + ": " + std::string(surfaceSiteProfileDetail(expedition.siteProfile)));
     appendSurfaceLog(
         expedition,
         "Rig fuel loaded: " + display::fixed(expedition.rigFuel, 1) +
             " (" + display::fixed(expedition.transferFuelRecovered, 1) +
             " transfer + " + display::fixed(expedition.expeditionPackFuel, 1) +
-            " expedition pack). Return stage reserved.");
-    state.run.surfaceExpedition = expedition;
+            " expedition allotment). No surface reserve or automatic refill.");
+    state.run.planetaryExpedition = expedition;
     // Landing never grants a free draft. XP thresholds are the only source of
     // run-upgrade choices; the App opens a persisted offer after an award.
     (void)rng;
@@ -4106,7 +4105,7 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
 
 double surfaceEnemyEncounterChance(const GameState& state)
 {
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     if (!expedition.active || !expedition.enemyEncountersEnabled) {
         return 0.0;
     }
@@ -4128,7 +4127,7 @@ double surfaceEnemyEncounterChance(const GameState& state)
 
 SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
 {
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     SurfaceActionOutcome outcome;
     if (expedition.miningRunUsed) {
         outcome.message = "Mining run is complete. Extract before surveying again.";
@@ -4150,7 +4149,7 @@ SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
             : tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus
     };
     addMaterials(expedition.temporaryMaterials, gain);
-    awardExpeditionExperience(state, miningMaterialExperience(gain), Screen::SurfaceExpedition);
+    awardExpeditionExperience(state, miningMaterialExperience(gain), Screen::Mining);
     expedition.miningSitePrepared = true;
     expedition.cargo += materialCargo(gain);
     outcome.materialDelta = gain;
@@ -4174,7 +4173,7 @@ SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
 
 SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
 {
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     SurfaceActionOutcome outcome = spendSupply(expedition, tuning::research::mineSupplyCost);
     if (!outcome.applied) {
         return outcome;
@@ -4197,7 +4196,7 @@ SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
     }
 
     addMaterials(expedition.temporaryMaterials, gain);
-    awardExpeditionExperience(state, miningMaterialExperience(gain), Screen::SurfaceExpedition);
+    awardExpeditionExperience(state, miningMaterialExperience(gain), Screen::Mining);
     expedition.cargo += materialCargo(gain);
     outcome.materialDelta = gain;
     outcome.cargoDelta = materialCargo(gain);
@@ -4220,7 +4219,7 @@ SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
 
 SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
 {
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     SurfaceActionOutcome outcome;
     if (expedition.miningRunUsed) {
         outcome.message = "Mining run is complete. Extract before pushing deeper.";
@@ -4233,7 +4232,7 @@ SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
 
     expedition.miningSitePrepared = true;
     expedition.depth += 1;
-    awardExpeditionExperience(state, 2.0, Screen::SurfaceExpedition);
+    awardExpeditionExperience(state, 2.0, Screen::Mining);
     expedition.hazard += tuning::research::hazardPerDepth;
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
@@ -4324,7 +4323,7 @@ SurfacePushSupport surfacePushSupport(const GameState& state)
 }
 
 MiningCellMaterial rollSurfacePushRichMarker(
-    const SurfaceExpeditionState& expedition,
+    const PlanetaryExpeditionState& expedition,
     int step,
     const SurfacePushSupport& support,
     Random& rng)
@@ -4343,7 +4342,7 @@ MiningCellMaterial rollSurfacePushRichMarker(
     return MiningCellMaterial::RareOre;
 }
 
-const SurfaceDepthProspect* findSurfaceDepthProspect(const SurfaceExpeditionState& expedition, int absoluteDepth)
+const SurfaceDepthProspect* findSurfaceDepthProspect(const PlanetaryExpeditionState& expedition, int absoluteDepth)
 {
     const auto found = std::find_if(expedition.depthProspects.begin(), expedition.depthProspects.end(), [&](const SurfaceDepthProspect& prospect) {
         return prospect.absoluteDepth == absoluteDepth;
@@ -4358,7 +4357,7 @@ SurfaceReturnSafetyAssessment surfaceReturnSafetyAssessment(
 {
     SurfaceReturnSafetyAssessment assessment;
     assessment.depth = std::max(0, absoluteDepth);
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     const int completedHostileSorties = destinationHistoryValue(
         state.meta.destinationSuccesses,
         catalog,
@@ -4441,7 +4440,7 @@ SurfaceReturnSafetyAssessment surfaceReturnSafetyAssessment(
 
 int deepestContiguousSurveyedDepth(const GameState& state)
 {
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     const int surveyRating = surfaceDepthRating(
         state,
         SurfaceDepthUpgradeKind::SurveyArray);
@@ -4471,7 +4470,7 @@ SurfaceDepthCapability surfaceDepthCapability(
     int targetDepth)
 {
     SurfaceDepthCapability capability;
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     capability.targetDepth = std::max(0, targetDepth);
     capability.surveyRating = surfaceDepthRating(
         state,
@@ -4569,7 +4568,7 @@ MaterialInventory materialDeltaAbove(const MaterialInventory& next, const Materi
     };
 }
 
-void mergeSurfaceDepthProspect(SurfaceExpeditionState& expedition, const SurfaceDepthProspect& prospect)
+void mergeSurfaceDepthProspect(PlanetaryExpeditionState& expedition, const SurfaceDepthProspect& prospect)
 {
     auto found = std::find_if(expedition.depthProspects.begin(), expedition.depthProspects.end(), [&](const SurfaceDepthProspect& existing) {
         return existing.absoluteDepth == prospect.absoluteDepth;
@@ -4592,7 +4591,7 @@ SurfaceDepthProspect rollSurfaceDepthProspect(
     const SurfaceScanSupport& support,
     Random& rng)
 {
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     const SurfaceCrewEffects crew = surfaceCrewEffects(state);
     const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
     SurfaceDepthProspect prospect;
@@ -4630,7 +4629,7 @@ SurfaceDepthProspect rollSurfaceDepthProspect(
 }
 
 MaterialInventory actualizePushMaterials(
-    const SurfaceExpeditionState& expedition,
+    const PlanetaryExpeditionState& expedition,
     int step,
     const SurfaceDepthProspect* forecast,
     const SurfacePushSupport& support,
@@ -4781,7 +4780,7 @@ void resetSurfacePush(GameState& state)
 
 SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random&)
 {
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     SurfaceActionOutcome outcome;
     if (expedition.miningRunUsed) {
         outcome.message = "Mining run is complete. Extract before surveying again.";
@@ -4813,7 +4812,7 @@ SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random&)
     scan.destinationId = expedition.destinationId;
     scan.maxPulses = std::max(
         1,
-        surfaceSurveyDepthLimit(state) - state.run.surfaceExpedition.depth + 1);
+        surfaceSurveyDepthLimit(state) - state.run.planetaryExpedition.depth + 1);
     scan.elapsedSeconds = tuning::research::scanWindowCenterRadians /
         tuning::research::scanSweepRadiansPerSecond;
     scan.signal = std::clamp(0.12 + support.signalBonus, 0.0, 0.42);
@@ -4854,7 +4853,7 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
     scan.hazardDelta += scanHazardDelta;
     scan.bustRisk = std::clamp(
         tuning::research::scanBaseBustRisk +
-            state.run.surfaceExpedition.hazard * tuning::research::scanBustRiskHazardScale +
+            state.run.planetaryExpedition.hazard * tuning::research::scanBustRiskHazardScale +
             scan.pulses * tuning::research::scanBustRiskPerPulse +
             scan.interference * 0.045 -
             support.riskRelief,
@@ -4890,7 +4889,7 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
         : tuning::research::scanGoodSuccessFanfareSeconds;
     scan.depthProspects.push_back(prospect);
     if (prospect.possibleArtifacts > 0 && scan.temporaryArtifacts.empty()) {
-        scan.temporaryArtifacts.push_back({artifactId(state.run.surfaceExpedition), state.run.surfaceExpedition.destinationId, false});
+        scan.temporaryArtifacts.push_back({artifactId(state.run.planetaryExpedition), state.run.planetaryExpedition.destinationId, false});
         outcome.artifactFound = true;
         outcome.cargoDelta += 3;
         scan.cargo += 3;
@@ -4918,7 +4917,7 @@ SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng)
 SurfaceActionOutcome bankSurfaceScan(GameState& state)
 {
     SurfaceScanRunState& scan = state.run.surfaceScan;
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     SurfaceActionOutcome outcome;
     if (!scan.completed && !scan.active) {
         outcome.message = "No surface survey is ready to log.";
@@ -4968,7 +4967,7 @@ SurfaceActionOutcome abortSurfaceScan(GameState& state)
     }
     outcome.applied = true;
     outcome.message = "Surface scan recalled. No survey logged.";
-    appendSurfaceLog(state.run.surfaceExpedition, surfaceActionSummary(outcome));
+    appendSurfaceLog(state.run.planetaryExpedition, surfaceActionSummary(outcome));
     resetSurfaceScan(state);
     state.screen = Screen::SurfaceExpedition;
     return outcome;
@@ -4976,7 +4975,7 @@ SurfaceActionOutcome abortSurfaceScan(GameState& state)
 
 SurfaceActionOutcome startSurfacePushRun(GameState& state, Random&)
 {
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     SurfaceActionOutcome outcome;
     if (expedition.miningRunUsed) {
         outcome.message = "Mining run is complete. Extract before pushing deeper.";
@@ -5008,7 +5007,7 @@ SurfaceActionOutcome startSurfacePushRun(GameState& state, Random&)
 
     outcome = spendSupply(expedition, tuning::research::pushSupplyCost);
     if (!outcome.applied) {
-        outcome.message = "Need two action kits to Dig.";
+        outcome.message = "The retired Dig board is unavailable; drill in the physical Mining world.";
         return outcome;
     }
 
@@ -5032,7 +5031,7 @@ SurfaceActionOutcome startSurfacePushRun(GameState& state, Random&)
 SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
 {
     SurfacePushRunState& push = state.run.surfacePush;
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     SurfaceActionOutcome outcome;
     if (!push.active || push.completed) {
         outcome.message = "Dig is not active.";
@@ -5141,7 +5140,7 @@ SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng)
 SurfaceActionOutcome bankSurfacePush(GameState& state)
 {
     SurfacePushRunState& push = state.run.surfacePush;
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     SurfaceActionOutcome outcome;
     if (!push.completed && !push.active) {
         outcome.message = "No start depth is ready to set.";
@@ -5183,7 +5182,7 @@ SurfaceActionOutcome bankSurfacePush(GameState& state)
 SurfaceReturnLedger surfaceReturnLedger(const GameState& state, const ContentCatalog& catalog)
 {
     SurfaceReturnLedger ledger;
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     if (!expedition.active) {
         return ledger;
     }
@@ -5265,7 +5264,7 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state)
 
 SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalog& catalog)
 {
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     SurfaceActionOutcome outcome;
     if (!expedition.active) {
         return outcome;
@@ -5362,8 +5361,8 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
         creditBankedMiningFirstClearRewards(
             state.meta,
             rules,
-            std::max(0, std::min(expedition.bankedMiningMaterials.rare, ledger.onShip.rare)),
-            std::max(0, std::min(expedition.bankedMiningMaterials.exotic, ledger.onShip.exotic)));
+            std::max(0, expedition.bankedMiningMaterials.rare),
+            std::max(0, expedition.bankedMiningMaterials.exotic));
     }
 
     outcome.message = "Returned " + std::to_string(ledger.onShip.common) + " Common";
@@ -5388,7 +5387,7 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
              0});
     }
 
-    SurfaceExpeditionState preservedProgression;
+    PlanetaryExpeditionState preservedProgression;
     copyRunProgression(expedition, preservedProgression);
     expedition = std::move(preservedProgression);
     return outcome;

@@ -8,7 +8,7 @@ This system follows [AGENT_DESIGN_CONTEXT.md](AGENT_DESIGN_CONTEXT.md). Treat US
 
 ## Role In The Loop
 
-Drone Bay begins as the payoff for the lunar mining contract. Safely delivering 30 Moon Common Ore creates a ready-to-claim Prospector milestone; `Install Prospector Mk I` permanently owns and equips the first Prospector Support Drone (Mining role) in Slot 1. Mars then reserves 40 local Common Ore for an explicit `Fabricate Slot 2` action, leaving that slot empty. The extended Mars contract makes repeated oxygen, heat, integrity, repair, cargo, and return decisions part of the early loop. Io later commissions the first Hazard Support Drone.
+Drone Bay begins as the industrial payoff for physically returning 20 Moon Common Ore. The anomaly activated by that delivery remains a separate EVA recovery objective and gates Mars. `Install Prospector Mk I` permanently owns and equips the first Prospector Support Drone (Mining role) in Slot 1. Mars then allocates 8 local Common Ore for an explicit `Fabricate Slot 2` action, leaving that slot empty. Io later commissions the first Hazard Support Drone.
 
 Support Drone choices should be readable and chunky:
 
@@ -110,6 +110,6 @@ Io is the current deliberate exception and tutorial: its soil never pays, it gen
 
 ## Future Hooks
 
-Save version 16 is an intentional fresh-start boundary. It persists permanent Survey/Bore ranks and Drone ownership and slots separately from Transport-run XP, temporary Mk ranks, slot grafts, selected synergies, and active Mining-agent runtime. Every non-v16 or malformed campaign is cleared and replaced without partial restoration or migration.
+Save version 18 is an intentional fresh-start boundary. It persists Support Drone ownership, assignments, runtime, physical payload ownership, and active Mining state. Every non-v18 or malformed campaign is rejected without partial restoration or migration and remains untouched until New Campaign is explicitly confirmed.
 
 Future passes can add branching per-unit upgrade trees, Support Drone repair, rarity-specific visual treatments, and more signature-specific effects. Keep enemy combat post-solar and swarm execution autonomous: the EVA sidearm protects the vulnerable operator, while buildcraft remains the source of sustained combat strength.

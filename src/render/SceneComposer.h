@@ -65,12 +65,20 @@ private:
     void drawBackdrop(const RenderSnapshot& snapshot);
     void drawFlyby(const RenderSnapshot& snapshot);
     void drawOrbit(const RenderSnapshot& snapshot);
-    void drawMining(const RenderSnapshot& snapshot);
+    void drawMining(const RenderSnapshot& snapshot, bool arrivalComposite = false);
+    void drawSurfaceArrival(const RenderSnapshot& snapshot);
+    void drawSurfaceExhaust(float nozzleX, float nozzleY, float shipSize, float strength, double animationTime);
     void drawSurfaceScan(const RenderSnapshot& snapshot);
     void drawSurfacePush(const RenderSnapshot& snapshot);
     void drawLevelUpFanfare(const RenderSnapshot& snapshot);
     void drawSolarBackground(const RenderSnapshot& snapshot, float alpha, bool animateFrames = true);
     void drawRoute(const RenderSnapshot& snapshot);
+    const std::vector<FlightTrajectoryPointSnapshot>& displayedFlightTrajectory(
+        const RenderSnapshot& snapshot);
+    void rebuildFlightTrajectoryCurve(const RenderSnapshot& snapshot);
+    void resetFlightTrajectoryPresentation() noexcept;
+    void updateFlightCameraPresentation(const RenderSnapshot& snapshot) noexcept;
+    void resetFlightCameraPresentation() noexcept;
     void drawLaunchAsteroids(const RenderSnapshot& snapshot);
     void drawEllipseLine(
         float cx,
@@ -150,6 +158,7 @@ private:
         MiningElementalAffinity hazardAffinity = MiningElementalAffinity::None;
         bool revealed = false;
         bool hazard = false;
+        bool suitOnlyPassage = false;
 
         bool operator==(const MiningTerrainCellPresentationState&) const = default;
     };
@@ -168,14 +177,41 @@ private:
         int postSolarGeologyRow = -1;
         std::uint64_t geologySeed = 0;
         float sceneAspect = 0.0F;
+        float viewTop = 0.0F;
+        float cellHeight = 0.0F;
+        float viewOffsetX = 0.0F;
+        float viewOffsetY = 0.0F;
+        float layerOpacity = 1.0F;
         double droneX = 0.0;
         double droneY = 0.0;
         float scannerPulse = 0.0F;
         float scannerRevealRadius = 0.0F;
         float scannerSweepRadius = 0.0F;
         bool texturedTiles = false;
+        bool arrivalComposite = false;
+        float arrivalResourceReveal = 1.0F;
 
         bool operator==(const MiningTerrainPresentationKey&) const = default;
+    };
+
+    struct FlightTrajectoryPresentationState {
+        std::vector<FlightTrajectoryPointSnapshot> points;
+        std::vector<FlightTrajectoryPointSnapshot> controlPoints;
+        std::vector<FlightTrajectoryPointSnapshot> curvePoints;
+        double lastPresentationTime = -1.0;
+        double lastShipX = 0.0;
+        double lastShipY = 0.0;
+        double lastImpactFlash = 0.0;
+        int originTier = -2;
+        int destinationTier = -1;
+        int flightMode = -1;
+        bool frontierTransfer = false;
+        bool returningHome = false;
+        bool active = false;
+    };
+
+    struct FlightCameraPresentationState {
+        float approachBlend = 0.0F;
     };
 
     SceneViewport viewport_;
@@ -211,6 +247,8 @@ private:
     std::vector<const MiningMiniDroneAgent*> miningSurveyDrones_;
     std::vector<MiningPickupBurst> miningPickupBursts_;
     std::vector<MiningPickupBurst> miningPickupBurstScratch_;
+    FlightTrajectoryPresentationState flightTrajectoryPresentation_;
+    FlightCameraPresentationState flightCameraPresentation_;
     int previousMiningWidth_ = 0;
     int previousMiningHeight_ = 0;
     bool previousMiningActive_ = false;
@@ -240,6 +278,7 @@ private:
     float sceneAspect_ = 16.0F / 9.0F;
     double presentationTimeSeconds_ = -1.0;
     bool cameraShakeEnabled_ = true;
+    float drawOpacity_ = 1.0F;
 };
 
 } // namespace rocket

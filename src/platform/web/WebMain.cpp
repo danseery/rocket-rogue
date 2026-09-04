@@ -28,6 +28,7 @@ std::unique_ptr<rocket::WebUiBridge> g_uiBridge;
 std::unique_ptr<rocket::WebGlGraphicsBackend> g_renderer;
 std::unique_ptr<rocket::WebGlRmlRenderHost> g_rmlRenderHost;
 std::unique_ptr<rocket::IGameUi> g_ui;
+std::unique_ptr<rocket::IGameAudio> g_audio;
 std::unique_ptr<rocket::AppServices> g_services;
 std::unique_ptr<rocket::GameRunner> g_runner;
 std::string g_debugMiningPreview;
@@ -93,6 +94,87 @@ EM_JS(int, rr_controller_debug_tools_enabled, (), {
         return 0;
     }
 });
+
+EM_JS(int, rr_web_play_audio_cue, (const char* cuePath, double pitch), {
+    try {
+        const path = UTF8ToString(cuePath);
+        const audio = globalThis.__orebitGameAudio || (globalThis.__orebitGameAudio = {
+            context: null,
+            buffers: new Map(),
+            pending: new Map(),
+            failures: new Set()
+        });
+        const AudioContextType = globalThis.AudioContext || globalThis.webkitAudioContext;
+        if (!AudioContextType) return 0;
+        if (!audio.context) audio.context = new AudioContextType();
+        const play = (buffer) => {
+            const source = audio.context.createBufferSource();
+            source.buffer = buffer;
+            source.playbackRate.value = Math.max(0.75, Math.min(1.25, pitch));
+            source.connect(audio.context.destination);
+            audio.context.resume().catch(() => {});
+            source.start();
+        };
+        if (audio.buffers.has(path)) {
+            play(audio.buffers.get(path));
+            return 1;
+        }
+        let pending = audio.pending.get(path);
+        if (!pending) {
+            pending = fetch(path)
+                .then((response) => {
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return response.arrayBuffer();
+                })
+                .then((bytes) => audio.context.decodeAudioData(bytes))
+                .then((buffer) => {
+                    audio.buffers.set(path, buffer);
+                    audio.pending.delete(path);
+                    return buffer;
+                })
+                .catch((error) => {
+                    audio.pending.delete(path);
+                    if (!audio.failures.has(path)) {
+                        audio.failures.add(path);
+                        console.warn(`OREBIT surface audio cue unavailable: ${path}`, error);
+                    }
+                    return null;
+                });
+            audio.pending.set(path, pending);
+        }
+        pending.then((buffer) => { if (buffer) play(buffer); });
+        return 1;
+    } catch (error) {
+        return 0;
+    }
+});
+
+class WebGameAudio final : public rocket::IGameAudio {
+public:
+    bool playOneShot(const rocket::GameAudioEvent& event) override
+    {
+        const std::string path = "assets/audio/surface/" + filename(event.cue);
+        return rr_web_play_audio_cue(path.c_str(), event.pitch) != 0;
+    }
+
+private:
+    static std::string filename(rocket::GameAudioCue cue)
+    {
+        switch (cue) {
+        case rocket::GameAudioCue::SafeTouchdown: return "safe_touchdown.wav";
+        case rocket::GameAudioCue::HardTouchdown: return "hard_touchdown.wav";
+        case rocket::GameAudioCue::BayOpen: return "bay_open.wav";
+        case rocket::GameAudioCue::RigEjection: return "rig_ejection.wav";
+        case rocket::GameAudioCue::ArrestingBurst: return "arresting_burst.wav";
+        case rocket::GameAudioCue::RigImpact: return "rig_impact.wav";
+        case rocket::GameAudioCue::DroneLaunch: return "drone_launch.wav";
+        case rocket::GameAudioCue::BayClose: return "bay_close.wav";
+        case rocket::GameAudioCue::SurfaceReady: return "surface_ready.wav";
+        case rocket::GameAudioCue::TakeoffIgnition: return "takeoff_ignition.wav";
+        }
+        return {};
+    }
+};
 
 void syncDomViewportLayout()
 {
@@ -174,6 +256,34 @@ void rr_launch_move(double steerAxis, double throttleAxis)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_deploy_surface_team()
+{
+    if (g_app) {
+        g_app->deploySurfaceTeam();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_depart_surface_undeployed()
+{
+    if (g_app) {
+        g_app->departSurfaceUndeployed();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int rr_surface_arrival_active()
+{
+    return g_app && g_app->inputContext() == rocket::InputContext::SurfaceArrival ? 1 : 0;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_prepare_launch()
 {
     if (g_app) {
@@ -197,26 +307,6 @@ EMSCRIPTEN_KEEPALIVE
 int rr_current_screen()
 {
     return g_app ? g_app->currentScreen() : -1;
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_arrival_ops()
-{
-    if (g_app) {
-        g_app->arrivalOps();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_skip_arrival_fanfare()
-{
-    if (g_app) {
-        g_app->skipArrivalFanfare();
-    }
 }
 
 #ifdef __EMSCRIPTEN__
@@ -322,106 +412,6 @@ void rr_acknowledge_approach_introduction()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void rr_arrival_flyby()
-{
-    if (g_app) {
-        g_app->runArrivalFlyby();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_flyby_move(double xAxis, double yAxis)
-{
-    if (g_app) {
-        g_app->flybyMove(xAxis, yAxis);
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_flyby_abort()
-{
-    if (g_app) {
-        g_app->flybyAbort();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_flyby_continue()
-{
-    if (g_app) {
-        g_app->flybyContinue();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_arrival_orbit()
-{
-    if (g_app) {
-        g_app->enterArrivalOrbit();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_orbit_move(double xAxis, double yAxis)
-{
-    if (g_app) {
-        g_app->orbitMove(xAxis, yAxis);
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_orbit_abort()
-{
-    if (g_app) {
-        g_app->orbitAbort();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_orbit_continue()
-{
-    if (g_app) {
-        g_app->orbitContinue();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_arrival_landing()
-{
-    if (g_app) {
-        g_app->attemptArrivalLanding();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_arrival_orbit_depart()
-{
-    if (g_app) {
-        g_app->departCapturedOrbit();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
 void rr_research_project(int index)
 {
     if (g_app) {
@@ -442,16 +432,6 @@ void rr_skip_research()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void rr_survey_surface()
-{
-    if (g_app) {
-        g_app->surveySurface();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
 void rr_mine_surface()
 {
     if (g_app) {
@@ -462,70 +442,10 @@ void rr_mine_surface()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void rr_push_surface()
-{
-    if (g_app) {
-        g_app->pushSurface();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
 void rr_extract_surface()
 {
     if (g_app) {
         g_app->extractSurface();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_surface_scan_pulse()
-{
-    if (g_app) {
-        g_app->scanSurfacePulse();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_surface_scan_bank()
-{
-    if (g_app) {
-        g_app->scanSurfaceBank();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_surface_scan_abort()
-{
-    if (g_app) {
-        g_app->scanSurfaceAbort();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_surface_push_step()
-{
-    if (g_app) {
-        g_app->pushSurfaceStep();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_surface_push_bank()
-{
-    if (g_app) {
-        g_app->pushSurfaceBank();
     }
 }
 
@@ -546,16 +466,6 @@ void rr_drone_ops()
 {
     if (g_app) {
         g_app->openDroneOps();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_surface_ops()
-{
-    if (g_app) {
-        g_app->backToSurfaceOps();
     }
 }
 
@@ -722,6 +632,16 @@ void rr_mining_stow()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_mining_wait_for_drones()
+{
+    if (g_app) {
+        g_app->miningWaitForDrones();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_mining_abort()
 {
     if (g_app) {
@@ -823,46 +743,6 @@ const char* rr_debug_mining_preview(int act, int difficulty, int gateOverride)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void rr_debug_surface_scan()
-{
-    if (g_app) {
-        g_app->debugStartSurfaceScan();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_debug_surface_push()
-{
-    if (g_app) {
-        g_app->debugStartSurfacePush();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_debug_flyby()
-{
-    if (g_app) {
-        g_app->debugStartFlyby();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_debug_orbit()
-{
-    if (g_app) {
-        g_app->debugStartOrbit();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
 void rr_debug_hangar()
 {
     if (g_app) {
@@ -887,16 +767,6 @@ void rr_debug_results()
 {
     if (g_app) {
         g_app->debugShowResults();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_debug_arrival_ops()
-{
-    if (g_app) {
-        g_app->debugShowArrivalOps();
     }
 }
 
@@ -1001,6 +871,16 @@ void rr_debug_launch_lesson(int lessonIndex)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_debug_surface_arrival(int destinationIndex, int phaseIndex)
+{
+    if (g_app) {
+        g_app->debugStartSurfaceArrival(destinationIndex, phaseIndex);
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_debug_exit()
 {
     if (g_app) {
@@ -1015,46 +895,6 @@ void rr_repair_ship()
 {
     if (g_app) {
         g_app->repairShip();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_recruit_crew()
-{
-    if (g_app) {
-        g_app->recruitCrew();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_recruit_candidate(int index)
-{
-    if (g_app) {
-        g_app->recruitCrew(index);
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_train_crew()
-{
-    if (g_app) {
-        g_app->trainCrew();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_rest_crew()
-{
-    if (g_app) {
-        g_app->restCrew();
     }
 }
 
@@ -1234,9 +1074,10 @@ int main()
     g_rmlRenderHost = std::make_unique<rocket::WebGlRmlRenderHost>();
     g_ui = std::make_unique<rocket::GameRmlUi>(
         *g_preferenceStore, *g_platformHost, *g_uiBridge, *g_rmlRenderHost);
+    g_audio = std::make_unique<WebGameAudio>();
     g_services = std::make_unique<rocket::AppServices>(rocket::AppServices {
         *g_saveStore, *g_preferenceStore, *g_platformHost, *g_gamepadSource,
-        *g_textureSource, *g_renderer, *g_ui, *g_uiBridge
+        *g_textureSource, *g_renderer, *g_ui, *g_uiBridge, g_audio.get()
     });
     g_runner = std::make_unique<rocket::GameRunner>(*g_services);
     if (!g_runner->initialize()) return 1;

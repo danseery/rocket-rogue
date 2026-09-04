@@ -249,36 +249,10 @@ void testScenarioRoutingAndSaveSuppression()
 
     const Observation launch = observe(NativeBenchmarkScenario::Launch);
     assert(launch.setup);
-    assert(launch.setup.screen == rocket::Screen::Launch);
+    assert(launch.setup.screen == rocket::Screen::Flight);
     assert(launch.inputContext == rocket::InputContext::Launch);
     assert(launch.saveWrites == 0);
 
-    const Observation flyby = observe(NativeBenchmarkScenario::Flyby);
-    assert(flyby.setup);
-    assert(flyby.setup.screen == rocket::Screen::Flyby);
-    assert(flyby.inputContext == rocket::InputContext::FlybyActive);
-    assert(flyby.saveWrites == 0);
-
-    const Observation orbit = observe(NativeBenchmarkScenario::Orbit);
-    assert(orbit.setup);
-    assert(orbit.setup.screen == rocket::Screen::Orbit);
-    assert(orbit.inputContext == rocket::InputContext::OrbitActive);
-    assert(orbit.saveWrites == 0);
-
-    const Observation surfaceOps = observe(NativeBenchmarkScenario::SurfaceOps);
-    assert(surfaceOps.setup);
-    assert(surfaceOps.setup.screen == rocket::Screen::SurfaceExpedition);
-    assert(surfaceOps.inputContext == rocket::InputContext::Ui);
-    assert(surfaceOps.saveWrites == 0);
-
-    const Observation surfaceScan = observe(NativeBenchmarkScenario::SurfaceScan);
-    const Observation repeatedSurfaceScan = observe(NativeBenchmarkScenario::SurfaceScan);
-    assert(surfaceScan.setup);
-    assert(surfaceScan.setup.screen == rocket::Screen::SurfaceScan);
-    assert(surfaceScan.inputContext == rocket::InputContext::SurfaceScan);
-    assert(surfaceScan.saveWrites == 0);
-    assert(surfaceScan.setup.gameplayStateHash.has_value());
-    assert(surfaceScan.setup.gameplayStateHash == repeatedSurfaceScan.setup.gameplayStateHash);
 }
 
 void testFixedSeedHighEntityMining()

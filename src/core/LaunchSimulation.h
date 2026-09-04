@@ -7,9 +7,6 @@
 
 namespace rocket {
 
-inline constexpr std::size_t launchControlKickCapacity = 16;
-inline constexpr std::size_t launchAsteroidCapacity = 24;
-
 struct LaunchAsteroidState {
     double routeProgress = 0.0;
     double courseOffset = 0.0;
@@ -49,6 +46,7 @@ struct PreparedLaunch {
     bool heatEnabled = false;
     bool asteroidsEnabled = false;
     bool trainingMission = false;
+    bool orbitRequired = false;
 
     double controlChaos = 0.0;
     double controlSteeringResponseVariation = 0.0;
@@ -64,55 +62,6 @@ struct FlightActionState {
     bool cutEnginesActive = false;
 };
 
-struct LaunchControlInput {
-    double steer = 0.0;
-    double throttle = 0.0;
-    bool enginesCut = false;
-};
-
-struct LaunchFlightState {
-    bool active = false;
-    bool returningHome = false;
-    double travelProgress = 0.0;
-    double previousTravelProgress = 0.0;
-    double currentMultiplier = 1.0;
-    double peakMultiplier = 1.0;
-    double selectedThrottle = 0.60;
-    double burnRatePerSecond = 0.0;
-    double travelVelocity = 0.0;
-    double fuelCapacity = 10.0;
-    double fuelRemaining = 10.0;
-    // Early calibration returns stretch whatever fuel remains across the
-    // home leg. Fuel Survey uses this for its explicit timing result; the
-    // controls lesson uses it to keep experimentation from becoming a hidden
-    // fuel trap while course handling remains the taught skill.
-    bool calibrationReturnFuelProtected = false;
-    bool fuelSurveyReturnClassifiable = false;
-    bool fuelSurveyLateLatched = false;
-    FuelSurveyReturnTiming fuelSurveyReturnTiming = FuelSurveyReturnTiming::Unqualified;
-    double fuelSurveyReturnUsePerProgress = 0.0;
-    double elapsedSeconds = 0.0;
-    double projectedFuelRequired = 0.0;
-    double projectedFuelReserve = 10.0;
-    double heat = 0.0;
-    double courseOffset = 0.0;
-    double courseVelocity = 0.0;
-    bool throttleInputActive = false;
-    double throttleAtLastKick = 0.60;
-    double throttleKickCooldownSeconds = 0.0;
-    int nextControlKickIndex = 0;
-    double heatFailureSeconds = 0.0;
-    double courseFailureSeconds = 0.0;
-    double fuelFailureSeconds = 0.0;
-    double minimumSafetyMargin = 1.0;
-    double hullMaximum = 100.0;
-    double hullRemaining = 100.0;
-    int hullDamageTaken = 0;
-    double asteroidInvulnerabilitySeconds = 0.0;
-    std::array<bool, launchAsteroidCapacity> asteroidHit {};
-    LaunchFailureCause failureCause = LaunchFailureCause::None;
-};
-
 struct LaunchFlightStep {
     bool reachedDestination = false;
     bool reachedHome = false;
@@ -121,6 +70,11 @@ struct LaunchFlightStep {
     bool trainingRescue = false;
     int hullDamageTaken = 0;
     LaunchFailureCause failureCause = LaunchFailureCause::None;
+    bool orbitCaptured = false;
+    bool safeTouchdown = false;
+    bool hardTouchdown = false;
+    bool flyby = false;
+    bool surfaceImpact = false;
 };
 
 // Both opening calibration flights teach the same readable fuel-return
@@ -156,17 +110,18 @@ double launchHullImpactMultiplierForRank(int rank);
 double launchAsteroidRowProgress(int row);
 double launchAsteroidLaneOffset(int lane);
 double launchAsteroidImpactDamage(int hullRank, double asteroidScale);
-LaunchFlightState beginLaunchFlight(const PreparedLaunch& launch, const Destination& destination);
-void beginLaunchReturn(LaunchFlightState& flight);
-CalibrationFuelWarning calibrationFuelWarning(const PreparedLaunch& launch, const LaunchFlightState& flight);
+FlightRunState beginLaunchFlight(const PreparedLaunch& launch, const Destination& destination);
+void beginLaunchReturn(FlightRunState& flight);
+CalibrationFuelWarning calibrationFuelWarning(const PreparedLaunch& launch, const FlightRunState& flight);
 double launchCourseLimit(const PreparedLaunch& launch);
 LaunchFlightStep updateLaunchFlight(
-    LaunchFlightState& flight,
+    FlightRunState& flight,
     const PreparedLaunch& launch,
     const Destination& destination,
-    const LaunchControlInput& input,
-    double deltaSeconds);
-TelemetryEvent launchTelemetryAt(const PreparedLaunch& launch, const LaunchFlightState& flight);
+    const FlightInput& input,
+    double deltaSeconds,
+    const MiningRunState* landingSite = nullptr);
+TelemetryEvent launchTelemetryAt(const PreparedLaunch& launch, const FlightRunState& flight);
 LaunchOutcome resolveLaunch(
     const PreparedLaunch& launch,
     const ContentCatalog& catalog,

@@ -14,7 +14,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <initializer_list>
+#include <iomanip>
 #include <iterator>
+#include <limits>
 #include <sstream>
 
 namespace rocket {
@@ -435,6 +437,8 @@ MiningElementalAffinity miningElementalAffinityFromInt(int value)
 int screenToInt(Screen screen)
 {
     switch (screen) {
+    case Screen::Flight:
+        return 1;
     case Screen::ArrivalOps:
         return 2;
     case Screen::Research:
@@ -455,6 +459,10 @@ int screenToInt(Screen screen)
         return 9;
     case Screen::Upgrade:
         return 10;
+    case Screen::Flyby:
+        return 11;
+    case Screen::Orbit:
+        return 12;
     default:
         return 0;
     }
@@ -463,6 +471,8 @@ int screenToInt(Screen screen)
 Screen screenFromInt(int value)
 {
     switch (value) {
+    case 1:
+        return Screen::Flight;
     case 2:
         return Screen::ArrivalOps;
     case 3:
@@ -481,6 +491,10 @@ Screen screenFromInt(int value)
         return Screen::StoryBriefing;
     case 10:
         return Screen::Upgrade;
+    case 11:
+        return Screen::Flyby;
+    case 12:
+        return Screen::Orbit;
     default:
         return Screen::Hangar;
     }
@@ -695,7 +709,7 @@ MiningArenaMetadata parseMiningArenaMetadata(std::string_view text)
     return metadata;
 }
 
-std::string serializeSurfaceBankedMiningArena(const SurfaceExpeditionState& expedition)
+std::string serializeSurfaceBankedMiningArena(const PlanetaryExpeditionState& expedition)
 {
     const MiningArenaMetadata& metadata = expedition.bankedMiningArenaMetadata;
     const MaterialInventory& materials = expedition.bankedMiningMaterials;
@@ -714,7 +728,7 @@ std::string serializeSurfaceBankedMiningArena(const SurfaceExpeditionState& expe
     return out.str();
 }
 
-void parseSurfaceBankedMiningArena(std::string_view text, SurfaceExpeditionState& expedition)
+void parseSurfaceBankedMiningArena(std::string_view text, PlanetaryExpeditionState& expedition)
 {
     const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
     if (!fields.empty()) {
@@ -893,7 +907,10 @@ std::string serializeMiningGateRuntime(const MiningGateRuntime& gate)
         << save_schema::crewFieldDelimiter << static_cast<int>(gate.protectedObjective.kind)
         << save_schema::crewFieldDelimiter << encodeSaveBlob(gate.protectedObjective.id)
         << save_schema::crewFieldDelimiter << gate.activeCocoonLayer
-        << save_schema::crewFieldDelimiter << encodeSaveBlob(serializeMiningCocoonLayers(gate.cocoonLayers));
+        << save_schema::crewFieldDelimiter << encodeSaveBlob(serializeMiningCocoonLayers(gate.cocoonLayers))
+        << save_schema::crewFieldDelimiter << static_cast<int>(gate.objectivePassage)
+        << save_schema::crewFieldDelimiter << (gate.completeOnShipCapture ? 1 : 0)
+        << save_schema::crewFieldDelimiter << encodeSaveBlob(gate.securedMessage);
     return out.str();
 }
 
@@ -956,6 +973,12 @@ void parseMiningGateRuntime(std::string_view text, MiningGateRuntime& gate)
     if (fields.size() > 32) gate.protectedObjective.id = decodeSaveBlob(fields[32]);
     if (fields.size() > 33) gate.activeCocoonLayer = std::max(-1, intAt(33, -1));
     if (fields.size() > 34) gate.cocoonLayers = parseMiningCocoonLayers(decodeSaveBlob(fields[34]));
+    if (fields.size() > 35) {
+        gate.objectivePassage = static_cast<MiningPassageClass>(
+            std::clamp(intAt(35), 0, static_cast<int>(MiningPassageClass::SuitOnly)));
+    }
+    gate.completeOnShipCapture = boolAt(36);
+    if (fields.size() > 37) gate.securedMessage = decodeSaveBlob(fields[37]);
 }
 
 std::string serializeMiningSites(const std::vector<MiningSiteProgress>& sites)
@@ -1077,9 +1100,9 @@ bool parsePostSolarSaveField(SaveData& save, std::string_view key, std::string_v
     if (key == save_schema::field::postSolarSystemRosters) {
         save.postSolarSystemRosters = parsePostSolarSystemRosters(value);
     } else if (key == save_schema::field::surfacePostSolarSystem) {
-        save.surfaceExpedition.postSolarSystemId = std::string(value);
+        save.planetaryExpedition.postSolarSystemId = std::string(value);
     } else if (key == save_schema::field::surfaceBody) {
-        save.surfaceExpedition.bodyId = std::string(value);
+        save.planetaryExpedition.bodyId = std::string(value);
     } else if (key == save_schema::field::miningPostSolarContext) {
         const std::vector<std::string> fields = split(value, '^');
         if (!fields.empty()) save.mining.postSolarSystemId = decodeSaveBlob(fields[0]);
@@ -1129,7 +1152,7 @@ std::array<MiningFirstClearProgress, miningFirstClearProgressCount> parseMiningF
 bool parseMiningProgressionField(SaveData& save, std::string_view key, std::string_view value)
 {
     if (key == save_schema::field::surfaceBankedMiningArena) {
-        parseSurfaceBankedMiningArena(value, save.surfaceExpedition);
+        parseSurfaceBankedMiningArena(value, save.planetaryExpedition);
         return true;
     }
     if (key == save_schema::field::miningArenaMetadata) {
@@ -1176,7 +1199,7 @@ std::array<std::string, 3> vectorToOfferArray(const std::vector<std::string>& va
 
 bool parseRunProgressionSaveField(SaveData& save, std::string_view key, std::string_view value)
 {
-    SurfaceExpeditionState& expedition = save.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = save.planetaryExpedition;
     if (key == save_schema::field::expeditionLevel) expedition.expeditionLevel = std::max(1, parseInt(value, 1));
     else if (key == save_schema::field::expeditionExperience) expedition.expeditionExperience = std::max(0.0, parseDouble(value, 0.0));
     else if (key == save_schema::field::pendingRunUpgradeChoices) expedition.pendingRunUpgradeChoices = std::max(0, parseInt(value, 0));
@@ -1318,6 +1341,27 @@ double parseDouble(std::string_view text, double fallback)
     return end == copy.c_str() ? fallback : value;
 }
 
+bool parseCurrentCampaignField(SaveData& save, std::string_view key, std::string_view value)
+{
+    if (key == save_schema::field::crewLossPending) {
+        save.crewLossPending = parseInt(value, 0) != 0;
+        return true;
+    }
+    if (key == save_schema::field::pendingReplacementArchetypeId) {
+        save.pendingReplacementArchetypeId = std::string(value);
+        return true;
+    }
+    if (key == save_schema::field::replacementSequence) {
+        save.replacementSequence = parseInt(value, 0);
+        return true;
+    }
+    if (key == save_schema::field::shipHoldRank) {
+        save.shipHoldRank = parseInt(value, 0);
+        return true;
+    }
+    return false;
+}
+
 template <typename Value>
 void writeField(std::ostringstream& out, std::string_view key, const Value& value)
 {
@@ -1331,9 +1375,11 @@ std::string serializeCrew(const std::vector<Astronaut>& crew)
         if (i > 0) {
             out << save_schema::crewRecordDelimiter;
         }
-        out << crew[i].id
-            << save_schema::crewFieldDelimiter << crew[i].training
-            << save_schema::crewFieldDelimiter << crew[i].stress
+        out << encodeSaveBlob(crew[i].id)
+            << save_schema::crewFieldDelimiter << encodeSaveBlob(crew[i].name)
+            << save_schema::crewFieldDelimiter << encodeSaveBlob(crew[i].background)
+            << save_schema::crewFieldDelimiter << encodeSaveBlob(crew[i].trait)
+            << save_schema::crewFieldDelimiter << encodeSaveBlob(crew[i].archetypeId)
             << save_schema::crewFieldDelimiter << statusToInt(crew[i].status);
     }
     return out.str();
@@ -1349,15 +1395,21 @@ std::vector<Astronaut> parseCrew(std::string_view text)
         }
 
         Astronaut astronaut;
-        astronaut.id = fields[0];
+        astronaut.id = decodeSaveBlob(fields[0]);
         if (fields.size() > 1) {
-            astronaut.training = parseInt(fields[1], 0);
+            astronaut.name = decodeSaveBlob(fields[1]);
         }
         if (fields.size() > 2) {
-            astronaut.stress = parseInt(fields[2], 0);
+            astronaut.background = decodeSaveBlob(fields[2]);
         }
         if (fields.size() > 3) {
-            astronaut.status = statusFromInt(parseInt(fields[3], 0));
+            astronaut.trait = decodeSaveBlob(fields[3]);
+        }
+        if (fields.size() > 4) {
+            astronaut.archetypeId = decodeSaveBlob(fields[4]);
+        }
+        if (fields.size() > 5) {
+            astronaut.status = statusFromInt(parseInt(fields[5], 0));
         }
         crew.push_back(astronaut);
     }
@@ -1387,6 +1439,107 @@ MaterialInventory parseMaterials(std::string_view text)
         materials.exotic = parseInt(fields[2], 0);
     }
     return materials;
+}
+
+std::string serializeFlightState(const FlightRunState& flight)
+{
+    std::ostringstream out;
+    out << encodeSaveBlob(flight.originId) << save_schema::crewFieldDelimiter
+        << encodeSaveBlob(flight.destinationId) << save_schema::crewFieldDelimiter
+        << (flight.active ? 1 : 0) << save_schema::crewFieldDelimiter
+        << (flight.physicalFlight ? 1 : 0) << save_schema::crewFieldDelimiter
+        << static_cast<int>(flight.phase) << save_schema::crewFieldDelimiter
+        << flight.positionX << save_schema::crewFieldDelimiter << flight.positionY << save_schema::crewFieldDelimiter
+        << flight.velocityX << save_schema::crewFieldDelimiter << flight.velocityY << save_schema::crewFieldDelimiter
+        << flight.heading << save_schema::crewFieldDelimiter << flight.angularVelocity << save_schema::crewFieldDelimiter
+        << flight.fuelRemaining << save_schema::crewFieldDelimiter << flight.fuelCapacity << save_schema::crewFieldDelimiter
+        << flight.heat << save_schema::crewFieldDelimiter << flight.hullRemaining << save_schema::crewFieldDelimiter
+        << flight.hullMaximum << save_schema::crewFieldDelimiter << flight.elapsedSeconds << save_schema::crewFieldDelimiter
+        << flight.orbit.targetRadius << save_schema::crewFieldDelimiter << flight.orbit.goodBand << save_schema::crewFieldDelimiter
+        << flight.orbit.perfectBand << save_schema::crewFieldDelimiter << flight.orbit.stableAngularProgress << save_schema::crewFieldDelimiter
+        << flight.orbit.previousAngle << save_schema::crewFieldDelimiter << (flight.orbit.enteredInfluence ? 1 : 0) << save_schema::crewFieldDelimiter
+        << (flight.orbit.captured ? 1 : 0) << save_schema::crewFieldDelimiter << (flight.orbit.perfectEligible ? 1 : 0) << save_schema::crewFieldDelimiter
+        << (flight.orbit.rewardAwarded ? 1 : 0) << save_schema::crewFieldDelimiter << static_cast<int>(flight.orbit.grade) << save_schema::crewFieldDelimiter
+        << static_cast<int>(flight.mode) << save_schema::crewFieldDelimiter << flight.landing.altitude << save_schema::crewFieldDelimiter
+        << flight.landing.verticalVelocity << save_schema::crewFieldDelimiter << flight.landing.lateralVelocity << save_schema::crewFieldDelimiter
+        << flight.landing.surfaceAngle << save_schema::crewFieldDelimiter << (flight.landing.hardLanding ? 1 : 0) << save_schema::crewFieldDelimiter
+        << (flight.flybyRecorded ? 1 : 0) << save_schema::crewFieldDelimiter
+        << flight.landing.basisAngle << save_schema::crewFieldDelimiter
+        << flight.landing.horizontalPosition << save_schema::crewFieldDelimiter
+        << flight.landing.heading << save_schema::crewFieldDelimiter
+        << flight.landing.padGridX << save_schema::crewFieldDelimiter << flight.landing.padGridY << save_schema::crewFieldDelimiter
+        << flight.landing.touchdownGridX << save_schema::crewFieldDelimiter << flight.landing.touchdownGridY << save_schema::crewFieldDelimiter
+        << flight.landing.siteKey << save_schema::crewFieldDelimiter
+        << (flight.landing.siteBound ? 1 : 0) << save_schema::crewFieldDelimiter << (flight.landing.gateArmed ? 1 : 0) << save_schema::crewFieldDelimiter
+        << static_cast<int>(flight.handoff.from) << save_schema::crewFieldDelimiter << static_cast<int>(flight.handoff.to) << save_schema::crewFieldDelimiter
+        << flight.handoff.elapsed << save_schema::crewFieldDelimiter << flight.handoff.sourceX << save_schema::crewFieldDelimiter
+        << flight.handoff.sourceY << save_schema::crewFieldDelimiter << flight.handoff.sourceHeading << save_schema::crewFieldDelimiter
+        << flight.orbitZoomProgress;
+    return out.str();
+}
+
+FlightRunState parseFlightState(std::string_view text)
+{
+    FlightRunState flight;
+    const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
+    if (fields.size() != 51) {
+        return flight;
+    }
+    std::size_t index = 0;
+    flight.originId = decodeSaveBlob(fields[index++]);
+    flight.destinationId = decodeSaveBlob(fields[index++]);
+    flight.active = parseInt(fields[index++], 0) != 0;
+    flight.physicalFlight = parseInt(fields[index++], 0) != 0;
+    flight.phase = static_cast<FlightPhase>(std::clamp(parseInt(fields[index++], 0), 0, static_cast<int>(FlightPhase::Complete)));
+    flight.positionX = parseDouble(fields[index++], flight.positionX);
+    flight.positionY = parseDouble(fields[index++], flight.positionY);
+    flight.velocityX = parseDouble(fields[index++], flight.velocityX);
+    flight.velocityY = parseDouble(fields[index++], flight.velocityY);
+    flight.heading = parseDouble(fields[index++], flight.heading);
+    flight.angularVelocity = parseDouble(fields[index++], flight.angularVelocity);
+    flight.fuelRemaining = std::max(0.0, parseDouble(fields[index++], flight.fuelRemaining));
+    flight.fuelCapacity = std::max(0.0, parseDouble(fields[index++], flight.fuelCapacity));
+    flight.heat = std::max(0.0, parseDouble(fields[index++], flight.heat));
+    flight.hullRemaining = std::max(0.0, parseDouble(fields[index++], flight.hullRemaining));
+    flight.hullMaximum = std::max(1.0, parseDouble(fields[index++], flight.hullMaximum));
+    flight.elapsedSeconds = std::max(0.0, parseDouble(fields[index++], flight.elapsedSeconds));
+    flight.orbit.targetRadius = parseDouble(fields[index++], flight.orbit.targetRadius);
+    flight.orbit.goodBand = parseDouble(fields[index++], flight.orbit.goodBand);
+    flight.orbit.perfectBand = parseDouble(fields[index++], flight.orbit.perfectBand);
+    flight.orbit.stableAngularProgress = std::max(0.0, parseDouble(fields[index++], 0.0));
+    flight.orbit.previousAngle = parseDouble(fields[index++], 0.0);
+    flight.orbit.enteredInfluence = parseInt(fields[index++], 0) != 0;
+    flight.orbit.captured = parseInt(fields[index++], 0) != 0;
+    flight.orbit.perfectEligible = parseInt(fields[index++], 1) != 0;
+    flight.orbit.rewardAwarded = parseInt(fields[index++], 0) != 0;
+    flight.orbit.grade = static_cast<OrbitGrade>(std::clamp(parseInt(fields[index++], 0), 0, static_cast<int>(OrbitGrade::Perfect)));
+    flight.mode = static_cast<FlightMode>(std::clamp(parseInt(fields[index++], 0),0,2));
+    flight.landing.altitude = parseDouble(fields[index++], 0.0);
+    flight.landing.verticalVelocity = parseDouble(fields[index++], 0.0);
+    flight.landing.lateralVelocity = parseDouble(fields[index++], 0.0);
+    flight.landing.surfaceAngle = parseDouble(fields[index++], 0.0);
+    flight.landing.hardLanding = parseInt(fields[index++], 0) != 0;
+    flight.flybyRecorded = parseInt(fields[index++], 0) != 0;
+    flight.landing.basisAngle = parseDouble(fields[index++], 1.5707963267948966);
+    flight.landing.horizontalPosition = parseDouble(fields[index++], 0.0);
+    flight.landing.heading = parseDouble(fields[index++], 1.5707963267948966);
+    flight.landing.padGridX = parseDouble(fields[index++], 0.0);
+    flight.landing.padGridY = parseDouble(fields[index++], 0.0);
+    flight.landing.touchdownGridX = parseDouble(fields[index++], 0.0);
+    flight.landing.touchdownGridY = parseDouble(fields[index++], 0.0);
+    flight.landing.siteKey = parseU64(fields[index++], 0);
+    flight.landing.siteBound = parseInt(fields[index++], 0) != 0;
+    flight.landing.gateArmed = parseInt(fields[index++], 1) != 0;
+    flight.handoff.from = static_cast<FlightMode>(std::clamp(parseInt(fields[index++],0),0,2));
+    flight.handoff.to = static_cast<FlightMode>(std::clamp(parseInt(fields[index++],0),0,2));
+    flight.handoff.elapsed = std::clamp(parseDouble(fields[index++],1.25),0.0,1.25);
+    flight.handoff.sourceX = parseDouble(fields[index++],0.0);
+    flight.handoff.sourceY = parseDouble(fields[index++],0.0);
+    flight.handoff.sourceHeading = parseDouble(fields[index++],0.0);
+    flight.orbitZoomProgress = std::clamp(parseDouble(fields[index++],0.0),0.0,1.0);
+    flight.fuelRemaining = std::min(flight.fuelRemaining, flight.fuelCapacity);
+    flight.hullRemaining = std::min(flight.hullRemaining, flight.hullMaximum);
+    return flight;
 }
 
 std::string serializeDroneModuleAssignments(const std::vector<DroneFrameModuleAssignment>& values)
@@ -1578,27 +1731,6 @@ std::vector<DroneModuleRuntimeState> parseDroneModuleRuntime(std::string_view te
         result.push_back(std::move(v));
     }
     return result;
-}
-
-std::string serializeDepthProspects(const std::vector<SurfaceDepthProspect>& prospects)
-{
-    std::ostringstream out;
-    for (std::size_t i = 0; i < prospects.size(); ++i) {
-        if (i > 0) {
-            out << save_schema::listDelimiter;
-        }
-        const SurfaceDepthProspect& prospect = prospects[i];
-        out << prospect.depthOffset
-            << save_schema::crewFieldDelimiter << prospect.absoluteDepth
-            << save_schema::crewFieldDelimiter << prospect.possibleMaterials.common
-            << save_schema::crewFieldDelimiter << prospect.possibleMaterials.rare
-            << save_schema::crewFieldDelimiter << prospect.possibleMaterials.exotic
-            << save_schema::crewFieldDelimiter << prospect.possibleArtifacts
-            << save_schema::crewFieldDelimiter << (prospect.swarmNest ? 1 : 0)
-            << save_schema::crewFieldDelimiter << prospect.swarmArtifactChance
-            << save_schema::crewFieldDelimiter << std::clamp(prospect.informationPercent, 0, 100);
-    }
-    return out.str();
 }
 
 std::vector<SurfaceDepthProspect> parseDepthProspects(std::string_view text)
@@ -2045,7 +2177,8 @@ std::string serializeMiningMiniDrones(const std::vector<MiningMiniDroneAgent>& a
             << save_schema::crewFieldDelimiter << agent.uncreditedHaulMaterials.common
             << save_schema::crewFieldDelimiter << agent.uncreditedHaulMaterials.rare
             << save_schema::crewFieldDelimiter << agent.uncreditedHaulMaterials.exotic
-            << save_schema::crewFieldDelimiter << agent.returnPathFailureSeconds;
+            << save_schema::crewFieldDelimiter << agent.returnPathFailureSeconds
+            << save_schema::crewFieldDelimiter << agent.carriedLooseObjectId;
     }
     return out.str();
 }
@@ -2148,51 +2281,66 @@ std::vector<MiningMiniDroneAgent> parseMiningMiniDrones(std::string_view text)
         if (fields.size() > 30) {
             agent.returnPathFailureSeconds = std::max(0.0, parseDouble(fields[30], 0.0));
         }
+        if (fields.size() > 31) {
+            agent.carriedLooseObjectId = parseU64(fields[31], 0);
+        }
         agents.push_back(agent);
     }
     return agents;
 }
 
-std::string serializeMiningLooseChunks(const std::vector<MiningLooseChunk>& chunks)
+std::string serializeMiningLooseObjects(const std::vector<MiningLooseObject>& chunks)
 {
     std::ostringstream out;
     for (std::size_t index = 0; index < chunks.size(); ++index) {
         if (index > 0) {
             out << save_schema::listDelimiter;
         }
-        const MiningLooseChunk& chunk = chunks[index];
-        out << miningMaterialToInt(chunk.material)
+        const MiningLooseObject& chunk = chunks[index];
+        out << chunk.persistentId
+            << save_schema::crewFieldDelimiter << static_cast<int>(chunk.kind)
+            << save_schema::crewFieldDelimiter << miningMaterialToInt(chunk.material)
             << save_schema::crewFieldDelimiter << chunk.x
             << save_schema::crewFieldDelimiter << chunk.y
             << save_schema::crewFieldDelimiter << chunk.velocityX
             << save_schema::crewFieldDelimiter << chunk.velocityY
+            << save_schema::crewFieldDelimiter << chunk.mass
             << save_schema::crewFieldDelimiter << chunk.cargoValue
+            << save_schema::crewFieldDelimiter << chunk.fuelValue
+            << save_schema::crewFieldDelimiter << chunk.pickupDelaySeconds
+            << save_schema::crewFieldDelimiter << chunk.carrierFrame
+            << save_schema::crewFieldDelimiter << (chunk.tethered ? 1 : 0)
             << save_schema::crewFieldDelimiter << (chunk.active ? 1 : 0);
     }
     return out.str();
 }
 
-std::vector<MiningLooseChunk> parseMiningLooseChunks(std::string_view text)
+std::vector<MiningLooseObject> parseMiningLooseObjects(std::string_view text)
 {
-    std::vector<MiningLooseChunk> chunks;
+    std::vector<MiningLooseObject> chunks;
     for (const std::string& record : split(text, save_schema::listDelimiter)) {
         if (record.empty()) {
             continue;
         }
         const std::vector<std::string> fields = split(record, save_schema::crewFieldDelimiter);
-        if (fields.size() < 6) {
+        if (fields.size() != 14) {
             continue;
         }
-        MiningLooseChunk chunk;
-        chunk.material = miningMaterialFromInt(parseInt(fields[0], miningMaterialToInt(chunk.material)));
-        chunk.x = parseDouble(fields[1], chunk.x);
-        chunk.y = parseDouble(fields[2], chunk.y);
-        chunk.velocityX = parseDouble(fields[3], chunk.velocityX);
-        chunk.velocityY = parseDouble(fields[4], chunk.velocityY);
-        chunk.cargoValue = std::max(0, parseInt(fields[5], chunk.cargoValue));
-        if (fields.size() > 6) {
-            chunk.active = parseInt(fields[6], chunk.active ? 1 : 0) != 0;
-        }
+        MiningLooseObject chunk;
+        chunk.persistentId = parseU64(fields[0], 0);
+        chunk.kind = static_cast<MiningLooseObjectKind>(std::clamp(parseInt(fields[1], 0), 0, 1));
+        chunk.material = miningMaterialFromInt(parseInt(fields[2], miningMaterialToInt(chunk.material)));
+        chunk.x = parseDouble(fields[3], chunk.x);
+        chunk.y = parseDouble(fields[4], chunk.y);
+        chunk.velocityX = parseDouble(fields[5], chunk.velocityX);
+        chunk.velocityY = parseDouble(fields[6], chunk.velocityY);
+        chunk.mass = std::max(0.0, parseDouble(fields[7], chunk.mass));
+        chunk.cargoValue = std::max(0, parseInt(fields[8], chunk.cargoValue));
+        chunk.fuelValue = std::max(0.0, parseDouble(fields[9], chunk.fuelValue));
+        chunk.pickupDelaySeconds = std::max(0.0, parseDouble(fields[10], 0.0));
+        chunk.carrierFrame = parseInt(fields[11], -1);
+        chunk.tethered = parseInt(fields[12], 0) != 0;
+        chunk.active = parseInt(fields[13], 0) != 0;
         chunks.push_back(chunk);
     }
     return chunks;
@@ -2430,10 +2578,7 @@ std::string serializeMiningOperatorState(const MiningRunState& mining)
         << save_schema::crewFieldDelimiter << mining.operatorIntegrity
         << save_schema::crewFieldDelimiter << mining.operatorFireCooldownSeconds
         << save_schema::crewFieldDelimiter << mining.operatorFirePulseSeconds
-        << save_schema::crewFieldDelimiter << (mining.operatorRigTethered ? 1 : 0)
-        // Trailing field preserves compatibility with version-14 records
-        // written before independent EVA oxygen existed.
-        << save_schema::crewFieldDelimiter << mining.operatorOxygenSeconds;
+        << save_schema::crewFieldDelimiter << (mining.operatorRigTethered ? 1 : 0);
     return out.str();
 }
 
@@ -2463,12 +2608,18 @@ void parseMiningOperatorState(std::string_view text, MiningRunState& mining)
     if (fields.size() > 11) {
         mining.operatorRigTethered = parseInt(fields[11], mining.operatorRigTethered ? 1 : 0) != 0;
     }
-    if (fields.size() > 12) {
-        mining.operatorOxygenSeconds = std::clamp(
-            parseDouble(fields[12], mining.operatorOxygenSeconds),
-            0.0,
-            tuning::mining::operatorOxygenSeconds);
-    }
+}
+
+std::string serializeResourceTank(const ResourceTankState& tank)
+{
+    return serializePair(tank.current, tank.capacity);
+}
+
+void parseResourceTank(std::string_view text, ResourceTankState& tank)
+{
+    parsePair(text, tank.current, tank.capacity);
+    tank.capacity = std::max(0.0, tank.capacity);
+    tank.current = std::clamp(tank.current, 0.0, tank.capacity);
 }
 
 std::string serializeMiningGravity(const MiningRunState& mining)
@@ -2521,7 +2672,7 @@ std::string serializeMiningDepthLayers(const std::vector<MiningDepthLayerState>&
             << encodeSaveBlob(serializeMiningEnemies(layer.enemies)) << '^'
             << encodeSaveBlob(serializeMiningArtifact(layer.artifact)) << '^'
             << encodeSaveBlob(serializeMiningGateRuntime(layer.gate)) << '^'
-            << encodeSaveBlob(serializeMiningLooseChunks(layer.looseChunks));
+            << encodeSaveBlob(serializeMiningLooseObjects(layer.looseObjects));
     }
     return out.str();
 }
@@ -2544,7 +2695,7 @@ std::vector<MiningDepthLayerState> parseMiningDepthLayers(std::string_view text)
         layer.artifact = parseMiningArtifact(decodeSaveBlob(fields[6]));
         parseMiningGateRuntime(decodeSaveBlob(fields[7]), layer.gate);
         if (fields.size() > 8) {
-            layer.looseChunks = parseMiningLooseChunks(decodeSaveBlob(fields[8]));
+            layer.looseObjects = parseMiningLooseObjects(decodeSaveBlob(fields[8]));
         }
         if (layer.terrain.depthZone != layer.depthZone ||
             static_cast<int>(layer.terrain.cells.size()) != layer.terrain.width * layer.terrain.height) {
@@ -2676,8 +2827,6 @@ SaveData captureSaveData(const GameState& state)
     save.frameId = state.run.frameId;
     save.offerRerollsThisExpedition = state.run.offerRerollsThisExpedition;
     save.repairOpsThisExpedition = state.run.repairOpsThisExpedition;
-    save.trainingOpsThisExpedition = state.run.trainingOpsThisExpedition;
-    save.restOpsThisExpedition = state.run.restOpsThisExpedition;
     save.shallowRecoveryStreak = state.run.shallowRecoveryStreak;
     save.cleanShallowRecoveryStreak = state.run.cleanShallowRecoveryStreak;
     save.nextLaunchFuelBoost = state.run.nextLaunchFuelBoost;
@@ -2685,18 +2834,29 @@ SaveData captureSaveData(const GameState& state)
     save.nextLaunchInstabilityPenalty = state.run.nextLaunchInstabilityPenalty;
     save.pendingTransferAssist = state.run.pendingTransferAssist;
     save.routeTransit = state.run.routeTransit;
-    if ((state.screen == Screen::ArrivalFanfare || state.screen == Screen::Flyby || state.screen == Screen::Orbit) && state.run.arrivalOps.active) {
-        save.screen = Screen::ArrivalOps;
-    } else if (state.screen == Screen::Flyby) {
-        // Authored departure Flybys do not persist their realtime simulation.
-        // A completed Jupiter pass persists its physical momentum separately
-        // and safely resumes at the Hangar continuation beat.
+    // Current saves never persist the retired Arrival/Flyby/Orbit/Surface-board
+    // simulations. If one is reached by an old debug or post-solar path, save
+    // at a safe activity boundary so Continue cannot revive a removed screen.
+    switch (state.screen) {
+    case Screen::Flight:
+        save.screen = Screen::Flight;
+        break;
+    case Screen::Mining:
+        save.screen = state.run.mining.active ? Screen::Mining : Screen::Hangar;
+        break;
+    case Screen::StoryBriefing:
+    case Screen::Research:
+    case Screen::SurfaceUpgrade:
+    case Screen::DroneOps:
+    case Screen::Navigation:
+    case Screen::Upgrade:
+        save.screen = state.screen;
+        break;
+    default:
         save.screen = Screen::Hangar;
-    } else if ((state.screen == Screen::SurfaceScan || state.screen == Screen::SurfacePush) && state.run.surfaceExpedition.active) {
-        save.screen = Screen::SurfaceExpedition;
-    } else {
-        save.screen = state.screen == Screen::StoryBriefing || state.screen == Screen::ArrivalOps || state.screen == Screen::Research || state.screen == Screen::SurfaceExpedition || state.screen == Screen::SurfaceUpgrade || state.screen == Screen::Mining || state.screen == Screen::DroneOps || state.screen == Screen::Navigation || state.screen == Screen::Upgrade ? state.screen : Screen::Hangar;
+        break;
     }
+    save.flight = state.run.flight;
     save.campaignMilestone = state.meta.campaignMilestone;
     save.chapter = state.meta.chapter;
     save.ark = state.meta.ark;
@@ -2710,21 +2870,24 @@ SaveData captureSaveData(const GameState& state)
     save.acknowledgedActivityBriefingIds = state.meta.acknowledgedActivityBriefingIds;
     save.campaignIntroductionAcknowledged = state.meta.campaignIntroductionAcknowledged;
     save.straylightDiscoveryAcknowledged = state.meta.straylightDiscoveryAcknowledged;
+    save.crewLossPending = state.meta.crewLossPending;
+    save.pendingReplacementArchetypeId = state.meta.pendingReplacementArchetypeId;
+    save.replacementSequence = state.meta.replacementSequence;
+    save.shipHoldRank = state.meta.shipHoldRank;
     save.inventoryModuleIds = state.run.inventoryModuleIds;
     save.equippedModuleIds = state.run.equippedModuleIds;
     save.crewUpgradeIds = state.run.crewUpgradeIds;
     save.offerModuleIds = arrayToVector(state.run.offerModuleIds);
     save.offerCrewUpgradeIds = arrayToVector(state.run.offerCrewUpgradeIds);
     save.researchProjectIds = arrayToVector(state.run.researchProjectIds);
-    save.arrivalOps = state.run.arrivalOps;
-    save.surfaceExpedition = state.run.surfaceExpedition;
+    save.planetaryExpedition = state.run.planetaryExpedition;
     save.mining = state.run.mining;
-    save.droneModuleAssignments = state.run.surfaceExpedition.droneModuleAssignments;
-    save.droneModuleRuntime = state.run.surfaceExpedition.droneModuleRuntime;
-    save.scannerCooldownSeconds = state.run.surfaceExpedition.scannerCooldownSeconds;
-    save.treasureMarks = state.run.surfaceExpedition.treasureMarks;
-    save.reclamationOxygenUses = state.run.surfaceExpedition.reclamationOxygenUses;
-    save.reclamationFuelRecovered = state.run.surfaceExpedition.reclamationFuelRecovered;
+    save.droneModuleAssignments = state.run.planetaryExpedition.droneModuleAssignments;
+    save.droneModuleRuntime = state.run.planetaryExpedition.droneModuleRuntime;
+    save.scannerCooldownSeconds = state.run.planetaryExpedition.scannerCooldownSeconds;
+    save.treasureMarks = state.run.planetaryExpedition.treasureMarks;
+    save.reclamationOxygenUses = state.run.planetaryExpedition.reclamationOxygenUses;
+    save.reclamationFuelRecovered = state.run.planetaryExpedition.reclamationFuelRecovered;
     save.unlockKeys = state.meta.unlockKeys;
     save.blueprintProgress = state.meta.blueprintProgress;
     save.materials = state.meta.materials;
@@ -2797,8 +2960,6 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.frameId = catalog.findFrame(save.frameId) == nullptr ? catalog.frames.front().id : save.frameId;
     state.run.offerRerollsThisExpedition = std::max(0, save.offerRerollsThisExpedition);
     state.run.repairOpsThisExpedition = std::max(0, save.repairOpsThisExpedition);
-    state.run.trainingOpsThisExpedition = std::max(0, save.trainingOpsThisExpedition);
-    state.run.restOpsThisExpedition = std::max(0, save.restOpsThisExpedition);
     state.run.shallowRecoveryStreak = std::max(0, save.shallowRecoveryStreak);
     state.run.cleanShallowRecoveryStreak = std::max(0, save.cleanShallowRecoveryStreak);
     state.run.nextLaunchFuelBoost = std::max(0.0, save.nextLaunchFuelBoost);
@@ -2813,6 +2974,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         -tuning::launch::pilotingCourseLost,
         tuning::launch::pilotingCourseLost);
     state.run.routeTransit = save.routeTransit;
+    state.run.flight = save.flight;
     if (routeLinkForTransit(catalog, state.run.routeTransit) == nullptr) {
         state.run.routeTransit = {};
     }
@@ -2829,12 +2991,12 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.offerModuleIds = vectorToOfferArray(save.offerModuleIds);
     state.run.offerCrewUpgradeIds = vectorToOfferArray(save.offerCrewUpgradeIds);
     state.run.researchProjectIds = vectorToOfferArray(save.researchProjectIds);
-    state.run.arrivalOps = save.arrivalOps;
-    state.run.surfaceExpedition = save.surfaceExpedition;
-    state.run.surfaceExpedition.droneModuleAssignments = save.droneModuleAssignments;
-    state.run.surfaceExpedition.scannerCooldownSeconds = save.scannerCooldownSeconds;
-    state.run.surfaceExpedition.treasureMarks = save.treasureMarks;
-    state.run.surfaceExpedition.droneModuleRuntime = save.droneModuleRuntime;
+    state.run.approach = {};
+    state.run.planetaryExpedition = save.planetaryExpedition;
+    state.run.planetaryExpedition.droneModuleAssignments = save.droneModuleAssignments;
+    state.run.planetaryExpedition.scannerCooldownSeconds = save.scannerCooldownSeconds;
+    state.run.planetaryExpedition.treasureMarks = save.treasureMarks;
+    state.run.planetaryExpedition.droneModuleRuntime = save.droneModuleRuntime;
     state.run.mining = save.mining;
     {
         MiningRunState& mining = state.run.mining;
@@ -2943,8 +3105,8 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         }
     }
     if (state.run.mining.active) {
-        state.run.surfaceExpedition.miningSitePrepared = true;
-        state.run.surfaceExpedition.miningRunUsed = true;
+        state.run.planetaryExpedition.miningSitePrepared = true;
+        state.run.planetaryExpedition.miningRunUsed = true;
         const double hullLength = std::sqrt(
             state.run.mining.hullDirX * state.run.mining.hullDirX +
             state.run.mining.hullDirY * state.run.mining.hullDirY);
@@ -2960,17 +3122,8 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         state.run.mining.aimX = state.run.mining.droneX + state.run.mining.aimDirX * tuning::mining::drillRangeCells;
         state.run.mining.aimY = state.run.mining.droneY + state.run.mining.aimDirY * tuning::mining::drillRangeCells;
     }
-    if (state.run.arrivalOps.active) {
-        state.run.arrivalOps.transferFuelCapacity = std::max(
-            0.0,
-            state.run.arrivalOps.transferFuelCapacity);
-        state.run.arrivalOps.transferFuelRemaining = std::clamp(
-            state.run.arrivalOps.transferFuelRemaining,
-            0.0,
-            state.run.arrivalOps.transferFuelCapacity);
-    }
-    if (state.run.surfaceExpedition.active) {
-        SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    if (state.run.planetaryExpedition.active) {
+        PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
         expedition.rigFuelCapacity = std::max(0.0, expedition.rigFuelCapacity);
         expedition.rigFuel = std::clamp(
             expedition.rigFuel,
@@ -2979,31 +3132,31 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         expedition.transferFuelRecovered = std::max(0.0, expedition.transferFuelRecovered);
         expedition.expeditionPackFuel = std::max(0.0, expedition.expeditionPackFuel);
     }
-    if (state.run.surfaceExpedition.logEntries.size() > static_cast<std::size_t>(tuning::research::surfaceLogEntryLimit)) {
-        state.run.surfaceExpedition.logEntries.erase(
-            state.run.surfaceExpedition.logEntries.begin(),
-            state.run.surfaceExpedition.logEntries.end() - tuning::research::surfaceLogEntryLimit);
+    if (state.run.planetaryExpedition.logEntries.size() > static_cast<std::size_t>(tuning::research::surfaceLogEntryLimit)) {
+        state.run.planetaryExpedition.logEntries.erase(
+            state.run.planetaryExpedition.logEntries.begin(),
+            state.run.planetaryExpedition.logEntries.end() - tuning::research::surfaceLogEntryLimit);
     }
     state.screen = save.screen;
     if (state.screen == Screen::Upgrade && !state.run.refitEntitled) {
         state.screen = Screen::Hangar;
     }
-    if (state.screen == Screen::ArrivalOps && !state.run.arrivalOps.active) {
+    if (state.screen == Screen::ArrivalOps && !state.run.approach.active) {
         state.screen = Screen::Hangar;
     }
     if (state.screen == Screen::Research && save.researchProjectIds.empty()) {
         state.screen = Screen::Hangar;
     }
-    if (state.screen == Screen::SurfaceExpedition && !state.run.surfaceExpedition.active) {
+    if (state.screen == Screen::SurfaceExpedition && !state.run.planetaryExpedition.active) {
         state.screen = Screen::Hangar;
     }
     if (state.screen == Screen::SurfaceUpgrade &&
-        (!state.run.surfaceExpedition.runUpgradeOfferPending ||
-         state.run.surfaceExpedition.runUpgradeOfferCount <= 0)) {
-        state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
+        (!state.run.planetaryExpedition.runUpgradeOfferPending ||
+         state.run.planetaryExpedition.runUpgradeOfferCount <= 0)) {
+        state.screen = state.run.planetaryExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
     }
-    if (state.screen == Screen::Mining && (!state.run.surfaceExpedition.active || !state.run.mining.active)) {
-        state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
+    if (state.screen == Screen::Mining && (!state.run.planetaryExpedition.active || !state.run.mining.active)) {
+        state.screen = state.run.planetaryExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
         state.run.mining = {};
     }
     // Drone Ops also owns the standalone Prospector onboarding that follows a
@@ -3012,7 +3165,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     if (state.run.mining.active && static_cast<int>(state.run.mining.terrain.cells.size()) != state.run.mining.terrain.width * state.run.mining.terrain.height) {
         state.run.mining = {};
         if (state.screen == Screen::Mining) {
-            state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
+            state.screen = state.run.planetaryExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
         }
     }
     normalizeRestoredMiningHazards(state.run.mining);
@@ -3044,7 +3197,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.acknowledgedActivityBriefingIds = save.acknowledgedActivityBriefingIds;
     ensureDroneBayState(state, catalog);
     if (state.screen == Screen::DroneOps && !droneBayUnlocked(state)) {
-        state.screen = state.run.surfaceExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
+        state.screen = state.run.planetaryExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
     }
     state.meta.campaignMilestone = save.campaignMilestone;
     state.meta.chapter = save.chapter;
@@ -3058,6 +3211,10 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.storyBriefing = save.storyBriefing;
     state.meta.campaignIntroductionAcknowledged = save.campaignIntroductionAcknowledged;
     state.meta.straylightDiscoveryAcknowledged = save.straylightDiscoveryAcknowledged;
+    state.meta.crewLossPending = save.crewLossPending;
+    state.meta.pendingReplacementArchetypeId = save.pendingReplacementArchetypeId;
+    state.meta.replacementSequence = std::max(0, save.replacementSequence);
+    state.meta.shipHoldRank = std::clamp(save.shipHoldRank, 0, 3);
     if (state.screen == Screen::Navigation && !navigationAvailable(state)) {
         state.screen = Screen::Hangar;
     }
@@ -3094,7 +3251,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     if (hasRecordedLaunchHistory) {
         ui::briefings::acknowledge(state.meta.acknowledgedActivityBriefingIds, ui::briefings::launch);
     }
-    if (save.surfaceExpedition.miningRunUsed || save.mining.active) {
+    if (save.planetaryExpedition.miningRunUsed || save.mining.active) {
         ui::briefings::acknowledge(state.meta.acknowledgedActivityBriefingIds, ui::briefings::mining);
     }
     syncLaunchConfig(state, catalog);
@@ -3121,7 +3278,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         const MiningArenaRequest request = campaignMiningArenaRequest(
             state.meta.chapter,
             state.run.mining.destinationId,
-            state.run.surfaceExpedition.depth,
+            state.run.planetaryExpedition.depth,
             completedHostileSorties,
             state.seed,
             landingOrdinal);
@@ -3168,8 +3325,10 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
                 return savedAstronaut.id == astronaut.id;
             });
             if (found != save.crew.end()) {
-                astronaut.training = found->training;
-                astronaut.stress = found->stress;
+                astronaut.name = found->name;
+                astronaut.background = found->background;
+                astronaut.trait = found->trait;
+                astronaut.archetypeId = found->archetypeId;
                 astronaut.status = found->status;
             }
         }
@@ -3179,11 +3338,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
                 return existing.id == savedAstronaut.id;
             });
             if (found == state.run.crew.end()) {
-                Astronaut recruit = savedAstronaut;
-                recruit.name = text::isReplacementId(savedAstronaut.id) ? std::string(text::panel::messages::replacementCadet) : savedAstronaut.id;
-                recruit.background = std::string(text::panel::messages::restoredCrewBackground);
-                recruit.trait = std::string(text::panel::messages::generatedRecruitTrait);
-                state.run.crew.push_back(recruit);
+                state.run.crew.push_back(savedAstronaut);
             }
         }
     }
@@ -3207,8 +3362,6 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::frameId, save.frameId);
     writeField(out, save_schema::field::offerRerolls, save.offerRerollsThisExpedition);
     writeField(out, save_schema::field::repairOps, save.repairOpsThisExpedition);
-    writeField(out, save_schema::field::trainingOps, save.trainingOpsThisExpedition);
-    writeField(out, save_schema::field::restOps, save.restOpsThisExpedition);
     writeField(out, save_schema::field::shallowRecoveryStreak, save.shallowRecoveryStreak);
     writeField(out, save_schema::field::cleanShallowRecoveryStreak, save.cleanShallowRecoveryStreak);
     writeField(out, save_schema::field::nextLaunchFuelBoost, save.nextLaunchFuelBoost);
@@ -3227,6 +3380,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::routeTransitTarget, save.routeTransit.targetDestinationId);
     writeField(out, save_schema::field::routeTransitIntent, static_cast<int>(save.routeTransit.intent));
     writeField(out, save_schema::field::screen, screenToInt(save.screen));
+    writeField(out, save_schema::field::flightState, serializeFlightState(save.flight));
     writeField(out, save_schema::field::campaignMilestone, campaignMilestoneToInt(save.campaignMilestone));
     writeField(out, save_schema::field::chapter, gameChapterToInt(save.chapter));
     writeField(out, save_schema::field::arkCondition, arkConditionToInt(save.ark.condition));
@@ -3254,6 +3408,10 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::acknowledgedActivityBriefings, join(save.acknowledgedActivityBriefingIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::campaignIntroductionAcknowledged, save.campaignIntroductionAcknowledged ? 1 : 0);
     writeField(out, save_schema::field::straylightDiscoveryAcknowledged, save.straylightDiscoveryAcknowledged ? 1 : 0);
+    writeField(out, save_schema::field::crewLossPending, save.crewLossPending ? 1 : 0);
+    writeField(out, save_schema::field::pendingReplacementArchetypeId, save.pendingReplacementArchetypeId);
+    writeField(out, save_schema::field::replacementSequence, save.replacementSequence);
+    writeField(out, save_schema::field::shipHoldRank, save.shipHoldRank);
     writeField(out, save_schema::field::inventory, join(save.inventoryModuleIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::equipped, join(save.equippedModuleIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::ownedModules, join(save.ownedModuleIds, save_schema::listDelimiter));
@@ -3262,53 +3420,32 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::offerModules, join(save.offerModuleIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::offerCrewUpgrades, join(save.offerCrewUpgradeIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::researchProjects, join(save.researchProjectIds, save_schema::listDelimiter));
-    writeField(out, save_schema::field::arrivalActive, save.arrivalOps.active ? 1 : 0);
-    writeField(out, save_schema::field::arrivalDestination, save.arrivalOps.destinationId);
-    writeField(out, save_schema::field::arrivalTransferFuelRemaining, save.arrivalOps.transferFuelRemaining);
-    writeField(out, save_schema::field::arrivalTransferFuelCapacity, save.arrivalOps.transferFuelCapacity);
-    writeField(out, save_schema::field::arrivalApproachCommitment, static_cast<int>(save.arrivalOps.commitment));
-    writeField(out, save_schema::field::arrivalRouteId, save.arrivalOps.incomingRoute.routeLinkId);
-    writeField(out, save_schema::field::arrivalRouteOrigin, save.arrivalOps.incomingRoute.originDestinationId);
-    writeField(out, save_schema::field::arrivalRouteTarget, save.arrivalOps.incomingRoute.targetDestinationId);
-    writeField(out, save_schema::field::arrivalRouteIntent, static_cast<int>(save.arrivalOps.incomingRoute.intent));
-    writeField(out, save_schema::field::surfaceActive, save.surfaceExpedition.active ? 1 : 0);
-    writeField(out, save_schema::field::surfaceDestination, save.surfaceExpedition.destinationId);
-    writeField(out, save_schema::field::surfacePostSolarSystem, save.surfaceExpedition.postSolarSystemId);
-    writeField(out, save_schema::field::surfaceBody, save.surfaceExpedition.bodyId);
-    writeField(out, save_schema::field::surfaceSite, surfaceSiteProfileToInt(save.surfaceExpedition.siteProfile));
-    writeField(out, save_schema::field::surfaceSupply, save.surfaceExpedition.supply);
-    writeField(out, save_schema::field::surfaceRigFuel, save.surfaceExpedition.rigFuel);
-    writeField(out, save_schema::field::surfaceRigFuelCapacity, save.surfaceExpedition.rigFuelCapacity);
-    writeField(out, save_schema::field::surfaceTransferFuelRecovered, save.surfaceExpedition.transferFuelRecovered);
-    writeField(out, save_schema::field::surfaceExpeditionPackFuel, save.surfaceExpedition.expeditionPackFuel);
-    writeField(out, save_schema::field::surfaceCargo, save.surfaceExpedition.cargo);
-    writeField(out, save_schema::field::surfaceHazard, save.surfaceExpedition.hazard);
-    writeField(out, save_schema::field::surfaceDepth, save.surfaceExpedition.depth);
-    writeField(out, save_schema::field::surfaceMaterials, serializeMaterials(save.surfaceExpedition.temporaryMaterials));
-    writeField(out, save_schema::field::surfaceArtifacts, serializeArtifacts(save.surfaceExpedition.temporaryArtifacts));
-    writeField(out, save_schema::field::surfaceProspectMaterials, serializeMaterials(save.surfaceExpedition.prospectMaterials));
-    writeField(out, save_schema::field::surfaceProspectArtifacts, save.surfaceExpedition.prospectArtifacts);
-    writeField(out, save_schema::field::surfaceDepthProspects, serializeDepthProspects(save.surfaceExpedition.depthProspects));
-    writeField(out, save_schema::field::surfaceEnemies, save.surfaceExpedition.enemyEncountersEnabled ? 1 : 0);
-    writeField(out, save_schema::field::surfaceMiningPrepared, save.surfaceExpedition.miningSitePrepared ? 1 : 0);
-    writeField(out, save_schema::field::surfaceMiningUsed, save.surfaceExpedition.miningRunUsed ? 1 : 0);
-    writeField(out, save_schema::field::surfacePendingScenario, save.surfaceExpedition.pendingScenarioId);
-    writeField(out, save_schema::field::surfacePendingScenarioStep, save.surfaceExpedition.pendingScenarioStepId);
-    writeField(out, save_schema::field::surfacePendingMiningSite, save.surfaceExpedition.pendingMiningSiteDefinitionId);
-    writeField(out, save_schema::field::surfaceBankedMiningArena, serializeSurfaceBankedMiningArena(save.surfaceExpedition));
-    writeField(out, save_schema::field::surfaceLog, join(save.surfaceExpedition.logEntries, save_schema::textListDelimiter));
-    writeField(out, save_schema::field::expeditionLevel, save.surfaceExpedition.expeditionLevel);
-    writeField(out, save_schema::field::expeditionExperience, save.surfaceExpedition.expeditionExperience);
-    writeField(out, save_schema::field::pendingRunUpgradeChoices, save.surfaceExpedition.pendingRunUpgradeChoices);
+    writeField(out, save_schema::field::surfaceActive, save.planetaryExpedition.active ? 1 : 0);
+    writeField(out, save_schema::field::surfaceDestination, save.planetaryExpedition.destinationId);
+    writeField(out, save_schema::field::surfacePostSolarSystem, save.planetaryExpedition.postSolarSystemId);
+    writeField(out, save_schema::field::surfaceBody, save.planetaryExpedition.bodyId);
+    writeField(out, save_schema::field::surfaceSite, surfaceSiteProfileToInt(save.planetaryExpedition.siteProfile));
+    writeField(out, save_schema::field::surfaceTransferFuelRecovered, save.planetaryExpedition.transferFuelRecovered);
+    writeField(out, save_schema::field::planetaryExpeditionPackFuel, save.planetaryExpedition.expeditionPackFuel);
+    writeField(out, save_schema::field::surfaceEnemies, save.planetaryExpedition.enemyEncountersEnabled ? 1 : 0);
+    writeField(out, save_schema::field::surfaceMiningPrepared, save.planetaryExpedition.miningSitePrepared ? 1 : 0);
+    writeField(out, save_schema::field::surfacePendingScenario, save.planetaryExpedition.pendingScenarioId);
+    writeField(out, save_schema::field::surfacePendingScenarioStep, save.planetaryExpedition.pendingScenarioStepId);
+    writeField(out, save_schema::field::surfacePendingMiningSite, save.planetaryExpedition.pendingMiningSiteDefinitionId);
+    writeField(out, save_schema::field::surfaceBankedMiningArena, serializeSurfaceBankedMiningArena(save.planetaryExpedition));
+    writeField(out, save_schema::field::surfaceLog, join(save.planetaryExpedition.logEntries, save_schema::textListDelimiter));
+    writeField(out, save_schema::field::expeditionLevel, save.planetaryExpedition.expeditionLevel);
+    writeField(out, save_schema::field::expeditionExperience, save.planetaryExpedition.expeditionExperience);
+    writeField(out, save_schema::field::pendingRunUpgradeChoices, save.planetaryExpedition.pendingRunUpgradeChoices);
     writeField(out, save_schema::field::runUpgradeOffers, serializeRunUpgradeOffers(
-        save.surfaceExpedition.runUpgradeOffers,
-        save.surfaceExpedition.runUpgradeOfferCount));
-    writeField(out, save_schema::field::runUpgradeOfferCount, save.surfaceExpedition.runUpgradeOfferCount);
-    writeField(out, save_schema::field::runUpgradeOfferPending, save.surfaceExpedition.runUpgradeOfferPending ? 1 : 0);
-    writeField(out, save_schema::field::runUpgradeReturnScreen, screenToInt(save.surfaceExpedition.runUpgradeReturnScreen));
-    writeField(out, save_schema::field::runRigUpgradeRanks, serializeRunRigUpgradeRanks(save.surfaceExpedition.runRigUpgradeRanks));
-    writeField(out, save_schema::field::runDroneRanks, serializeRunDroneRanks(save.surfaceExpedition.runDroneRanks));
-    writeField(out, save_schema::field::selectedSynergyIds, join(save.surfaceExpedition.selectedSynergyIds, save_schema::listDelimiter));
+        save.planetaryExpedition.runUpgradeOffers,
+        save.planetaryExpedition.runUpgradeOfferCount));
+    writeField(out, save_schema::field::runUpgradeOfferCount, save.planetaryExpedition.runUpgradeOfferCount);
+    writeField(out, save_schema::field::runUpgradeOfferPending, save.planetaryExpedition.runUpgradeOfferPending ? 1 : 0);
+    writeField(out, save_schema::field::runUpgradeReturnScreen, screenToInt(save.planetaryExpedition.runUpgradeReturnScreen));
+    writeField(out, save_schema::field::runRigUpgradeRanks, serializeRunRigUpgradeRanks(save.planetaryExpedition.runRigUpgradeRanks));
+    writeField(out, save_schema::field::runDroneRanks, serializeRunDroneRanks(save.planetaryExpedition.runDroneRanks));
+    writeField(out, save_schema::field::selectedSynergyIds, join(save.planetaryExpedition.selectedSynergyIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::droneModuleAssignments, serializeDroneModuleAssignments(save.droneModuleAssignments));
     writeField(out, save_schema::field::droneModuleRuntime, serializeDroneModuleRuntime(save.droneModuleRuntime));
     writeField(out, save_schema::field::scannerCooldownSeconds, save.scannerCooldownSeconds);
@@ -3339,10 +3476,11 @@ std::string serializeSaveData(const SaveData& save)
             std::to_string(std::max(0.0, save.mining.siteBaselineOxygenSeconds)) + "^" +
             std::to_string(static_cast<int>(save.mining.enemyTheme)));
     writeField(out, save_schema::field::miningElapsed, save.mining.elapsedSeconds);
-    writeField(out, save_schema::field::miningOxygen, save.mining.oxygenSeconds);
+    writeField(out, save_schema::field::miningRigFuelTank, serializeResourceTank(save.mining.rigFuel));
+    writeField(out, save_schema::field::miningRigOxygenTank, serializeResourceTank(save.mining.rigOxygen));
+    writeField(out, save_schema::field::miningSuitOxygenTank, serializeResourceTank(save.mining.suitOxygen));
+    writeField(out, save_schema::field::miningNextLooseObjectId, save.mining.nextLooseObjectId);
     writeField(out, save_schema::field::miningDroneHealth, save.mining.droneHealth);
-    writeField(out, save_schema::field::miningFuelCycle, save.mining.fuelCycleProgress);
-    writeField(out, save_schema::field::miningFuelSpent, save.mining.fuelSpent);
     writeField(out, save_schema::field::miningDrone, serializePair(save.mining.droneX, save.mining.droneY));
     writeField(out, save_schema::field::miningRigState, serializeMiningRigState(save.mining));
     writeField(out, save_schema::field::miningOperatorState, serializeMiningOperatorState(save.mining));
@@ -3366,7 +3504,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningCellsBroken, save.mining.cellsBroken);
     writeField(out, save_schema::field::miningEnemies, serializeMiningEnemies(save.mining.enemies));
     writeField(out, save_schema::field::miningMiniDrones, serializeMiningMiniDrones(save.mining.miniDrones));
-    writeField(out, save_schema::field::miningLooseChunks, serializeMiningLooseChunks(save.mining.looseChunks));
+    writeField(out, save_schema::field::miningLooseObjects, serializeMiningLooseObjects(save.mining.looseObjects));
     writeField(
         out,
         save_schema::field::miningCombat,
@@ -3480,36 +3618,6 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
         if (parsePostSolarSaveField(save, key, value)) {
             continue;
         }
-        if (key == save_schema::field::arrivalTransferFuelRemaining) {
-            save.arrivalOps.transferFuelRemaining = parseDouble(value, save.arrivalOps.transferFuelRemaining);
-            continue;
-        }
-        if (key == save_schema::field::arrivalTransferFuelCapacity) {
-            save.arrivalOps.transferFuelCapacity = parseDouble(value, save.arrivalOps.transferFuelCapacity);
-            continue;
-        }
-        if (key == save_schema::field::arrivalApproachCommitment) {
-            save.arrivalOps.commitment = parseInt(value, 0) == static_cast<int>(ApproachCommitment::OrbitCaptured)
-                ? ApproachCommitment::OrbitCaptured
-                : ApproachCommitment::Uncommitted;
-            continue;
-        }
-        if (key == save_schema::field::arrivalRouteId) {
-            save.arrivalOps.incomingRoute.routeLinkId = std::string(value);
-            continue;
-        }
-        if (key == save_schema::field::arrivalRouteOrigin) {
-            save.arrivalOps.incomingRoute.originDestinationId = std::string(value);
-            continue;
-        }
-        if (key == save_schema::field::arrivalRouteTarget) {
-            save.arrivalOps.incomingRoute.targetDestinationId = std::string(value);
-            continue;
-        }
-        if (key == save_schema::field::arrivalRouteIntent) {
-            save.arrivalOps.incomingRoute.intent = static_cast<RouteTransitIntent>(std::clamp(parseInt(value, 0), 0, 3));
-            continue;
-        }
         if (key == save_schema::field::routeTransitId) {
             save.routeTransit.routeLinkId = std::string(value);
             continue;
@@ -3527,19 +3635,19 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             continue;
         }
         if (key == save_schema::field::surfaceRigFuel) {
-            save.surfaceExpedition.rigFuel = parseDouble(value, save.surfaceExpedition.rigFuel);
+            save.planetaryExpedition.rigFuel = parseDouble(value, save.planetaryExpedition.rigFuel);
             continue;
         }
         if (key == save_schema::field::surfaceRigFuelCapacity) {
-            save.surfaceExpedition.rigFuelCapacity = parseDouble(value, save.surfaceExpedition.rigFuelCapacity);
+            save.planetaryExpedition.rigFuelCapacity = parseDouble(value, save.planetaryExpedition.rigFuelCapacity);
             continue;
         }
         if (key == save_schema::field::surfaceTransferFuelRecovered) {
-            save.surfaceExpedition.transferFuelRecovered = parseDouble(value, save.surfaceExpedition.transferFuelRecovered);
+            save.planetaryExpedition.transferFuelRecovered = parseDouble(value, save.planetaryExpedition.transferFuelRecovered);
             continue;
         }
-        if (key == save_schema::field::surfaceExpeditionPackFuel) {
-            save.surfaceExpedition.expeditionPackFuel = parseDouble(value, save.surfaceExpedition.expeditionPackFuel);
+        if (key == save_schema::field::planetaryExpeditionPackFuel) {
+            save.planetaryExpedition.expeditionPackFuel = parseDouble(value, save.planetaryExpedition.expeditionPackFuel);
             continue;
         }
         if (key == surfaceDepthSaveField::surveyArrayRank) {
@@ -3591,10 +3699,6 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.offerRerollsThisExpedition = parseInt(value, save.offerRerollsThisExpedition);
         } else if (key == save_schema::field::repairOps) {
             save.repairOpsThisExpedition = parseInt(value, save.repairOpsThisExpedition);
-        } else if (key == save_schema::field::trainingOps) {
-            save.trainingOpsThisExpedition = parseInt(value, save.trainingOpsThisExpedition);
-        } else if (key == save_schema::field::restOps) {
-            save.restOpsThisExpedition = parseInt(value, save.restOpsThisExpedition);
         } else if (key == save_schema::field::shallowRecoveryStreak) {
             save.shallowRecoveryStreak = parseInt(value, save.shallowRecoveryStreak);
         } else if (key == save_schema::field::cleanShallowRecoveryStreak) {
@@ -3626,6 +3730,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
                 tuning::launch::pilotingCourseLost);
         } else if (key == save_schema::field::screen) {
             save.screen = screenFromInt(parseInt(value, screenToInt(save.screen)));
+        } else if (key == save_schema::field::flightState) {
+            save.flight = parseFlightState(value);
         } else if (key == save_schema::field::campaignMilestone) {
             save.campaignMilestone = campaignMilestoneFromInt(parseInt(value, campaignMilestoneToInt(save.campaignMilestone)));
         } else if (key == save_schema::field::chapter) {
@@ -3690,52 +3796,44 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.offerCrewUpgradeIds = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::researchProjects) {
             save.researchProjectIds = split(value, save_schema::listDelimiter);
-        } else if (key == save_schema::field::arrivalActive) {
-            save.arrivalOps.active = parseInt(value, 0) != 0;
-        } else if (key == save_schema::field::arrivalDestination) {
-            save.arrivalOps.destinationId = std::string(value);
         } else if (key == save_schema::field::surfaceActive) {
-            save.surfaceExpedition.active = parseInt(value, 0) != 0;
+            save.planetaryExpedition.active = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::surfaceDestination) {
-            save.surfaceExpedition.destinationId = std::string(value);
+            save.planetaryExpedition.destinationId = std::string(value);
         } else if (key == save_schema::field::surfaceSite) {
-            save.surfaceExpedition.siteProfile = surfaceSiteProfileFromInt(parseInt(value, surfaceSiteProfileToInt(save.surfaceExpedition.siteProfile)));
+            save.planetaryExpedition.siteProfile = surfaceSiteProfileFromInt(parseInt(value, surfaceSiteProfileToInt(save.planetaryExpedition.siteProfile)));
         } else if (key == save_schema::field::surfaceSupply) {
-            save.surfaceExpedition.supply = parseInt(value, save.surfaceExpedition.supply);
-        } else if (key == save_schema::field::surfaceSharedFuel) {
-            save.surfaceExpedition.rigFuel = parseDouble(value, save.surfaceExpedition.rigFuel);
-        } else if (key == save_schema::field::surfaceSharedFuelCapacity) {
-            save.surfaceExpedition.rigFuelCapacity = parseDouble(value, save.surfaceExpedition.rigFuelCapacity);
+            save.planetaryExpedition.supply = parseInt(value, save.planetaryExpedition.supply);
         } else if (key == save_schema::field::surfaceCargo) {
-            save.surfaceExpedition.cargo = parseInt(value, save.surfaceExpedition.cargo);
+            save.planetaryExpedition.cargo = parseInt(value, save.planetaryExpedition.cargo);
         } else if (key == save_schema::field::surfaceHazard) {
-            save.surfaceExpedition.hazard = parseDouble(value, save.surfaceExpedition.hazard);
+            save.planetaryExpedition.hazard = parseDouble(value, save.planetaryExpedition.hazard);
         } else if (key == save_schema::field::surfaceDepth) {
-            save.surfaceExpedition.depth = parseInt(value, save.surfaceExpedition.depth);
+            save.planetaryExpedition.depth = parseInt(value, save.planetaryExpedition.depth);
         } else if (key == save_schema::field::surfaceMaterials) {
-            save.surfaceExpedition.temporaryMaterials = parseMaterials(value);
+            save.planetaryExpedition.temporaryMaterials = parseMaterials(value);
         } else if (key == save_schema::field::surfaceArtifacts) {
-            save.surfaceExpedition.temporaryArtifacts = parseArtifacts(value);
+            save.planetaryExpedition.temporaryArtifacts = parseArtifacts(value);
         } else if (key == save_schema::field::surfaceProspectMaterials) {
-            save.surfaceExpedition.prospectMaterials = parseMaterials(value);
+            save.planetaryExpedition.prospectMaterials = parseMaterials(value);
         } else if (key == save_schema::field::surfaceProspectArtifacts) {
-            save.surfaceExpedition.prospectArtifacts = parseInt(value, save.surfaceExpedition.prospectArtifacts);
+            save.planetaryExpedition.prospectArtifacts = parseInt(value, save.planetaryExpedition.prospectArtifacts);
         } else if (key == save_schema::field::surfaceDepthProspects) {
-            save.surfaceExpedition.depthProspects = parseDepthProspects(value);
+            save.planetaryExpedition.depthProspects = parseDepthProspects(value);
         } else if (key == save_schema::field::surfaceEnemies) {
-            save.surfaceExpedition.enemyEncountersEnabled = parseInt(value, 0) != 0;
+            save.planetaryExpedition.enemyEncountersEnabled = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::surfaceMiningPrepared) {
-            save.surfaceExpedition.miningSitePrepared = parseInt(value, 0) != 0;
+            save.planetaryExpedition.miningSitePrepared = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::surfaceMiningUsed) {
-            save.surfaceExpedition.miningRunUsed = parseInt(value, 0) != 0;
+            save.planetaryExpedition.miningRunUsed = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::surfacePendingScenario) {
-            save.surfaceExpedition.pendingScenarioId = std::string(value);
+            save.planetaryExpedition.pendingScenarioId = std::string(value);
         } else if (key == save_schema::field::surfacePendingScenarioStep) {
-            save.surfaceExpedition.pendingScenarioStepId = std::string(value);
+            save.planetaryExpedition.pendingScenarioStepId = std::string(value);
         } else if (key == save_schema::field::surfacePendingMiningSite) {
-            save.surfaceExpedition.pendingMiningSiteDefinitionId = std::string(value);
+            save.planetaryExpedition.pendingMiningSiteDefinitionId = std::string(value);
         } else if (key == save_schema::field::surfaceLog) {
-            save.surfaceExpedition.logEntries = split(value, save_schema::textListDelimiter);
+            save.planetaryExpedition.logEntries = split(value, save_schema::textListDelimiter);
         } else if (key == save_schema::field::miningActive) {
             save.mining.active = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::miningDestination) {
@@ -3766,14 +3864,16 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             }
         } else if (key == save_schema::field::miningElapsed) {
             save.mining.elapsedSeconds = parseDouble(value, save.mining.elapsedSeconds);
-        } else if (key == save_schema::field::miningOxygen) {
-            save.mining.oxygenSeconds = parseDouble(value, save.mining.oxygenSeconds);
+        } else if (key == save_schema::field::miningRigFuelTank) {
+            parseResourceTank(value, save.mining.rigFuel);
+        } else if (key == save_schema::field::miningRigOxygenTank) {
+            parseResourceTank(value, save.mining.rigOxygen);
+        } else if (key == save_schema::field::miningSuitOxygenTank) {
+            parseResourceTank(value, save.mining.suitOxygen);
+        } else if (key == save_schema::field::miningNextLooseObjectId) {
+            save.mining.nextLooseObjectId = std::max<std::uint64_t>(1, parseU64(value, 1));
         } else if (key == save_schema::field::miningDroneHealth) {
             save.mining.droneHealth = std::clamp(parseDouble(value, save.mining.droneHealth), 0.0, 1.0);
-        } else if (key == save_schema::field::miningFuelCycle) {
-            save.mining.fuelCycleProgress = std::clamp(parseDouble(value, save.mining.fuelCycleProgress), 0.0, 1.0);
-        } else if (key == save_schema::field::miningFuelSpent) {
-            save.mining.fuelSpent = parseInt(value, save.mining.fuelSpent);
         } else if (key == save_schema::field::miningDrone) {
             parsePair(value, save.mining.droneX, save.mining.droneY);
         } else if (key == save_schema::field::miningRigState) {
@@ -3835,8 +3935,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.mining.enemies = parseMiningEnemies(value);
         } else if (key == save_schema::field::miningMiniDrones) {
             save.mining.miniDrones = parseMiningMiniDrones(value);
-        } else if (key == save_schema::field::miningLooseChunks) {
-            save.mining.looseChunks = parseMiningLooseChunks(value);
+        } else if (key == save_schema::field::miningLooseObjects) {
+            save.mining.looseObjects = parseMiningLooseObjects(value);
         } else if (key == save_schema::field::miningCombat) {
             const std::vector<std::string> fields = split(value, save_schema::crewFieldDelimiter);
             if (!fields.empty()) {
@@ -3874,6 +3974,7 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             parseMiningTerrainSize(value, save.mining.terrain);
         } else if (key == save_schema::field::miningTerrainCells) {
             parseMiningCells(value, save.mining.terrain);
+        } else if (parseCurrentCampaignField(save, key, value)) {
         } else if (parseInventoryAndHistoryField(save, key, value)) {
         }
     }

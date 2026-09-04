@@ -13,17 +13,17 @@
 
 namespace rocket {
 
-inline std::string crewStressSummary(const Astronaut* astronaut)
+inline std::string crewStatusSummary(const Astronaut* astronaut)
 {
     if (astronaut == nullptr) {
         return std::string(text::panel::noActiveCrew);
     }
-    return display::wholePercent(astronaut->stress);
+    return std::string(toString(astronaut->status));
 }
 
 inline const Destination& panelDisplayDestination(const GameState& state, const ContentCatalog& catalog, const PreparedLaunch& activeLaunch)
 {
-    if (state.screen == Screen::Launch) {
+    if (state.screen == Screen::Flight) {
         if (const Destination* activeDestination = catalog.findDestination(activeLaunch.config.destinationId)) {
             return *activeDestination;
         }
@@ -32,13 +32,13 @@ inline const Destination& panelDisplayDestination(const GameState& state, const 
         if (const Destination* arrivalDestination = catalog.findDestination(state.lastOutcome.destinationId)) {
             return *arrivalDestination;
         }
-        if (state.screen == Screen::Flyby && !state.run.flyby.destinationId.empty()) {
-            if (const Destination* flybyDestination = catalog.findDestination(state.run.flyby.destinationId)) {
+        if (state.screen == Screen::Flyby && !state.run.approach.flyby.destinationId.empty()) {
+            if (const Destination* flybyDestination = catalog.findDestination(state.run.approach.flyby.destinationId)) {
                 return *flybyDestination;
             }
         }
-        if (state.screen == Screen::Orbit && !state.run.orbit.destinationId.empty()) {
-            if (const Destination* orbitDestination = catalog.findDestination(state.run.orbit.destinationId)) {
+        if (state.screen == Screen::Orbit && !state.run.approach.orbit.destinationId.empty()) {
+            if (const Destination* orbitDestination = catalog.findDestination(state.run.approach.orbit.destinationId)) {
                 return *orbitDestination;
             }
         }
@@ -75,20 +75,20 @@ inline std::vector<PanelMetricPresentation> panelHeaderMetrics(
 {
     std::vector<PanelMetricPresentation> metrics;
     const Destination& displayDestination = panelDisplayDestination(state, catalog, activeLaunch);
-    const bool transferLaunch = state.screen == Screen::Launch && activeLaunch.config.frontierTransfer;
+    const bool transferLaunch = state.screen == Screen::Flight && activeLaunch.config.frontierTransfer;
     const Astronaut* astronaut = activeAstronaut(state);
 
     metrics.push_back(panelMetric(text::labels::missionCredits, display::money(state.run.credits)));
     metrics.push_back(panelMetric(text::labels::chapter, chapterLabel(state.meta.chapter)));
     metrics.push_back(panelMetric(text::labels::hullDamage, display::wholePercent(state.run.shipDamage)));
     metrics.push_back(panelMetric(transferLaunch ? text::labels::transferTarget : text::labels::currentFrontier, displayDestination.name));
-    if (state.screen == Screen::Launch) {
+    if (state.screen == Screen::Flight) {
         metrics.push_back(panelMetric("Launch lesson", std::string(toString(flightModel.config.missionKind))));
     }
-    metrics.push_back(panelMetric(text::labels::crewStress, crewStressSummary(astronaut)));
-    const double pendingFuelSavings = state.screen == Screen::Launch ? activeLaunch.slingshotFuelSavings : state.run.nextLaunchFuelBoost;
-    const double pendingSpeedBoost = state.screen == Screen::Launch ? activeLaunch.slingshotSpeedBoost : state.run.nextLaunchSpeedBoost;
-    const double pendingInstability = state.screen == Screen::Launch
+    metrics.push_back(panelMetric("Crew", crewStatusSummary(astronaut)));
+    const double pendingFuelSavings = state.screen == Screen::Flight ? activeLaunch.slingshotFuelSavings : state.run.nextLaunchFuelBoost;
+    const double pendingSpeedBoost = state.screen == Screen::Flight ? activeLaunch.slingshotSpeedBoost : state.run.nextLaunchSpeedBoost;
+    const double pendingInstability = state.screen == Screen::Flight
         ? activeLaunch.slingshotInstabilityPenalty
         : state.run.nextLaunchInstabilityPenalty;
     if (pendingFuelSavings > 0.0 || pendingSpeedBoost > 0.0 || pendingInstability > 0.0) {

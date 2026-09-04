@@ -25,6 +25,7 @@ public:
 
 private:
     void dispatchPendingHaptic();
+    void dispatchPendingAudio();
     void frameWithDelta(std::optional<double> fixedDeltaSeconds);
     void refreshPreferences(bool force);
     void resetPerformanceSamples();

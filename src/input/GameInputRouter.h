@@ -18,9 +18,9 @@ enum class GameInputAction : std::size_t {
     StartOrContinue,
     ReturnHome,
     ToggleEngines,
+    DeploySurfaceTeam,
+    DepartSurfaceUndeployed,
     Abort,
-    PrimarySurfaceAction,
-    BankSurfaceAction,
     MiningScan,
     MiningTether,
     MiningStow,
@@ -160,47 +160,12 @@ public:
             }
             break;
 
-        case InputContext::FlybyActive:
-        case InputContext::OrbitActive:
-            enterUiFocusFromDpad(frame, result);
-            result.moveX = frame.leftX;
-            result.moveY = preferences.invertFlightY ? frame.leftY : -frame.leftY;
+        case InputContext::SurfaceArrival:
+            if (frame.wasPressed(ControllerButton::South)) {
+                add(GameInputAction::DeploySurfaceTeam);
+            }
             if (holdCrossed(frame, ControllerButton::East, 0.45)) {
-                add(GameInputAction::Abort);
-            }
-            break;
-
-        case InputContext::FlybyComplete:
-        case InputContext::OrbitComplete:
-            if (frame.wasPressed(ControllerButton::South)) {
-                add(GameInputAction::StartOrContinue);
-            }
-            break;
-
-        case InputContext::SurfaceScan:
-        case InputContext::SurfacePush:
-            result.navigation = frame.navigation;
-            result.scroll = frame.rightY;
-            if (frame.navigation) {
-                contextualUiFocusActive_ = true;
-            }
-            if (frame.wasPressed(ControllerButton::South)) {
-                add(contextualUiFocusActive_
-                    ? GameInputAction::ActivateFocused
-                    : GameInputAction::PrimarySurfaceAction);
-            }
-            if (contextualUiFocusActive_ && frame.wasPressed(ControllerButton::East)) {
-                add(GameInputAction::CancelFocused);
-                contextualUiFocusActive_ = false;
-                holdTriggered_.set(static_cast<std::size_t>(ControllerButton::East));
-            } else if (!contextualUiFocusActive_ && holdCrossed(frame, ControllerButton::East, 0.45)) {
-                add(GameInputAction::Abort);
-            } else if (!contextualUiFocusActive_
-                && frame.wasReleased(ControllerButton::East)
-                && !holdTriggeredBeforeUpdate.test(static_cast<std::size_t>(ControllerButton::East))) {
-                // East is the normal backout control. A short press safely
-                // banks progress; only crossing the hold threshold aborts.
-                add(GameInputAction::BankSurfaceAction);
+                add(GameInputAction::DepartSurfaceUndeployed);
             }
             break;
 

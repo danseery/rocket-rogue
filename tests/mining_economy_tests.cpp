@@ -23,18 +23,19 @@ using namespace rocket;
 void require(bool condition, const std::string& message)
 {
     if (!condition) {
+        std::cerr << "Mining economy test failure: " << message << '\n';
         throw std::runtime_error(message);
     }
 }
 
 void prepareSurface(GameState& state, std::string destinationId)
 {
-    state.run.surfaceExpedition = {};
-    state.run.surfaceExpedition.active = true;
-    state.run.surfaceExpedition.destinationId = std::move(destinationId);
-    state.run.surfaceExpedition.rigFuel = 4.0;
-    state.run.surfaceExpedition.rigFuelCapacity = 4.0;
-    state.run.surfaceExpedition.miningSitePrepared = true;
+    state.run.planetaryExpedition = {};
+    state.run.planetaryExpedition.active = true;
+    state.run.planetaryExpedition.destinationId = std::move(destinationId);
+    state.run.planetaryExpedition.rigFuel = 4.0;
+    state.run.planetaryExpedition.rigFuelCapacity = 4.0;
+    state.run.planetaryExpedition.miningSitePrepared = true;
     state.screen = Screen::SurfaceExpedition;
 }
 
@@ -46,8 +47,8 @@ struct ExpeditionExperienceSnapshot {
 ExpeditionExperienceSnapshot snapshotExpeditionExperience(const GameState& state)
 {
     return {
-        state.run.surfaceExpedition.expeditionLevel,
-        state.run.surfaceExpedition.expeditionExperience
+        state.run.planetaryExpedition.expeditionLevel,
+        state.run.planetaryExpedition.expeditionExperience
     };
 }
 
@@ -55,7 +56,7 @@ double expeditionExperienceEarnedSince(
     const ExpeditionExperienceSnapshot& before,
     const GameState& state)
 {
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     double earned = expedition.expeditionExperience - before.progress;
     for (int level = before.level; level < expedition.expeditionLevel; ++level) {
         earned += expeditionExperienceThreshold(level);
@@ -236,11 +237,30 @@ void richPayoutsShareOneLedger()
 
     breakRareCell();
     breakRareCell();
-    const int rareCollected = mining.temporaryMaterials.rare + mining.stowedMaterials.rare;
-    const int commonCollected = mining.temporaryMaterials.common + mining.stowedMaterials.common;
-    require(rareCollected == 1 && mining.richRewardsAwarded.rare == 1,
+    int looseRare = 0;
+    int looseCommon = 0;
+    for (const MiningLooseObject& object : mining.looseObjects) {
+        if (!object.active || object.kind != MiningLooseObjectKind::Material) {
+            continue;
+        }
+        looseRare += object.material == MiningCellMaterial::RareOre ? 1 : 0;
+        looseCommon += object.material == MiningCellMaterial::CommonOre ? 1 : 0;
+    }
+    require(looseRare == 1 && mining.richRewardsAwarded.rare == 1,
         "all mining reward paths should stop rare payouts at the shared cap");
-    require(commonCollected >= 1, "rich payout overflow should retain common salvage value");
+    require(looseCommon >= 1, "rich payout overflow should retain common salvage value");
+    require(mining.temporaryMaterials.common == materialsBefore.common &&
+            mining.temporaryMaterials.rare == materialsBefore.rare,
+        "fractured ore must remain physical until the rig intake reaches it");
+
+    for (MiningLooseObject& object : mining.looseObjects) {
+        if (object.active && object.kind == MiningLooseObjectKind::Material) {
+            object.x = mining.droneX;
+            object.y = mining.droneY;
+            object.pickupDelaySeconds = 0.0;
+        }
+    }
+    updateMiningRun(state, catalog, 0.08);
     const MaterialInventory acquired {
         mining.temporaryMaterials.common - materialsBefore.common,
         mining.temporaryMaterials.rare - materialsBefore.rare,
@@ -251,7 +271,149 @@ void richPayoutsShareOneLedger()
             expeditionExperienceEarnedSince(experienceBefore, state)
             - static_cast<double>(miningMaterialExperience(acquired)))
             < 0.000001,
-        "direct rig ore should award XP exactly when it enters the rig manifest");
+        "physical ore should award XP exactly when it enters the rig manifest");
+}
+
+void lunarContractActivatesScannerLedEvaArtifactInSameRun()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 220);
+    require(performScenarioAction(
+                state,
+                catalog,
+                content::scenario::lunarProspector,
+                "briefing",
+                ScenarioActionKind::AcknowledgeBriefing)
+                .applied,
+        "the lunar contract briefing should be acknowledgeable");
+    prepareSurface(state, content::destination::moon);
+    state.run.planetaryExpedition.rigFuel = tuning::research::expeditionRigPackFuel;
+    state.run.planetaryExpedition.rigFuelCapacity = tuning::research::expeditionRigPackFuel;
+    require(startMiningRun(state, catalog, {MiningAct::ActOne, 1, 0x20ULL}, true).applied,
+        "the first lunar mining run should start");
+
+    MiningRunState& mining = state.run.mining;
+    const MiningArenaRules firstMoonRules = resolveMiningArenaRules({
+        mining.arenaMetadata.act,
+        mining.arenaMetadata.difficulty,
+        mining.arenaMetadata.seed});
+    require(firstMoonRules.mechanics.oxygenAndFuel &&
+            !firstMoonRules.mechanics.drillHeat &&
+            std::abs(mining.rigFuel.capacity - tuning::research::expeditionRigPackFuel) < 0.000001,
+        "the first Moon expedition should start with its three-fuel allotment and live oxygen, without heat");
+    const int availableCommonOre = static_cast<int>(std::count_if(
+        mining.terrain.cells.begin(),
+        mining.terrain.cells.end(),
+        [](const MiningCell& cell) { return cell.material == MiningCellMaterial::CommonOre; }));
+    require(availableCommonOre >= tuning::research::prospectorCommonOreGoal,
+        "the authored first Moon terrain should contain enough physical Common Ore for one intended haul");
+    mining.droneX = mining.returnZoneX;
+    mining.droneY = mining.returnZoneY;
+    mining.temporaryMaterials.common = tuning::research::prospectorCommonOreGoal;
+    mining.cargo = tuning::research::prospectorCommonOreGoal;
+    require(bankMiningPayloadAtShip(state, catalog),
+        "twenty lunar ore should transfer directly into contract allocation");
+    require(state.meta.materials.common == 0,
+        "lunar contract ore should not consume the starting twelve-mass ship hold");
+    require(!hasUnlock(state.meta, content::unlock::routeMars),
+        "ore delivery alone must not unlock Mars");
+
+    updateMiningRun(state, catalog, 0.01);
+    require(mining.miningSiteDefinitionId == content::miningSite::lunarAnomalyCrevice &&
+            mining.gate.siteId == content::miningSite::lunarAnomalyCrevice &&
+            mining.artifact.id == content::protectedObjective::lunarSignalArtifact,
+        "the twentieth banked ore should activate the authored anomaly in the same mining run");
+    int suitOnlyCells = 0;
+    for (const MiningCell& cell : mining.terrain.cells) {
+        suitOnlyCells += cell.suitOnlyPassage ? 1 : 0;
+    }
+    require(suitOnlyCells >= 6 && !mining.artifact.revealed,
+        "the lunar artifact should begin behind a persistent suit-only crevice");
+    pulseMiningScanner(state, catalog);
+    require(mining.artifact.revealed,
+        "one contextual scanner pulse should reveal the lunar artifact bearing");
+
+    mining.depthZone = mining.entryDepthZone;
+    mining.artifact.state = MiningArtifactState::Loose;
+    mining.artifact.tethered = true;
+    mining.artifact.x = mining.returnZoneX;
+    mining.artifact.y = mining.returnZoneY;
+    updateMiningRun(state, catalog, 0.01);
+    require(mining.artifact.state == MiningArtifactState::Delivered &&
+            mining.stowedArtifacts.size() == 1,
+        "towing the anomaly into the ship capture field should secure exactly one physical artifact");
+    require(scenarioStepState(
+                state,
+                catalog,
+                content::scenario::lunarProspector,
+                "anomaly") == ScenarioStepState::ReadyToClaim,
+        "physical artifact recovery should advance the anomaly to an explicit claim");
+    require(!hasUnlock(state.meta, content::unlock::routeMars),
+        "recovering the artifact should not silently advance the story before its claim");
+    require(performScenarioAction(
+                state,
+                catalog,
+                content::scenario::lunarProspector,
+                "anomaly",
+                ScenarioActionKind::ClaimReward)
+                .applied,
+        "the recovered anomaly should expose a working explicit claim action");
+    require(hasUnlock(state.meta, content::unlock::routeMars),
+        "claiming the recovered lunar artifact should unlock the Mars route");
+
+    const std::size_t artifactCount = mining.stowedArtifacts.size();
+    updateMiningRun(state, catalog, 0.25);
+    require(mining.stowedArtifacts.size() == artifactCount,
+        "delivered artifacts must not duplicate on later mining updates");
+}
+
+void rigLoadBandsAndHardCapacityAreImmediate()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 221);
+    prepareSurface(state, content::destination::moon);
+    require(startMiningRun(state, catalog, {MiningAct::ActOne, 1, 0x21ULL}, true).applied,
+        "the lunar load-band test should start a mining run");
+
+    struct ExpectedBand {
+        int mass;
+        RigLoadBand band;
+        double speed;
+        double fuel;
+    };
+    const std::array<ExpectedBand, 5> expectations {{
+        {5, RigLoadBand::Light, 1.00, 1.00},
+        {6, RigLoadBand::Standard, 0.90, 1.15},
+        {12, RigLoadBand::Laden, 0.72, 1.40},
+        {18, RigLoadBand::Packrat, 0.55, 1.70},
+        {24, RigLoadBand::Full, 0.50, 1.75},
+    }};
+    for (const ExpectedBand& expected : expectations) {
+        state.run.mining.cargo = expected.mass;
+        state.run.mining.temporaryMaterials = {expected.mass, 0, 0};
+        const MiningLoadStats load = miningLoadStats(state, catalog);
+        require(load.band == expected.band &&
+                std::abs(load.speedMultiplier - expected.speed) < 0.000001 &&
+                std::abs(load.fuelConsumptionMultiplier - expected.fuel) < 0.000001,
+            "first-run rig load thresholds must immediately apply their published movement and fuel curve");
+    }
+
+    MiningRunState& mining = state.run.mining;
+    MiningLooseObject overflow;
+    overflow.persistentId = mining.nextLooseObjectId++;
+    overflow.kind = MiningLooseObjectKind::Material;
+    overflow.material = MiningCellMaterial::CommonOre;
+    overflow.x = mining.droneX;
+    overflow.y = mining.droneY;
+    overflow.cargoValue = 1;
+    overflow.mass = 1.0;
+    overflow.active = true;
+    mining.looseObjects.push_back(overflow);
+    updateMiningRun(state, catalog, 0.08);
+    require(mining.cargo == 24 &&
+            !mining.looseObjects.empty() &&
+            mining.looseObjects.front().active,
+        "ore beside a full rig must remain a persistent physical object instead of being deleted or converted");
 }
 
 void supportDroneXpWaitsForAuthoritativeShipDelivery()
@@ -274,7 +436,7 @@ void supportDroneXpWaitsForAuthoritativeShipDelivery()
 
     MiningRunState& mining = state.run.mining;
     mining.enemies.clear();
-    mining.oxygenSeconds = 100.0;
+    mining.rigOxygen.current = 100.0;
     require(
         mining.miniDrones.size() == 1
             && mining.miniDrones.front().role == MiniDroneRole::Resource,
@@ -309,15 +471,64 @@ void supportDroneXpWaitsForAuthoritativeShipDelivery()
     mining.droneY = mining.returnZoneY;
     const ExpeditionExperienceSnapshot beforeSafeRecall =
         snapshotExpeditionExperience(state);
+    const SurfaceActionOutcome departure = finishMiningRun(state, catalog, false);
     require(
-        finishMiningRun(state, catalog, false).applied,
-        "normal departure should recall the Support Drone manifest");
+        departure.applied,
+        "the astronaut should be able to depart without recalling a missing Support Drone");
     require(
-        std::abs(
-            expeditionExperienceEarnedSince(beforeSafeRecall, state)
-            - 3.0)
-            < 0.000001,
-        "normal departure should credit newly owned Support Drone ore when the intact drone reaches Ship cargo");
+        std::abs(expeditionExperienceEarnedSince(beforeSafeRecall, state)) < 0.000001 &&
+            departure.materialLost.rare == 1,
+        "departure must not teleport or credit Support Drone ore that did not physically unload");
+}
+
+void supportDroneRecallIsPhysicalAndExplicit()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 254);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
+    ensureDroneBayState(state, catalog);
+    state.meta.droneBaySlots = 1;
+    state.meta.equippedDroneIds = {content::drone::resourceDrone};
+    prepareSurface(state, content::destination::mars);
+    require(
+        startMiningRun(
+            state,
+            catalog,
+            {MiningAct::ActOne, 3, 0xD312ULL},
+            false).applied,
+        "Support Drone recall fixture should start");
+
+    MiningRunState& mining = state.run.mining;
+    mining.enemies.clear();
+    mining.droneX = mining.returnZoneX;
+    mining.droneY = mining.returnZoneY;
+    require(mining.miniDrones.size() == 1,
+        "Support Drone recall fixture should create one physical drone");
+    MiningMiniDroneAgent& resource = mining.miniDrones.front();
+    resource.haulMaterials.common = 2;
+    resource.uncreditedHaulMaterials.common = 2;
+    resource.behavior = MiningMiniDroneBehavior::Working;
+
+    const MiningDroneRecoveryStatus before = miningDroneRecoveryStatus(mining);
+    require(before.outstandingDrones == 1 && before.outstandingCargoMass == 2 &&
+            !before.recallInProgress,
+        "service should identify the exact outstanding drone and cargo before recall");
+    require(requestMiningDroneRecall(state) &&
+            resource.behavior == MiningMiniDroneBehavior::DeliveringToShip &&
+            resource.haulMaterials.common == 2,
+        "Wait for Drones should start physical transit without remotely crediting cargo");
+
+    const MiningDroneRecoveryStatus returning = miningDroneRecoveryStatus(mining);
+    require(returning.outstandingDrones == 1 && returning.recallInProgress &&
+            mining.stowedMaterials.common == 0,
+        "recalled cargo should remain owned by its drone until timed delivery completes");
+    resource.actionCooldownSeconds = 0.0;
+    updateMiningRun(state, catalog, 0.01);
+    require(mining.stowedMaterials.common == 2 &&
+            miningDroneRecoveryStatus(mining).outstandingDrones == 0 &&
+            !requestMiningDroneRecall(state),
+        "ship contact should unload once and clear the outstanding recall state");
 }
 
 void looseEvaOreAwardsXpWhenTheRigCollectsIt()
@@ -335,13 +546,13 @@ void looseEvaOreAwardsXpWhenTheRigCollectsIt()
 
     MiningRunState& mining = state.run.mining;
     mining.enemies.clear();
-    mining.oxygenSeconds = 100.0;
-    MiningLooseChunk chunk;
+    mining.rigOxygen.current = 100.0;
+    MiningLooseObject chunk;
     chunk.material = MiningCellMaterial::ExoticVein;
     chunk.x = mining.droneX;
     chunk.y = mining.droneY;
     chunk.cargoValue = tuning::mining::exoticCargo;
-    mining.looseChunks.push_back(chunk);
+    mining.looseObjects.push_back(chunk);
     const ExpeditionExperienceSnapshot experienceBefore =
         snapshotExpeditionExperience(state);
     require(
@@ -352,7 +563,7 @@ void looseEvaOreAwardsXpWhenTheRigCollectsIt()
     updateMiningRun(state, catalog, 0.01);
     require(
         mining.temporaryMaterials.exotic == 1
-            && mining.looseChunks.empty(),
+            && mining.looseObjects.empty(),
         "the rig should take ownership of the loose EVA ore");
     require(
         std::abs(
@@ -431,7 +642,7 @@ void oxygenCapacityHasAHardCeiling()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 606);
     const MiningDrillStats baseline = miningDrillStats(state, catalog);
-    state.run.surfaceExpedition.runRigUpgradeRanks.push_back(
+    state.run.planetaryExpedition.runRigUpgradeRanks.push_back(
         {content::surfaceUpgrade::emergencyWinch, 3});
     const MiningDrillStats winch = miningDrillStats(state, catalog);
     require(
@@ -444,7 +655,7 @@ void oxygenCapacityHasAHardCeiling()
     state.meta.droneBaySlots = 6;
     state.meta.ownedDroneIds.assign(6, content::drone::resourceDrone);
     state.meta.equippedDroneIds.assign(6, content::drone::resourceDrone);
-    state.run.surfaceExpedition.runDroneRanks.push_back(
+    state.run.planetaryExpedition.runDroneRanks.push_back(
         {content::drone::resourceDrone, 3});
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     require(stats.oxygenSeconds <= tuning::mining::maximumOxygenSeconds,
@@ -501,8 +712,8 @@ void supplyPocketsAreDeterministicAndPayImmediately()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 708);
     prepareSurface(state, content::destination::mars);
-    state.run.surfaceExpedition.rigFuel = 1.0;
-    state.run.surfaceExpedition.rigFuelCapacity = 4.0;
+    state.run.planetaryExpedition.rigFuel = 1.0;
+    state.run.planetaryExpedition.rigFuelCapacity = 4.0;
     require(startMiningRun(state, catalog, {MiningAct::ActOne, 4, 0xF00DULL}, false).applied,
         "Mars supply-pocket arena should start");
 
@@ -546,18 +757,28 @@ void supplyPocketsAreDeterministicAndPayImmediately()
     };
 
     const MaterialInventory materialsBefore = mining.temporaryMaterials;
-    const double fuelBefore = state.run.surfaceExpedition.rigFuel;
+    const double fuelBefore = mining.rigFuel.current;
     drillTestCell(MiningCellMaterial::FuelPocket);
-    require(std::abs(state.run.surfaceExpedition.rigFuel - (fuelBefore + 1.0)) < 0.0001,
-        "fuel pocket should restore one rig fuel immediately");
-    require(!mining.pickupEvents.empty()
-            && mining.pickupEvents.back().kind == MiningPickupKind::Fuel
-            && mining.pickupEvents.back().amount == 1,
-        "fuel pocket should emit one typed pickup event");
+    auto fuelCell = std::find_if(
+        mining.looseObjects.begin(), mining.looseObjects.end(),
+        [](const MiningLooseObject& object) {
+            return object.active && object.kind == MiningLooseObjectKind::FuelCell;
+        });
+    require(fuelCell != mining.looseObjects.end()
+            && mining.rigFuel.current <= fuelBefore
+            && mining.rigFuel.current > fuelBefore - 0.05,
+        "a drilled fuel pocket should spawn a physical cell while drilling consumes only its normal powered demand");
+    const double fuelBeforeContact = mining.rigFuel.current;
+    fuelCell->x = mining.droneX;
+    fuelCell->y = mining.droneY;
+    fuelCell->pickupDelaySeconds = 0.0;
+    updateMiningRun(state, catalog, 0.01);
+    require(mining.rigFuel.current > fuelBeforeContact,
+        "fuel should transfer only after physical contact with the rig");
 
-    mining.oxygenSeconds = 5.0;
+    mining.rigOxygen.current = 5.0;
     drillTestCell(MiningCellMaterial::OxygenPocket);
-    require(mining.oxygenSeconds > 14.5 && mining.oxygenSeconds <= 15.0,
+    require(mining.rigOxygen.current > 14.5 && mining.rigOxygen.current <= 15.0,
         "oxygen pocket should restore ten seconds immediately");
     require(mining.pickupEvents.back().kind == MiningPickupKind::Oxygen
             && mining.pickupEvents.back().amount == 1,
@@ -609,8 +830,8 @@ void ioTerrainAndArtifactSealAreDeterministic()
         // The progression curve authors the first artifact on depth +1. This
         // fixture starts on that surveyed layer so the remaining assertions
         // can exercise the protected-objective adapter directly.
-        state.run.surfaceExpedition.depth = 1;
-        state.run.surfaceExpedition.prospectMaterials = {
+        state.run.planetaryExpedition.depth = 1;
+        state.run.planetaryExpedition.prospectMaterials = {
             .common = 5,
             .rare = 2,
             .exotic = 1
@@ -634,7 +855,7 @@ void ioTerrainAndArtifactSealAreDeterministic()
     const MiningRunState& repeat = second.run.mining;
     require(mining.terrain.cells.size() == repeat.terrain.cells.size(),
         "matching Io arena requests should produce matching terrain sizes");
-    require(mining.oxygenSeconds >= tuning::mining::ioArtifactOxygenSeconds,
+    require(mining.rigOxygen.current >= tuning::mining::ioArtifactOxygenSeconds,
         "the fixed Io artifact expedition should start with at least 60 seconds of oxygen");
     require(mining.artifact.present
             && mining.artifact.id == content::protectedObjective::ioMinorArtifact
@@ -648,10 +869,10 @@ void ioTerrainAndArtifactSealAreDeterministic()
             && mining.gate.innerShellTilesRemaining == 0,
         "the introductory Io artifact should begin behind one four-segment thermal seal");
     require(static_cast<int>(std::floor(mining.gate.anchorX)) ==
-                static_cast<int>(std::floor(mining.droneX))
+                mining.terrain.width / 2
             && static_cast<int>(std::floor(mining.gate.anchorY)) ==
-                static_cast<int>(std::floor(mining.droneY)) + 10,
-        "the first Io artifact should stay centered in the entry lane, ten cells below the Mining Rig");
+                static_cast<int>(std::floor(mining.returnZoneY)) + 10,
+        "the first Io artifact should stay centered ten cells below the entry pad");
 
     int thermalLava = 0;
     for (std::size_t index = 0;
@@ -733,7 +954,7 @@ void ioTerrainAndArtifactSealAreDeterministic()
     recoveredMining.droneY = recoveredMining.returnZoneY;
     require(finishMiningRun(recovered, catalog, false).applied,
         "the rig should be able to leave after its artifact is secured aboard the ship");
-    require(recovered.run.surfaceExpedition.temporaryArtifacts.size() == 1,
+    require(recovered.run.planetaryExpedition.temporaryArtifacts.size() == 1,
         "stowing and leaving must retain the delivered artifact for the return flight");
     const ScenarioObjectivePresentation pendingRecovery = scenarioObjectiveForDestination(
         recovered,
@@ -747,7 +968,7 @@ void ioTerrainAndArtifactSealAreDeterministic()
             pendingRecovery.action == ScenarioActionKind::None,
         "a protected artifact aboard the ship should replace the next objective with a pending-return recovery state");
     GameState legacyPending = recovered;
-    legacyPending.run.surfaceExpedition.temporaryArtifacts.front().rewardApplied = true;
+    legacyPending.run.planetaryExpedition.temporaryArtifacts.front().rewardApplied = true;
     const ScenarioObjectivePresentation repairedLegacyPending = scenarioObjectiveForDestination(
         legacyPending,
         catalog,
@@ -788,11 +1009,11 @@ void proceduralArtifactGatesStayCenteredTenCellsBelowEntry()
         "procedural Jupiter artifact arena should create an artifact gate");
     require(static_cast<int>(std::floor(mining.gate.anchorX)) == mining.terrain.width / 2 &&
             static_cast<int>(std::floor(mining.gate.anchorY)) ==
-                static_cast<int>(std::floor(mining.droneY)) + 10 &&
+                static_cast<int>(std::floor(mining.returnZoneY)) + 10 &&
             static_cast<int>(std::floor(mining.artifact.x)) == mining.terrain.width / 2 &&
             static_cast<int>(std::floor(mining.artifact.y)) ==
-                static_cast<int>(std::floor(mining.droneY)) + 10,
-        "new procedural artifact gates should be centered exactly ten cells below the Mining Rig");
+                static_cast<int>(std::floor(mining.returnZoneY)) + 10,
+        "new procedural artifact gates should stay ten cells below the entry pad, independent of rig staging");
 
 }
 
@@ -818,9 +1039,9 @@ void ioLavaAlwaysCoolsIntoMineableCommonOre()
         ScenarioActionKind::BeginActivity);
     require(recovery.applied && recovery.beginsActivity,
         "the thermal treatment fixture should start the authored recovery activity");
-    state.run.surfaceExpedition.pendingScenarioId = content::scenario::volcanicDescent;
-    state.run.surfaceExpedition.pendingScenarioStepId = "recovery";
-    state.run.surfaceExpedition.pendingMiningSiteDefinitionId = recovery.miningSiteDefinitionId;
+    state.run.planetaryExpedition.pendingScenarioId = content::scenario::volcanicDescent;
+    state.run.planetaryExpedition.pendingScenarioStepId = "recovery";
+    state.run.planetaryExpedition.pendingMiningSiteDefinitionId = recovery.miningSiteDefinitionId;
     state.meta.droneBaySlots = 1;
     state.meta.equippedDroneIds = {content::drone::hazardDrone};
     require(startMiningRun(
@@ -895,7 +1116,10 @@ int main()
         miningExperienceAwardsMatchApprovedEconomy();
         explicitArenaIsDeterministicAndBudgeted();
         richPayoutsShareOneLedger();
+        lunarContractActivatesScannerLedEvaArtifactInSameRun();
+        rigLoadBandsAndHardCapacityAreImmediate();
         supportDroneXpWaitsForAuthoritativeShipDelivery();
+        supportDroneRecallIsPhysicalAndExplicit();
         looseEvaOreAwardsXpWhenTheRigCollectsIt();
         firstClearCreditsOnlyExtractedMiningMaterials();
         rewardLedgerAndPendingCreditRoundTrip();

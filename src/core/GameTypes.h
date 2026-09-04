@@ -13,7 +13,7 @@ namespace rocket {
 
 enum class Screen {
     Hangar,
-    Launch,
+    Flight,
     Results,
     ArrivalFanfare,
     ArrivalOps,
@@ -609,6 +609,11 @@ enum class MiningSiteObjectivePlacement {
     EntryCentered
 };
 
+enum class MiningPassageClass {
+    AllActors,
+    SuitOnly
+};
+
 // An authored site configures reusable mining mechanics. It deliberately has
 // no campaign or destination semantics; scenarios decide where it is offered.
 struct MiningSiteDefinition {
@@ -618,6 +623,10 @@ struct MiningSiteDefinition {
     MiningSiteBiome biome = MiningSiteBiome::Default;
     MiningGateType gateType = MiningGateType::None;
     MiningSiteObjectivePlacement objectivePlacement = MiningSiteObjectivePlacement::DeepRoute;
+    MiningPassageClass objectivePassage = MiningPassageClass::AllActors;
+    std::string activationMessage;
+    bool completeOnShipCapture = false;
+    std::string securedMessage;
     double baselineOxygenSeconds = 0.0;
     MiningCocoonDefinition cocoon;
     MiningEnemyTheme enemyTheme = MiningEnemyTheme::Neutral;
@@ -675,6 +684,9 @@ struct MiningGateRuntime {
     bool endurancePlacement = false;
     bool shieldCorridor = false;
     bool burrowBreach = false;
+    MiningPassageClass objectivePassage = MiningPassageClass::AllActors;
+    bool completeOnShipCapture = false;
+    std::string securedMessage;
     double anchorX = 0.0;
     double anchorY = 0.0;
     std::vector<MiningGateMarker> markers;
@@ -876,10 +888,6 @@ struct ModuleStats {
 };
 
 struct CrewUpgradeStats {
-    int trainingGain = 0;
-    int trainingStressRelief = 0;
-    int restStressBonus = 0;
-    int launchStressRelief = 0;
     double traitModifier = 0.0;
 };
 
@@ -933,6 +941,35 @@ struct MaterialInventory {
     int common = 0;
     int rare = 0;
     int exotic = 0;
+};
+
+// Shared finite-resource storage only. Consumption and refill behavior belong
+// to the resource-specific core policy; fuel and oxygen never share rules.
+struct ResourceTankState {
+    double current = 0.0;
+    double capacity = 0.0;
+};
+
+struct CrewPerkStats {
+    double rigOxygenSeconds = 0.0;
+    double suitOxygenSeconds = 0.0;
+    double rigIntegrity = 0.0;
+    double repairEfficiency = 0.0;
+    double navigationControl = 0.0;
+    double emergencyRecovery = 0.0;
+    double scannerRadius = 0.0;
+    double excavationEfficiency = 0.0;
+    double resourceDiscovery = 0.0;
+    double evaThrust = 0.0;
+};
+
+struct CrewArchetypeDefinition {
+    std::string id;
+    std::string species;
+    std::string role;
+    std::string perkName;
+    std::string perkDetail;
+    CrewPerkStats stats;
 };
 
 struct SurfaceDepthProspect {
@@ -1309,8 +1346,7 @@ struct Astronaut {
     std::string name;
     std::string background;
     std::string trait;
-    int training = 0;
-    int stress = 0;
+    std::string archetypeId;
     CrewStatus status = CrewStatus::Active;
 };
 
@@ -1441,7 +1477,20 @@ struct TelemetryEvent {
     std::string message;
 };
 
+// Session-only contact telemetry. Saves retain hull, not presentation history.
+struct FlightImpactEvent {
+    bool valid = false;
+    double impactSpeed = 0.0;
+    double damage = 0.0;
+    double hullBefore = 0.0;
+    double hullAfter = 0.0;
+    double contactX = 0.0;
+    double contactY = 0.0;
+    std::string destinationId;
+};
+
 struct LaunchOutcome {
+    FlightImpactEvent impact;
     LaunchResultType type = LaunchResultType::None;
     RecoveryMethod recoveryMethod = RecoveryMethod::None;
     std::string destinationId;
@@ -1553,27 +1602,15 @@ struct MetaProgress {
     std::vector<PostSolarSystemRoster> postSolarSystemRosters;
     bool campaignIntroductionAcknowledged = false;
     bool straylightDiscoveryAcknowledged = false;
+    bool crewLossPending = false;
+    std::string pendingReplacementArchetypeId;
+    int replacementSequence = 0;
+    int shipHoldRank = 0;
 };
 
 struct StoryBriefingState {
     StoryBriefingId pending = StoryBriefingId::None;
     Screen continuation = Screen::Hangar;
-};
-
-enum class ApproachCommitment {
-    Uncommitted = 0,
-    OrbitCaptured = 1
-};
-
-struct ArrivalOpsState {
-    bool active = false;
-    std::string destinationId;
-    double transferFuelRemaining = 0.0;
-    double transferFuelCapacity = 0.0;
-    ApproachCommitment commitment = ApproachCommitment::Uncommitted;
-    // Retained from the successful leg so a Pass Through can offer a real
-    // recovery route instead of silently restarting at Earth.
-    RouteTransitState incomingRoute;
 };
 
 struct FlybyTrailPoint {
@@ -1684,7 +1721,42 @@ struct OrbitRunState {
     std::vector<FlybyTrailPoint> trailPoints;
 };
 
-struct SurfaceExpeditionState {
+enum class ApproachPhase {
+    Entry,
+    Flyby,
+    Orbit,
+    Descent,
+    Departing,
+    Complete
+};
+
+struct DescentRunState {
+    bool active = false;
+    double corridorWidth = 1.0;
+    double turbulence = 0.0;
+    bool directDescent = false;
+};
+
+struct ApproachRewardLedger {
+    bool flybyAwarded = false;
+    bool orbitAwarded = false;
+    bool landingRecorded = false;
+};
+
+struct ApproachRunState {
+    bool active = false;
+    std::string destinationId;
+    double transferFuelRemaining = 0.0;
+    double transferFuelCapacity = 0.0;
+    RouteTransitState incomingRoute;
+    ApproachPhase phase = ApproachPhase::Entry;
+    FlybyRunState flyby;
+    OrbitRunState orbit;
+    DescentRunState descent;
+    ApproachRewardLedger rewards;
+};
+
+struct PlanetaryExpeditionState {
     bool active = false;
     std::string destinationId;
     std::string postSolarSystemId;
@@ -1710,7 +1782,7 @@ struct SurfaceExpeditionState {
     std::array<RunUpgradeOffer, 3> runUpgradeOffers {};
     int runUpgradeOfferCount = 0;
     bool runUpgradeOfferPending = false;
-    Screen runUpgradeReturnScreen = Screen::SurfaceExpedition;
+    Screen runUpgradeReturnScreen = Screen::Mining;
     std::vector<RunRigUpgradeRank> runRigUpgradeRanks;
     std::vector<RunDroneRank> runDroneRanks;
     std::vector<std::string> selectedSynergyIds;
@@ -1920,13 +1992,25 @@ struct MiningDamageNumber {
     bool rigDamage = false;
 };
 
-struct MiningLooseChunk {
+enum class MiningLooseObjectKind {
+    Material,
+    FuelCell
+};
+
+struct MiningLooseObject {
+    std::uint64_t persistentId = 0;
+    MiningLooseObjectKind kind = MiningLooseObjectKind::Material;
     MiningCellMaterial material = MiningCellMaterial::CommonOre;
     double x = 0.0;
     double y = 0.0;
     double velocityX = 0.0;
     double velocityY = 0.0;
+    double mass = 1.0;
     int cargoValue = 1;
+    double fuelValue = 0.0;
+    double pickupDelaySeconds = 0.0;
+    int carrierFrame = -1;
+    bool tethered = false;
     bool active = true;
 };
 
@@ -1973,6 +2057,7 @@ struct MiningMiniDroneAgent {
     double shieldImpactSeconds = 0.0;
     MaterialInventory haulMaterials;
     MaterialInventory uncreditedHaulMaterials;
+    std::uint64_t carriedLooseObjectId = 0;
     bool finishTargetBeforeReturn = false;
     double returnPathFailureSeconds = 0.0;
     bool defenseAngleInitialized = false;
@@ -2007,7 +2092,7 @@ struct MiningDepthLayerState {
     MiningTerrain terrain;
     std::vector<MiningEnemy> enemies;
     MiningArtifactObject artifact;
-    std::vector<MiningLooseChunk> looseChunks;
+    std::vector<MiningLooseObject> looseObjects;
     MiningGateRuntime gate;
     double downwardTransitionX = 0.0;
     bool hasDownwardTransition = false;
@@ -2037,9 +2122,8 @@ struct MiningRunState {
     double elapsedSeconds = 0.0;
     // Rig life support. This continues to receive rig upgrades, site
     // baselines, pockets, and support-drone bonuses.
-    double oxygenSeconds = 30.0;
-    double fuelCycleProgress = 0.0;
-    int fuelSpent = 0;
+    ResourceTankState rigFuel;
+    ResourceTankState rigOxygen {30.0, 30.0};
     double droneX = 32.0;
     double droneY = 4.0;
     double rigVelocityX = 0.0;
@@ -2062,7 +2146,7 @@ struct MiningRunState {
     double operatorAimDirY = 1.0;
     double operatorIntegrity = 1.0;
     // EVA carries a fixed emergency reserve independent of the rig tank.
-    double operatorOxygenSeconds = 15.0;
+    ResourceTankState suitOxygen {15.0, 15.0};
     double operatorFireCooldownSeconds = 0.0;
     double operatorFirePulseSeconds = 0.0;
     double operatorToggleProgress = 0.0;
@@ -2105,6 +2189,9 @@ struct MiningRunState {
     double contactBounceCooldown = 0.0;
     double contactSpeedRecovery = 1.0;
     double scannerPulseSeconds = 0.0;
+    // Presentation-only recovery acknowledgement. Gameplay completion is
+    // recorded immediately when the artifact crosses the ship capture field.
+    double artifactSecuredCelebrationSeconds = 0.0;
     int depthZone = 0;
     int entryDepthZone = 0;
     int deepestDepthZone = 0;
@@ -2149,7 +2236,8 @@ struct MiningRunState {
     MiningTerrain terrain;
     std::vector<MiningEnemy> enemies;
     std::vector<MiningMiniDroneAgent> miniDrones;
-    std::vector<MiningLooseChunk> looseChunks;
+    std::vector<MiningLooseObject> looseObjects;
+    std::uint64_t nextLooseObjectId = 1;
     std::uint64_t pickupEventSequence = 0;
     std::vector<MiningPickupEvent> pickupEvents;
     std::vector<MiningProjectileVisual> combatProjectiles;
@@ -2158,6 +2246,134 @@ struct MiningRunState {
     MiningGateRuntime gate;
     std::vector<MiningDepthLayerState> depthLayers;
     MiningSwarmState swarm;
+};
+
+inline constexpr std::size_t launchControlKickCapacity = 16;
+inline constexpr std::size_t launchAsteroidCapacity = 24;
+
+struct FlightInput {
+    double steer = 0.0;
+    double throttle = 0.0;
+    bool enginesCut = false;
+    bool analogThrottle = false;
+};
+
+enum class FlightPhase {
+    Departure,
+    Transfer,
+    TargetApproach,
+    Orbiting,
+    Descent,
+    Landing,
+    Landed,
+    Flyby,
+    Impact,
+    Complete
+};
+
+struct OrbitCaptureState {
+    double targetRadius = 0.44;
+    double goodBand = 0.075;
+    double perfectBand = 0.030;
+    double stableAngularProgress = 0.0;
+    double previousAngle = 0.0;
+    bool enteredInfluence = false;
+    bool captured = false;
+    bool perfectEligible = true;
+    bool rewardAwarded = false;
+    OrbitGrade grade = OrbitGrade::Active;
+};
+
+enum class FlightMode { Travel, Orbit, Landing };
+
+struct FlightHandoffState {
+    FlightMode from = FlightMode::Travel;
+    FlightMode to = FlightMode::Travel;
+    double elapsed = 1.25;
+    double sourceX = 0.0;
+    double sourceY = 0.0;
+    double sourceHeading = 0.0;
+};
+
+struct LandingState {
+    // Fixed at gate entry. Local Y is up; the Mining grid's Y is down.
+    double basisAngle = 1.5707963267948966;
+    double horizontalPosition = 0.0;
+    double heading = 1.5707963267948966;
+    double padGridX = 0.0;
+    double padGridY = 0.0;
+    double touchdownGridX = 0.0;
+    double touchdownGridY = 0.0;
+    std::uint64_t siteKey = 0;
+    bool siteBound = false;
+    bool gateArmed = true;
+    double altitude = 0.0;
+    double verticalVelocity = 0.0;
+    double lateralVelocity = 0.0;
+    double surfaceAngle = 0.0;
+    bool hardLanding = false;
+};
+
+struct FlightRunState {
+    FlightImpactEvent impact;
+    double impactDisplaySeconds = 0.0;
+    bool contactEpisode = false;
+    double contactClearSeconds = 0.0;
+    std::string originId;
+    std::string destinationId;
+    bool active = false;
+    bool returningHome = false;
+    double travelProgress = 0.0;
+    double previousTravelProgress = 0.0;
+    double currentMultiplier = 1.0;
+    double peakMultiplier = 1.0;
+    double selectedThrottle = 0.60;
+    double burnRatePerSecond = 0.0;
+    double travelVelocity = 0.0;
+    double fuelCapacity = 10.0;
+    double fuelRemaining = 10.0;
+    bool calibrationReturnFuelProtected = false;
+    bool fuelSurveyReturnClassifiable = false;
+    bool fuelSurveyLateLatched = false;
+    FuelSurveyReturnTiming fuelSurveyReturnTiming = FuelSurveyReturnTiming::Unqualified;
+    double fuelSurveyReturnUsePerProgress = 0.0;
+    double elapsedSeconds = 0.0;
+    double projectedFuelRequired = 0.0;
+    double projectedFuelReserve = 10.0;
+    double heat = 0.0;
+    double courseOffset = 0.0;
+    double courseVelocity = 0.0;
+    bool throttleInputActive = false;
+    double throttleAtLastKick = 0.60;
+    double throttleKickCooldownSeconds = 0.0;
+    int nextControlKickIndex = 0;
+    double heatFailureSeconds = 0.0;
+    double courseFailureSeconds = 0.0;
+    double fuelFailureSeconds = 0.0;
+    double minimumSafetyMargin = 1.0;
+    double hullMaximum = 100.0;
+    double hullRemaining = 100.0;
+    int hullDamageTaken = 0;
+    double asteroidInvulnerabilitySeconds = 0.0;
+    std::array<bool, launchAsteroidCapacity> asteroidHit {};
+    LaunchFailureCause failureCause = LaunchFailureCause::None;
+    bool physicalFlight = false;
+    FlightMode mode = FlightMode::Travel;
+    double orbitZoomProgress = 0.0;
+    FlightHandoffState handoff;
+    FlightPhase phase = FlightPhase::Departure;
+    double positionX = -3.40;
+    double positionY = 1.10;
+    double velocityX = 0.036;
+    double velocityY = 0.034;
+    double heading = 0.0;
+    double angularVelocity = 0.0;
+    OrbitCaptureState orbit;
+    LandingState landing;
+    bool flybyRecorded = false;
+    bool orbitCelebrationPending = false;
+    bool touchdownCelebrationPending = false;
+    std::vector<FlybyTrailPoint> predictedTrajectory;
 };
 
 struct RunState {
@@ -2176,13 +2392,12 @@ struct RunState {
     std::array<std::string, 3> offerModuleIds {};
     std::array<std::string, 3> offerCrewUpgradeIds {};
     std::array<std::string, 3> researchProjectIds {};
-    ArrivalOpsState arrivalOps;
-    FlybyRunState flyby;
-    OrbitRunState orbit;
-    SurfaceExpeditionState surfaceExpedition;
+    ApproachRunState approach;
+    PlanetaryExpeditionState planetaryExpedition;
     SurfaceScanRunState surfaceScan;
     SurfacePushRunState surfacePush;
     MiningRunState mining;
+    FlightRunState flight;
     // Serialized under the compatibility field name nextLaunchFuelBoost.
     // The value is powered-route fuel saved by existing Flyby momentum; it
     // never changes the physical Transfer Tank capacity.
@@ -2195,8 +2410,6 @@ struct RunState {
     int launchesThisExpedition = 0;
     int offerRerollsThisExpedition = 0;
     int repairOpsThisExpedition = 0;
-    int trainingOpsThisExpedition = 0;
-    int restOpsThisExpedition = 0;
     int shallowRecoveryStreak = 0;
     int cleanShallowRecoveryStreak = 0;
 };

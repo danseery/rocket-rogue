@@ -154,7 +154,7 @@ bool protectedObjectiveAwaitingReturn(
         step.miningSiteDefinitionId.empty()) {
         return false;
     }
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     if (!expedition.active || expedition.temporaryArtifacts.empty()) {
         return false;
     }
@@ -1416,7 +1416,7 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
         step->completionEvent == ScenarioEventKind::FlybyFinished &&
         (step->action == ScenarioActionKind::BeginActivity ||
          step->action == ScenarioActionKind::RetryActivity) &&
-        state.run.surfaceExpedition.active;
+        state.run.planetaryExpedition.active;
     if (departureBlockedBySurfaceLoop) {
         presentation.detail = "RETURN TO EARTH TO BEGIN THE DEPARTURE SLINGSHOT.";
     }

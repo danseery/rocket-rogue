@@ -9,6 +9,7 @@
 
 #include <string_view>
 #include <string>
+#include <vector>
 
 namespace rocket {
 
@@ -31,12 +32,28 @@ struct MiningDrillStats {
     int terrainHeight = 0;
 };
 
+enum class RigLoadBand {
+    Light,
+    Standard,
+    Laden,
+    Packrat,
+    Full
+};
+
+struct MiningActorHull {
+    double halfLength = tuning::mining::rigHullHalfLengthCells;
+    double halfWidth = tuning::mining::rigHullHalfWidthCells;
+};
+
 struct MiningLoadStats {
     double currentLoad = 0.0;
+    double capacity = tuning::mining::rigCargoCapacityMass;
     double freeBuffer = tuning::mining::baseCarryBufferCargo;
     double burden = 0.0;
     double speedMultiplier = 1.0;
     double fuelConsumptionMultiplier = 1.0;
+    RigLoadBand band = RigLoadBand::Light;
+    bool full = false;
 };
 
 // A single normalized source for discovery/luck effects. New Luck upgrades
@@ -52,13 +69,56 @@ struct MiningSwarmPreview {
     std::uint64_t seed = 0;
 };
 
+// A surface landing is built before it is visible so the descent renderer and
+// the eventual Mining run consume the exact same deterministic world.  The
+// prepared value is deliberately session-owned by RocketGameApp; none of this
+// cinematic staging is part of the save contract.
+struct SurfaceLandingBuildRequest {
+    std::string destinationId;
+    int landingOrdinal = 0;
+    std::uint64_t siteSeed = 0;
+    std::string scenarioId;
+    std::string scenarioStepId;
+    std::string miningSiteDefinitionId;
+};
+
+struct PreparedSurfaceLanding {
+    std::uint64_t preparationKey = 0;
+    SurfaceLandingBuildRequest request;
+    PlanetaryExpeditionState expeditionTemplate;
+    MiningRunState miningTemplate;
+    int destinationIndex = -1;
+    int landingOrdinal = 0;
+    std::vector<MiningSiteProgress> miningSites;
+    std::vector<PostSolarSystemRoster> postSolarSystemRosters;
+    bool valid = false;
+    std::string error;
+};
+
+PreparedSurfaceLanding prepareSurfaceLanding(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const SurfaceLandingBuildRequest& request);
+bool preparedSurfaceLandingCurrent(
+    const GameState& state,
+    const ContentCatalog& catalog,
+    const PreparedSurfaceLanding& prepared);
+bool commitPreparedSurfaceLanding(
+    GameState& state,
+    PreparedSurfaceLanding&& prepared,
+    double actualTransferFuel);
+bool surfaceLandingStaging(const MiningRunState& mining, double shipX, double shipY,
+    double& rigX, double& rigY);
+bool positionSurfaceLandingTeam(MiningRunState& mining, double shipX, double shipY);
+
 // The physical object selected by the shared T/Y tether action. This is
 // intentionally independent of presentation so the command label, input, and
 // simulation cannot disagree about what is closest.
 enum class MiningTetherTarget {
     None,
     Artifact,
-    MiningRig
+    MiningRig,
+    FuelCell
 };
 
 enum class MiningTetherBlocker {
@@ -66,9 +126,11 @@ enum class MiningTetherBlocker {
     NoTarget,
     ArtifactUnexposed,
     ArtifactOutOfRange,
+    SuitRequired,
     ArtifactGateLocked,
     RigDifferentDepth,
-    RigOutOfRange
+    RigOutOfRange,
+    FuelCellOutOfRange
 };
 
 struct MiningTetherTargetResolution {
@@ -79,6 +141,9 @@ struct MiningTetherTargetResolution {
     bool artifactInRange = false;
     bool rigAvailable = false;
     bool rigInRange = false;
+    std::uint64_t fuelCellId = 0;
+    bool fuelCellInRange = false;
+    double fuelCellDistance = 0.0;
     double artifactDistance = 0.0;
     double rigDistance = 0.0;
 };
@@ -102,6 +167,9 @@ MiningCell* miningCellAt(MiningTerrain& terrain, int x, int y);
 const MiningCell* miningCellAt(const MiningTerrain& terrain, int x, int y);
 MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& catalog);
 MiningDrillStats miningOperatorDrillStats();
+std::string_view rigLoadBandName(RigLoadBand band);
+int miningRigCargoCapacityMass();
+int miningRigCargoAvailableMass(const MiningRunState& mining);
 // These are the single source of truth for the currently controlled actor's
 // oxygen readout. UI warnings and guidance use them rather than duplicating
 // the rig/EVA branch.
@@ -128,6 +196,13 @@ int miningCarriedCargo(const MiningRunState& mining);
 int miningBankedCargo(const MiningRunState& mining);
 bool miningAtReturnZone(const MiningRunState& mining);
 bool miningRigAtReturnZone(const MiningRunState& mining);
+struct MiningDroneRecoveryStatus {
+    int outstandingDrones = 0;
+    int outstandingCargoMass = 0;
+    bool recallInProgress = false;
+};
+MiningDroneRecoveryStatus miningDroneRecoveryStatus(const MiningRunState& mining);
+bool requestMiningDroneRecall(GameState& state);
 MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& catalog);
 int miningDrillRepairCost(const MiningRunState& mining);
 int miningDroneRepairCost(const MiningRunState& mining);
@@ -153,5 +228,6 @@ void pulseMiningScanner(GameState& state, const ContentCatalog& catalog);
 bool repairMiningOperator(GameState& state);
 void updateMiningRun(GameState& state, const ContentCatalog& catalog, double deltaSeconds);
 SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& catalog, bool abort);
+bool bankMiningPayloadAtShip(GameState& state, const ContentCatalog& catalog);
 
 } // namespace rocket

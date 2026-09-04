@@ -430,7 +430,7 @@ void testScreenSurfaceMapping()
     }
 
     constexpr std::array persistentScreens {
-        rocket::Screen::Launch,
+        rocket::Screen::Flight,
         rocket::Screen::Flyby,
         rocket::Screen::Orbit,
         rocket::Screen::SurfaceScan,
@@ -765,7 +765,7 @@ void testLaunchDestinationGateUsesCorridorEndpoints()
     composer.setViewport({1280, 800, 1280, 800, 1.0F});
     for (int destinationTier = 0; destinationTier <= 3; ++destinationTier) {
         RenderSnapshot snapshot;
-        snapshot.screen = rocket::Screen::Launch;
+        snapshot.screen = rocket::Screen::Flight;
         snapshot.destinationTier = destinationTier;
         snapshot.launchCourseLimit = 1.2;
 
@@ -945,7 +945,7 @@ void testTransferAssistLaunchUsesItsSourceBody()
     composer.setTextureReady(TextureId::Jupiter, true);
 
     RenderSnapshot snapshot;
-    snapshot.screen = rocket::Screen::Launch;
+    snapshot.screen = rocket::Screen::Flight;
     snapshot.destinationTier = 3;
     snapshot.frontierTransfer = true;
     snapshot.launchOriginTier = 2;
@@ -981,7 +981,7 @@ void testJupiterSaturnLaunchKeepsJupiterVisibleBesideShip()
     composer.setTextureReady(TextureId::RocketClosed, true);
 
     RenderSnapshot snapshot;
-    snapshot.screen = rocket::Screen::Launch;
+    snapshot.screen = rocket::Screen::Flight;
     snapshot.destinationTier = 4;
     snapshot.frontierTransfer = true;
     snapshot.launchOriginTier = 3;
@@ -1152,7 +1152,7 @@ void testFlightInstrumentClusterUsesAtlasNeedlesAndBlinkingWarning()
     composer.setTextureReady(TextureId::FlightInstrumentCluster, true);
 
     RenderSnapshot snapshot;
-    snapshot.screen = rocket::Screen::Launch;
+    snapshot.screen = rocket::Screen::Flight;
     snapshot.flightInstrumentsVisible = true;
     snapshot.instrumentSpeed = 0.0;
     snapshot.instrumentTemperature = 0.5;
@@ -1283,7 +1283,7 @@ void testLaunchUsesAttachedFlameAndSideSteeringTriangleOnly()
     composer.setTextureReady(TextureId::Thrust, true);
 
     RenderSnapshot snapshot;
-    snapshot.screen = rocket::Screen::Launch;
+    snapshot.screen = rocket::Screen::Flight;
     snapshot.poweredFlight = true;
     snapshot.launchManualControlsEnabled = true;
     snapshot.launchThrottle = 0.6;
@@ -1333,6 +1333,310 @@ void testLaunchUsesAttachedFlameAndSideSteeringTriangleOnly()
     assert(std::abs((-nozzleSide / rocketHalfWidth) - (2.0F * 0.028F / 0.11F)) < 0.03F);
 }
 
+void testPhysicalMoonFlightStartsOnScreenAtEarthDeparture()
+{
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::RocketClosed, true);
+
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::Flight;
+    snapshot.destinationTier = 1;
+    snapshot.frontierTransfer = true;
+    snapshot.launchPhysicalFlight = true;
+    snapshot.launchPositionX = -3.40;
+    snapshot.launchPositionY = 1.10;
+    snapshot.launchHeading = 0.0;
+
+    const ScenePacket packet =
+        rocket::SceneComposerTestAccess::rocketPacket(composer, snapshot);
+    assert(!packet.instances.empty());
+    const SceneInstance ship = rocket::unpackSceneInstance(packet.instances.back());
+
+    // The physical starting coordinate is presented as an Earth departure,
+    // rather than being translated past the top edge around the Moon.
+    assert(ship.centerX > -1.0F && ship.centerX < 1.0F);
+    assert(ship.centerY > -1.0F && ship.centerY < 1.0F);
+    assert(std::abs(ship.centerX - -0.18F) < 0.01F);
+    assert(std::abs(ship.centerY - -0.70F) < 0.01F);
+
+    // The same transform must rotate the ship with its trajectory so the
+    // vehicle points away from Earth along the visible transfer direction.
+    const float forwardLength = std::hypot(ship.axisYx, ship.axisYy);
+    assert(forwardLength > 0.0F);
+    assert(ship.axisYx / forwardLength > 0.0F);
+    assert(ship.axisYy / forwardLength > 0.0F);
+}
+
+void testPhysicalApproachZoomBeginsContinuouslyAtThreeQuarters()
+{
+    const auto texturedInstance = [](const ScenePacket& packet, TextureId texture) {
+        const rocket::SceneAtlasUvRect expected =
+            rocket::mapSceneAtlasUvRect(texture, 0.0F, 0.0F, 1.0F, 1.0F);
+        const auto found = std::find_if(
+            packet.instances.begin(),
+            packet.instances.end(),
+            [&](const PackedSceneInstance& packed) {
+                const SceneInstance instance = rocket::unpackSceneInstance(packed);
+                return instance.textured &&
+                    std::abs(instance.u0 - expected.u0) < 0.001F &&
+                    std::abs(instance.v0 - expected.v0) < 0.001F &&
+                    std::abs(instance.u1 - expected.u1) < 0.001F &&
+                    std::abs(instance.v1 - expected.v1) < 0.001F;
+            });
+        assert(found != packet.instances.end());
+        return rocket::unpackSceneInstance(*found);
+    };
+    const auto distance = [](const SceneInstance& first, const SceneInstance& second) {
+        return std::hypot(first.centerX - second.centerX, first.centerY - second.centerY);
+    };
+    const auto spriteWidth = [](const SceneInstance& instance) {
+        return 2.0F * std::hypot(instance.axisXx, instance.axisXy);
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::Earth, true);
+    composer.setTextureReady(TextureId::Moon, true);
+    composer.setTextureReady(TextureId::RocketClosed, true);
+
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::Flight;
+    snapshot.destinationTier = 1;
+    snapshot.frontierTransfer = true;
+    snapshot.launchPhysicalFlight = true;
+    snapshot.launchHeading = 0.0;
+
+    // Just before three-quarters distance, the original transfer framing is
+    // untouched. Just after it, smoothstep's zero derivative keeps both the
+    // camera target and scale visually continuous.
+    snapshot.launchPositionX = -3.40 * 0.251;
+    snapshot.launchPositionY = 1.10 * 0.251;
+    const ScenePacket beforePacket = composer.compose(snapshot);
+    const SceneInstance moonBefore = texturedInstance(beforePacket, TextureId::Moon);
+
+    snapshot.launchPositionX = -3.40 * 0.249;
+    snapshot.launchPositionY = 1.10 * 0.249;
+    const ScenePacket afterPacket = composer.compose(snapshot);
+    const SceneInstance moonAfter = texturedInstance(afterPacket, TextureId::Moon);
+    assert(distance(moonBefore, moonAfter) < 0.001F);
+    assert(std::abs(spriteWidth(moonBefore) - spriteWidth(moonAfter)) < 0.001F);
+
+    snapshot.launchPositionX = -3.40 * 0.25;
+    snapshot.launchPositionY = 1.10 * 0.25;
+    const ScenePacket thresholdPacket = composer.compose(snapshot);
+    const SceneInstance moonThreshold = texturedInstance(thresholdPacket, TextureId::Moon);
+    const SceneInstance shipThreshold = texturedInstance(thresholdPacket, TextureId::RocketClosed);
+
+    // By the outer orbit band, the camera has completed its pan to the
+    // planet-centered view and enlarged the readable actors without warping
+    // the ship into the landing frame.
+    constexpr double departureDistance = 3.5735136770411273;
+    constexpr double outerOrbitBand = 0.44 + 0.075;
+    const double remainingFraction = outerOrbitBand / departureDistance;
+    snapshot.launchPositionX = -3.40 * remainingFraction;
+    snapshot.launchPositionY = 1.10 * remainingFraction;
+    const ScenePacket closePacket = composer.compose(snapshot);
+    const SceneInstance moonClose = texturedInstance(closePacket, TextureId::Moon);
+    const SceneInstance shipClose = texturedInstance(closePacket, TextureId::RocketClosed);
+    assert(moonClose.centerX < moonThreshold.centerX - 0.20F);
+    assert(moonClose.centerY < moonThreshold.centerY - 0.20F);
+    assert(std::abs(moonClose.centerX) < 0.01F);
+    assert(std::abs(moonClose.centerY) < 0.01F);
+    assert(spriteWidth(moonClose) > spriteWidth(moonThreshold) * 1.35F);
+    assert(spriteWidth(shipClose) > spriteWidth(shipThreshold) * 1.15F);
+    assert(distance(shipClose, moonClose) <= 0.47F);
+    assert(!snapshot.launchLandingLocalFrame);
+}
+
+void testPhysicalApproachCameraAppliesToMarsAndLaterDestinations()
+{
+    const auto texturedInstance = [](const ScenePacket& packet, TextureId texture) {
+        const rocket::SceneAtlasUvRect expected =
+            rocket::mapSceneAtlasUvRect(texture, 0.0F, 0.0F, 1.0F, 1.0F);
+        const auto found = std::find_if(
+            packet.instances.begin(),
+            packet.instances.end(),
+            [&](const PackedSceneInstance& packed) {
+                const SceneInstance instance = rocket::unpackSceneInstance(packed);
+                return instance.textured &&
+                    std::abs(instance.u0 - expected.u0) < 0.001F &&
+                    std::abs(instance.v0 - expected.v0) < 0.001F &&
+                    std::abs(instance.u1 - expected.u1) < 0.001F &&
+                    std::abs(instance.v1 - expected.v1) < 0.001F;
+            });
+        assert(found != packet.instances.end());
+        return rocket::unpackSceneInstance(*found);
+    };
+
+    constexpr double departureDistance = 3.5735136770411273;
+    constexpr double outerOrbitBand = 0.44 + 0.075;
+    const std::array<std::pair<int, TextureId>, 2> destinations {{
+        {2, TextureId::Mars},
+        {4, TextureId::Saturn},
+    }};
+    for (const auto& [tier, texture] : destinations) {
+        SceneComposer composer;
+        composer.setViewport({1280, 800, 1280, 800, 1.0F});
+        composer.setTextureReady(texture, true);
+        composer.setTextureReady(TextureId::RocketClosed, true);
+
+        RenderSnapshot snapshot;
+        snapshot.screen = rocket::Screen::Flight;
+        snapshot.destinationTier = tier;
+        snapshot.frontierTransfer = true;
+        snapshot.launchPhysicalFlight = true;
+        snapshot.launchHeading = 0.0;
+
+        snapshot.launchPositionX = -3.40 * 0.251;
+        snapshot.launchPositionY = 1.10 * 0.251;
+        const SceneInstance before = texturedInstance(composer.compose(snapshot), texture);
+        snapshot.launchPositionX = -3.40 * 0.249;
+        snapshot.launchPositionY = 1.10 * 0.249;
+        const SceneInstance after = texturedInstance(composer.compose(snapshot), texture);
+        assert(std::hypot(
+            before.centerX - after.centerX,
+            before.centerY - after.centerY) < 0.001F);
+
+        // A grazing transfer can be three quarters complete while remaining
+        // outside the radial trigger. Route progress must still begin the
+        // camera move continuously and finish the flyby framing.
+        snapshot.launchPositionX = -1.05;
+        snapshot.launchPositionY = 0.35;
+        snapshot.travelProgress = 0.749;
+        const SceneInstance grazingBefore = texturedInstance(composer.compose(snapshot), texture);
+        snapshot.travelProgress = 0.751;
+        const SceneInstance grazingAfter = texturedInstance(composer.compose(snapshot), texture);
+        assert(std::hypot(
+            grazingBefore.centerX - grazingAfter.centerX,
+            grazingBefore.centerY - grazingAfter.centerY) < 0.001F);
+        snapshot.travelProgress = 0.95;
+        const SceneInstance grazingComplete = texturedInstance(composer.compose(snapshot), texture);
+        assert(std::abs(grazingComplete.centerX) < 0.01F);
+        assert(std::abs(grazingComplete.centerY) < 0.01F);
+
+        const double remainingFraction = outerOrbitBand / departureDistance;
+        snapshot.travelProgress = 0.0;
+        snapshot.launchPositionX = -3.40 * remainingFraction;
+        snapshot.launchPositionY = 1.10 * remainingFraction;
+        const SceneInstance orbit = texturedInstance(composer.compose(snapshot), texture);
+        assert(std::abs(orbit.centerX) < 0.01F);
+        assert(std::abs(orbit.centerY) < 0.01F);
+    }
+}
+
+void testPhysicalLandingCameraBlendsWithoutTeleportingUnauthorizedImpacts()
+{
+    const auto ship = [](SceneComposer& composer, const RenderSnapshot& snapshot) {
+        const ScenePacket packet = rocket::SceneComposerTestAccess::rocketPacket(composer, snapshot);
+        assert(!packet.instances.empty());
+        return rocket::unpackSceneInstance(packet.instances.back());
+    };
+    const auto distance = [](const SceneInstance& first, const SceneInstance& second) {
+        return std::hypot(first.centerX - second.centerX, first.centerY - second.centerY);
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::RocketClosed, true);
+
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::Flight;
+    snapshot.destinationTier = 1;
+    snapshot.frontierTransfer = true;
+    snapshot.launchPhysicalFlight = true;
+    snapshot.launchOrbitCaptured = true;
+    snapshot.launchLandingAuthorized = true;
+    snapshot.launchLandingVerticalVelocity = -1.0;
+    snapshot.launchPositionY = 0.0;
+
+    snapshot.launchPositionX = 0.441;
+    const SceneInstance beforeDescent = ship(composer, snapshot);
+    snapshot.launchPositionX = 0.439;
+    const SceneInstance afterDescent = ship(composer, snapshot);
+    assert(distance(beforeDescent, afterDescent) < 0.01F);
+
+    // A wide later-world orbit must not create an empty mid-descent frame.
+    // The altitude-aware camera keeps the physical horizon inside the Deck
+    // viewport while it closes toward the final 2.40x landing composition.
+    RenderSnapshot wideOrbit = snapshot;
+    wideOrbit.launchOrbitTargetRadius = 0.90;
+    wideOrbit.launchOrbitGoodBand = 0.12;
+    wideOrbit.launchPositionX = 0.65;
+    const ScenePacket wideOrbitPacket = composer.compose(wideOrbit);
+    const auto horizon = std::find_if(
+        wideOrbitPacket.instances.begin(),
+        wideOrbitPacket.instances.end(),
+        [](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return instance.shape == SceneInstanceShape::Rectangle
+                && std::abs(instance.color.r - 0.76F) < 0.01F
+                && std::abs(instance.color.g - 0.74F) < 0.01F
+                && std::abs(instance.color.b - 0.68F) < 0.01F
+                && instance.color.a > 0.40F;
+        });
+    assert(horizon != wideOrbitPacket.instances.end());
+    const SceneInstance horizonInstance = rocket::unpackSceneInstance(*horizon);
+    assert(std::abs(horizonInstance.centerX) < 0.90F);
+    assert(std::abs(horizonInstance.centerY) < 0.90F);
+
+    snapshot.launchPositionX = 0.311;
+    const SceneInstance beforeLanding = ship(composer, snapshot);
+    snapshot.launchPositionX = 0.309;
+    snapshot.launchLandingLocalFrame = true;
+    const SceneInstance localLanding = ship(composer, snapshot);
+    assert(distance(beforeLanding, localLanding) < 0.03F);
+    assert(std::abs(localLanding.centerX) < 0.01F);
+    assert(std::abs(localLanding.centerY + 0.30F) < 0.01F);
+
+    RenderSnapshot unauthorized = snapshot;
+    unauthorized.launchLandingAuthorized = false;
+    unauthorized.launchLandingLocalFrame = false;
+    unauthorized.launchPositionX = 0.309;
+    const SceneInstance impact = ship(composer, unauthorized);
+    assert(std::hypot(impact.centerX, impact.centerY + 0.30F) > 0.08F);
+}
+
+void testPhysicalLandingCameraDoesNotRetainTransferBodies()
+{
+    const auto hasTexture = [](const ScenePacket& packet, TextureId texture) {
+        const rocket::SceneAtlasUvRect expected =
+            rocket::mapSceneAtlasUvRect(texture, 0.0F, 0.0F, 1.0F, 1.0F);
+        return std::any_of(
+            packet.instances.begin(),
+            packet.instances.end(),
+            [&](const PackedSceneInstance& packed) {
+                const SceneInstance instance = rocket::unpackSceneInstance(packed);
+                return instance.textured &&
+                    std::abs(instance.u0 - expected.u0) < 0.001F &&
+                    std::abs(instance.v0 - expected.v0) < 0.001F &&
+                    std::abs(instance.u1 - expected.u1) < 0.001F &&
+                    std::abs(instance.v1 - expected.v1) < 0.001F;
+            });
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::Earth, true);
+    composer.setTextureReady(TextureId::Moon, true);
+    composer.setTextureReady(TextureId::RocketClosed, true);
+
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::Flight;
+    snapshot.destinationTier = 1;
+    snapshot.frontierTransfer = true;
+    snapshot.launchPhysicalFlight = true;
+    snapshot.launchLandingLocalFrame = true;
+    snapshot.launchPositionX = 0.24;
+    snapshot.launchPositionY = 0.0;
+    snapshot.launchLandingAltitude = 8.0;
+
+    const ScenePacket& packet = composer.compose(snapshot);
+    assert(!hasTexture(packet, TextureId::Earth));
+    assert(!hasTexture(packet, TextureId::Moon));
+    assert(hasTexture(packet, TextureId::RocketClosed));
+}
+
 void testOverheatedLaunchFlashesShipRedAtTheCriticalWarningCadence()
 {
     const auto redShipOverlays = [](const ScenePacket& packet) {
@@ -1357,7 +1661,7 @@ void testOverheatedLaunchFlashesShipRedAtTheCriticalWarningCadence()
     composer.setTextureReady(TextureId::RocketClosed, true);
 
     RenderSnapshot snapshot;
-    snapshot.screen = rocket::Screen::Launch;
+    snapshot.screen = rocket::Screen::Flight;
     snapshot.instrumentTemperature =
         rocket::tuning::launch::temperatureCriticalThreshold;
     snapshot.animationTime = 0.0;
@@ -1457,7 +1761,7 @@ void testFlightPlumesScaleContinuouslyWithThrottle()
     assert(orbitHigh.second > orbitLow.second);
 
     RenderSnapshot launch;
-    launch.screen = rocket::Screen::Launch;
+    launch.screen = rocket::Screen::Flight;
     launch.poweredFlight = true;
     launch.currentMultiplier = 1.2;
     launch.targetMultiplier = 2.0;
@@ -1506,7 +1810,7 @@ void testCampaignIntroductionDrawsHeroicCapybara()
         }));
 
     RenderSnapshot approach;
-    approach.screen = rocket::Screen::Launch;
+    approach.screen = rocket::Screen::Flight;
     approach.straylightApproach = true;
     approach.frontierTransfer = true;
     approach.destinationTier = 6;
@@ -1559,7 +1863,7 @@ void testUndiscoveredStraylightIsForeshadowedBehindNeptuneOnly()
     composer.setTextureReady(TextureId::ArkOperational, true);
 
     RenderSnapshot neptune;
-    neptune.screen = rocket::Screen::Launch;
+    neptune.screen = rocket::Screen::Flight;
     neptune.destinationTier = 6;
     neptune.frontierTransfer = true;
     neptune.arkCondition = rocket::ArkCondition::NotFound;
@@ -1866,7 +2170,7 @@ void testAtlasPageBatchingAcrossLogicalTextures()
     composer.setTextureReady(TextureId::RocketClosed, true);
 
     RenderSnapshot snapshot;
-    snapshot.screen = rocket::Screen::Launch;
+    snapshot.screen = rocket::Screen::Flight;
     snapshot.preflightActive = true;
     snapshot.preflightProgress = 0.625;
     const ScenePacket& packet = composer.compose(snapshot);
@@ -2596,7 +2900,7 @@ void testMiningActiveAnchorOwnsDefenseEffects()
     assert(!samePackedInstances(base, movedAnchor));
 }
 
-void testMiningLooseChunksAreVisibleWorldEntities()
+void testMiningLooseObjectsAreVisibleWorldEntities()
 {
     rocket::MiningRunState mining;
     mining.terrain.width = 4;
@@ -2621,15 +2925,15 @@ void testMiningLooseChunksAreVisibleWorldEntities()
         {rocket::MiningCellMaterial::ExoticVein, {0.78F, 0.42F, 1.0F, 1.0F}},
     }};
     for (const auto& [material, color] : materials) {
-        mining.looseChunks.clear();
-        rocket::MiningLooseChunk chunk;
+        mining.looseObjects.clear();
+        rocket::MiningLooseObject chunk;
         chunk.material = material;
         chunk.x = 2.0;
         chunk.y = 2.0;
         chunk.velocityX = 0.4;
         chunk.velocityY = -0.2;
         chunk.cargoValue = 2;
-        mining.looseChunks.push_back(chunk);
+        mining.looseObjects.push_back(chunk);
         RenderSnapshot chunkSnapshot = miningSnapshot(mining);
         chunkSnapshot.miningShipPresent = false;
         SceneComposer chunkComposer;
@@ -4106,7 +4410,62 @@ void testLevelUpFanfareGeometryAndAccessibleShake()
     assert(quiet.vertices.size() < midVertexCount || quiet.instances.size() < midInstanceCount);
 }
 
-void testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake()
+void testArrivalCelebrationRestoresImpactAndRadialBursts()
+{
+    RenderSnapshot arrival;
+    arrival.screen = rocket::Screen::ArrivalFanfare;
+    arrival.destinationTier = 2;
+    arrival.travelProgress = 1.0;
+    arrival.animationTime = 0.02;
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const ScenePacket& celebration = composer.compose(arrival);
+    const std::size_t celebrationVertexCount = celebration.vertices.size();
+    const std::size_t celebrationInstanceCount = celebration.instances.size();
+    const Color celebrationClear = celebration.clearColor;
+
+    RenderSnapshot ordinaryApproach = arrival;
+    ordinaryApproach.screen = rocket::Screen::ArrivalOps;
+    const ScenePacket& ordinary = composer.compose(ordinaryApproach);
+    const std::size_t ordinaryGeometryCount = ordinary.vertices.size() + ordinary.instances.size();
+    assert(celebrationVertexCount + celebrationInstanceCount > ordinaryGeometryCount);
+    assert(celebrationClear.r > ordinary.clearColor.r);
+
+    SceneComposer shaken;
+    shaken.setViewport({1280, 800, 1280, 800, 1.0F});
+    const auto shakenCenter = rocket::SceneComposerTestAccess::frameCenter(shaken, arrival);
+    SceneComposer stable;
+    stable.setViewport({1280, 800, 1280, 800, 1.0F});
+    stable.setCameraShakeEnabled(false);
+    const auto stableCenter = rocket::SceneComposerTestAccess::frameCenter(stable, arrival);
+    assert(std::hypot(
+        shakenCenter.first - stableCenter.first,
+        shakenCenter.second - stableCenter.second) > 1.0F);
+
+    // Reduced-motion mode removes the contact jolt but preserves the rings
+    // and outward line bursts, so the celebration is not erased with shake.
+    const ScenePacket& accessibleCelebration = stable.compose(arrival);
+    assert(accessibleCelebration.vertices.size() + accessibleCelebration.instances.size() > ordinaryGeometryCount);
+
+    // The physical jolt settles quickly while the visual ceremony continues
+    // for the remainder of the automatic two-second beat.
+    arrival.animationTime = 0.90;
+    SceneComposer settled;
+    settled.setViewport({1280, 800, 1280, 800, 1.0F});
+    const auto settledCenter = rocket::SceneComposerTestAccess::frameCenter(settled, arrival);
+    SceneComposer settledStable;
+    settledStable.setViewport({1280, 800, 1280, 800, 1.0F});
+    settledStable.setCameraShakeEnabled(false);
+    const auto settledStableCenter = rocket::SceneComposerTestAccess::frameCenter(settledStable, arrival);
+    assert(std::hypot(
+        settledCenter.first - settledStableCenter.first,
+        settledCenter.second - settledStableCenter.second) < 0.001F);
+    const ScenePacket& settledCelebration = settled.compose(arrival);
+    assert(settledCelebration.vertices.size() + settledCelebration.instances.size() > ordinaryGeometryCount);
+}
+
+void testFlightDestructionCinematicUsesExplosionFramesAndAccessibleShake()
 {
     const auto hasTextureFrame = [](const ScenePacket& packet, TextureId texture, int frame, int frameCount = 1) {
         const rocket::SceneAtlasUvRect expected = rocket::mapSceneAtlasUvRect(
@@ -4147,12 +4506,13 @@ void testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake()
     };
 
     RenderSnapshot impact;
-    impact.screen = rocket::Screen::Launch;
+    impact.screen = rocket::Screen::Flight;
     impact.destinationTier = 1;
     impact.travelProgress = 1.0;
-    impact.launchLunarImpactActive = true;
-    impact.launchLunarImpactElapsed = 0.04;
-    impact.animationTime = impact.launchLunarImpactElapsed;
+    impact.launchDestructionActive = true;
+    impact.launchDestructionElapsed = 0.04;
+    impact.launchDestructionCause = rocket::LaunchFailureCause::LunarImpact;
+    impact.animationTime = impact.launchDestructionElapsed;
 
     SceneComposer composer;
     composer.setViewport({1280, 800, 1280, 800, 1.0F});
@@ -4163,8 +4523,8 @@ void testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake()
     assert(explosionFrame(contact) < 0);
     const std::size_t contactDrawCount = contact.draws.size();
 
-    impact.launchLunarImpactElapsed = 0.09;
-    impact.animationTime = impact.launchLunarImpactElapsed;
+    impact.launchDestructionElapsed = 0.09;
+    impact.animationTime = impact.launchDestructionElapsed;
     const ScenePacket& firstBlast = composer.compose(impact);
     assert(!hasTextureFrame(firstBlast, TextureId::RocketClosed, 0));
     assert(explosionFrame(firstBlast) == 0);
@@ -4172,21 +4532,21 @@ void testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake()
     assert(firstBlastDrawCount > contactDrawCount);
 
     const double frameDuration =
-        (rocket::tuning::session::lunarImpactExplosionEndSeconds -
-            rocket::tuning::session::lunarImpactHoldSeconds) /
+        (rocket::tuning::session::flightDestructionExplosionEndSeconds -
+            rocket::tuning::session::flightDestructionHoldSeconds) /
         8.0;
     for (int frame = 0; frame < 8; ++frame) {
-        impact.launchLunarImpactElapsed =
-            rocket::tuning::session::lunarImpactHoldSeconds +
+        impact.launchDestructionElapsed =
+            rocket::tuning::session::flightDestructionHoldSeconds +
             (static_cast<double>(frame) + 0.5) * frameDuration;
-        impact.animationTime = impact.launchLunarImpactElapsed;
+        impact.animationTime = impact.launchDestructionElapsed;
         const ScenePacket& blastFrame = composer.compose(impact);
         assert(explosionFrame(blastFrame) == frame);
     }
 
     RenderSnapshot still = impact;
-    still.launchLunarImpactElapsed = 0.12;
-    still.animationTime = still.launchLunarImpactElapsed;
+    still.launchDestructionElapsed = 0.12;
+    still.animationTime = still.launchDestructionElapsed;
     SceneComposer shakeComposer;
     shakeComposer.setViewport({1280, 800, 1280, 800, 1.0F});
     const auto shakenCenter = rocket::SceneComposerTestAccess::frameCenter(shakeComposer, still);
@@ -4199,7 +4559,7 @@ void testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake()
         shakenCenter.second - stableCenter.second);
     assert(lunarShakeDistance > 8.0F);
     RenderSnapshot ordinaryImpact = still;
-    ordinaryImpact.launchLunarImpactActive = false;
+    ordinaryImpact.launchDestructionActive = false;
     ordinaryImpact.launchShake = 1.0;
     SceneComposer ordinaryComposer;
     ordinaryComposer.setViewport({1280, 800, 1280, 800, 1.0F});
@@ -4221,6 +4581,11 @@ void testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake()
     const ScenePacket& resolvedLunarImpact = composer.compose(lunarResult);
     assert(explosionFrame(resolvedLunarImpact) < 0);
     assert(!hasTextureFrame(resolvedLunarImpact, TextureId::RocketClosed, 0));
+
+    lunarResult.lastLaunchFailureCause = rocket::LaunchFailureCause::ThermalRunaway;
+    const ScenePacket& resolvedThermalRunaway = composer.compose(lunarResult);
+    assert(explosionFrame(resolvedThermalRunaway) < 0);
+    assert(!hasTextureFrame(resolvedThermalRunaway, TextureId::RocketClosed, 0));
 
     lunarResult.lastLaunchFailureCause = rocket::LaunchFailureCause::FuelExhausted;
     const ScenePacket& genericDestroyed = composer.compose(lunarResult);
@@ -4252,6 +4617,11 @@ int main()
     testFlightInstrumentClusterUsesAtlasNeedlesAndBlinkingWarning();
     testFlybySteeringTriangleAndThrustFlameRemainDistinct();
     testLaunchUsesAttachedFlameAndSideSteeringTriangleOnly();
+    testPhysicalMoonFlightStartsOnScreenAtEarthDeparture();
+    testPhysicalApproachZoomBeginsContinuouslyAtThreeQuarters();
+    testPhysicalApproachCameraAppliesToMarsAndLaterDestinations();
+    testPhysicalLandingCameraBlendsWithoutTeleportingUnauthorizedImpacts();
+    testPhysicalLandingCameraDoesNotRetainTransferBodies();
     testOverheatedLaunchFlashesShipRedAtTheCriticalWarningCadence();
     testFlightPlumesScaleContinuouslyWithThrottle();
     testCampaignIntroductionDrawsHeroicCapybara();
@@ -4263,7 +4633,7 @@ int main()
     testMiningEVAUsesDedicatedTextureWithoutFallback();
     testMiningEvaDeathAddsPresentationWithoutReplacingTheSuit();
     testMiningActiveAnchorOwnsDefenseEffects();
-    testMiningLooseChunksAreVisibleWorldEntities();
+    testMiningLooseObjectsAreVisibleWorldEntities();
     testMiningCellsAndScannerMarksUseMaterialSilhouettes();
     testSurfaceScannerMarksUseMaterialSilhouettes();
     testSurfaceScanSuccessFanfareRespectsCameraShake();
@@ -4295,6 +4665,7 @@ int main()
     testSurfacePushSecondDigFrameCompletes();
     testSurfacePushTerrainGuardBoundsInvalidAspect();
     testLevelUpFanfareGeometryAndAccessibleShake();
-    testLunarImpactCinematicUsesExplosionFramesAndAccessibleShake();
+    testArrivalCelebrationRestoresImpactAndRadialBursts();
+    testFlightDestructionCinematicUsesExplosionFramesAndAccessibleShake();
     return 0;
 }

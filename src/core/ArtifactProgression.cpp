@@ -119,7 +119,7 @@ std::optional<ProgressionArtifactOpportunity> unresolvedProgressionArtifactOppor
         return std::nullopt;
     }
 
-    const SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     if (expedition.destinationId == destinationId &&
         !expedition.pendingScenarioId.empty() &&
         !expedition.pendingScenarioStepId.empty()) {

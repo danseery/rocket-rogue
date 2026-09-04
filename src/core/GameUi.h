@@ -15,6 +15,8 @@ inline constexpr std::string_view startLaunch = "start_launch";
 inline constexpr std::string_view returnHome = "return_home";
 inline constexpr std::string_view arrivalOps = "arrival_ops";
 inline constexpr std::string_view cutEngines = "cut_engines";
+inline constexpr std::string_view deploySurfaceTeam = "deploy_surface_team";
+inline constexpr std::string_view departSurfaceUndeployed = "depart_surface_undeployed";
 inline constexpr std::string_view next = "next";
 inline constexpr std::string_view attemptFrontier = "attempt_frontier";
 inline constexpr std::string_view openNavigation = "open_navigation";
@@ -30,13 +32,9 @@ inline constexpr std::string_view orbitAbort = "orbit_abort";
 inline constexpr std::string_view orbitContinue = "orbit_continue";
 inline constexpr std::string_view arrivalLanding = "arrival_landing";
 inline constexpr std::string_view arrivalOrbitDepart = "arrival_orbit_depart";
-inline constexpr std::string_view skipArrivalFanfare = "skip_arrival_fanfare";
 inline constexpr std::string_view acknowledgeStoryBriefing = "acknowledge_story_briefing";
 inline constexpr std::string_view repairShip = "repair_ship";
-inline constexpr std::string_view recruitCrew = "recruit_crew";
-inline constexpr std::string_view recruitCandidatePrefix = "recruit_candidate:";
-inline constexpr std::string_view trainCrew = "train_crew";
-inline constexpr std::string_view restCrew = "rest_crew";
+inline constexpr std::string_view acceptCrewReplacement = "accept_crew_replacement";
 inline constexpr std::string_view resetSave = "reset_save";
 inline constexpr std::string_view buyOfferPrefix = "buy_offer:";
 inline constexpr std::string_view selectRefitOfferPrefix = "select_refit_offer:";
@@ -63,6 +61,8 @@ inline constexpr std::string_view miningTether = "mining_tether";
 inline constexpr std::string_view miningRepairDrill = "mining_repair_drill";
 inline constexpr std::string_view miningRepairDrone = "mining_repair_drone";
 inline constexpr std::string_view miningStow = "mining_stow";
+inline constexpr std::string_view miningWaitForDrones = "mining_wait_for_drones";
+inline constexpr std::string_view miningDepart = "mining_depart";
 inline constexpr std::string_view miningAbort = "mining_abort";
 inline constexpr std::string_view miningFailureAck = "mining_failure_ack";
 inline constexpr std::string_view acknowledgeJupiterWindow = "acknowledge_jupiter_window";
@@ -86,11 +86,6 @@ inline std::string selectRefitOffer(int index)
 inline std::string researchProject(int index)
 {
     return std::string(researchProjectPrefix) + std::to_string(index);
-}
-
-inline std::string recruitCandidate(int index)
-{
-    return std::string(recruitCandidatePrefix) + std::to_string(index);
 }
 
 inline std::string selectNavigationDestination(int index)

@@ -782,7 +782,7 @@ std::string_view screenFamilyClass(Screen screen)
     case Screen::DroneOps: return "drone-workspace-screen-panel rr-family-drone-ops";
     case Screen::ArrivalOps: return "arrival-family-panel rr-family-arrival";
     case Screen::Upgrade: return "selection-screen-panel rr-family-selection";
-    case Screen::Launch: return "flight-family-panel";
+    case Screen::Flight: return "flight-family-panel";
     case Screen::Mining: return "rr-family-mining";
     case Screen::Results: return "rr-family-results";
     default:
@@ -881,16 +881,10 @@ std::string nativeSceneOverlayMarkup(const PanelDocumentPresentation& presentati
     case PanelOverlayKind::PreflightLaunch: {
         const bool ready = presentation.runtime.preflightReady;
         std::string markup = "<button id=\"rr-scene-launch-control\" class=\"native-scene-launch-control rr-text-button\" "
-            "data-rr-action=\"start_launch\" data-ui-focus-id=\"action:start_launch\"";
-        if (ready) {
-            markup += " data-ui-default-focus=\"1\"";
-        }
-        if (!ready) {
-            markup += " disabled=\"1\"";
-        }
-        markup += ">";
+            "data-rr-action=\"start_launch\" data-ui-focus-id=\"action:start_launch\" "
+            "data-ui-default-focus=\"1\">";
         markup += "<span class=\"rr-button-label\">";
-        markup += ready ? "Launch" : "Securing Mining Rig";
+        markup += ready ? "Launch" : "Launch when ready";
         markup += "</span></button>";
         return markup;
     }
@@ -910,7 +904,9 @@ std::string nativeSceneOverlayMarkup(const PanelDocumentPresentation& presentati
         const int clusterHeight = std::max(1, static_cast<int>(clusterWidth * flight_instrument_layout::kAspectRatio));
         const int clusterLeft = scene.x + scene.width - clusterWidth
             - static_cast<int>(flight_instrument_layout::kSceneInsetPixels);
-        const int promptClearance = std::clamp((scene.height * 6) / 100, 28, 64);
+        // Match SceneComposer's safe area so the RmlUi readouts stay seated in
+        // the bezel after the cluster is lifted clear of the viewport edge.
+        const int promptClearance = std::clamp((scene.height * 12) / 100, 64, 112);
         const int clusterTop = scene.y + scene.height - clusterHeight - promptClearance;
         const PanelRuntimeHints& runtime = presentation.runtime;
         const std::string clusterClass = clusterWidth < 320
@@ -1880,6 +1876,13 @@ std::string inputPromptBar(
         && presentation.metadata.interaction == PanelInteractionMode::Realtime;
     const bool surfaceActivity = (screen == Screen::SurfaceScan || screen == Screen::SurfacePush)
         && presentation.metadata.interaction == PanelInteractionMode::Realtime;
+    if ((mining || presentation.runtime.inlineFlightControls) && !modalOpen) {
+        // Mining controls are introduced contextually. A permanent ribbon
+        // competes with the physical scene and the service-zone actions.
+        // Physical Flight also owns its device-aware inline control hint;
+        // do not add the legacy Turn Around / Steer-Throttle ribbon to it.
+        return {};
+    }
     if (!controllerActive && (modalOpen || (!mining && !flyby && !orbit && !surfaceActivity))) {
         return {};
     }
@@ -1990,7 +1993,7 @@ std::string inputPromptBar(
         prompt += item(labels.south, "Pulse / push")
             + item(labels.east, screen == Screen::SurfaceScan ? "Tap: log survey" : "Tap: set start depth")
             + item(labels.east, "Hold: abort") + item(labels.menu, "Pause");
-    } else if (screen == Screen::Launch
+    } else if (screen == Screen::Flight
         && presentation.metadata.overlay != PanelOverlayKind::PreflightLaunch) {
         if (presentation.contentMarkup.find("data-launch-manual-controls=\"1\"") != std::string::npos) {
             prompt += describedItem("Steer / throttle", "L-stick");
@@ -2555,12 +2558,22 @@ void collectFocusTargets(bool modalOpen)
     if (!g_document) {
         return;
     }
-    Rml::Element* root = modalOpen ? g_document->GetElementById("rr-modal") : g_document->GetElementById("rr-panel");
-    if (!root) {
-        return;
-    }
     std::vector<Rml::Element*> elements;
-    collectFocusableElements(root, elements);
+    if (modalOpen) {
+        if (Rml::Element* root = g_document->GetElementById("rr-modal")) {
+            collectFocusableElements(root, elements);
+        }
+    } else {
+        // Realtime scene controls such as the preflight Launch button live in
+        // a sibling persistent host. They participate in the same semantic
+        // focus scope as the panel rather than behaving like a modal.
+        if (Rml::Element* panel = g_document->GetElementById("rr-panel")) {
+            collectFocusableElements(panel, elements);
+        }
+        if (Rml::Element* overlay = g_document->GetElementById("rr-scene-overlay-host")) {
+            collectFocusableElements(overlay, elements);
+        }
+    }
     std::vector<std::string> seen;
     g_focusTargets.reserve(elements.size());
     for (Rml::Element* element : elements) {
@@ -3569,6 +3582,15 @@ void GameRmlUi::requestFocus(std::string_view id)
         return;
     }
     pendingFocusId_ = std::string(id);
+    // A requested target may have been mounted in a separately rebuilt host
+    // (the Flight launch control lives in the scene overlay, not the left
+    // panel). Recollect unconditionally so a non-empty cache from the previous
+    // screen cannot make the newly mounted target appear unavailable.
+    const bool modalScope = modalOpen();
+    collectFocusTargets(modalScope);
+    if (findFocusTarget(pendingFocusId_)) {
+        (void)applyPendingFocusIfAvailable();
+    }
 }
 
 void GameRmlUi::openModal(const std::string& id)
@@ -3797,6 +3819,7 @@ bool GameRmlUi::applyDocumentPresentationState()
     const bool modalVisible = !openModalId_.empty();
     const bool panelInputHelperVisible = presentation_.runtime.responsiveViewport
         && !modalVisible
+        && !presentation_.runtime.inlineFlightControls
         && (controllerPresentationActive_ || presentation_.runtime.gameplayInputHelper);
     std::string documentClass = "rr-document";
     if (controllerFocusVisible_) {

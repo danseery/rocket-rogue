@@ -37,13 +37,20 @@ struct PanelRenderContext {
     std::string_view titleNotice;
     bool firstTimeIntroductionsEnabled = true;
     int selectedRefitOfferIndex = 0;
-    const LaunchFlightState* launchFlight = nullptr;
+    const FlightRunState* launchFlight = nullptr;
     double levelUpFanfareElapsed = 1.0;
     int levelUpBatchChoices = 0;
     bool levelUpActivationLocked = false;
     int levelUpResolvingOfferIndex = -1;
     bool expeditionXpPulse = false;
     bool miningFailureModalReady = true;
+    bool miningExtractionActive = false;
+    bool surfaceArrivalActive = false;
+    int surfaceArrivalPhase = 0;
+    bool surfaceArrivalDeployQueued = false;
+    bool surfaceArrivalLandingCommitted = false;
+    bool controllerFlightControls = false;
+    bool invertFlightY = false;
 };
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);

@@ -61,20 +61,20 @@ int main()
     assert(help.options.showHelp);
 
     const NativeBenchmarkParseResult full = parse({
-        "--benchmark-scenario=orbit",
+        "--benchmark-scenario=launch",
         "--benchmark-seed", "0xBEB17",
         "--benchmark-warmup-seconds", "12.5",
         "--benchmark-duration-seconds=45",
         "--benchmark-renderer", "vulkan",
         "--benchmark-frame-limit", "balanced",
         "--benchmark-resolution", "2560X1440",
-        "--benchmark-json", "captures/orbit.json",
-        "--benchmark-screenshot", "captures/orbit.PNG",
+        "--benchmark-json", "captures/flight.json",
+        "--benchmark-screenshot", "captures/flight.PNG",
         "--benchmark-profile-dir", "captures/profile",
     });
     assert(full);
     assert(full.options.enabled);
-    assert(full.options.scenario == NativeBenchmarkScenario::Orbit);
+    assert(full.options.scenario == NativeBenchmarkScenario::Launch);
     assert(full.options.seed == 0xBEB17ULL);
     assert(std::abs(full.options.warmupSeconds - 12.5) < 0.000001);
     assert(full.options.durationSeconds == 45.0);
@@ -82,8 +82,8 @@ int main()
     assert(full.options.renderer == NativeBenchmarkRenderer::Vulkan);
     assert(full.options.frameLimitMode == rocket::FrameLimitMode::Balanced);
     assert(full.options.resolution.width == 2560 && full.options.resolution.height == 1440);
-    assert(full.options.jsonPath == std::filesystem::path("captures/orbit.json"));
-    assert(full.options.screenshotPath == std::filesystem::path("captures/orbit.PNG"));
+    assert(full.options.jsonPath == std::filesystem::path("captures/flight.json"));
+    assert(full.options.screenshotPath == std::filesystem::path("captures/flight.PNG"));
 
     const NativeBenchmarkParseResult byFrames = minimalBenchmark({
         "--benchmark-frame-count", "3600",
@@ -103,19 +103,9 @@ int main()
         "--benchmark-profile-dir", "title-profile",
     });
     assert(title && title.options.scenario == NativeBenchmarkScenario::Title);
-    const NativeBenchmarkParseResult surfaceOps = parse({
-        "--benchmark-scenario", "surface-ops",
-        "--benchmark-json", "surface-ops.json",
-        "--benchmark-profile-dir", "surface-ops-profile",
-    });
-    assert(surfaceOps && surfaceOps.options.scenario == NativeBenchmarkScenario::SurfaceOps);
-    const NativeBenchmarkParseResult surfaceScan = parse({
-        "--benchmark-scenario", "surface-scan",
-        "--benchmark-json", "surface-scan.json",
-        "--benchmark-profile-dir", "surface-scan-profile",
-    });
-    assert(surfaceScan && surfaceScan.options.scenario == NativeBenchmarkScenario::SurfaceScan);
-    assert(nativeBenchmarkScenarioName(surfaceScan.options.scenario) == "surface-scan");
+    assert(!minimalBenchmark({"--benchmark-scenario", "surface-ops"}));
+    assert(!minimalBenchmark({"--benchmark-scenario", "surface-scan"}));
+    assert(nativeBenchmarkScenarioName(NativeBenchmarkScenario::Launch) == "launch");
     assert(!minimalBenchmark({"--benchmark-resolution", "1280"}));
     assert(!minimalBenchmark({"--benchmark-resolution", "200x100"}));
     assert(!minimalBenchmark({"--benchmark-renderer", "directx"}));

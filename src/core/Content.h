@@ -16,6 +16,7 @@ struct ContentCatalog {
     std::vector<DroneSynergyDefinition> droneSynergies;
     std::vector<ResearchProject> researchProjects;
     std::vector<ShipFrame> frames;
+    std::vector<CrewArchetypeDefinition> crewArchetypes;
     std::vector<Astronaut> astronauts;
     std::vector<Destination> destinations;
     std::vector<RouteLinkDefinition> routeLinks;
@@ -32,6 +33,7 @@ struct ContentCatalog {
     const DroneSynergyDefinition* findDroneSynergy(std::string_view id) const;
     const ResearchProject* findResearchProject(std::string_view id) const;
     const ShipFrame* findFrame(std::string_view id) const;
+    const CrewArchetypeDefinition* findCrewArchetype(std::string_view id) const;
     const Astronaut* findAstronaut(std::string_view id) const;
     const Destination* findDestination(std::string_view id) const;
     const RouteLinkDefinition* findRouteLink(std::string_view id) const;

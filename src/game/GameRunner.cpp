@@ -106,6 +106,7 @@ void GameRunner::frameWithDelta(std::optional<double> fixedDeltaSeconds)
     }
 
     dispatchPendingHaptic();
+    dispatchPendingAudio();
     const double simulationFinished = performanceEnabled ? services_.host.monotonicSeconds() : inputFinished;
     app_.renderScene();
     const double sceneFinished = performanceEnabled ? services_.host.monotonicSeconds() : simulationFinished;
@@ -244,12 +245,26 @@ void GameRunner::dispatchPendingHaptic()
     case ControllerHapticCue::Failure:
         services_.host.haptic(0.300, 0.70, 1.00);
         break;
+    case ControllerHapticCue::Arrival:
+        services_.host.haptic(0.180, 0.34, 0.62);
+        break;
     case ControllerHapticCue::LevelUp:
         services_.host.haptic(0.100, 0.25, 0.50);
         break;
     case ControllerHapticCue::None:
     default:
         break;
+    }
+}
+
+void GameRunner::dispatchPendingAudio()
+{
+    std::vector<GameAudioEvent> events = app_.consumePendingAudioEvents();
+    if (services_.audio == nullptr) {
+        return;
+    }
+    for (const GameAudioEvent& event : events) {
+        (void)services_.audio->playOneShot(event);
     }
 }
 

@@ -88,8 +88,8 @@ The following belongs in content and presentation, not in reusable mechanics:
 
 | Scenario content | Steps and explicit reward | Route effect |
 | --- | --- | --- |
-| Moon: Lunar Prospector Contract | Mandatory mining briefing; safely deliver 30 Moon Common Ore; explicitly claim Prospector Mk I, Slot 1, and the Mining Support Drone. | Grants the Mars route key and readiness. |
-| Mars: Bay Expansion | Mandatory bay-expansion briefing; safely deliver 40 Mars Common Ore; explicitly claim empty Slot 2. | Grants the Jupiter route key and readiness. |
+| Moon: Lunar Prospector Contract | Physically return 20 Moon Common Ore to complete the industrial contract; the twentieth ore activates the anomaly; pulse the scanner, enter the suit-only crevice in EVA, and recover the Artifact. | Ore grants Prospector Mk I; the recovered and explicitly claimed Artifact grants the Mars route key. |
+| Mars: Bay Expansion | Safely deliver 8 Mars Common Ore; explicitly claim empty Slot 2. | Grants the Jupiter route key and readiness. |
 | Io: Volcanic Descent | Commission Hazard Support Drone; launch the Thermal layered-recovery site; complete its cocoon, tether its protected Artifact, and extract safely; full return grants 75 Artifact XP plus the 10-XP authored-objective award. | Grants the slingshot scenario's availability key. |
 | Jupiter departure: Perfect Slingshot | Mandatory one-way briefing; run a scenario Flyby that requires Perfect; first non-Perfect outcome explains the failure once; explicitly claim its reward. | Grants the Saturn route key and readiness permanently. |
 
@@ -101,13 +101,13 @@ The Io mining-site configuration happens to use a Thermal biome, an inert Regoli
 
 Native RmlUi and WebAssembly use the same `assets/ui` templates and RCSS. A scenario action is emitted with semantic scenario-instance ID, step ID, and `ScenarioActionKind` attributes. Templates may choose layout and visual family, but must not infer a claim, route gate, or mandatory-modal behavior from text, a route name, or a markup query. See [RmlUi Template and Component System](RMLUI_TEMPLATE_COMPONENT_SYSTEM.md) for the shared template/focus rules.
 
-## Save version 16 boundary and recovery
+## Save version 18 boundary and recovery
 
-Save version 16 is the only accepted schema. It persists scenario instances, launch-upgrade ranks, permanent Survey Array, Bore System, and Rig Fuel Loop ranks, lesson completion, mining-site provenance, protected-objective state, expedition fuel, Expedition XP, queued Level Up choices, persisted offers, Rig and Drone ranks, slot grafts, and selected synergies.
+Save version 18 is the only accepted schema. It persists scenario instances, unified Flight state, planetary-expedition state, physical Mining objects, independent fuel and oxygen tanks, cargo ownership, crew identity/status, and current progression.
 
-Every non-v16 or malformed payload is cleared before any field is restored and immediately replaced with a fresh v16 campaign. Preferences remain intact. Validated hub states additionally write a sidecar checkpoint. If a v16 campaign fails the runtime progression audit, the title presents `ROUTE CONTROL // RECOVERY REQUIRED` with explicit checkpoint restoration or a confirmed new campaign; neither path grants progress.
+Every non-v18 or malformed payload is rejected before any field is restored and remains untouched until the player confirms New Campaign. Preferences remain intact. Validated hub states additionally write a v18 sidecar checkpoint. If a v18 campaign fails the runtime progression audit, the title presents `ROUTE CONTROL // RECOVERY REQUIRED` with explicit checkpoint restoration or a confirmed new campaign; neither path grants progress.
 
-`SaveSchema.h` and `SaveData.*` are authoritative for wire keys and defaults. Test strict version rejection plus v16 round trips, native/web checkpoint parity, active Arrival, Surface, Mining, protected-objective, and open post-extraction Level Up states whenever scenario, site, cocoon, launch-progression, expedition-fuel, or Expedition XP fields change.
+`SaveSchema.h` and `SaveData.*` are authoritative for wire keys and defaults. Test strict version rejection plus v18 round trips, native/web checkpoint parity, active Flight, Mining, protected-objective, and open post-extraction Level Up states whenever scenario, site, flight, expedition-fuel, or Expedition XP fields change.
 
 ## Authoring checklist
 
@@ -118,7 +118,7 @@ Every non-v16 or malformed payload is cleared before any field is restored and i
 5. Use a `MiningSiteDefinition` and `MiningCocoonDefinition` for protected mining rather than adding encounter flags to generic terrain or drone code.
 6. Route every player action through the scenario dispatcher and every result through a typed event.
 7. Render from `ScenarioObjectivePresentation` on native and web; keep semantic action and focus IDs stable.
-8. Add authored, procedural, event/claim, route, cocoon-layer, strict-v16 save/checkpoint, and native/web presentation coverage as applicable.
+8. Add authored, procedural, event/claim, route, cocoon-layer, strict-v18 save/checkpoint, and native/web presentation coverage as applicable.
 9. Run catalog validation, `node tools/check-scenario-boundaries.mjs`, relevant core/mining/UI tests, and `git diff --check`.
 
 If a proposed feature requires a code comparison against a campaign ID, destination ID, title, or reward copy outside content code, stop and express the needed capability in a typed definition instead.

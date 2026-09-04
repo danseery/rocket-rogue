@@ -68,7 +68,7 @@ void allActLevelContractsResolve()
                 require(!miningEnemyAllowed(rules, MiningEnemyType::Ant), "Act 1 should have no enemy roster");
                 require(rules.enemyHealthScale == 0.0 && rules.enemyDamageScale == 0.0, "Act 1 should not expose combat scaling");
                 require(rules.mechanics.fogAndScanner == (difficulty >= 2), "Act 1 scanner gate should match its level table");
-                require(rules.mechanics.oxygenAndFuel == (difficulty >= 2), "Act 1 endurance gate should match its level table");
+                require(rules.mechanics.oxygenAndFuel, "Act 1 endurance resources should be active from the first Moon expedition");
                 require(miningMaterialAllowed(rules, MiningCellMaterial::HardRock) == (difficulty >= 3), "Act 1 Hard Rock gate should match its level table");
                 require(rules.mechanics.drillHeat == (difficulty >= 4), "Act 1 heat gate should match its level table");
                 require(rules.mechanics.cargoDrag == (difficulty >= 5), "Act 1 cargo gate should match its level table");
@@ -114,7 +114,8 @@ void allActLevelContractsResolve()
     const MiningArenaRules actOneLevelOne = resolveMiningArenaRules({MiningAct::ActOne, 1, 1});
     const MiningArenaRules actOneLevelTwo = resolveMiningArenaRules({MiningAct::ActOne, 2, 1});
     const MiningArenaRules actOneLevelThree = resolveMiningArenaRules({MiningAct::ActOne, 3, 1});
-    require(!actOneLevelOne.mechanics.fogAndScanner, "Act 1 level 1 should isolate movement and drilling");
+    require(!actOneLevelOne.mechanics.fogAndScanner && actOneLevelOne.mechanics.oxygenAndFuel,
+        "Act 1 level 1 should teach movement, drilling, fuel, and oxygen without general scanner fog");
     require(actOneLevelTwo.mechanics.fogAndScanner && actOneLevelTwo.mechanics.oxygenAndFuel, "Act 1 level 2 should introduce scanner and endurance resources");
     require(miningMaterialAllowed(actOneLevelThree, MiningCellMaterial::HardRock), "Act 1 level 3 should introduce hard rock");
 
@@ -366,12 +367,12 @@ void miningGateContractsAndRuntimeAreDeterministic()
 
     const ContentCatalog catalog = createDefaultContent();
     auto prepareSurface = [](GameState& state, std::string_view destinationId) {
-        state.run.surfaceExpedition = {};
-        state.run.surfaceExpedition.active = true;
-        state.run.surfaceExpedition.destinationId = std::string(destinationId);
-        state.run.surfaceExpedition.rigFuel = 4.0;
-        state.run.surfaceExpedition.rigFuelCapacity = 4.0;
-        state.run.surfaceExpedition.miningSitePrepared = true;
+        state.run.planetaryExpedition = {};
+        state.run.planetaryExpedition.active = true;
+        state.run.planetaryExpedition.destinationId = std::string(destinationId);
+        state.run.planetaryExpedition.rigFuel = 4.0;
+        state.run.planetaryExpedition.rigFuelCapacity = 4.0;
+        state.run.planetaryExpedition.miningSitePrepared = true;
     };
 
     GameState hazardState = createNewGame(catalog, 501);
@@ -432,7 +433,7 @@ void miningGateContractsAndRuntimeAreDeterministic()
     surveyState.run.mining.droneX = surveyState.run.mining.gate.markers.front().x;
     surveyState.run.mining.droneY = surveyState.run.mining.gate.markers.front().y;
     pulseMiningScanner(surveyState, catalog);
-    require(surveyState.run.surfaceExpedition.scannerCooldownSeconds > 0.0,
+    require(surveyState.run.planetaryExpedition.scannerCooldownSeconds > 0.0,
         "triangulation calibration should preserve the shared scanner recharge");
     const int afterFirstPulse = surveyState.run.mining.gate.surveyOriginsCompleted;
     require(afterFirstPulse >= 1,
@@ -455,7 +456,7 @@ void miningGateContractsAndRuntimeAreDeterministic()
             [](const MiningGateMarker& candidate) { return !candidate.activated; });
         require(marker != surveyState.run.mining.gate.markers.end(),
             "an incomplete triangulation should retain an unresolved hidden signal");
-        surveyState.run.surfaceExpedition.scannerCooldownSeconds = 0.0;
+        surveyState.run.planetaryExpedition.scannerCooldownSeconds = 0.0;
         surveyState.run.mining.droneX = marker->x;
         surveyState.run.mining.droneY = marker->y;
         pulseMiningScanner(surveyState, catalog);
@@ -610,15 +611,15 @@ void authoredArtifactLayerIsPrebuiltAtResolvedDepth()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 0x10A471FAC7ULL);
-    state.run.surfaceExpedition = {};
-    state.run.surfaceExpedition.active = true;
-    state.run.surfaceExpedition.destinationId = content::destination::jupiter;
-    state.run.surfaceExpedition.rigFuel = 4.0;
-    state.run.surfaceExpedition.rigFuelCapacity = 4.0;
-    state.run.surfaceExpedition.supply = 4;
-    state.run.surfaceExpedition.pendingScenarioId = content::scenario::volcanicDescent;
-    state.run.surfaceExpedition.pendingScenarioStepId = "recovery";
-    state.run.surfaceExpedition.pendingMiningSiteDefinitionId =
+    state.run.planetaryExpedition = {};
+    state.run.planetaryExpedition.active = true;
+    state.run.planetaryExpedition.destinationId = content::destination::jupiter;
+    state.run.planetaryExpedition.rigFuel = 4.0;
+    state.run.planetaryExpedition.rigFuelCapacity = 4.0;
+    state.run.planetaryExpedition.supply = 4;
+    state.run.planetaryExpedition.pendingScenarioId = content::scenario::volcanicDescent;
+    state.run.planetaryExpedition.pendingScenarioStepId = "recovery";
+    state.run.planetaryExpedition.pendingMiningSiteDefinitionId =
         content::miningSite::thermalLayeredRecovery;
 
     require(startMiningRun(state, catalog).applied,
@@ -719,12 +720,12 @@ void layeredCocoonsHonorAuthoredRevealPolicies()
     catalog.miningSites.push_back(site);
 
     GameState state = createNewGame(catalog, 0xC0C00BULL);
-    state.run.surfaceExpedition.active = true;
-    state.run.surfaceExpedition.destinationId = content::destination::mars;
-    state.run.surfaceExpedition.rigFuel = 4.0;
-    state.run.surfaceExpedition.rigFuelCapacity = 4.0;
-    state.run.surfaceExpedition.miningSitePrepared = true;
-    state.run.surfaceExpedition.pendingMiningSiteDefinitionId = site.id;
+    state.run.planetaryExpedition.active = true;
+    state.run.planetaryExpedition.destinationId = content::destination::mars;
+    state.run.planetaryExpedition.rigFuel = 4.0;
+    state.run.planetaryExpedition.rigFuelCapacity = 4.0;
+    state.run.planetaryExpedition.miningSitePrepared = true;
+    state.run.planetaryExpedition.pendingMiningSiteDefinitionId = site.id;
     require(startMiningRun(
                 state,
                 catalog,
@@ -803,11 +804,11 @@ void tetherTargetingPrioritizesArtifactsAndKeepsEvaTow()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 0xA11CE);
-    state.run.surfaceExpedition.active = true;
-    state.run.surfaceExpedition.destinationId = content::destination::mars;
-    state.run.surfaceExpedition.rigFuel = 4.0;
-    state.run.surfaceExpedition.rigFuelCapacity = 4.0;
-    state.run.surfaceExpedition.miningSitePrepared = true;
+    state.run.planetaryExpedition.active = true;
+    state.run.planetaryExpedition.destinationId = content::destination::mars;
+    state.run.planetaryExpedition.rigFuel = 4.0;
+    state.run.planetaryExpedition.rigFuelCapacity = 4.0;
+    state.run.planetaryExpedition.miningSitePrepared = true;
     require(startMiningRun(
                 state,
                 catalog,
@@ -926,11 +927,11 @@ void evaTetherFollowsAndRecoversAtShip()
 {
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 0x70A11E);
-    state.run.surfaceExpedition.active = true;
-    state.run.surfaceExpedition.destinationId = content::destination::mars;
-    state.run.surfaceExpedition.rigFuel = 4.0;
-    state.run.surfaceExpedition.rigFuelCapacity = 4.0;
-    state.run.surfaceExpedition.miningSitePrepared = true;
+    state.run.planetaryExpedition.active = true;
+    state.run.planetaryExpedition.destinationId = content::destination::mars;
+    state.run.planetaryExpedition.rigFuel = 4.0;
+    state.run.planetaryExpedition.rigFuelCapacity = 4.0;
+    state.run.planetaryExpedition.miningSitePrepared = true;
     require(startMiningRun(
                 state,
                 catalog,

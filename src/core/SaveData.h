@@ -19,8 +19,6 @@ struct SaveData {
     std::string frameId = "pathfinder";
     int offerRerollsThisExpedition = 0;
     int repairOpsThisExpedition = 0;
-    int trainingOpsThisExpedition = 0;
-    int restOpsThisExpedition = 0;
     int shallowRecoveryStreak = 0;
     int cleanShallowRecoveryStreak = 0;
     double nextLaunchFuelBoost = 0.0;
@@ -29,6 +27,7 @@ struct SaveData {
     PendingTransferAssist pendingTransferAssist;
     RouteTransitState routeTransit;
     Screen screen = Screen::Hangar;
+    FlightRunState flight;
     CampaignMilestone campaignMilestone = CampaignMilestone::SolarTutorial;
     GameChapter chapter = GameChapter::ProvingGround;
     ArkState ark;
@@ -42,14 +41,17 @@ struct SaveData {
     std::vector<std::string> acknowledgedActivityBriefingIds;
     bool campaignIntroductionAcknowledged = false;
     bool straylightDiscoveryAcknowledged = false;
+    bool crewLossPending = false;
+    std::string pendingReplacementArchetypeId;
+    int replacementSequence = 0;
+    int shipHoldRank = 0;
     std::vector<std::string> inventoryModuleIds;
     std::vector<std::string> equippedModuleIds;
     std::vector<std::string> crewUpgradeIds;
     std::vector<std::string> offerModuleIds;
     std::vector<std::string> offerCrewUpgradeIds;
     std::vector<std::string> researchProjectIds;
-    ArrivalOpsState arrivalOps;
-    SurfaceExpeditionState surfaceExpedition;
+    PlanetaryExpeditionState planetaryExpedition;
     MiningRunState mining;
     std::vector<DroneFrameModuleAssignment> droneModuleAssignments;
     std::vector<DroneModuleRuntimeState> droneModuleRuntime;

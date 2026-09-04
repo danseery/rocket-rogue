@@ -499,27 +499,13 @@
         </div>
       </section>
       <section class="debug-accordion-item">
-        <button class="debug-accordion-toggle" type="button" aria-expanded="false" aria-controls="debug-menu-flight-arrival" data-debug-menu-toggle>
-          <span class="debug-accordion-title"><strong>Flight &amp; Arrival</strong><small>4 destinations</small></span>
-          <span aria-hidden="true">&gt;</span>
-        </button>
-        <div class="debug-accordion-panel" id="debug-menu-flight-arrival" hidden>
-          <button type="button" data-debug-action="flyby">Flyby sandbox</button>
-          <button type="button" data-debug-action="orbit">Orbit sandbox</button>
-          <button type="button" data-debug-action="results">Debrief board</button>
-          <button type="button" data-debug-action="arrival-ops">Arrival Ops board</button>
-        </div>
-      </section>
-      <section class="debug-accordion-item">
         <button class="debug-accordion-toggle" type="button" aria-expanded="false" aria-controls="debug-menu-research-surface" data-debug-menu-toggle>
-          <span class="debug-accordion-title"><strong>Research &amp; Surface</strong><small>5 destinations</small></span>
+          <span class="debug-accordion-title"><strong>Research &amp; Surface</strong><small>3 destinations</small></span>
           <span aria-hidden="true">&gt;</span>
         </button>
         <div class="debug-accordion-panel" id="debug-menu-research-surface" hidden>
           <button type="button" data-debug-action="research">Research board</button>
           <button type="button" data-debug-action="refit">Refit board</button>
-          <button class="warn" type="button" data-debug-action="scan">Scan sandbox</button>
-          <button class="danger" type="button" data-debug-action="push">Dig sandbox</button>
           <button type="button" data-debug-action="surface-upgrade">Surface Upgrade board</button>
         </div>
       </section>
@@ -720,6 +706,38 @@
       return Number(rawValue);
     }
 
+    function requestedDebugSurfaceArrival() {
+      const query = new URLSearchParams(window.location.search);
+      const rawValue = query.get("debug_surface_arrival");
+      if (rawValue === null) return null;
+      const phases = {
+        approach: 0,
+        safe: 1,
+        hard: 2,
+        command: 3,
+        bay: 4,
+        rig: 5,
+        drones: 6,
+        staging: 7,
+        takeoff: 8,
+        correction: 9,
+        inverted: 10,
+        fast: 11,
+        touchdown: 12,
+        climb: 13,
+        gate: 14,
+        fastgate: 15,
+        impact: 16,
+        fatal: 17,
+        scrape: 18,
+        rest: 19,
+        bodyimpact: 20
+      };
+      const destination = query.get("debug_surface_destination") === "mars" ? 1 : 0;
+      const phase = phases[rawValue];
+      return phase === undefined ? null : { destination, phase };
+    }
+
     function normalizedControllerPreferences(value = {}) {
       const promptFamilies = ["auto", "generic", "xbox", "playstation", "steamdeck"];
       const promptFamily = promptFamilies.includes(value.promptFamily) ? value.promptFamily : "auto";
@@ -849,13 +867,13 @@
         window.localStorage.removeItem("rocket_rogue_save_v1");
       },
       loadCheckpoint() {
-        return window.localStorage.getItem("rocket_rogue_checkpoint_v16") || "";
+        return window.localStorage.getItem("rocket_rogue_checkpoint_v18") || "";
       },
       storeCheckpoint(data) {
-        window.localStorage.setItem("rocket_rogue_checkpoint_v16", data || "");
+        window.localStorage.setItem("rocket_rogue_checkpoint_v18", data || "");
       },
       clearCheckpoint() {
-        window.localStorage.removeItem("rocket_rogue_checkpoint_v16");
+        window.localStorage.removeItem("rocket_rogue_checkpoint_v18");
       },
       gameSpeedMultiplier
     };
@@ -882,18 +900,10 @@
       currentScreen: () => rrCall("rr_current_screen", [], [], "number"),
       startLaunch: () => rrCall("rr_start_launch"),
       launchMove: (steerAxis, throttleAxis) => rrCall("rr_launch_move", [steerAxis, throttleAxis], ["number", "number"]),
+      deploySurfaceTeam: () => rrCall("rr_deploy_surface_team"),
+      departSurfaceUndeployed: () => rrCall("rr_depart_surface_undeployed"),
+      surfaceArrivalActive: () => rrCall("rr_surface_arrival_active", [], [], "number") !== 0,
       returnHome: () => rrCall("rr_return_home"),
-      skipArrivalFanfare: () => rrCall("rr_skip_arrival_fanfare"),
-      flybyMove: (xAxis, yAxis) => rrCall("rr_flyby_move", [xAxis, yAxis], ["number", "number"]),
-      flybyAbort: () => rrCall("rr_flyby_abort"),
-      flybyContinue: () => rrCall("rr_flyby_continue"),
-      orbitMove: (xAxis, yAxis) => rrCall("rr_orbit_move", [xAxis, yAxis], ["number", "number"]),
-      orbitAbort: () => rrCall("rr_orbit_abort"),
-      orbitContinue: () => rrCall("rr_orbit_continue"),
-      surfaceScanPulse: () => rrCall("rr_surface_scan_pulse"),
-      surfaceScanBank: () => rrCall("rr_surface_scan_bank"),
-      surfacePushStep: () => rrCall("rr_surface_push_step"),
-      surfacePushBank: () => rrCall("rr_surface_push_bank"),
       miningMove: (xAxis, yAxis) => rrCall("rr_mining_move", [xAxis, yAxis], ["number", "number"]),
       miningPointerAim: (x, y) => rrCall("rr_mining_pointer_aim", [x, y], ["number", "number"]),
       miningFire: (active) => rrCall("rr_mining_fire", [active ? 1 : 0], ["number"]),
@@ -903,6 +913,7 @@
       miningTether: () => rrCall("rr_mining_tether"),
       miningOperatorToggle: () => rrCall("rr_mining_operator_toggle"),
       miningStow: () => rrCall("rr_mining_stow"),
+      miningWaitForDrones: () => rrCall("rr_mining_wait_for_drones"),
       miningAbort: () => rrCall("rr_mining_abort"),
       debugMiningArena: (act, difficulty, seed, loadoutMode, gateOverride, destinationTierOverride, systemOverride, bodyIndex) => rrCall(
         "rr_debug_mining_arena",
@@ -919,14 +930,9 @@
         ["number", "number", "number"],
         "string"),
       debugSwarmArena: () => rrCall("rr_debug_swarm_arena"),
-      debugSurfaceScan: () => rrCall("rr_debug_surface_scan"),
-      debugSurfacePush: () => rrCall("rr_debug_surface_push"),
-      debugFlyby: () => rrCall("rr_debug_flyby"),
-      debugOrbit: () => rrCall("rr_debug_orbit"),
       debugHangar: () => rrCall("rr_debug_hangar"),
       debugJupiterOptions: (mode) => rrCall("rr_debug_jupiter_options", [mode], ["number"]),
       debugResults: () => rrCall("rr_debug_results"),
-      debugArrivalOps: () => rrCall("rr_debug_arrival_ops"),
       debugResearch: () => rrCall("rr_debug_research"),
       debugRefit: () => rrCall("rr_debug_refit"),
       debugSurfaceUpgrade: () => rrCall("rr_debug_surface_upgrade"),
@@ -940,6 +946,10 @@
         "rr_debug_launch_lesson",
         [lessonIndex],
         ["number"]),
+      debugSurfaceArrival: (destinationIndex, phaseIndex) => rrCall(
+        "rr_debug_surface_arrival",
+        [destinationIndex, phaseIndex],
+        ["number", "number"]),
       debugExit: () => rrCall("rr_debug_exit"),
       rmlMouseMove: (x, y) => rrCall("rr_rml_mouse_move", [x, y], ["number", "number"], "number") === 1,
       rmlMouseDown: (x, y, button) => rrCall("rr_rml_mouse_down", [x, y, button], ["number", "number", "number"], "number") === 1,
@@ -1062,10 +1072,6 @@
       "mining-copy": copyDebugMiningArenaId,
       "mining-launch": launchDebugMiningArena,
       "mining-swarm": () => rr.debugSwarmArena(),
-      scan: () => rr.debugSurfaceScan(),
-      push: () => rr.debugSurfacePush(),
-      flyby: () => rr.debugFlyby(),
-      orbit: () => rr.debugOrbit(),
       hangar: () => rr.debugHangar(),
       "jupiter-neither": () => rr.debugJupiterOptions(0),
       "jupiter-tanks": () => rr.debugJupiterOptions(1),
@@ -1074,7 +1080,6 @@
       "jupiter-perfect-slingshot": () => rr.debugJupiterOptions(4),
       "jupiter-perfect-both": () => rr.debugJupiterOptions(5),
       results: () => rr.debugResults(),
-      "arrival-ops": () => rr.debugArrivalOps(),
       research: () => rr.debugResearch(),
       refit: () => rr.debugRefit(),
       "surface-upgrade": () => rr.debugSurfaceUpgrade(),
@@ -1189,8 +1194,6 @@
     });
 
     const launchKeys = new Set();
-    const flybyKeys = new Set();
-    const orbitKeys = new Set();
     const miningKeys = new Set();
     let miningPrimaryPointerDown = false;
     let miningSecondaryPointerDown = false;
@@ -1204,18 +1207,19 @@
       return currentUiHostContext.titleScreenActive;
     }
 
-    function isFlybyActive() {
-      return rmlUiAvailable
-        && currentUiHostContext.realtimeActivityActive
-        && !isTitleScreenActive()
-        && currentScreen() === rrScreen.flyby;
-    }
-
     function isLaunchActive() {
       return rmlUiAvailable
         && currentUiHostContext.realtimeActivityActive
         && !isTitleScreenActive()
         && currentScreen() === rrScreen.launch;
+    }
+
+    function isSurfaceArrivalActive() {
+      return rmlUiAvailable
+        && currentUiHostContext.realtimeActivityActive
+        && !isTitleScreenActive()
+        && currentScreen() === rrScreen.launch
+        && rr.surfaceArrivalActive();
     }
 
     function updateLaunchMove() {
@@ -1226,34 +1230,11 @@
       rr.launchMove((right ? 1 : 0) - (left ? 1 : 0), (up ? 1 : 0) - (down ? 1 : 0));
     }
 
-    function isOrbitActive() {
-      return rmlUiAvailable
-        && currentUiHostContext.realtimeActivityActive
-        && !isTitleScreenActive()
-        && currentScreen() === rrScreen.orbit;
-    }
-
     function isMiningActive() {
       return rmlUiAvailable
         && currentUiHostContext.realtimeActivityActive
         && !isTitleScreenActive()
         && currentScreen() === rrScreen.mining;
-    }
-
-    function updateFlybyMove() {
-      const left = flybyKeys.has("a") || flybyKeys.has("arrowleft");
-      const right = flybyKeys.has("d") || flybyKeys.has("arrowright");
-      const up = flybyKeys.has("w") || flybyKeys.has("arrowup");
-      const down = flybyKeys.has("s") || flybyKeys.has("arrowdown");
-      rr.flybyMove((left ? 1 : 0) - (right ? 1 : 0), (up ? 1 : 0) - (down ? 1 : 0));
-    }
-
-    function updateOrbitMove() {
-      const left = orbitKeys.has("a") || orbitKeys.has("arrowleft");
-      const right = orbitKeys.has("d") || orbitKeys.has("arrowright");
-      const up = orbitKeys.has("w") || orbitKeys.has("arrowup");
-      const down = orbitKeys.has("s") || orbitKeys.has("arrowdown");
-      rr.orbitMove((right ? 1 : 0) - (left ? 1 : 0), (up ? 1 : 0) - (down ? 1 : 0));
     }
 
     function updateMiningMove() {
@@ -1275,14 +1256,10 @@
 
     function releaseRealtimeInputs() {
       launchKeys.clear();
-      flybyKeys.clear();
-      orbitKeys.clear();
       miningKeys.clear();
       releaseMiningDrill();
       if (!window.rr) return;
       updateLaunchMove();
-      updateFlybyMove();
-      updateOrbitMove();
       updateMiningMove();
     }
 
@@ -1290,6 +1267,17 @@
       if (event.ctrlKey || event.metaKey || event.altKey) return false;
       const key = event.key.toLowerCase();
       const movement = ["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"];
+      if (isSurfaceArrivalActive()) {
+        if (!event.repeat && (key === " " || key === "enter")) {
+          rr.deploySurfaceTeam();
+        } else if (!event.repeat && key === "r") {
+          rr.departSurfaceUndeployed();
+        } else {
+          return false;
+        }
+        event.preventDefault();
+        return true;
+      }
       if (isLaunchActive()) {
         if (movement.includes(key)) {
           launchKeys.add(key);
@@ -1298,30 +1286,6 @@
           rr.returnHome();
         } else if (!event.repeat && key === "c") {
           rrCall("rr_cut_engines");
-        } else {
-          return false;
-        }
-        event.preventDefault();
-        return true;
-      }
-      if (isFlybyActive()) {
-        if (movement.includes(key)) {
-          flybyKeys.add(key);
-          updateFlybyMove();
-        } else if (!event.repeat && key === "escape") {
-          rr.flybyAbort();
-        } else {
-          return false;
-        }
-        event.preventDefault();
-        return true;
-      }
-      if (isOrbitActive()) {
-        if (movement.includes(key)) {
-          orbitKeys.add(key);
-          updateOrbitMove();
-        } else if (!event.repeat && key === "escape") {
-          rr.orbitAbort();
         } else {
           return false;
         }
@@ -1354,8 +1318,6 @@
     function handleRealtimeKeyUp(event) {
       const key = event.key.toLowerCase();
       if (launchKeys.delete(key)) updateLaunchMove();
-      if (flybyKeys.delete(key)) updateFlybyMove();
-      if (orbitKeys.delete(key)) updateOrbitMove();
       if (miningKeys.delete(key)) updateMiningMove();
       if (isMiningActive() && key === " ") rr.miningKeyboardDrill(false);
     }
@@ -1452,39 +1414,6 @@
       if (handleRealtimeKeyDown(event)) return;
 
       const screen = currentScreen();
-      if (!event.repeat && screen === rrScreen.arrivalFanfare
-          && (event.key === " " || event.key === "Enter")) {
-        rr.skipArrivalFanfare();
-        event.preventDefault();
-        return;
-      }
-      // Space belongs to Survey for the whole minigame screen, including its
-      // exhausted result state. Letting it fall through to generic UI confirm
-      // can activate a utility control after the final pulse rebuilds focus.
-      if (!event.repeat && screen === rrScreen.surfaceScan && event.key === " ") {
-        rr.surfaceScanPulse();
-        event.preventDefault();
-        return;
-      }
-      if (!event.repeat && screen === rrScreen.surfaceScan
-          && (event.key.toLowerCase() === "b" || event.key === "Escape")) {
-        rr.surfaceScanBank();
-        event.preventDefault();
-        return;
-      }
-      if (!event.repeat && currentUiHostContext.realtimeActivityActive
-          && screen === rrScreen.surfacePush && event.key === " ") {
-        rr.surfacePushStep();
-        event.preventDefault();
-        return;
-      }
-      if (!event.repeat && currentUiHostContext.realtimeActivityActive
-          && screen === rrScreen.surfacePush
-          && (event.key.toLowerCase() === "b" || event.key === "Escape")) {
-        rr.surfacePushBank();
-        event.preventDefault();
-        return;
-      }
       if (!event.repeat && !isTitleScreenActive() && screen === rrScreen.launch) {
         const key = event.key.toLowerCase();
         if (key === " ") {
@@ -1521,6 +1450,11 @@
         window.setTimeout(() => {
           refreshDebugMiningPreview();
           syncDebugActOneControls();
+          const surfaceArrival = requestedDebugSurfaceArrival();
+          if (surfaceArrival !== null) {
+            window.rr.debugSurfaceArrival(surfaceArrival.destination, surfaceArrival.phase);
+            return;
+          }
           const lessonIndex = requestedDebugLaunchLesson();
           if (lessonIndex !== null) window.rr.debugLaunchLesson(lessonIndex);
         }, 0);

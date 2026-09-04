@@ -2,6 +2,8 @@
 
 #include "core/FlightProgress.h"
 #include "core/FlightInstrumentPresentation.h"
+#include "core/SurfaceBayTiming.h"
+#include "core/FlightSystem.h"
 #include "core/ContentIds.h"
 #include "core/GameUi.h"
 #include "core/GameText.h"
@@ -31,6 +33,14 @@ namespace rocket {
 namespace {
 
 constexpr double asteroidImpactFeedbackDuration = 0.32;
+constexpr double kTouchdownCelebrationSeconds = surface_bay_timing::touchdownSeconds;
+constexpr double kSurfaceDeploymentSeconds = surface_bay_timing::deploymentSeconds;
+constexpr double kSurfaceUndeployedTakeoffSeconds = surface_bay_timing::shipOnlyDepartureSeconds;
+constexpr std::uint32_t kArrivalAudioRigEjection = 1U << 0U;
+constexpr std::uint32_t kArrivalAudioArrestingBurst = 1U << 1U;
+constexpr std::uint32_t kArrivalAudioRigImpact = 1U << 2U;
+constexpr std::uint32_t kArrivalAudioBayClose = 1U << 3U;
+constexpr std::uint32_t kArrivalAudioSurfaceReady = 1U << 4U;
 // The renderer displays at most this many scan/push markers. Keep snapshot
 // construction bounded too, so a malformed saved prospect cannot allocate a
 // large transient vector before the renderer reaches its own visual limit.
@@ -51,6 +61,42 @@ constexpr double kMiningEvaDeathFadeToBlackSeconds = 0.62;
 constexpr double kMiningEvaDeathFadeFromBlackSeconds = 0.32;
 
 int destinationIndexForId(const ContentCatalog& catalog, std::string_view destinationId);
+
+std::uint64_t surfaceSiteSeed(
+    std::uint64_t campaignSeed,
+    std::string_view destinationId,
+    int landingOrdinal)
+{
+    std::uint64_t hash = campaignSeed ^ 0x9E3779B97F4A7C15ULL;
+    for (const unsigned char byte : destinationId) {
+        hash ^= static_cast<std::uint64_t>(byte);
+        hash *= 1099511628211ULL;
+    }
+    hash ^= static_cast<std::uint64_t>(std::max(0, landingOrdinal));
+    hash *= 0xBF58476D1CE4E5B9ULL;
+    return hash == 0 ? 1 : hash;
+}
+
+void awardUnifiedOrbit(
+    GameState& state,
+    const ContentCatalog& catalog,
+    const Destination& destination,
+    OrbitGrade grade)
+{
+    if (grade != OrbitGrade::Good && grade != OrbitGrade::Perfect) {
+        return;
+    }
+    const int destinationIndex = destinationIndexForId(catalog, destination.id);
+    if (destinationIndex >= 0) {
+        if (state.meta.destinationOrbits.size() < catalog.destinations.size()) {
+            state.meta.destinationOrbits.resize(catalog.destinations.size(), 0);
+        }
+        ++state.meta.destinationOrbits[static_cast<std::size_t>(destinationIndex)];
+    }
+    state.run.credits += orbitCreditReward(destination, grade);
+    state.meta.blueprintProgress += orbitResearchDataReward(destination, grade);
+    unlockFromBlueprints(state);
+}
 
 struct DebugActOneCheckpoint {
     std::string_view label;
@@ -143,9 +189,9 @@ void seedDebugDroneBay(GameState& state, const ContentCatalog& catalog)
 void seedDebugSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Random& rng, std::string_view destinationId)
 {
     state.run.destinationIndex = destinationIndexForId(catalog, destinationId);
-    state.run.arrivalOps = {true, std::string(destinationId)};
+    state.run.approach = {true, std::string(destinationId)};
     startSurfaceExpedition(state, catalog, &rng);
-    SurfaceExpeditionState& expedition = state.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     expedition.cargo = std::max(expedition.cargo, 2);
     expedition.temporaryMaterials.common = std::max(expedition.temporaryMaterials.common, 3);
     expedition.temporaryMaterials.rare = std::max(expedition.temporaryMaterials.rare, 1);
@@ -157,7 +203,7 @@ void seedDebugSurfaceExpedition(GameState& state, const ContentCatalog& catalog,
 
 std::vector<TelemetryEvent> chartTelemetryForOutcome(
     const PreparedLaunch& launch,
-    const LaunchFlightState& finalFlight,
+    const FlightRunState& finalFlight,
     bool returningHome)
 {
     constexpr int sampleCapacity = tuning::launch::telemetrySampleCount;
@@ -165,7 +211,7 @@ std::vector<TelemetryEvent> chartTelemetryForOutcome(
     telemetry.reserve(sampleCapacity);
     for (int i = 0; i < sampleCapacity; ++i) {
         const double t = static_cast<double>(i) / static_cast<double>(sampleCapacity - 1);
-        LaunchFlightState sample = finalFlight;
+        FlightRunState sample = finalFlight;
         const double routeShape = returningHome ? std::sin(t * math::pi) : t;
         sample.currentMultiplier = 1.0 + (finalFlight.peakMultiplier - 1.0) * routeShape;
         sample.heat = tuning::launch::pilotingHeatInitial +
@@ -314,7 +360,7 @@ void appendProspectMarkers(
 } // namespace
 
 RocketGameApp::RocketGameApp(AppServices& services)
-    : services_(services)
+    : services_(services), session_(state_.run.flight)
 {
 }
 
@@ -342,29 +388,37 @@ void RocketGameApp::clearResultView()
 
 void RocketGameApp::beginArrivalFanfare()
 {
-    session_.arrivalFanfare = {true, 0.0};
-    state_.screen = Screen::ArrivalFanfare;
-    state_.statusLine = std::string(text::status::arrivalFanfare);
+    if (state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery) {
+        session_.arrivalFanfare = {};
+        state_.screen = Screen::StoryBriefing;
+        state_.statusLine = "An impossible contact is resolving beyond Neptune.";
+    } else {
+        // This transient phase owns only presentation. It adds no choice,
+        // confirmation, reward authority, or serialized state; after two
+        // seconds it yields directly to the already-prepared Approach.
+        session_.arrivalFanfare = {true, 0.0};
+        state_.screen = Screen::ArrivalFanfare;
+        state_.statusLine = "Arrival confirmed.";
+        queueControllerHapticCue(ControllerHapticCue::Arrival);
+    }
 }
 
 void RocketGameApp::finishArrivalFanfare()
 {
-    if (state_.screen != Screen::ArrivalFanfare) {
+    if (!session_.arrivalFanfare.active) {
         return;
     }
     session_.arrivalFanfare = {};
-    if (state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery) {
-        state_.screen = Screen::StoryBriefing;
-        state_.statusLine = "An impossible contact is resolving beyond Neptune.";
+    if (state_.screen == Screen::ArrivalFanfare) {
+        // Touchdown already was the landing decision. The celebration is
+        // ceremonial only and yields directly to the continuous surface (or
+        // the next eligible activity when a destination has no surface).
+        beginSurfaceExpeditionOrRefit();
+    }
+    if (!firstTimeIntroductionsEnabled_
+        && state_.run.approach.destinationId == content::destination::moon) {
+        ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
         save();
-    } else {
-        state_.screen = Screen::ArrivalOps;
-        state_.statusLine = std::string(text::status::arrivalOpsOpened);
-        if (!firstTimeIntroductionsEnabled_
-            && state_.run.arrivalOps.destinationId == content::destination::moon) {
-            ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
-            save();
-        }
     }
     panelDirty_ = true;
 }
@@ -376,7 +430,7 @@ bool RocketGameApp::levelUpActivationLocked() const
 
 void RocketGameApp::maybeOpenLevelUpDraft()
 {
-    SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state_.run.planetaryExpedition;
     if (titleScreenActive_ || services_.ui.modalOpen() || levelUp_.resolving) {
         return;
     }
@@ -407,7 +461,7 @@ void RocketGameApp::maybeOpenLevelUpDraft()
         }
         if (expedition.pendingRunUpgradeChoices <= 0) {
             const Screen returnScreen = expedition.runUpgradeReturnScreen == Screen::SurfaceUpgrade
-                ? Screen::SurfaceExpedition
+                ? Screen::Mining
                 : expedition.runUpgradeReturnScreen;
             state_.screen = returnScreen;
             state_.statusLine = "Expedition upgrade installed.";
@@ -423,12 +477,12 @@ void RocketGameApp::maybeOpenLevelUpDraft()
         const bool priorityTransition = state_.screen == Screen::StoryBriefing
             || state_.screen == Screen::Results
             || state_.screen == Screen::ArrivalFanfare
-            || (state_.screen == Screen::Launch &&
+            || (state_.screen == Screen::Flight &&
                 state_.launchConfig.missionKind == LaunchMissionKind::StraylightApproach)
-            || (state_.screen == Screen::Flyby && state_.run.flyby.completed)
-            || (state_.screen == Screen::Orbit && state_.run.orbit.completed)
+            || (state_.screen == Screen::Flyby && state_.run.approach.flyby.completed)
+            || (state_.screen == Screen::Orbit && state_.run.approach.orbit.completed)
             || (state_.screen == Screen::Mining && state_.run.mining.failurePending)
-            || miningExtraction_.active;
+            || surfaceBaySequence_.active();
         if (priorityTransition) {
             return;
         }
@@ -485,7 +539,7 @@ void RocketGameApp::finishLevelUpSelection()
     levelUp_.resolveElapsed = 0.0;
     levelUp_.selectedOfferIndex = -1;
 
-    SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state_.run.planetaryExpedition;
     for (int guard = 0;
          guard < 64 && expedition.pendingRunUpgradeChoices > 0 && !expedition.runUpgradeOfferPending;
          ++guard) {
@@ -503,7 +557,7 @@ void RocketGameApp::finishLevelUpSelection()
         state_.statusLine = std::to_string(expedition.pendingRunUpgradeChoices) + " PICKS REMAIN";
     } else {
         const Screen returnScreen = expedition.runUpgradeReturnScreen == Screen::SurfaceUpgrade
-            ? Screen::SurfaceExpedition
+            ? Screen::Mining
             : expedition.runUpgradeReturnScreen;
         state_.screen = returnScreen;
         state_.statusLine = expedition.pendingRunUpgradeChoices <= 0
@@ -517,7 +571,7 @@ void RocketGameApp::finishLevelUpSelection()
 
 void RocketGameApp::observeExpeditionExperience()
 {
-    const SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+    const PlanetaryExpeditionState& expedition = state_.run.planetaryExpedition;
     if (!expeditionXpObservationInitialized_) {
         observedExpeditionLevel_ = expedition.expeditionLevel;
         observedExpeditionExperience_ = expedition.expeditionExperience;
@@ -540,9 +594,11 @@ void RocketGameApp::observeExpeditionExperience()
 void RocketGameApp::beginSurfaceExpeditionOrRefit()
 {
     startSurfaceExpedition(state_, catalog_, &rng_);
-    if (state_.run.surfaceExpedition.active) {
-        state_.screen = Screen::SurfaceExpedition;
-        state_.statusLine = std::string(text::status::surfaceExpeditionStarted);
+    if (state_.run.planetaryExpedition.active) {
+        const SurfaceActionOutcome mining = startMiningRun(state_, catalog_);
+        state_.statusLine = mining.applied
+            ? std::string(text::status::miningStarted)
+            : surfaceActionSummary(mining);
     } else if (openRefitIfAvailable()) {
         state_.statusLine = std::string(text::status::refitWindowOpened);
     } else {
@@ -551,9 +607,302 @@ void RocketGameApp::beginSurfaceExpeditionOrRefit()
     }
 }
 
+void RocketGameApp::prepareSurfaceArrivalIfNeeded(const Destination& destination)
+{
+    if (!destinationSupportsSurface(destination)) {
+        return;
+    }
+    if (surfaceArrival_.prepared.has_value() &&
+        (!surfaceArrival_.prepared->valid ||
+         preparedSurfaceLandingCurrent(state_, catalog_, *surfaceArrival_.prepared))) {
+        return;
+    }
+
+    const int destinationIndex = destinationIndexForId(catalog_, destination.id);
+    const int completedLandings = destinationIndex >= 0 &&
+            destinationIndex < static_cast<int>(state_.meta.destinationLandings.size())
+        ? state_.meta.destinationLandings[static_cast<std::size_t>(destinationIndex)]
+        : 0;
+    SurfaceLandingBuildRequest request;
+    request.destinationId = destination.id;
+    request.landingOrdinal = completedLandings + 1;
+    request.siteSeed = surfaceSiteSeed(state_.seed, destination.id, request.landingOrdinal);
+    PreparedSurfaceLanding prepared = prepareSurfaceLanding(state_, catalog_, request);
+    if (!prepared.valid) {
+        services_.host.log(
+            PlatformLogLevel::Error,
+            "Surface landing preparation failed: " + prepared.error);
+    }
+    surfaceArrival_.prepared = std::move(prepared);
+    surfaceArrival_.phase = SurfaceArrivalPhase::SurfaceReveal;
+}
+
+bool RocketGameApp::commitSurfaceTouchdown(
+    const Destination& destination,
+    bool hardTouchdown)
+{
+    // A failed background preparation gets one final attempt at contact;
+    // never spin rebuilding it every frame or strand the Take Off command.
+    if (surfaceArrival_.prepared.has_value() && !surfaceArrival_.prepared->valid) {
+        surfaceArrival_.prepared.reset();
+    }
+    prepareSurfaceArrivalIfNeeded(destination);
+    if (!surfaceArrival_.prepared.has_value() || !surfaceArrival_.prepared->valid) {
+        state_.statusLine = "SURFACE SITE UNAVAILABLE - TAKE OFF REMAINS AVAILABLE";
+        surfaceArrival_.phase = SurfaceArrivalPhase::AwaitingCommand;
+        surfaceArrival_.elapsed = 0.0;
+        surfaceArrival_.landingCommitted = false;
+        panelDirty_ = true;
+        return false;
+    }
+
+    const GameState stateBefore = state_;
+    const PreparedLaunch flightModel = currentFlightModel();
+    LaunchOutcome outcome = resolveLaunch(
+        flightModel,
+        catalog_,
+        state_,
+        destination.targetMultiplier,
+        RecoveryMethod::TransferArrival,
+        rng_,
+        {true,
+            LaunchFailureCause::None,
+            session_.flight.minimumSafetyMargin,
+            session_.flight.hullDamageTaken,
+            session_.flight.fuelSurveyReturnTiming});
+    outcome.peakWarning = std::max(outcome.peakWarning, session_.peakWarning);
+    outcome.transferFuelRemaining = std::max(0.0, session_.flight.fuelRemaining);
+    outcome.transferFuelCapacity = std::max(0.0, session_.flight.fuelCapacity);
+    outcome.telemetry = chartTelemetryForOutcome(flightModel, session_.flight, false);
+    outcome.impact=session_.flight.impact;
+    outcome.shipDamage=physicalFlightCampaignDamage(session_.flight,flightModel.existingShipDamage);
+    if (!outcome.telemetry.empty()) {
+        outcome.telemetry.back() = launchTelemetryAt(flightModel, session_.flight);
+    }
+    applyLaunchOutcome(state_, catalog_, outcome);
+    if (!preparedSurfaceLandingCurrent(state_, catalog_, *surfaceArrival_.prepared)) {
+        const SurfaceLandingBuildRequest request = surfaceArrival_.prepared->request;
+        surfaceArrival_.prepared = prepareSurfaceLanding(state_, catalog_, request);
+    }
+    if (!commitPreparedSurfaceLanding(
+            state_,
+            std::move(*surfaceArrival_.prepared),
+            outcome.transferFuelRemaining)) {
+        state_ = stateBefore;
+        surfaceArrival_.prepared.reset();
+        surfaceArrival_.phase = SurfaceArrivalPhase::AwaitingCommand;
+        surfaceArrival_.landingCommitted = false;
+        state_.statusLine = "SURFACE SITE UNAVAILABLE - LANDING NOT COMMITTED";
+        panelDirty_ = true;
+        return false;
+    }
+
+    if (!positionSurfaceLandingTeam(state_.run.mining,
+            session_.flight.landing.touchdownGridX,session_.flight.landing.touchdownGridY)) {
+        state_=stateBefore;
+        surfaceArrival_.reset();
+        surfaceArrival_.phase=SurfaceArrivalPhase::AwaitingCommand;
+        state_.statusLine="SURFACE CLEARANCE UNAVAILABLE - TAKE OFF REMAINS AVAILABLE";
+        panelDirty_=true;
+        return false;
+    }
+
+    surfaceArrival_.prepared.reset();
+    surfaceArrival_.phase = SurfaceArrivalPhase::Touchdown;
+    surfaceArrival_.elapsed = 0.0;
+    surfaceArrival_.deployQueued = false;
+    surfaceArrival_.landingCommitted = true;
+    surfaceArrival_.rigImpactFeedbackPlayed = false;
+    surfaceArrival_.surfaceReadyFeedbackPlayed = false;
+    surfaceArrival_.audioCueMask = 0;
+    surfaceArrival_.droneAudioCueCount = 0;
+    session_.currentMultiplier = outcome.ejectMultiplier;
+    session_.peakWarning = 0.0;
+    releaseRealtimeInputs(true);
+    session_.controls.actions.cutEnginesActive = false;
+    state_.statusLine = hardTouchdown
+        ? "HARD LANDING - HULL DAMAGED"
+        : "TOUCHDOWN";
+    queueAudioCue(hardTouchdown ? GameAudioCue::HardTouchdown : GameAudioCue::SafeTouchdown);
+    if (!validateProgressionStateOrRestore(stateBefore, "surface touchdown")) {
+        surfaceArrival_.reset();
+        return false;
+    }
+    panelDirty_ = true;
+    realtimeHudDirty_ = true;
+    return true;
+}
+
+void RocketGameApp::deploySurfaceTeam()
+{
+    if (surfaceArrival_.phase == SurfaceArrivalPhase::Touchdown) {
+        surfaceArrival_.deployQueued = true;
+        state_.statusLine = "DEPLOYMENT QUEUED";
+        panelDirty_ = true;
+        return;
+    }
+    if (surfaceArrival_.phase != SurfaceArrivalPhase::AwaitingCommand ||
+        !surfaceArrival_.landingCommitted) {
+        return;
+    }
+    beginSurfaceDeploymentSequence();
+}
+
+void RocketGameApp::beginSurfaceDeploymentSequence()
+{
+    surfaceArrival_.phase = SurfaceArrivalPhase::Deploying;
+    surfaceArrival_.elapsed = 0.0;
+    surfaceArrival_.rigImpactFeedbackPlayed = false;
+    surfaceArrival_.surfaceReadyFeedbackPlayed = false;
+    surfaceArrival_.audioCueMask = 0;
+    surfaceArrival_.droneAudioCueCount = 0;
+    surfaceBaySequence_ = {SurfaceBaySequenceKind::Deploy, false, 0.0};
+    state_.statusLine = "DEPLOYING - RIG / DRONES";
+    queueAudioCue(GameAudioCue::BayOpen);
+    releaseRealtimeInputs(true);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::departSurfaceUndeployed()
+{
+    if (surfaceArrival_.phase != SurfaceArrivalPhase::AwaitingCommand) {
+        return;
+    }
+    surfaceArrival_.phase = SurfaceArrivalPhase::UndeployedTakeoff;
+    surfaceArrival_.elapsed = 0.0;
+    surfaceBaySequence_ = {SurfaceBaySequenceKind::ShipOnlyDepart, false, 0.0};
+    state_.statusLine = "TAKING OFF";
+    queueAudioCue(GameAudioCue::TakeoffIgnition);
+    releaseRealtimeInputs(true);
+    panelDirty_ = true;
+}
+
+void RocketGameApp::completeSurfaceDeployment()
+{
+    if (!surfaceArrival_.landingCommitted || !state_.run.mining.active) {
+        state_.statusLine = "SURFACE TEAM COULD NOT DEPLOY";
+        surfaceArrival_.phase = SurfaceArrivalPhase::AwaitingCommand;
+        surfaceArrival_.elapsed = 0.0;
+        panelDirty_ = true;
+        return;
+    }
+    state_.screen = Screen::Mining;
+    state_.statusLine = "SURFACE TEAM READY";
+    session_.flightArmed = false;
+    clearFlightControls();
+    surfaceBaySequence_.reset();
+    surfaceArrival_.reset();
+    save();
+    panelDirty_ = true;
+    realtimeHudDirty_ = true;
+}
+
+void RocketGameApp::completeUndeployedTakeoff()
+{
+    state_.run.mining = {};
+    state_.run.planetaryExpedition = {};
+    session_.flightArmed = false;
+    clearFlightControls();
+    surfaceBaySequence_.reset();
+    surfaceArrival_.reset();
+    finishArrivalVisit("SURFACE DEPARTURE COMPLETE");
+    save();
+    panelDirty_ = true;
+}
+
+void RocketGameApp::advanceSurfaceArrival(double deltaSeconds)
+{
+    const double step = std::clamp(
+        deltaSeconds,
+        0.0,
+        tuning::launch::maxFrameStepSeconds);
+    switch (surfaceArrival_.phase) {
+    case SurfaceArrivalPhase::Touchdown:
+        surfaceArrival_.elapsed = std::min(
+            kTouchdownCelebrationSeconds,
+            surfaceArrival_.elapsed + step);
+        if (surfaceArrival_.elapsed >= kTouchdownCelebrationSeconds) {
+            if (surfaceArrival_.deployQueued && surfaceArrival_.landingCommitted) {
+                beginSurfaceDeploymentSequence();
+            } else {
+                surfaceArrival_.phase = SurfaceArrivalPhase::AwaitingCommand;
+                surfaceArrival_.elapsed = 0.0;
+                state_.statusLine = surfaceArrival_.landingCommitted
+                    ? "LANDED"
+                    : "LANDED - SURFACE SITE UNAVAILABLE";
+            }
+            panelDirty_ = true;
+        }
+        realtimeHudDirty_ = true;
+        break;
+    case SurfaceArrivalPhase::Deploying: {
+        surfaceBaySequence_.elapsed = std::min(
+            kSurfaceDeploymentSeconds,
+            surfaceBaySequence_.elapsed + step);
+        surfaceArrival_.elapsed = surfaceBaySequence_.elapsed;
+        if ((surfaceArrival_.audioCueMask & kArrivalAudioRigEjection) == 0U &&
+            surfaceArrival_.elapsed >= 0.25) {
+            surfaceArrival_.audioCueMask |= kArrivalAudioRigEjection;
+            queueAudioCue(GameAudioCue::RigEjection);
+        }
+        if ((surfaceArrival_.audioCueMask & kArrivalAudioArrestingBurst) == 0U &&
+            surfaceArrival_.elapsed >= 0.85) {
+            surfaceArrival_.audioCueMask |= kArrivalAudioArrestingBurst;
+            queueAudioCue(GameAudioCue::ArrestingBurst);
+        }
+        const std::size_t droneCount = state_.run.mining.miniDrones.size();
+        while (surfaceArrival_.droneAudioCueCount < static_cast<int>(droneCount) &&
+            surfaceArrival_.elapsed >= surface_bay_timing::droneLaunchSeconds(
+                static_cast<std::size_t>(surfaceArrival_.droneAudioCueCount), droneCount)) {
+            const int index = surfaceArrival_.droneAudioCueCount++;
+            queueAudioCue(GameAudioCue::DroneLaunch, 0.94 + 0.035 * static_cast<double>(index % 4));
+        }
+        if (!surfaceArrival_.rigImpactFeedbackPlayed && surfaceArrival_.elapsed >= 1.20) {
+            surfaceArrival_.rigImpactFeedbackPlayed = true;
+            queueControllerHapticCue(ControllerHapticCue::MiningHardContact);
+            surfaceArrival_.audioCueMask |= kArrivalAudioRigImpact;
+            queueAudioCue(GameAudioCue::RigImpact);
+        }
+        if ((surfaceArrival_.audioCueMask & kArrivalAudioBayClose) == 0U &&
+            surfaceArrival_.elapsed >= 1.75) {
+            surfaceArrival_.audioCueMask |= kArrivalAudioBayClose;
+            queueAudioCue(GameAudioCue::BayClose);
+        }
+        if (!surfaceArrival_.surfaceReadyFeedbackPlayed && surfaceArrival_.elapsed >= 2.72) {
+            surfaceArrival_.surfaceReadyFeedbackPlayed = true;
+            queueControllerHapticCue(ControllerHapticCue::Arrival);
+            surfaceArrival_.audioCueMask |= kArrivalAudioSurfaceReady;
+            queueAudioCue(GameAudioCue::SurfaceReady);
+        }
+        if (surfaceArrival_.elapsed >= kSurfaceDeploymentSeconds) {
+            completeSurfaceDeployment();
+        } else {
+            realtimeHudDirty_ = true;
+        }
+        break;
+    }
+    case SurfaceArrivalPhase::UndeployedTakeoff:
+        surfaceBaySequence_.elapsed = std::min(
+            kSurfaceUndeployedTakeoffSeconds,
+            surfaceBaySequence_.elapsed + step);
+        surfaceArrival_.elapsed = surfaceBaySequence_.elapsed;
+        if (surfaceArrival_.elapsed >= kSurfaceUndeployedTakeoffSeconds) {
+            completeUndeployedTakeoff();
+        } else {
+            realtimeHudDirty_ = true;
+        }
+        break;
+    case SurfaceArrivalPhase::None:
+    case SurfaceArrivalPhase::SurfaceReveal:
+    case SurfaceArrivalPhase::AwaitingCommand:
+    case SurfaceArrivalPhase::Complete:
+        break;
+    }
+}
+
 void RocketGameApp::finishArrivalVisit(std::string statusLine)
 {
-    state_.run.arrivalOps = {};
+    state_.run.approach = {};
     if (!openRefitIfAvailable()) {
         state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
     }
@@ -585,6 +934,8 @@ bool RocketGameApp::openRefitIfAvailable(bool regenerateOffers)
 
 void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
 {
+    surfaceArrival_.reset();
+    surfaceBaySequence_.reset();
     session_.preparedLaunch = preparedLaunch;
     const Destination* destination = catalog_.findDestination(
         preparedLaunch.routeProfileDestinationId.empty()
@@ -593,18 +944,20 @@ void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
     session_.flight = beginLaunchFlight(
         preparedLaunch,
         destination == nullptr ? currentDestination(state_, catalog_) : *destination);
+    session_.flight.active = false;
     session_.flightArmed = false;
     session_.launchQueued = false;
     session_.preflightElapsed = miningDroneTransferEnabled(state_)
         ? 0.0
         : tuning::session::preflightBoardingSeconds;
     session_.elapsed = 0.0;
+    session_.autosaveElapsed = 0.0;
     session_.currentMultiplier = 1.0;
     session_.peakWarning = 0.0;
     session_.steerInput = 0.0;
     session_.throttleInput = 0.0;
     session_.asteroidImpactFeedbackSeconds = 0.0;
-    session_.lunarImpact = {};
+    session_.destruction = {};
     clearFlightControls();
     clearResultView();
     session_.arrivalFanfare = {};
@@ -628,11 +981,12 @@ double RocketGameApp::liveBurnMultiplier() const
 
 void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
 {
+    surfaceArrival_.reset();
     debugActOneCheckpoint_ = -1;
     state_ = createNewGame(catalog_, 0x524F434B45544ULL);
     rng_ = Random(state_.seed);
-    session_ = {};
-    miningExtraction_ = {};
+    session_.reset();
+    surfaceBaySequence_.reset();
     miningEvaDeathPresentation_ = {};
     miningSceneHandoff_ = MiningSceneHandoff::None;
     miningSceneHandoffCommitted_ = false;
@@ -663,6 +1017,13 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
                 : "ROUTE CONTROL // RECOVERY REQUIRED. No valid checkpoint is available; begin a new campaign.";
         } else {
             rng_ = Random(saveData->seed + 0xA51CE5ULL + static_cast<std::uint64_t>(saveData->blueprintProgress));
+            if (state_.screen == Screen::Flight) {
+                session_.preparedLaunch = rocket::prepareLaunch(state_, catalog_, rng_);
+                session_.flightArmed = state_.run.flight.active;
+                session_.preflightElapsed = session_.flightArmed
+                    ? tuning::session::preflightBoardingSeconds
+                    : 0.0;
+            }
             if (state_.screen == Screen::Upgrade && !openRefitIfAvailable(false)) {
                 state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
             }
@@ -670,24 +1031,12 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
             hasSavedGame_ = true;
         }
     } else if (!storedSave.empty()) {
-        // This revision is a deliberate fresh-campaign boundary. Never
-        // reconstruct an older progression state: delete it, then leave a
-        // brand-new v16 payload in its place for the next launch.
-        const bool cleared = services_.saves.clear();
-        if (!cleared) {
-            services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
-        }
-        const std::string freshPayload = serializeSaveData(captureSaveData(state_));
-        const bool storedFresh = services_.saves.storeAtomic(freshPayload);
-        if (!storedFresh) {
-            services_.host.log(PlatformLogLevel::Error, services_.saves.lastError());
-            titleNotice_ = "Previous campaign was cleared, but the fresh save could not be stored.";
-        } else {
-            (void)services_.saves.storeCheckpointAtomic(freshPayload);
-            titleNotice_ = "Previous campaign cleared for this revision.";
-        }
-        // The title screen must never offer Continue for the rejected
-        // campaign, even though a replacement payload is ready for later.
+        // v19 is an intentional fresh-campaign boundary. Preserve the old
+        // payload byte-for-byte until the player explicitly starts a new
+        // campaign; incompatible active and checkpoint saves are never
+        // offered as recovery paths.
+        checkpointRecoveryAvailable_ = false;
+        titleNotice_ = "CAMPAIGN UPDATE \xC2\xB7 A new campaign is required.";
         hasSavedGame_ = false;
     }
 
@@ -698,13 +1047,15 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
 
 void RocketGameApp::beginDebugSandbox(const std::string& statusLine)
 {
+    surfaceArrival_.reset();
+    surfaceBaySequence_.reset();
     titleScreenActive_ = false;
     titleNotice_.clear();
     debugSessionActive_ = true;
     debugActOneCheckpoint_ = -1;
     state_ = createNewGame(catalog_, 0xD36B6D3BU);
     rng_ = Random(state_.seed ^ 0x51A7E5ULL);
-    session_ = {};
+    session_.reset();
     levelUp_ = {};
     expeditionXpPulseSeconds_ = 0.0;
     expeditionXpObservationInitialized_ = false;
@@ -726,7 +1077,7 @@ void RocketGameApp::captureDebugDroneLoadout()
     }
     debugDroneLoadout_.configured = true;
     debugDroneLoadout_.equippedDroneIds = state_.meta.equippedDroneIds;
-    debugDroneLoadout_.droneRanks = state_.run.surfaceExpedition.runDroneRanks;
+    debugDroneLoadout_.droneRanks = state_.run.planetaryExpedition.runDroneRanks;
 }
 
 void RocketGameApp::applyDebugDroneLoadout()
@@ -736,7 +1087,7 @@ void RocketGameApp::applyDebugDroneLoadout()
         return;
     }
     state_.meta.equippedDroneIds = debugDroneLoadout_.equippedDroneIds;
-    state_.run.surfaceExpedition.runDroneRanks = debugDroneLoadout_.droneRanks;
+    state_.run.planetaryExpedition.runDroneRanks = debugDroneLoadout_.droneRanks;
     ensureDroneBayState(state_, catalog_);
 }
 
@@ -828,7 +1179,7 @@ void RocketGameApp::setFirstTimeIntroductionsEnabled(bool enabled)
     firstTimeIntroductionsEnabled_ = enabled;
     if (!enabled
         && state_.screen == Screen::ArrivalOps
-        && state_.run.arrivalOps.destinationId == content::destination::moon
+        && state_.run.approach.destinationId == content::destination::moon
         && !ui::briefings::acknowledged(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::approach)) {
         ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
         save();
@@ -861,8 +1212,10 @@ InputContext RocketGameApp::gameplayInputContext() const
         return InputContext::Ui;
     }
     switch (state_.screen) {
-    case Screen::Launch:
-        return session_.lunarImpact.active
+    case Screen::Flight:
+        return surfaceArrival_.active()
+            ? InputContext::SurfaceArrival
+            : session_.destruction.active
             ? InputContext::Stamp
             : (session_.flightArmed ? InputContext::Launch : InputContext::Preflight);
     case Screen::Results:
@@ -870,13 +1223,10 @@ InputContext RocketGameApp::gameplayInputContext() const
     case Screen::StoryBriefing:
         return InputContext::Stamp;
     case Screen::Flyby:
-        return state_.run.flyby.completed ? InputContext::FlybyComplete : InputContext::FlybyActive;
     case Screen::Orbit:
-        return state_.run.orbit.completed ? InputContext::OrbitComplete : InputContext::OrbitActive;
     case Screen::SurfaceScan:
-        return InputContext::SurfaceScan;
     case Screen::SurfacePush:
-        return InputContext::SurfacePush;
+        return InputContext::Ui;
     case Screen::Mining:
         if (state_.run.mining.failurePending) {
             return InputContext::MiningFailure;
@@ -906,12 +1256,7 @@ std::string_view controllerContextName(InputContext context)
     case InputContext::Ui: return "ui";
     case InputContext::Preflight: return "preflight";
     case InputContext::Launch: return "launch";
-    case InputContext::FlybyActive: return "flyby_active";
-    case InputContext::FlybyComplete: return "flyby_complete";
-    case InputContext::OrbitActive: return "orbit_active";
-    case InputContext::OrbitComplete: return "orbit_complete";
-    case InputContext::SurfaceScan: return "surface_scan";
-    case InputContext::SurfacePush: return "surface_push";
+    case InputContext::SurfaceArrival: return "surface_arrival";
     case InputContext::MiningActive: return "mining_active";
     case InputContext::MiningService: return "mining_service";
     case InputContext::MiningFailure: return "mining_failure";
@@ -955,9 +1300,9 @@ std::string_view controllerActionName(GameInputAction action)
     case GameInputAction::StartOrContinue: return "start_or_continue";
     case GameInputAction::ReturnHome: return "return_home";
     case GameInputAction::ToggleEngines: return "toggle_engines";
+    case GameInputAction::DeploySurfaceTeam: return "deploy_surface_team";
+    case GameInputAction::DepartSurfaceUndeployed: return "depart_surface_undeployed";
     case GameInputAction::Abort: return "abort";
-    case GameInputAction::PrimarySurfaceAction: return "surface_primary";
-    case GameInputAction::BankSurfaceAction: return "surface_bank";
     case GameInputAction::MiningScan: return "mining_scan";
     case GameInputAction::MiningTether: return "mining_tether";
     case GameInputAction::MiningStow: return "mining_stow";
@@ -1010,6 +1355,21 @@ ControllerHapticCue RocketGameApp::consumePendingControllerHapticCue()
     return cue;
 }
 
+std::vector<GameAudioEvent> RocketGameApp::consumePendingAudioEvents()
+{
+    std::vector<GameAudioEvent> events = std::move(pendingAudioEvents_);
+    pendingAudioEvents_.clear();
+    return events;
+}
+
+void RocketGameApp::queueAudioCue(GameAudioCue cue, double pitch)
+{
+    if (pendingAudioEvents_.size() >= 16U) {
+        return;
+    }
+    pendingAudioEvents_.push_back({cue, std::clamp(pitch, 0.75, 1.25)});
+}
+
 void RocketGameApp::queueControllerHapticCue(ControllerHapticCue cue)
 {
     if (!controllerPreferences_.vibrationEnabled
@@ -1050,8 +1410,7 @@ bool RocketGameApp::realtimeControllerContext(InputContext context) const
 {
     return context == InputContext::Preflight
         || context == InputContext::Launch
-        || context == InputContext::FlybyActive
-        || context == InputContext::OrbitActive
+        || context == InputContext::SurfaceArrival
         || context == InputContext::MiningActive
         || context == InputContext::MiningService
         || context == InputContext::MiningFailure;
@@ -1064,10 +1423,10 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
         keyboardRealtimeInput_ = {};
         keyboardDrillPressed_ = false;
     }
-    state_.run.flyby.inputX = 0.0;
-    state_.run.flyby.inputY = 0.0;
-    state_.run.orbit.inputX = 0.0;
-    state_.run.orbit.inputY = 0.0;
+    state_.run.approach.flyby.inputX = 0.0;
+    state_.run.approach.flyby.inputY = 0.0;
+    state_.run.approach.orbit.inputX = 0.0;
+    state_.run.approach.orbit.inputY = 0.0;
     session_.steerInput = 0.0;
     session_.throttleInput = 0.0;
     state_.run.mining.moveX = 0.0;
@@ -1085,7 +1444,7 @@ void RocketGameApp::applyRealtimeInputs()
     const double moveY = useController ? controllerRealtimeInput_.moveY : keyboardRealtimeInput_.moveY;
 
     switch (state_.screen) {
-    case Screen::Launch:
+    case Screen::Flight:
         session_.steerInput = moveX;
         session_.throttleInput = moveY;
         break;
@@ -1164,13 +1523,7 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
 
     switch (action) {
     case GameInputAction::ActivateFocused:
-        if (!services_.ui.activateFocused()) {
-            if (context == InputContext::SurfaceScan) {
-                scanSurfacePulse();
-            } else if (context == InputContext::SurfacePush) {
-                pushSurfaceStep();
-            }
-        }
+        (void)services_.ui.activateFocused();
         break;
     case GameInputAction::CancelFocused:
         if (pauseReason_ == PauseReason::ControllerDisconnected || pauseReason_ == PauseReason::PageHidden) {
@@ -1208,16 +1561,10 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
     case GameInputAction::StartOrContinue:
         if (context == InputContext::Preflight) {
             startLaunch();
-        } else if (state_.screen == Screen::ArrivalFanfare) {
-            skipArrivalFanfare();
         } else if (state_.screen == Screen::Results) {
             next();
         } else if (state_.screen == Screen::StoryBriefing) {
             acknowledgeStoryBriefing();
-        } else if (context == InputContext::FlybyComplete) {
-            flybyContinue();
-        } else if (context == InputContext::OrbitComplete) {
-            orbitContinue();
         }
         break;
     case GameInputAction::ReturnHome:
@@ -1226,31 +1573,15 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
     case GameInputAction::ToggleEngines:
         cutEngines();
         break;
+    case GameInputAction::DeploySurfaceTeam:
+        deploySurfaceTeam();
+        break;
+    case GameInputAction::DepartSurfaceUndeployed:
+        departSurfaceUndeployed();
+        break;
     case GameInputAction::Abort:
-        if (context == InputContext::FlybyActive) {
-            flybyAbort();
-        } else if (context == InputContext::OrbitActive) {
-            orbitAbort();
-        } else if (context == InputContext::SurfaceScan) {
-            scanSurfaceAbort();
-        } else if (context == InputContext::SurfacePush) {
-            pushSurfaceBank();
-        } else if (context == InputContext::MiningActive || context == InputContext::MiningService) {
+        if (context == InputContext::MiningActive || context == InputContext::MiningService) {
             miningAbort();
-        }
-        break;
-    case GameInputAction::PrimarySurfaceAction:
-        if (context == InputContext::SurfaceScan) {
-            scanSurfacePulse();
-        } else if (context == InputContext::SurfacePush) {
-            pushSurfaceStep();
-        }
-        break;
-    case GameInputAction::BankSurfaceAction:
-        if (context == InputContext::SurfaceScan) {
-            scanSurfaceBank();
-        } else if (context == InputContext::SurfacePush) {
-            pushSurfaceBank();
         }
         break;
     case GameInputAction::MiningScan:
@@ -1295,13 +1626,7 @@ void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGa
         // the rendered corridor, matching the raw left-stick X convention.
         controllerRealtimeInput_.moveX = input.moveX;
         controllerRealtimeInput_.moveY = input.moveY;
-    } else if (context == InputContext::FlybyActive) {
-        // Flyby steering is angular: its existing keyboard convention maps A
-        // (left) to positive turn authority.
-        controllerRealtimeInput_.moveX = -input.moveX;
-        controllerRealtimeInput_.moveY = input.moveY;
-    } else if (context == InputContext::OrbitActive
-        || context == InputContext::MiningActive
+    } else if (context == InputContext::MiningActive
         || context == InputContext::MiningService) {
         controllerRealtimeInput_.moveX = input.moveX;
         controllerRealtimeInput_.moveY = input.moveY;
@@ -1423,8 +1748,7 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
     const InputContext presentationContext = gameplayInputContext();
     const bool directGameplayControls = presentationContext == InputContext::Preflight
         || presentationContext == InputContext::Launch
-        || presentationContext == InputContext::FlybyActive
-        || presentationContext == InputContext::OrbitActive
+        || presentationContext == InputContext::SurfaceArrival
         || presentationContext == InputContext::MiningActive
         || presentationContext == InputContext::MiningService;
     const bool openingScreen = titleScreenActive_
@@ -1628,25 +1952,30 @@ void RocketGameApp::tick(double deltaSeconds)
         return;
     }
 
-    if (state_.screen == Screen::Launch) {
-        if (session_.lunarImpact.active) {
+    if (state_.screen == Screen::Flight) {
+        if (session_.destruction.active) {
             const double clampedDelta = std::clamp(
                 deltaSeconds,
                 0.0,
                 tuning::launch::maxFrameStepSeconds);
-            session_.lunarImpact.elapsed = std::min(
-                session_.lunarImpact.elapsed + clampedDelta,
-                tuning::session::lunarImpactSequenceSeconds);
-            if (session_.lunarImpact.elapsed >= tuning::session::lunarImpactSequenceSeconds) {
-                const double burnMultiplier = session_.lunarImpact.burnMultiplier;
-                session_.lunarImpact.active = false;
+            session_.destruction.elapsed = std::min(
+                session_.destruction.elapsed + clampedDelta,
+                tuning::session::flightDestructionSequenceSeconds);
+            if (session_.destruction.elapsed >= tuning::session::flightDestructionSequenceSeconds) {
+                const double burnMultiplier = session_.destruction.burnMultiplier;
+                const LaunchFailureCause failureCause = session_.destruction.failureCause;
+                session_.destruction.active = false;
                 completeLaunch(
                     burnMultiplier,
                     RecoveryMethod::None,
-                    LaunchFailureCause::LunarImpact);
+                    failureCause);
             } else {
                 realtimeHudDirty_ = true;
             }
+            return;
+        }
+        if (surfaceArrival_.active()) {
+            advanceSurfaceArrival(deltaSeconds);
             return;
         }
         if (!session_.flightArmed) {
@@ -1659,6 +1988,10 @@ void RocketGameApp::tick(double deltaSeconds)
                     startLaunch();
                 } else {
                     state_.statusLine = std::string(text::status::preflightReady);
+                    // Reassert the scene control when boarding completes so a
+                    // pointer or header-navigation detour cannot leave confirm
+                    // on Menu at the moment Launch becomes immediate.
+                    services_.ui.requestFocus("action:start_launch");
                     refreshPanel();
                 }
             }
@@ -1669,9 +2002,15 @@ void RocketGameApp::tick(double deltaSeconds)
             session_.preparedLaunch.routeProfileDestinationId.empty()
                 ? session_.preparedLaunch.config.destinationId
                 : session_.preparedLaunch.routeProfileDestinationId);
-        const Destination& destination = activeDestination == nullptr ? currentDestination(state_, catalog_) : *activeDestination;
-
+        const Destination& destination = activeDestination == nullptr
+            ? currentDestination(state_, catalog_)
+            : *activeDestination;
         const double clampedDelta = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+        // A resumed local descent needs its exact terrain before the first
+        // movement step, not one frame after contact could already occur.
+        if (session_.flight.mode == FlightMode::Landing) {
+            prepareSurfaceArrivalIfNeeded(destination);
+        }
         session_.asteroidImpactFeedbackSeconds = std::max(
             0.0,
             session_.asteroidImpactFeedbackSeconds - clampedDelta);
@@ -1683,46 +2022,87 @@ void RocketGameApp::tick(double deltaSeconds)
                 session_.steerInput,
                 session_.throttleInput,
                 session_.controls.actions.cutEnginesActive,
+                activeInputSource_ == InputSource::Controller,
             },
-            clampedDelta);
+            clampedDelta,
+            surfaceArrival_.prepared.has_value() && surfaceArrival_.prepared->valid
+                ? &surfaceArrival_.prepared->miningTemplate : nullptr);
         session_.elapsed += clampedDelta;
+        session_.autosaveElapsed += clampedDelta;
         session_.currentMultiplier = session_.flight.currentMultiplier;
         const TelemetryEvent event = launchTelemetryAt(flightModel, session_.flight);
         recordTelemetryPeak(event);
-        if (step.asteroidHit) {
+        if (step.asteroidHit || (step.surfaceImpact && session_.flight.impact.damage>0.0)) {
             session_.asteroidImpactFeedbackSeconds = asteroidImpactFeedbackDuration;
+            if (step.surfaceImpact && !step.failed) queueControllerHapticCue(ControllerHapticCue::Damage);
+        }
+        if (session_.flight.active && !step.reachedDestination && session_.autosaveElapsed >= 2.0) {
+            session_.autosaveElapsed = 0.0;
+            save();
         }
 
-        if (step.failed && step.failureCause == LaunchFailureCause::LunarImpact) {
-            beginLunarImpactCinematic();
+        const bool surfacePreparationReady = session_.preparedLaunch.orbitRequired
+            ? session_.flight.orbit.captured
+            : (session_.flight.travelProgress >= 0.50 ||
+               session_.flight.mode == FlightMode::Landing);
+        if (session_.preparedLaunch.config.frontierTransfer && surfacePreparationReady) {
+            prepareSurfaceArrivalIfNeeded(destination);
+        }
+
+        if (step.orbitCaptured) {
+            if (!session_.flight.orbit.rewardAwarded) {
+                awardUnifiedOrbit(
+                    state_,
+                    catalog_,
+                    destination,
+                    session_.flight.orbit.grade);
+                session_.flight.orbit.rewardAwarded = true;
+            }
+            state_.statusLine = "ORBIT CAPTURED — brake against your path to deorbit.";
+            queueControllerHapticCue(ControllerHapticCue::Arrival);
+        }
+        if (step.failed &&
+            (step.failureCause == LaunchFailureCause::LunarImpact ||
+             step.failureCause == LaunchFailureCause::ThermalRunaway)) {
+            beginFlightDestructionCinematic(step.failureCause);
         } else if (step.failed) {
             completeLaunch(session_.flight.peakMultiplier, RecoveryMethod::None, step.failureCause);
         } else if (step.reachedHome) {
             completeLaunch(session_.flight.peakMultiplier, RecoveryMethod::ReturnHome);
         } else if (step.reachedDestination && session_.preparedLaunch.config.frontierTransfer) {
+            if (commitSurfaceTouchdown(destination, step.hardTouchdown)) {
+                queueControllerHapticCue(
+                    step.hardTouchdown ? ControllerHapticCue::Damage : ControllerHapticCue::Arrival);
+            }
+        } else if (step.flyby) {
+            surfaceArrival_.reset();
             completeLaunch(destination.targetMultiplier, RecoveryMethod::TransferArrival);
+            finishArrivalVisit("FLYBY RECORDED — trajectory left the destination influence.");
+            save();
         } else if (step.asteroidHit) {
             state_.statusLine = "ASTEROID IMPACT \xE2\x80\x94 HULL " +
                 display::fixed(std::max(0.0, session_.flight.hullRemaining), 0) + " / " +
                 display::fixed(session_.flight.hullMaximum, 0) + " HP";
-        } else {
+        } else if (!step.orbitCaptured) {
             state_.statusLine = launchStatusMessage(
                 session_.preparedLaunch,
                 session_.flight,
                 session_.controls.actions);
         }
 
-        if (state_.screen == Screen::Launch) {
+        if (state_.screen == Screen::Flight) {
             realtimeHudDirty_ = true;
         }
     } else if (state_.screen == Screen::Mining) {
-        if (miningExtraction_.active) {
-            miningExtraction_.elapsed = std::min(
-                miningExtraction_.elapsed + std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds),
+        if (surfaceBaySequence_.kind == SurfaceBaySequenceKind::Extract) {
+            surfaceBaySequence_.elapsed = std::min(
+                surfaceBaySequence_.elapsed + std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds),
                 tuning::mining::miningExtractionSequenceSeconds);
-            if (miningExtraction_.elapsed >= tuning::mining::miningExtractionSequenceSeconds) {
-                miningExtraction_ = {};
-                queueMiningSceneHandoff(MiningSceneHandoff::ReturnToSurface);
+            if (surfaceBaySequence_.elapsed >= tuning::mining::miningExtractionSequenceSeconds &&
+                !surfaceBaySequence_.handoffQueued) {
+                queueMiningSceneHandoff(MiningSceneHandoff::DepartPlanet);
+                surfaceBaySequence_.handoffQueued =
+                    miningSceneHandoff_ == MiningSceneHandoff::DepartPlanet;
             }
         } else {
             const bool wasActive = state_.run.mining.active;
@@ -1753,11 +2133,11 @@ void RocketGameApp::tick(double deltaSeconds)
             panelDirty_ = true;
         }
     } else if (state_.screen == Screen::Flyby) {
-        const bool wasCompleted = state_.run.flyby.completed;
+        const bool wasCompleted = state_.run.approach.flyby.completed;
         updateFlybyRun(state_, deltaSeconds);
-        if (!wasCompleted && state_.run.flyby.completed) {
+        if (!wasCompleted && state_.run.approach.flyby.completed) {
             const TransferAssistDefinition* transferAssist = catalog_.findTransferAssist(
-                state_.run.flyby.transferAssistId);
+                state_.run.approach.flyby.transferAssistId);
             const bool transferAssistRun = transferAssist != nullptr;
             const Destination* assistSource = transferAssist == nullptr
                 ? nullptr
@@ -1768,17 +2148,17 @@ void RocketGameApp::tick(double deltaSeconds)
             const std::string assistSourceName = assistSource == nullptr ? "the source body" : assistSource->name;
             const std::string assistTargetName = assistTarget == nullptr ? "the target" : assistTarget->name;
             if (transferAssist != nullptr &&
-                static_cast<int>(state_.run.flyby.result) >= static_cast<int>(transferAssist->minimumGrade)) {
+                static_cast<int>(state_.run.approach.flyby.result) >= static_cast<int>(transferAssist->minimumGrade)) {
                 (void)armTransferAssist(state_, catalog_);
             }
-            const bool scenarioChallenge = state_.run.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
-                !state_.run.flyby.scenarioId.empty() && !state_.run.flyby.scenarioStepId.empty();
+            const bool scenarioChallenge = state_.run.approach.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
+                !state_.run.approach.flyby.scenarioId.empty() && !state_.run.approach.flyby.scenarioStepId.empty();
             const ScenarioDefinition* scenario = scenarioChallenge
-                ? findScenarioDefinition(catalog_, state_.run.flyby.scenarioId)
+                ? findScenarioDefinition(catalog_, state_.run.approach.flyby.scenarioId)
                 : nullptr;
             const ScenarioStepDefinition* challenge = scenario == nullptr
                 ? nullptr
-                : findScenarioStepDefinition(*scenario, state_.run.flyby.scenarioStepId);
+                : findScenarioStepDefinition(*scenario, state_.run.approach.flyby.scenarioStepId);
             if (scenarioChallenge) {
                 // Realtime Flyby motion is intentionally transient, but the
                 // finished grade is campaign progress. Record it before the
@@ -1788,14 +2168,14 @@ void RocketGameApp::tick(double deltaSeconds)
                     state_,
                     catalog_,
                     {ScenarioEventKind::FlybyFinished,
-                     state_.run.flyby.scenarioId,
-                     state_.run.flyby.scenarioStepId,
-                     state_.run.flyby.scenarioId,
+                     state_.run.approach.flyby.scenarioId,
+                     state_.run.approach.flyby.scenarioStepId,
+                     state_.run.approach.flyby.scenarioId,
                      {},
                      1,
-                     static_cast<int>(state_.run.flyby.result)});
+                     static_cast<int>(state_.run.approach.flyby.result)});
             }
-            switch (state_.run.flyby.result) {
+            switch (state_.run.approach.flyby.result) {
             case FlybyGrade::Perfect:
                 state_.statusLine = transferAssistRun
                     ? assistSourceName + " assist active. The ship is already moving toward " + assistTargetName + "."
@@ -1829,10 +2209,10 @@ void RocketGameApp::tick(double deltaSeconds)
             realtimeHudDirty_ = true;
         }
     } else if (state_.screen == Screen::Orbit) {
-        const bool wasCompleted = state_.run.orbit.completed;
+        const bool wasCompleted = state_.run.approach.orbit.completed;
         updateOrbitRun(state_, deltaSeconds);
-        if (!wasCompleted && state_.run.orbit.completed) {
-            switch (state_.run.orbit.result) {
+        if (!wasCompleted && state_.run.approach.orbit.completed) {
+            switch (state_.run.approach.orbit.result) {
             case OrbitGrade::Perfect:
                 state_.statusLine = "Perfect orbit plotted. Research run ready to stamp.";
                 break;
@@ -1864,12 +2244,15 @@ void RocketGameApp::tick(double deltaSeconds)
         realtimeHudDirty_ = true;
     } else if (state_.screen == Screen::Results) {
         session_.result.elapsed += std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
-    } else if (state_.screen == Screen::ArrivalFanfare) {
+    }
+    if (session_.arrivalFanfare.active) {
         session_.arrivalFanfare.elapsed = std::min(
             session_.arrivalFanfare.elapsed + std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds),
             tuning::session::arrivalFanfareSeconds);
+        if (session_.arrivalFanfare.elapsed >= tuning::session::arrivalFanfareSeconds) {
+            finishArrivalFanfare();
+        }
     }
-
 }
 
 void RocketGameApp::renderScene()
@@ -1934,8 +2317,7 @@ void RocketGameApp::prepareForLaunch()
 
     if (!ui::briefings::acknowledged(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::launch)) {
         ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::launch);
-        // Persist while the campaign is still safely in the Hangar. Active
-        // launch sessions are intentionally not restored from save data.
+        // Persist the one-time briefing acknowledgement before Flight begins.
         save();
     }
     if (state_.meta.launchLessons.stage == LaunchTrainingStage::FlightControlsCalibration) {
@@ -1959,14 +2341,18 @@ void RocketGameApp::prepareForLaunch()
     }
     beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
     consumeNextLaunchBoost();
-    state_.screen = Screen::Launch;
+    state_.screen = Screen::Flight;
     state_.statusLine = miningDroneTransferEnabled(state_)
         ? std::string(text::status::droneStowing)
         : std::string(text::status::preflightReadyWithoutDrone);
-    // Persist one-attempt momentum consumption immediately. Active flight
-    // saves normalize back to a safe board, but may never restore a spent
-    // Mars slingshot after the Jupiter segment has begun.
+    // Persist one-attempt momentum consumption and the preflight state
+    // immediately. Once controls go live, Flight autosaves its physical
+    // trajectory without recreating a retired approach board.
     save();
+    // Queue semantic focus before rebuilding the persistent hosts. The target
+    // does not exist on the Hangar tree, so GameRmlUi retains the request and
+    // applies it as part of mounting the Flight scene overlay.
+    services_.ui.requestFocus("action:start_launch");
     refreshPanel();
 }
 
@@ -1977,7 +2363,7 @@ void RocketGameApp::startLaunch()
         return;
     }
 
-    if (state_.screen != Screen::Launch || session_.flightArmed) {
+    if (state_.screen != Screen::Flight || session_.flightArmed) {
         return;
     }
 
@@ -1990,6 +2376,7 @@ void RocketGameApp::startLaunch()
 
     session_.launchQueued = false;
     session_.flightArmed = true;
+    session_.flight.active = true;
     state_.statusLine = session_.preparedLaunch.config.frontierTransfer
         ? std::string(text::status::transferBurnStarted)
         : std::string(text::status::provingBurnStarted);
@@ -1998,7 +2385,7 @@ void RocketGameApp::startLaunch()
 
 void RocketGameApp::launchMove(double steerAxis, double throttleAxis)
 {
-    if (state_.screen != Screen::Launch || !session_.flightArmed || session_.lunarImpact.active) {
+    if (state_.screen != Screen::Flight || !session_.flightArmed || session_.destruction.active) {
         return;
     }
     keyboardRealtimeInput_.moveX = std::clamp(steerAxis, -1.0, 1.0);
@@ -2008,8 +2395,8 @@ void RocketGameApp::launchMove(double steerAxis, double throttleAxis)
 
 void RocketGameApp::returnHome()
 {
-    if (state_.screen != Screen::Launch || !session_.flightArmed ||
-        session_.lunarImpact.active || session_.controls.actions.returningHome ||
+    if (state_.screen != Screen::Flight || !session_.flightArmed ||
+        session_.destruction.active || session_.controls.actions.returningHome ||
         session_.preparedLaunch.config.missionKind == LaunchMissionKind::StraylightApproach) {
         return;
     }
@@ -2025,7 +2412,7 @@ void RocketGameApp::returnHome()
 
 void RocketGameApp::arrivalOps()
 {
-    if (state_.screen != Screen::Launch || !session_.flightArmed || session_.controls.actions.returningHome || session_.preparedLaunch.config.frontierTransfer) {
+    if (state_.screen != Screen::Flight || !session_.flightArmed || session_.controls.actions.returningHome || session_.preparedLaunch.config.frontierTransfer) {
         return;
     }
 
@@ -2036,14 +2423,6 @@ void RocketGameApp::arrivalOps()
 
     recordTelemetryPeak(telemetryAt(currentFlightModel(), session_.currentMultiplier));
     completeLaunch(session_.currentMultiplier, RecoveryMethod::TransferArrival);
-}
-
-void RocketGameApp::skipArrivalFanfare()
-{
-    finishArrivalFanfare();
-    if (panelDirty_) {
-        refreshPanel();
-    }
 }
 
 void RocketGameApp::acknowledgeStoryBriefing()
@@ -2088,14 +2467,14 @@ void RocketGameApp::beginStraylightApproach()
     state_.launchConfig.missionKind = LaunchMissionKind::StraylightApproach;
     state_.launchConfig.burnGoalMultiplier = currentDestination(state_, catalog_).targetMultiplier;
     beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
-    state_.screen = Screen::Launch;
+    state_.screen = Screen::Flight;
     refreshPanel();
 }
 
 void RocketGameApp::cutEngines()
 {
-    if (state_.screen != Screen::Launch || !session_.flightArmed ||
-        session_.lunarImpact.active || !session_.preparedLaunch.heatEnabled) {
+    if (state_.screen != Screen::Flight || !session_.flightArmed ||
+        session_.destruction.active || !session_.preparedLaunch.heatEnabled) {
         return;
     }
 
@@ -2118,12 +2497,7 @@ void RocketGameApp::next()
                 state_.screen = Screen::StoryBriefing;
                 state_.statusLine = "An impossible contact is resolving beyond Neptune.";
             } else {
-                state_.screen = Screen::ArrivalOps;
-                state_.statusLine = std::string(text::status::arrivalOpsOpened);
-                if (!firstTimeIntroductionsEnabled_
-                    && state_.run.arrivalOps.destinationId == content::destination::moon) {
-                    ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
-                }
+                beginSurfaceExpeditionOrRefit();
             }
             syncLaunchConfig(state_, catalog_);
             save();
@@ -2168,7 +2542,7 @@ void RocketGameApp::runArrivalFlyby()
     const ScenarioObjectivePresentation objective = scenarioDepartureChallengeForDestination(
         state_,
         catalog_,
-        state_.run.arrivalOps.destinationId);
+        state_.run.approach.destinationId);
     if (objective.available) {
         state_.statusLine = "Jupiter departure requires the Perfect Slingshot challenge. Use its route card.";
         panelDirty_ = true;
@@ -2186,7 +2560,7 @@ void RocketGameApp::runArrivalFlyby()
 void RocketGameApp::acknowledgeApproachIntroduction()
 {
     if (state_.screen != Screen::ArrivalOps
-        || state_.run.arrivalOps.destinationId != content::destination::moon) {
+        || state_.run.approach.destinationId != content::destination::moon) {
         return;
     }
 
@@ -2254,11 +2628,11 @@ void RocketGameApp::continueJupiterSlingshot()
 
 void RocketGameApp::continueTransferAssist()
 {
-    if (state_.screen == Screen::Flyby && state_.run.flyby.active &&
-        state_.run.flyby.completed &&
-        !state_.run.flyby.transferAssistId.empty()) {
-        const TransferAssistDefinition* definition = catalog_.findTransferAssist(state_.run.flyby.transferAssistId);
-        if (definition == nullptr || static_cast<int>(state_.run.flyby.result) < static_cast<int>(definition->minimumGrade)) {
+    if (state_.screen == Screen::Flyby && state_.run.approach.flyby.active &&
+        state_.run.approach.flyby.completed &&
+        !state_.run.approach.flyby.transferAssistId.empty()) {
+        const TransferAssistDefinition* definition = catalog_.findTransferAssist(state_.run.approach.flyby.transferAssistId);
+        if (definition == nullptr || static_cast<int>(state_.run.approach.flyby.result) < static_cast<int>(definition->minimumGrade)) {
             completeFlybyRun(state_, catalog_);
             save();
             panelDirty_ = true;
@@ -2289,12 +2663,12 @@ void RocketGameApp::flybyMove(double xAxis, double yAxis)
 
 void RocketGameApp::flybyAbort()
 {
-    if (state_.screen != Screen::Flyby || state_.run.flyby.completed) {
+    if (state_.screen != Screen::Flyby || state_.run.approach.flyby.completed) {
         return;
     }
-    const bool jupiterSlingshot = !state_.run.flyby.transferAssistId.empty();
-    const bool scenarioChallenge = state_.run.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
-        !state_.run.flyby.scenarioId.empty() && !state_.run.flyby.scenarioStepId.empty();
+    const bool jupiterSlingshot = !state_.run.approach.flyby.transferAssistId.empty();
+    const bool scenarioChallenge = state_.run.approach.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
+        !state_.run.approach.flyby.scenarioId.empty() && !state_.run.approach.flyby.scenarioStepId.empty();
     abortFlybyRun(state_, catalog_);
     if (!scenarioChallenge && !jupiterSlingshot) {
         state_.statusLine = "Flyby aborted. No recon reward earned.";
@@ -2305,13 +2679,13 @@ void RocketGameApp::flybyAbort()
 
 void RocketGameApp::flybyContinue()
 {
-    if (state_.screen != Screen::Flyby || !state_.run.flyby.completed) {
+    if (state_.screen != Screen::Flyby || !state_.run.approach.flyby.completed) {
         return;
     }
 
-    const FlybyGrade grade = state_.run.flyby.result;
-    if (!state_.run.flyby.transferAssistId.empty()) {
-        const TransferAssistDefinition* definition = catalog_.findTransferAssist(state_.run.flyby.transferAssistId);
+    const FlybyGrade grade = state_.run.approach.flyby.result;
+    if (!state_.run.approach.flyby.transferAssistId.empty()) {
+        const TransferAssistDefinition* definition = catalog_.findTransferAssist(state_.run.approach.flyby.transferAssistId);
         if (definition != nullptr && static_cast<int>(grade) >= static_cast<int>(definition->minimumGrade)) {
             continueTransferAssist();
         } else {
@@ -2322,8 +2696,8 @@ void RocketGameApp::flybyContinue()
         }
         return;
     }
-    const bool scenarioChallenge = state_.run.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
-        !state_.run.flyby.scenarioId.empty() && !state_.run.flyby.scenarioStepId.empty();
+    const bool scenarioChallenge = state_.run.approach.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
+        !state_.run.approach.flyby.scenarioId.empty() && !state_.run.approach.flyby.scenarioStepId.empty();
     if (scenarioChallenge) {
         // Completion records a typed scenario event. A Perfect leaves an
         // explicit claim instead of advancing a route implicitly; failures
@@ -2399,7 +2773,7 @@ void RocketGameApp::orbitMove(double xAxis, double yAxis)
 
 void RocketGameApp::orbitAbort()
 {
-    if (state_.screen != Screen::Orbit || state_.run.orbit.completed) {
+    if (state_.screen != Screen::Orbit || state_.run.approach.orbit.completed) {
         return;
     }
     abortOrbitRun(state_);
@@ -2410,11 +2784,11 @@ void RocketGameApp::orbitAbort()
 
 void RocketGameApp::orbitContinue()
 {
-    if (state_.screen != Screen::Orbit || !state_.run.orbit.completed) {
+    if (state_.screen != Screen::Orbit || !state_.run.approach.orbit.completed) {
         return;
     }
 
-    const OrbitGrade grade = state_.run.orbit.result;
+    const OrbitGrade grade = state_.run.approach.orbit.result;
     completeOrbitRun(state_, catalog_);
     switch (grade) {
     case OrbitGrade::Perfect:
@@ -2444,8 +2818,14 @@ void RocketGameApp::attemptArrivalLanding()
     }
 
     ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::landing);
-    const bool mappedDescent = state_.run.arrivalOps.commitment == ApproachCommitment::OrbitCaptured;
+    const bool mappedDescent = state_.run.approach.rewards.orbitAwarded;
+    state_.run.approach.phase = ApproachPhase::Descent;
+    state_.run.approach.descent.active = true;
+    state_.run.approach.descent.directDescent = !mappedDescent;
+    state_.run.approach.descent.corridorWidth = mappedDescent ? 1.0 : 0.65;
+    state_.run.approach.descent.turbulence = mappedDescent ? 0.0 : 0.35;
     bankArrivalLandingFlightData(state_, catalog_);
+    state_.run.approach.rewards.landingRecorded = true;
     beginSurfaceExpeditionOrRefit();
     state_.statusLine = mappedDescent
         ? "Mapped descent committed. Orbital survey removed the +20 descent hazard."
@@ -2531,7 +2911,7 @@ void RocketGameApp::mineSurface()
     const ScenarioObjectivePresentation objective = scenarioObjectiveForDestination(
         state_,
         catalog_,
-        state_.run.surfaceExpedition.destinationId);
+        state_.run.planetaryExpedition.destinationId);
     if (objective.available && objective.mandatoryBriefing && !objective.briefingAcknowledged) {
         state_.statusLine = "Acknowledge " + objective.title + " before deploying the Mining Rig.";
         panelDirty_ = true;
@@ -2551,7 +2931,7 @@ void RocketGameApp::startMiningRunAfterFade()
         panelDirty_ = true;
         return;
     }
-    SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state_.run.planetaryExpedition;
     const ScenarioObjectivePresentation objective = scenarioObjectiveForDestination(
         state_,
         catalog_,
@@ -2692,7 +3072,13 @@ void RocketGameApp::selectSurfaceUpgrade(int index)
 
 void RocketGameApp::openDroneOps()
 {
-    if (state_.screen != Screen::SurfaceExpedition || !state_.run.surfaceExpedition.active || !droneBayUnlocked(state_)) {
+    const bool miningService = state_.screen == Screen::Mining
+        && state_.run.mining.active
+        && miningAtReturnZone(state_.run.mining);
+    const bool legacySurface = state_.screen == Screen::SurfaceExpedition;
+    if ((!miningService && !legacySurface)
+        || !state_.run.planetaryExpedition.active
+        || !droneBayUnlocked(state_)) {
         state_.statusLine = "Complete the Prospector contract before assigning Support Drones.";
         panelDirty_ = true;
         return;
@@ -2712,8 +3098,9 @@ void RocketGameApp::backToSurfaceOps()
         return;
     }
 
-    if (state_.run.surfaceExpedition.active) {
-        state_.screen = Screen::SurfaceExpedition;
+    if (state_.run.planetaryExpedition.active && state_.run.mining.active) {
+        state_.screen = Screen::Mining;
+        state_.statusLine = "Drone loadout updated. Surface control restored.";
     } else if (openRefitIfAvailable(true)) {
         state_.statusLine = "Mars requires 20 transfer fuel. Use the Moon mission credits to install Fuel Tanks II.";
     } else {
@@ -2764,7 +3151,7 @@ void RocketGameApp::upgradeDroneSlot()
 
 void RocketGameApp::miningMove(double xAxis, double yAxis)
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         return;
     }
     keyboardRealtimeInput_.moveX = std::clamp(xAxis, -1.0, 1.0);
@@ -2774,7 +3161,7 @@ void RocketGameApp::miningMove(double xAxis, double yAxis)
 
 void RocketGameApp::miningAim(double normalizedX, double normalizedY)
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         return;
     }
     keyboardRealtimeInput_.aimX = normalizedX;
@@ -2797,7 +3184,7 @@ void RocketGameApp::miningPointerAim(double viewportX, double viewportY)
 
 void RocketGameApp::miningFire(bool active)
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         keyboardRealtimeInput_.firing = false;
         return;
     }
@@ -2807,7 +3194,7 @@ void RocketGameApp::miningFire(bool active)
 
 void RocketGameApp::miningDrill(bool active)
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         return;
     }
     keyboardRealtimeInput_.drilling = active;
@@ -2816,7 +3203,7 @@ void RocketGameApp::miningDrill(bool active)
 
 void RocketGameApp::miningOperatorToggle()
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         return;
     }
     const bool toggled = toggleMiningOperator(state_);
@@ -2837,7 +3224,7 @@ void RocketGameApp::miningOperatorToggle()
 
 void RocketGameApp::miningOperatorToggleProgress(double progress)
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         return;
     }
     setMiningOperatorToggleProgress(state_, std::clamp(progress, 0.0, 1.0));
@@ -2846,7 +3233,7 @@ void RocketGameApp::miningOperatorToggleProgress(double progress)
 
 void RocketGameApp::miningKeyboardDrill(bool active)
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         keyboardDrillPressed_ = false;
         return;
     }
@@ -2866,7 +3253,7 @@ void RocketGameApp::miningKeyboardDrill(bool active)
 
 void RocketGameApp::miningScanner()
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         return;
     }
 
@@ -2876,7 +3263,7 @@ void RocketGameApp::miningScanner()
 
 void RocketGameApp::miningTether()
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         return;
     }
 
@@ -2899,7 +3286,7 @@ void RocketGameApp::miningTether()
 
 void RocketGameApp::miningRepairDrill()
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         return;
     }
     MiningRunState& mining = state_.run.mining;
@@ -2919,7 +3306,7 @@ void RocketGameApp::miningRepairDrill()
 
 void RocketGameApp::miningRepairDrone()
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         return;
     }
     MiningRunState& mining = state_.run.mining;
@@ -2968,7 +3355,7 @@ void RocketGameApp::miningRepairDrone()
 
 void RocketGameApp::miningStow()
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active) {
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         return;
     }
     if (!miningAtReturnZone(state_.run.mining)) {
@@ -2977,30 +3364,80 @@ void RocketGameApp::miningStow()
         return;
     }
 
-    const MiningRunState extractionVisual = state_.run.mining;
-    const SurfaceActionOutcome outcome = finishMiningRun(state_, catalog_, false);
-    if (outcome.applied) {
-        state_.run.mining = extractionVisual;
-        state_.run.mining.active = false;
-        state_.run.mining.drilling = false;
-        state_.run.mining.moveX = 0.0;
-        state_.run.mining.moveY = 0.0;
-        state_.run.mining.cargo = 0;
-        state_.run.mining.temporaryMaterials = {};
-        state_.run.mining.temporaryArtifacts.clear();
-        state_.run.mining.stowedCargo = outcome.cargoDelta;
-        state_.run.mining.stowedMaterials = outcome.materialDelta;
-        state_.run.mining.combatProjectiles.clear();
-        state_.run.mining.damageNumbers.clear();
-        miningExtraction_.active = true;
-        miningExtraction_.elapsed = 0.0;
-        state_.screen = Screen::Mining;
-    }
-    state_.statusLine = outcome.applied
-        ? "All rig and Support Drone ore loaded. Returning to surface."
-        : std::string(text::status::miningStowed);
+    const bool banked = bankMiningPayloadAtShip(state_, catalog_);
+    state_.statusLine = banked
+        ? "Payload banked. Surface control remains active."
+        : "No rig payload can transfer. Drone cargo must physically return before unloading.";
     save();
     panelDirty_ = true;
+}
+
+void RocketGameApp::miningWaitForDrones()
+{
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
+        return;
+    }
+    if (!miningAtReturnZone(state_.run.mining)) {
+        state_.statusLine = "Return to the shuttle before recalling Support Drones.";
+        panelDirty_ = true;
+        return;
+    }
+
+    if (requestMiningDroneRecall(state_)) {
+        state_.statusLine = "Support Drones recalled. Their payload counts only after they reach the shuttle.";
+        save();
+    } else {
+        state_.statusLine = "All Support Drone payload is already aboard.";
+    }
+    panelDirty_ = true;
+}
+
+void RocketGameApp::miningDepart()
+{
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active() ||
+        miningSceneHandoff_ != MiningSceneHandoff::None) {
+        return;
+    }
+
+    // Settle the physical visit once, then retain only a presentation copy of
+    // the landed scene while the bay closes and the ship lifts off. The save
+    // remains at the pre-departure state until the cinematic handoff commits.
+    const GameState preDepartureState = state_;
+    MiningRunState extractionVisual = state_.run.mining;
+    const SurfaceActionOutcome miningOutcome = finishMiningRun(state_, catalog_, false);
+    if (!miningOutcome.applied) {
+        state_.statusLine = surfaceActionSummary(miningOutcome);
+        panelDirty_ = true;
+        return;
+    }
+    const SurfaceActionOutcome surfaceOutcome = extractSurfacePayload(state_, catalog_);
+    if (!surfaceOutcome.applied) {
+        state_ = preDepartureState;
+        state_.statusLine = "Departure settlement could not complete. Payload and surface state were preserved.";
+        panelDirty_ = true;
+        return;
+    }
+
+    extractionVisual.active = false;
+    extractionVisual.failurePending = false;
+    extractionVisual.drilling = false;
+    extractionVisual.moveX = 0.0;
+    extractionVisual.moveY = 0.0;
+    extractionVisual.cargo = 0;
+    extractionVisual.temporaryMaterials = {};
+    extractionVisual.temporaryArtifacts.clear();
+    extractionVisual.stowedCargo = 0;
+    extractionVisual.stowedMaterials = {};
+    extractionVisual.stowedArtifacts.clear();
+    extractionVisual.combatProjectiles.clear();
+    extractionVisual.damageNumbers.clear();
+    state_.run.mining = std::move(extractionVisual);
+    state_.screen = Screen::Mining;
+    state_.statusLine = "DEPARTING — Bay secured. Ignition sequence.";
+    surfaceBaySequence_ = {SurfaceBaySequenceKind::Extract, false, 0.0};
+    releaseRealtimeInputs(true);
+    panelDirty_ = true;
+    realtimeHudDirty_ = true;
 }
 
 void RocketGameApp::scanSurfacePulse()
@@ -3065,7 +3502,7 @@ void RocketGameApp::pushSurfaceBank()
 
 void RocketGameApp::miningAbort()
 {
-    if (state_.screen != Screen::Mining || miningExtraction_.active ||
+    if (state_.screen != Screen::Mining || surfaceBaySequence_.active() ||
         miningSceneHandoff_ != MiningSceneHandoff::None) {
         return;
     }
@@ -3097,42 +3534,6 @@ void RocketGameApp::miningFailureAck()
     }
 
     queueMiningSceneHandoff(MiningSceneHandoff::AbortMining);
-}
-
-void RocketGameApp::debugStartFlyby()
-{
-    beginDebugSandbox("Debug flyby sandbox. No progress, rewards, or save data will be written.");
-    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::moon);
-    state_.run.arrivalOps = {true, content::destination::moon};
-    state_.lastOutcome.type = LaunchResultType::MissionComplete;
-    state_.lastOutcome.recoveryMethod = RecoveryMethod::TransferArrival;
-    state_.lastOutcome.destinationId = content::destination::moon;
-    state_.lastOutcome.frontierTransfer = true;
-    if (ScenarioInstance* scenario = findScenarioInstance(state_.meta, content::scenario::marsBayExpansion)) {
-        if (ScenarioStepProgress* funding = findScenarioStepProgress(*scenario, "funding")) {
-            funding->briefingAcknowledged = true;
-        }
-    }
-    startArrivalFlybyRun(state_, catalog_);
-    state_.statusLine = "Debug flyby sandbox. Fly this approach without touching your save.";
-    syncLaunchConfig(state_, catalog_);
-    panelDirty_ = true;
-}
-
-void RocketGameApp::debugStartOrbit()
-{
-    beginDebugSandbox("Debug orbit sandbox. No progress, rewards, or save data will be written.");
-    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::moon);
-    state_.run.arrivalOps = {true, content::destination::moon};
-    state_.lastOutcome.type = LaunchResultType::MissionComplete;
-    state_.lastOutcome.recoveryMethod = RecoveryMethod::TransferArrival;
-    state_.lastOutcome.destinationId = content::destination::moon;
-    state_.lastOutcome.frontierTransfer = true;
-    setDestinationHistory(state_.meta.destinationFlybys, catalog_, content::destination::moon, 1);
-    startArrivalOrbitRun(state_, catalog_);
-    state_.statusLine = "Debug orbit sandbox. Hold the research band without touching your save.";
-    syncLaunchConfig(state_, catalog_);
-    panelDirty_ = true;
 }
 
 void RocketGameApp::debugStartMining()
@@ -3246,7 +3647,7 @@ void RocketGameApp::debugStartMiningArena(
     }
 
     state_.run.destinationIndex = destinationIndexForId(catalog_, destinationId);
-    SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+    PlanetaryExpeditionState& expedition = state_.run.planetaryExpedition;
     expedition = {};
     expedition.active = true;
     expedition.destinationId = std::string(destinationId);
@@ -3436,55 +3837,6 @@ std::string RocketGameApp::debugMiningArenaPreview(int act, int difficulty, int 
     return preview.str();
 }
 
-void RocketGameApp::debugStartSurfaceScan()
-{
-    beginDebugSandbox("Debug scanner sandbox. No materials, artifacts, or save data will be written.");
-    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::moon);
-    state_.run.surfaceExpedition = {};
-    state_.run.surfaceExpedition.active = true;
-    state_.run.surfaceExpedition.destinationId = content::destination::moon;
-    state_.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::FractureField;
-    state_.run.surfaceExpedition.supply = tuning::research::baseSupply;
-    state_.run.surfaceExpedition.expeditionPackFuel = tuning::research::expeditionRigPackFuel;
-    state_.run.surfaceExpedition.transferFuelRecovered = 5.0;
-    state_.run.surfaceExpedition.rigFuelCapacity = 8.0;
-    state_.run.surfaceExpedition.rigFuel = 8.0;
-    state_.run.surfaceExpedition.hazard = tuning::research::baseHazard + 0.05;
-    const SurfaceActionOutcome outcome = startSurfaceScanRun(state_, rng_);
-    state_.statusLine = outcome.applied
-        ? "Debug scanner sandbox. Pulse, log, or bust without touching your save."
-        : surfaceActionSummary(outcome);
-    syncLaunchConfig(state_, catalog_);
-    panelDirty_ = true;
-}
-
-void RocketGameApp::debugStartSurfacePush()
-{
-    beginDebugSandbox("Debug Dig sandbox. No materials, artifacts, or save data will be written.");
-    state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::moon);
-    state_.run.surfaceExpedition = {};
-    state_.run.surfaceExpedition.active = true;
-    state_.run.surfaceExpedition.destinationId = content::destination::moon;
-    state_.run.surfaceExpedition.siteProfile = SurfaceSiteProfile::OreShelf;
-    state_.run.surfaceExpedition.supply = tuning::research::baseSupply;
-    state_.run.surfaceExpedition.expeditionPackFuel = tuning::research::expeditionRigPackFuel;
-    state_.run.surfaceExpedition.transferFuelRecovered = 5.0;
-    state_.run.surfaceExpedition.rigFuelCapacity = 8.0;
-    state_.run.surfaceExpedition.rigFuel = 8.0;
-    state_.run.surfaceExpedition.hazard = tuning::research::baseHazard + 0.08;
-    SurfaceDepthProspect artifactForecast;
-    artifactForecast.depthOffset = 1;
-    artifactForecast.absoluteDepth = state_.run.surfaceExpedition.depth + 1;
-    artifactForecast.possibleArtifacts = 1;
-    state_.run.surfaceExpedition.depthProspects.push_back(artifactForecast);
-    const SurfaceActionOutcome outcome = startSurfacePushRun(state_, rng_);
-    state_.statusLine = outcome.applied
-        ? "Debug Dig sandbox. Tunnel, secure the start depth, or collapse without touching your save."
-        : surfaceActionSummary(outcome);
-    syncLaunchConfig(state_, catalog_);
-    panelDirty_ = true;
-}
-
 void RocketGameApp::debugShowTitle()
 {
     debugSessionActive_ = false;
@@ -3579,14 +3931,15 @@ void RocketGameApp::debugShowResults()
     panelDirty_ = true;
 }
 
-void RocketGameApp::debugShowArrivalOps()
+void RocketGameApp::debugShowArrivalCelebration()
 {
-    beginDebugSandbox("Debug Arrival Ops board. No save data will be written.");
+    beginDebugSandbox("Debug automatic arrival celebration. No save data will be written.");
     state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::mars);
     state_.lastOutcome = debugTransferOutcome(content::destination::mars);
     startArrivalOps(state_, state_.lastOutcome);
-    state_.screen = Screen::ArrivalOps;
-    state_.statusLine = "Debug Arrival Ops board. Inspect approach cards without touching your save.";
+    session_.flight.physicalFlight = true;
+    session_.flight.phase = FlightPhase::Landed;
+    beginArrivalFanfare();
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
 }
@@ -3595,7 +3948,7 @@ void RocketGameApp::debugShowResearch()
 {
     beginDebugSandbox("Debug Research board. No save data will be written.");
     state_.run.destinationIndex = destinationIndexForId(catalog_, content::destination::mars);
-    state_.run.arrivalOps = {true, content::destination::mars};
+    state_.run.approach = {true, content::destination::mars};
     seedDebugResearchAccess(state_);
     generateResearchProjects(state_, catalog_, rng_);
     state_.screen = Screen::Research;
@@ -3625,22 +3978,11 @@ void RocketGameApp::debugShowSurfaceUpgrade()
     beginDebugSandbox("Debug Surface Upgrade board. No save data will be written.");
     seedDebugResearchAccess(state_);
     seedDebugSurfaceExpedition(state_, catalog_, rng_, content::destination::mars);
-    (void)awardExpeditionExperience(state_, 10.0, Screen::SurfaceExpedition);
+    (void)awardExpeditionExperience(state_, 10.0, Screen::Mining);
     generateRunUpgradeOffers(state_, catalog_, rng_);
     state_.screen = Screen::SurfaceUpgrade;
-    state_.run.surfaceExpedition.runUpgradeReturnScreen = Screen::SurfaceExpedition;
+    state_.run.planetaryExpedition.runUpgradeReturnScreen = Screen::Mining;
     state_.statusLine = "Debug Level Up board. Inspect draft cards without touching your save.";
-    syncLaunchConfig(state_, catalog_);
-    panelDirty_ = true;
-}
-
-void RocketGameApp::debugShowSurfaceOps()
-{
-    beginDebugSandbox("Debug Surface Ops board. No materials, artifacts, or save data will be written.");
-    seedDebugResearchAccess(state_);
-    seedDebugSurfaceExpedition(state_, catalog_, rng_, content::destination::mars);
-    state_.screen = Screen::SurfaceExpedition;
-    state_.statusLine = "Debug Surface Ops board. Inspect expedition choices without touching your save.";
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
 }
@@ -3769,10 +4111,162 @@ void RocketGameApp::debugStartLaunchLesson(int lessonIndex)
     syncLaunchConfig(state_, catalog_);
     beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
     session_.flightArmed = true;
-    state_.screen = Screen::Launch;
+    session_.flight.active = true;
+    state_.screen = Screen::Flight;
     state_.statusLine = "Debug launch lesson " + std::to_string(lessonIndex + 1) +
         "/4: " + std::string(lessonLabels[static_cast<std::size_t>(lessonIndex)]) +
         ". Real save remains untouched.";
+    panelDirty_ = true;
+    realtimeHudDirty_ = true;
+}
+
+void RocketGameApp::debugStartSurfaceArrival(int destinationIndex, int phaseIndex)
+{
+    const bool mars = destinationIndex == 1;
+    if ((destinationIndex != 0 && !mars) || phaseIndex < 0 || phaseIndex > 20) {
+        return;
+    }
+
+    debugStartLaunchLesson(mars ? 3 : 2);
+    // Arrival choreography needs an equipped team to make the deterministic
+    // drone fan independently inspectable. This is debug-sandbox state only;
+    // real landings continue to deploy exactly the player's equipped drones.
+    seedDebugDroneLoadout();
+    state_.meta.droneBaySlots = 3;
+    state_.meta.equippedDroneIds = {
+        content::drone::miningDrone,
+        content::drone::resourceDrone,
+        content::drone::surveyDrone
+    };
+    ensureDroneBayState(state_, catalog_);
+    state_.launchConfig.destinationId = mars ? content::destination::mars : content::destination::moon;
+    state_.launchConfig.routeTransit = {};
+    state_.launchConfig.frontierTransfer = true;
+    state_.launchConfig.missionKind = LaunchMissionKind::Standard;
+    beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
+    session_.flightArmed = true;
+    FlightRunState& flight = session_.flight;
+    flight.active = true;
+    flight.physicalFlight = true;
+    flight.phase = FlightPhase::Landing;
+    flight.positionX = 0.0;
+    flight.positionY = 0.235;
+    flight.velocityX = 0.0;
+    flight.velocityY = -0.055;
+    flight.heading = 1.5707963267948966;
+    flight.angularVelocity = 0.0;
+    flight.travelProgress = 1.0;
+    flight.previousTravelProgress = 1.0;
+    flight.orbit.enteredInfluence = true;
+    flight.orbit.captured = true;
+    flight.orbit.grade = OrbitGrade::Good;
+    enterLocalLanding(flight);
+    flight.handoff.elapsed = flight_landing::handoffSeconds;
+    flight.landing.altitude = 7.5;
+    flight.landing.verticalVelocity = -1.43;
+    flight.landing.lateralVelocity = 0.0;
+    flight.landing.surfaceAngle = 0.0;
+    if (phaseIndex == 9) {
+        // A manual feel preset just after an overcorrection: already in the
+        // landing frame, drifting sideways and climbing above its entry.
+        flight.landing.altitude = 35.0;
+        flight.landing.verticalVelocity = 2.0;
+        flight.landing.lateralVelocity = 3.0;
+    }
+    if (phaseIndex == 0 || phaseIndex == 10 || phaseIndex == 11) {
+        flight.landing.altitude=60.0;
+        flight.landing.verticalVelocity=phaseIndex==11 ? -24.0 : -4.0;
+        flight.landing.heading=phaseIndex==10 ? -1.5707963267948966 : 1.5707963267948966;
+    }
+    if (phaseIndex==12) {flight.landing.altitude=2.0;flight.landing.verticalVelocity=-2.0;}
+    if (phaseIndex==13) {flight.landing.altitude=116.0;flight.landing.verticalVelocity=8.0;}
+    if (phaseIndex>=16) {
+        flight.hullRemaining=phaseIndex==17 ? 40.0 : 85.0;
+        flight.landing.altitude=0.001;
+        flight.landing.verticalVelocity=-std::sqrt(18.0*18.0-2.0*flight_landing::gravityAcceleration*0.001);
+        if (phaseIndex==18) {
+            flight.landing.heading=1.10;
+            flight.landing.altitude=1.5;
+            flight.landing.verticalVelocity=-2.0;
+            flight.landing.lateralVelocity=3.0;
+        }
+        if (phaseIndex==19) {flight.landing.verticalVelocity=-0.1;}
+        if (phaseIndex==20) {
+            flight.mode=FlightMode::Orbit;flight.phase=FlightPhase::TargetApproach;
+            flight.orbit.captured=false;flight.orbitZoomProgress=1.0;
+            flight.handoff={FlightMode::Orbit,FlightMode::Orbit,flight_landing::handoffSeconds,0.0,0.0,0.0};
+            flight.positionX=flight_geometry::bodyRadius+0.001;flight.positionY=0.0;
+            flight.velocityX=-18.0/flight_geometry::velocityToMetersPerSecond;flight.velocityY=0.0;
+            flight.heading=0.0;
+        }
+    }
+    if (phaseIndex==14 || phaseIndex==15) {
+        // Exercise the actual swept gate and basis conversion rather than
+        // starting inside the local phase. The fast case is never clamped.
+        const double angle=std::atan2(flight_geometry::startY,flight_geometry::startX);
+        const double nx=std::cos(angle),ny=std::sin(angle);
+        const double inward=(phaseIndex==15 ? -30.0 : -5.0)/flight_landing::velocityConversion;
+        const double sideways=4.0/flight_landing::velocityConversion;
+        flight.mode=FlightMode::Orbit;
+        flight.phase=FlightPhase::Orbiting;
+        flight.orbitZoomProgress=1.0;
+        flight.handoff={FlightMode::Orbit,FlightMode::Orbit,flight_landing::handoffSeconds,0.0,0.0,angle};
+        flight.positionX=nx*(flight_geometry::landingBoundary+0.015);
+        flight.positionY=ny*(flight_geometry::landingBoundary+0.015);
+        flight.velocityX=nx*inward+ny*sideways;
+        flight.velocityY=ny*inward-nx*sideways;
+        flight.heading=angle;
+        flight.orbit.previousAngle=angle;
+        flight.landing.gateArmed=true;
+    }
+    prepareSurfaceArrivalIfNeeded(currentDestination(state_, catalog_));
+
+    if (surfaceArrival_.prepared && surfaceArrival_.prepared->valid) {
+        bindLandingSite(flight,surfaceArrival_.prepared->miningTemplate);
+        flight.landing.touchdownGridX=flight.landing.padGridX;
+        flight.landing.touchdownGridY=flight.landing.padGridY;
+    }
+
+    if (phaseIndex == 0 || phaseIndex >= 9) {
+        state_.statusLine = phaseIndex == 9
+            ? "Landing correction trial. Rising with sideways drift; real save untouched."
+            : mars
+            ? "Debug Mars final approach. Surface site is prepared but uncommitted."
+            : "Debug Moon final approach. Surface site is prepared but uncommitted.";
+        panelDirty_ = true;
+        realtimeHudDirty_ = true;
+        return;
+    }
+
+    flight.active = false;
+    flight.phase = FlightPhase::Landed;
+    flight.positionY = flight_geometry::bodyRadius;
+    flight.landing.altitude = 0.0;
+    flight.velocityX = 0.0;
+    flight.velocityY = 0.0;
+    const bool hardTouchdown = phaseIndex == 2;
+    flight.landing.hardLanding = hardTouchdown;
+    if (!commitSurfaceTouchdown(currentDestination(state_, catalog_), hardTouchdown)) {
+        return;
+    }
+    if (phaseIndex <= 2) {
+        surfaceArrival_.elapsed = 0.18;
+    } else if (phaseIndex == 3) {
+        surfaceArrival_.phase = SurfaceArrivalPhase::AwaitingCommand;
+        surfaceArrival_.elapsed = 0.0;
+        state_.statusLine = "LANDED";
+    } else if (phaseIndex == 8) {
+        surfaceArrival_.phase = SurfaceArrivalPhase::AwaitingCommand;
+        surfaceArrival_.elapsed = 0.0;
+        departSurfaceUndeployed();
+    } else {
+        surfaceArrival_.phase = SurfaceArrivalPhase::AwaitingCommand;
+        beginSurfaceDeploymentSequence();
+        static constexpr std::array<double, 4> deploymentTimes {0.10, 0.68, 1.32, 2.18};
+        const double elapsed = deploymentTimes[static_cast<std::size_t>(phaseIndex - 4)];
+        surfaceArrival_.elapsed = elapsed;
+        surfaceBaySequence_.elapsed = elapsed;
+    }
     panelDirty_ = true;
     realtimeHudDirty_ = true;
 }
@@ -3785,7 +4279,7 @@ void RocketGameApp::applyDebugActOneCheckpoint()
         static_cast<int>(kDebugActOneCheckpoints.size()) - 1);
     const DebugActOneCheckpoint& checkpoint = kDebugActOneCheckpoints[static_cast<std::size_t>(debugActOneCheckpoint_)];
 
-    session_ = {};
+    session_.reset();
     levelUp_ = {};
     expeditionXpPulseSeconds_ = 0.0;
     expeditionXpObservationInitialized_ = false;
@@ -3813,16 +4307,17 @@ void RocketGameApp::applyDebugActOneCheckpoint()
         syncLaunchConfig(state_, catalog_);
         beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
         session_.flightArmed = true;
-        state_.screen = Screen::Launch;
+        session_.flight.active = true;
+        state_.screen = Screen::Flight;
     } else {
         setDestinationHistory(state_.meta.destinationFlybys, catalog_, checkpoint.destinationId, 1);
         setDestinationHistory(state_.meta.destinationOrbits, catalog_, checkpoint.destinationId, 1);
         startArrivalOps(state_, state_.lastOutcome);
         if (checkpoint.destinationId == std::string_view(content::destination::neptune)) {
-            scheduleStoryBriefing(state_, StoryBriefingId::StraylightDiscovery, Screen::ArrivalOps);
+            scheduleStoryBriefing(state_, StoryBriefingId::StraylightDiscovery, Screen::Hangar);
             state_.screen = Screen::StoryBriefing;
         } else {
-            state_.screen = Screen::ArrivalOps;
+            beginSurfaceExpeditionOrRefit();
         }
     }
 
@@ -3920,7 +4415,7 @@ void RocketGameApp::attemptFrontierTransfer()
     }
     beginLaunchSession(rocket::prepareLaunch(state_, catalog_, rng_));
     consumeNextLaunchBoost();
-    state_.screen = Screen::Launch;
+    state_.screen = Screen::Flight;
     state_.statusLine = miningDroneTransferEnabled(state_)
         ? std::string(text::status::droneStowing)
         : std::string(text::status::preflightReadyWithoutDrone);
@@ -4033,38 +4528,6 @@ void RocketGameApp::repairShip()
     panelDirty_ = true;
 }
 
-void RocketGameApp::recruitCrew()
-{
-    if (rocket::recruitCrew(state_, catalog_)) {
-        save();
-    }
-    panelDirty_ = true;
-}
-
-void RocketGameApp::recruitCrew(int candidateIndex)
-{
-    if (rocket::recruitCrew(state_, catalog_, candidateIndex)) {
-        save();
-    }
-    panelDirty_ = true;
-}
-
-void RocketGameApp::trainCrew()
-{
-    if (rocket::trainCrew(state_, catalog_)) {
-        save();
-    }
-    panelDirty_ = true;
-}
-
-void RocketGameApp::restCrew()
-{
-    if (rocket::restCrew(state_, catalog_)) {
-        save();
-    }
-    panelDirty_ = true;
-}
-
 void RocketGameApp::resetSave()
 {
     debugSessionActive_ = false;
@@ -4086,7 +4549,7 @@ void RocketGameApp::resetSave()
     titleNotice_ = titleScreenActive_ ? "Local campaign save cleared." : std::string();
     state_ = createNewGame(catalog_, 0x524F434B45544ULL);
     rng_ = Random(state_.seed);
-    session_ = {};
+    session_.reset();
     levelUp_ = {};
     expeditionXpPulseSeconds_ = 0.0;
     expeditionXpObservationInitialized_ = false;
@@ -4132,9 +4595,9 @@ void RocketGameApp::startNewGame()
     debugActOneCheckpoint_ = -1;
     state_ = std::move(freshState);
     rng_ = Random(state_.seed);
-    session_ = {};
+    session_.reset();
     session_.returnTrip.duration = tuning::session::returnDefaultDuration;
-    miningExtraction_ = {};
+    surfaceBaySequence_.reset();
     miningEvaDeathPresentation_ = {};
     levelUp_ = {};
     expeditionXpPulseSeconds_ = 0.0;
@@ -4199,8 +4662,8 @@ bool RocketGameApp::restoreCheckpoint()
     }
     state_ = std::move(restored);
     rng_ = Random(checkpoint->seed + 0xA51CE5ULL + static_cast<std::uint64_t>(checkpoint->blueprintProgress));
-    session_ = {};
-    miningExtraction_ = {};
+    session_.reset();
+    surfaceBaySequence_.reset();
     miningEvaDeathPresentation_ = {};
     levelUp_ = {};
     hasSavedGame_ = true;
@@ -4225,7 +4688,7 @@ bool RocketGameApp::stateCanBecomeCheckpoint() const
     case Screen::Research:
     case Screen::Navigation:
         return !state_.run.routeTransit.active() && state_.storyBriefing.pending == StoryBriefingId::None;
-    case Screen::Launch:
+    case Screen::Flight:
     case Screen::Results:
     case Screen::ArrivalFanfare:
     case Screen::Flyby:
@@ -4408,9 +4871,13 @@ void RocketGameApp::completeMiningSceneHandoff()
     case MiningSceneHandoff::EnterMining:
         startMiningRunAfterFade();
         break;
-    case MiningSceneHandoff::ReturnToSurface:
+    case MiningSceneHandoff::DepartPlanet:
+        surfaceBaySequence_.reset();
         state_.run.mining = {};
-        state_.screen = Screen::SurfaceExpedition;
+        if (!openRefitIfAvailable()) {
+            state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
+        }
+        state_.statusLine = "Planetary departure complete.";
         save();
         panelDirty_ = true;
         break;
@@ -4483,22 +4950,34 @@ bool RocketGameApp::uiCancel()
     return services_.ui.cancel();
 }
 
-void RocketGameApp::beginLunarImpactCinematic()
+void RocketGameApp::beginFlightDestructionCinematic(LaunchFailureCause failureCause)
 {
-    if (session_.lunarImpact.active) {
+    if (session_.destruction.active) {
         return;
     }
 
-    session_.lunarImpact = {
+    session_.destruction = {
         true,
         0.0,
         session_.flight.peakMultiplier,
+        failureCause,
     };
+    // Keep an already-revealed site underneath an authorized surface crash.
+    // It remains uncommitted and is discarded when the loss handoff finishes.
+    surfaceArrival_.phase = surfaceArrival_.prepared.has_value()
+        ? SurfaceArrivalPhase::SurfaceReveal : SurfaceArrivalPhase::None;
+    surfaceArrival_.elapsed = 0.0;
+    surfaceArrival_.deployQueued = false;
+    surfaceArrival_.landingCommitted = false;
     releaseRealtimeInputs(true);
     session_.controls.actions.cutEnginesActive = false;
-    state_.statusLine = "LUNAR IMPACT \xE2\x80\x94 UNCALIBRATED LANDING";
+    state_.statusLine = failureCause == LaunchFailureCause::ThermalRunaway
+        ? "THERMAL RUNAWAY \xE2\x80\x94 ENGINE FAILURE"
+        : "HULL LOST";
     queueControllerHapticCue(ControllerHapticCue::Failure);
-    panelDirty_ = true;
+    // Destruction changes live values and copy, not panel structure. Keep the
+    // existing Flight HUD mounted through the explosion and patch its status
+    // in place instead of rebuilding the entire sidebar mid-cinematic.
     realtimeHudDirty_ = true;
 }
 
@@ -4507,6 +4986,7 @@ void RocketGameApp::completeLaunch(
     RecoveryMethod method,
     LaunchFailureCause failureCause)
 {
+    surfaceArrival_.reset();
     const GameState stateBefore = state_;
     const PreparedLaunch flightModel = currentFlightModel();
     const bool wasReturningHome = session_.controls.actions.returningHome;
@@ -4528,11 +5008,18 @@ void RocketGameApp::completeLaunch(
     outcome.transferFuelRemaining = std::max(0.0, session_.flight.fuelRemaining);
     outcome.transferFuelCapacity = std::max(0.0, session_.flight.fuelCapacity);
     outcome.telemetry = chartTelemetryForOutcome(flightModel, session_.flight, wasReturningHome);
+    if (outcome.failureCause==LaunchFailureCause::None || outcome.failureCause==LaunchFailureCause::LunarImpact) {
+        outcome.impact=session_.flight.impact;
+    }
+    if (session_.flight.physicalFlight && outcome.type!=LaunchResultType::Destroyed &&
+        outcome.failureCause==LaunchFailureCause::None) {
+        outcome.shipDamage=physicalFlightCampaignDamage(session_.flight,flightModel.existingShipDamage);
+    }
     if (!outcome.telemetry.empty()) {
         outcome.telemetry.back() = launchTelemetryAt(flightModel, session_.flight);
     }
     applyLaunchOutcome(state_, catalog_, outcome);
-    session_.lunarImpact.active = false;
+    session_.destruction.active = false;
     const bool completedStraylightApproach =
         flightModel.config.missionKind == LaunchMissionKind::StraylightApproach &&
         outcome.type == LaunchResultType::MissionComplete &&
@@ -4547,6 +5034,12 @@ void RocketGameApp::completeLaunch(
             // Neptune is the one arrival whose ordinary fanfare gives way to a
             // saved, input-blocking story beat after the player reviews results.
             state_.screen = Screen::Results;
+        } else if (session_.flight.physicalFlight &&
+                   session_.flight.phase == FlightPhase::Landed) {
+            // Physical Flight already owns approach, orbit, descent, and the
+            // touchdown ceremony. Enter the continuous landed world without
+            // constructing the retired Arrival Ops aggregate even briefly.
+            beginSurfaceExpeditionOrRefit();
         } else {
             startArrivalOps(state_, outcome);
             beginArrivalFanfare();
@@ -4569,7 +5062,7 @@ void RocketGameApp::completeLaunch(
 
 void RocketGameApp::save()
 {
-    if (debugSessionActive_) {
+    if (debugSessionActive_ || surfaceArrival_.active() || session_.destruction.active) {
         return;
     }
     const CampaignProgressionAuditResult audit = auditCampaignProgression(state_, catalog_);
@@ -4623,6 +5116,13 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         levelUp_.resolving ? levelUp_.selectedOfferIndex : -1,
         expeditionXpPulseSeconds_ > 0.0,
         miningEvaDeathModalReady(),
+        surfaceBaySequence_.kind == SurfaceBaySequenceKind::Extract,
+        surfaceArrival_.active(),
+        static_cast<int>(surfaceArrival_.phase),
+        surfaceArrival_.deployQueued,
+        surfaceArrival_.landingCommitted,
+        controllerConnected_ && activeInputSource_ == InputSource::Controller,
+        controllerPreferences_.invertFlightY,
     };
 }
 
@@ -4687,7 +5187,7 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
     // committed only by this explicit player action.  Resolve that event
     // before asking the scenario system to claim the reward; otherwise the
     // button is labelled from the still-active step and the claim is rejected.
-    const FlybyRunState& flyby = state_.run.flyby;
+    const FlybyRunState& flyby = state_.run.approach.flyby;
     const bool claimingCompletedScenarioFlyby =
         address.action == ScenarioActionKind::ClaimReward &&
         state_.screen == Screen::Flyby &&
@@ -4706,8 +5206,8 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
         (address.action == ScenarioActionKind::BeginActivity ||
          address.action == ScenarioActionKind::RetryActivity) &&
         !step->miningSiteDefinitionId.empty();
-    if (miningSiteAction && state_.run.surfaceExpedition.active &&
-        state_.run.surfaceExpedition.miningRunUsed) {
+    if (miningSiteAction && state_.run.planetaryExpedition.active &&
+        state_.run.planetaryExpedition.miningRunUsed) {
         state_.statusLine =
             "This surface loop's Mining Rig deployment is spent. Return to Earth, then land again to retry this recovery.";
         panelDirty_ = true;
@@ -4761,7 +5261,7 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
     const bool supportDroneNeedsAssignment = grantsAutoAssignedSupportDrone &&
         state_.meta.equippedDroneIds.size() <= equippedDroneCountBefore;
     if (outcome.beginsActivity && !outcome.miningSiteDefinitionId.empty()) {
-        SurfaceExpeditionState& expedition = state_.run.surfaceExpedition;
+        PlanetaryExpeditionState& expedition = state_.run.planetaryExpedition;
         if (!expedition.active) {
             state_.statusLine = "Open Surface Ops before beginning this recovery site.";
         } else if (expedition.miningRunUsed) {
@@ -4850,8 +5350,11 @@ void RocketGameApp::runUiAction(const std::string& action)
         unequipDroneSlot(index);
     } else if (consumeIndexedAction(action, ui::actions::selectNavigationDestinationPrefix, index)) {
         selectNavigationDestination(index);
-    } else if (consumeIndexedAction(action, ui::actions::recruitCandidatePrefix, index)) {
-        recruitCrew(index);
+    } else if (action == ui::actions::acceptCrewReplacement) {
+        if (rocket::acceptCrewReplacement(state_, catalog_)) {
+            save();
+        }
+        panelDirty_ = true;
     } else if (action == ui::actions::prepareLaunch) {
         prepareForLaunch();
     } else if (action == ui::actions::startLaunch) {
@@ -4860,12 +5363,14 @@ void RocketGameApp::runUiAction(const std::string& action)
         returnHome();
     } else if (action == ui::actions::arrivalOps) {
         arrivalOps();
-    } else if (action == ui::actions::skipArrivalFanfare) {
-        skipArrivalFanfare();
     } else if (action == ui::actions::acknowledgeStoryBriefing) {
         acknowledgeStoryBriefing();
     } else if (action == ui::actions::cutEngines) {
         cutEngines();
+    } else if (action == ui::actions::deploySurfaceTeam) {
+        deploySurfaceTeam();
+    } else if (action == ui::actions::departSurfaceUndeployed) {
+        departSurfaceUndeployed();
     } else if (action == ui::actions::next) {
         next();
     } else if (action == ui::actions::attemptFrontier) {
@@ -4942,18 +5447,16 @@ void RocketGameApp::runUiAction(const std::string& action)
         miningRepairDrone();
     } else if (action == ui::actions::miningStow) {
         miningStow();
+    } else if (action == ui::actions::miningWaitForDrones) {
+        miningWaitForDrones();
+    } else if (action == ui::actions::miningDepart) {
+        miningDepart();
     } else if (action == ui::actions::miningAbort) {
         miningAbort();
     } else if (action == ui::actions::miningFailureAck) {
         miningFailureAck();
     } else if (action == ui::actions::repairShip) {
         repairShip();
-    } else if (action == ui::actions::recruitCrew) {
-        recruitCrew();
-    } else if (action == ui::actions::trainCrew) {
-        trainCrew();
-    } else if (action == ui::actions::restCrew) {
-        restCrew();
     } else if (action == ui::actions::resetSave) {
         resetSave();
     }
@@ -4988,16 +5491,20 @@ RenderSnapshot RocketGameApp::snapshot() const
         : LaunchFailureCause::None;
     result.currentMultiplier = session_.currentMultiplier;
     result.animationTime = session_.result.elapsed;
-    if (state_.screen == Screen::Launch) {
-        result.animationTime = session_.lunarImpact.active
-            ? session_.lunarImpact.elapsed
-            : (session_.flightArmed ? session_.elapsed : session_.preflightElapsed);
+    if (state_.screen == Screen::Flight) {
+        result.animationTime = session_.destruction.active
+            ? session_.destruction.elapsed
+            : (surfaceArrival_.active()
+                ? surfaceArrival_.elapsed
+                : (session_.flightArmed ? session_.elapsed : session_.preflightElapsed));
     } else if (state_.screen == Screen::Mining) {
-        result.animationTime = miningExtraction_.active ? miningExtraction_.elapsed : state_.run.mining.elapsedSeconds;
+        result.animationTime = surfaceBaySequence_.kind == SurfaceBaySequenceKind::Extract
+            ? surfaceBaySequence_.elapsed
+            : state_.run.mining.elapsedSeconds;
     } else if (state_.screen == Screen::Flyby) {
-        result.animationTime = state_.run.flyby.elapsedSeconds;
+        result.animationTime = state_.run.approach.flyby.elapsedSeconds;
     } else if (state_.screen == Screen::Orbit) {
-        result.animationTime = state_.run.orbit.elapsedSeconds;
+        result.animationTime = state_.run.approach.orbit.elapsedSeconds;
     } else if (state_.screen == Screen::SurfaceScan) {
         result.animationTime = state_.run.surfaceScan.elapsedSeconds;
     } else if (state_.screen == Screen::SurfacePush) {
@@ -5012,7 +5519,7 @@ RenderSnapshot RocketGameApp::snapshot() const
     }
     const Destination& currentFrontier = currentDestination(state_, catalog_);
     const Destination* visualDestination = &currentFrontier;
-    if (state_.screen == Screen::Launch) {
+    if (state_.screen == Screen::Flight) {
         if (const Destination* activeDestination = catalog_.findDestination(session_.preparedLaunch.config.destinationId)) {
             visualDestination = activeDestination;
         }
@@ -5021,13 +5528,13 @@ RenderSnapshot RocketGameApp::snapshot() const
         if (const Destination* resultDestination = catalog_.findDestination(state_.lastOutcome.destinationId)) {
             visualDestination = resultDestination;
         }
-        if (state_.screen == Screen::Flyby && !state_.run.flyby.destinationId.empty()) {
-            if (const Destination* flybyDestination = catalog_.findDestination(state_.run.flyby.destinationId)) {
+        if (state_.screen == Screen::Flyby && !state_.run.approach.flyby.destinationId.empty()) {
+            if (const Destination* flybyDestination = catalog_.findDestination(state_.run.approach.flyby.destinationId)) {
                 visualDestination = flybyDestination;
             }
         }
-        if (state_.screen == Screen::Orbit && !state_.run.orbit.destinationId.empty()) {
-            if (const Destination* orbitDestination = catalog_.findDestination(state_.run.orbit.destinationId)) {
+        if (state_.screen == Screen::Orbit && !state_.run.approach.orbit.destinationId.empty()) {
+            if (const Destination* orbitDestination = catalog_.findDestination(state_.run.approach.orbit.destinationId)) {
                 visualDestination = orbitDestination;
             }
         }
@@ -5044,7 +5551,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.frontierTransfer = state_.lastOutcome.frontierTransfer;
     }
     result.targetMultiplier = visualDestination->targetMultiplier;
-    if (state_.screen == Screen::Launch) {
+    if (state_.screen == Screen::Flight) {
         result.launchMissionTargetProgress = std::clamp(
             (flightModel.config.burnGoalMultiplier - 1.0) /
                 std::max(0.01, visualDestination->targetMultiplier - 1.0),
@@ -5068,7 +5575,7 @@ RenderSnapshot RocketGameApp::snapshot() const
     }
     result.shipDamage = static_cast<double>(state_.run.shipDamage);
     result.destinationTier = visualDestination->tier;
-    if (state_.screen == Screen::Launch) {
+    if (state_.screen == Screen::Flight) {
         if (flightModel.config.routeTransit.active()) {
             if (const Destination* source = catalog_.findDestination(flightModel.config.routeTransit.originDestinationId)) {
                 result.launchOriginTier = source->tier;
@@ -5087,23 +5594,53 @@ RenderSnapshot RocketGameApp::snapshot() const
         (state_.storyBriefing.pending == StoryBriefingId::StraylightDiscovery ||
          state_.storyBriefing.pending == StoryBriefingId::StraylightApproach ||
          state_.storyBriefing.pending == StoryBriefingId::ActOneComplete);
-    result.straylightApproach = state_.screen == Screen::Launch &&
+    result.straylightApproach = state_.screen == Screen::Flight &&
         flightModel.config.missionKind == LaunchMissionKind::StraylightApproach;
     result.campaignStoryIntroduction = state_.screen == Screen::StoryBriefing
         && state_.storyBriefing.pending == StoryBriefingId::CampaignIntroduction;
     if (result.straylightStoryReveal) {
         result.arkCondition = ArkCondition::DerelictOperable;
     }
-    result.preflightActive = state_.screen == Screen::Launch && !session_.flightArmed && miningDroneTransferEnabled(state_);
+    result.preflightActive = state_.screen == Screen::Flight && !session_.flightArmed && miningDroneTransferEnabled(state_);
     result.preflightProgress = result.preflightActive
         ? std::clamp(session_.preflightElapsed / tuning::session::preflightBoardingSeconds, 0.0, 1.0)
         : 1.0;
 
-    if (state_.screen == Screen::Mining && (state_.run.mining.active || miningExtraction_.active)) {
-        const MiningRunState& mining = state_.run.mining;
-        result.miningExtractionActive = miningExtraction_.active;
-        result.miningExtractionProgress = miningExtraction_.active
-            ? std::clamp(miningExtraction_.elapsed / tuning::mining::miningExtractionSequenceSeconds, 0.0, 1.0)
+    const MiningRunState* visualMining = nullptr;
+    const PlanetaryExpeditionState* visualExpedition = nullptr;
+    if (state_.screen == Screen::Mining &&
+        (state_.run.mining.active || surfaceBaySequence_.kind == SurfaceBaySequenceKind::Extract)) {
+        visualMining = &state_.run.mining;
+        visualExpedition = &state_.run.planetaryExpedition;
+    } else if (state_.screen == Screen::Flight) {
+        if (surfaceArrival_.landingCommitted && state_.run.mining.active) {
+            visualMining = &state_.run.mining;
+            visualExpedition = &state_.run.planetaryExpedition;
+        } else if (surfaceArrival_.prepared.has_value() && surfaceArrival_.prepared->valid) {
+            visualMining = &surfaceArrival_.prepared->miningTemplate;
+            visualExpedition = &surfaceArrival_.prepared->expeditionTemplate;
+        }
+    }
+    result.surfaceArrivalPrepared = visualMining != nullptr && state_.screen == Screen::Flight;
+    result.surfaceArrivalActive = surfaceArrival_.active();
+    result.surfaceArrivalLandingCommitted = surfaceArrival_.landingCommitted;
+    result.surfaceArrivalHardLanding = session_.flight.landing.hardLanding;
+    result.surfaceArrivalDeployQueued = surfaceArrival_.deployQueued;
+    result.surfaceArrivalPhase = static_cast<int>(surfaceArrival_.phase);
+    result.surfaceArrivalProgress = surfaceArrival_.phase == SurfaceArrivalPhase::Deploying
+        ? std::clamp(surfaceArrival_.elapsed / kSurfaceDeploymentSeconds, 0.0, 1.0)
+        : (surfaceArrival_.phase == SurfaceArrivalPhase::UndeployedTakeoff
+            ? std::clamp(surfaceArrival_.elapsed / kSurfaceUndeployedTakeoffSeconds, 0.0, 1.0)
+            : (surfaceArrival_.phase == SurfaceArrivalPhase::Touchdown
+                ? std::clamp(surfaceArrival_.elapsed / kTouchdownCelebrationSeconds, 0.0, 1.0)
+                : 0.0));
+
+    if (visualMining != nullptr && visualExpedition != nullptr) {
+        const MiningRunState& mining = *visualMining;
+        const PlanetaryExpeditionState& expedition = *visualExpedition;
+        result.miningExtractionActive = surfaceBaySequence_.kind == SurfaceBaySequenceKind::Extract;
+        result.miningExtractionProgress = result.miningExtractionActive
+            ? std::clamp(surfaceBaySequence_.elapsed / tuning::mining::miningExtractionSequenceSeconds, 0.0, 1.0)
             : 0.0;
         result.miningWidth = mining.terrain.width;
         result.miningHeight = mining.terrain.height;
@@ -5123,7 +5660,9 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningReturnZoneY = mining.returnZoneY;
         result.miningShipPresent = mining.depthZone == mining.entryDepthZone;
         result.miningAtReturnZone = miningAtReturnZone(mining);
-        const MiningLoadStats loadStats = miningLoadStats(state_, catalog_);
+        const MiningLoadStats loadStats = surfaceArrival_.prepared.has_value()
+            ? MiningLoadStats {}
+            : miningLoadStats(state_, catalog_);
         result.miningLoad = loadStats.currentLoad;
         result.miningLoadSpeedMultiplier = loadStats.speedMultiplier;
         result.miningContactIntensity = mining.contactIntensity;
@@ -5131,10 +5670,12 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningContactIndicatorDirX = mining.contactIndicatorDirX;
         result.miningContactIndicatorDirY = mining.contactIndicatorDirY;
         result.miningScannerPulse = mining.scannerPulseSeconds;
+        result.miningArtifactSecuredCelebration =
+            std::clamp(mining.artifactSecuredCelebrationSeconds / 2.0, 0.0, 1.0);
         result.miningScannerRechargeProgress = tuning::mining::scannerRechargePresentationProgress(
-            state_.run.surfaceExpedition.scannerCooldownSeconds);
+            expedition.scannerCooldownSeconds);
         const MiningDrillStats miningStats = miningDrillStats(state_, catalog_);
-        if (!miningExtraction_.active) {
+        if (!surfaceBaySequence_.active() && state_.screen == Screen::Mining) {
             result.miningPoiGuidance = miningPoiGuidanceTarget(
                 mining,
                 miningActiveOxygenSeconds(mining),
@@ -5232,12 +5773,12 @@ RenderSnapshot RocketGameApp::snapshot() const
             };
         }
         result.bindMiningFrameViews(mining);
-        result.miningDroneModuleAssignments = state_.run.surfaceExpedition.droneModuleAssignments;
-        result.miningTreasureMarks = state_.run.surfaceExpedition.treasureMarks;
+        result.miningDroneModuleAssignments = expedition.droneModuleAssignments;
+        result.miningTreasureMarks = expedition.treasureMarks;
     }
 
-    if (state_.screen == Screen::Flyby && state_.run.flyby.active) {
-        const FlybyRunState& flyby = state_.run.flyby;
+    if (state_.screen == Screen::Flyby && state_.run.approach.flyby.active) {
+        const FlybyRunState& flyby = state_.run.approach.flyby;
         result.flybyCompleted = flyby.completed;
         result.flybyZone = flyby.currentZone;
         result.flybyResult = static_cast<int>(flyby.result);
@@ -5254,8 +5795,8 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.flybyTrailPoints = flyby.trailPoints;
     }
 
-    if (state_.screen == Screen::Orbit && state_.run.orbit.active) {
-        const OrbitRunState& orbit = state_.run.orbit;
+    if (state_.screen == Screen::Orbit && state_.run.approach.orbit.active) {
+        const OrbitRunState& orbit = state_.run.approach.orbit;
         result.orbitCompleted = orbit.completed;
         result.orbitZone = orbit.currentZone;
         result.orbitResult = static_cast<int>(orbit.result);
@@ -5307,7 +5848,7 @@ RenderSnapshot RocketGameApp::snapshot() const
     if (state_.screen == Screen::SurfacePush && (state_.run.surfacePush.active || state_.run.surfacePush.completed)) {
         const SurfacePushRunState& push = state_.run.surfacePush;
         result.surfacePushBusted = push.busted;
-        result.surfacePushStartDepth = std::max(0, state_.run.surfaceExpedition.depth);
+        result.surfacePushStartDepth = std::max(0, state_.run.planetaryExpedition.depth);
         result.surfacePushSteps = push.steps;
         result.surfacePushMaxSteps = std::max(1, push.maxSteps);
         result.surfacePushPressure = push.pressure;
@@ -5326,7 +5867,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.surfacePushRewardDepthOffsets.assign(
             push.rewardMarkerDepthOffsets.begin(),
             push.rewardMarkerDepthOffsets.begin() + static_cast<std::ptrdiff_t>(visibleRewardOffsetCount));
-        for (const SurfaceDepthProspect& prospect : state_.run.surfaceExpedition.depthProspects) {
+        for (const SurfaceDepthProspect& prospect : state_.run.planetaryExpedition.depthProspects) {
             if (result.surfacePushForecastMarkers.size() >= kMaxSurfaceProspectMarkers) {
                 break;
             }
@@ -5334,9 +5875,10 @@ RenderSnapshot RocketGameApp::snapshot() const
         }
     }
 
-    if (state_.screen == Screen::Launch) {
-        result.launchLunarImpactActive = session_.lunarImpact.active;
-        result.launchLunarImpactElapsed = session_.lunarImpact.elapsed;
+    if (state_.screen == Screen::Flight) {
+        result.launchDestructionActive = session_.destruction.active;
+        result.launchDestructionElapsed = session_.destruction.elapsed;
+        result.launchDestructionCause = session_.destruction.failureCause;
         result.launchManualControlsEnabled = flightModel.manualControlsEnabled;
         result.launchHeatEnabled = flightModel.heatEnabled;
         result.launchAsteroidsEnabled = flightModel.asteroidsEnabled;
@@ -5350,6 +5892,61 @@ RenderSnapshot RocketGameApp::snapshot() const
         // at center and then jumps sideways on ignition.
         result.launchCourseOffset = session_.flight.courseOffset;
         result.launchCourseVelocity = session_.flight.courseVelocity;
+        result.launchPhysicalFlight = session_.flight.physicalFlight;
+        result.launchFlightPhase = static_cast<int>(session_.flight.phase);
+        result.launchPositionX = session_.flight.positionX;
+        result.launchPositionY = session_.flight.positionY;
+        result.launchVelocityX = session_.flight.velocityX;
+        result.launchVelocityY = session_.flight.velocityY;
+        result.launchHeading = session_.flight.heading;
+        result.launchLandingAuthorized = session_.flight.orbit.captured || !flightModel.orbitRequired;
+        const FlightScaleProfile scaleProfile = flightScaleProfile(session_.flight);
+        result.launchApproachBlend = scaleProfile.approachBlend;
+        result.launchLandingBlend = scaleProfile.landingBlend;
+        result.launchOrbitTargetRadius = session_.flight.orbit.targetRadius;
+        result.launchOrbitGoodBand = session_.flight.orbit.goodBand;
+        result.launchOrbitProgress = std::clamp(
+            session_.flight.orbit.stableAngularProgress / 6.28318530717958647692,
+            0.0,
+            1.0);
+        result.launchOrbitCaptured = session_.flight.orbit.captured;
+        result.launchLandingAltitude = session_.flight.landing.altitude;
+        result.launchLandingVerticalVelocity = session_.flight.landing.verticalVelocity;
+        result.launchLandingLateralVelocity = session_.flight.landing.lateralVelocity;
+        result.launchLandingLocalFrame = session_.flight.mode == FlightMode::Landing;
+        result.launchFlightMode = static_cast<int>(session_.flight.mode);
+        result.launchHandoffFrom = static_cast<int>(session_.flight.handoff.from);
+        result.launchHandoffProgress = std::clamp(session_.flight.handoff.elapsed/flight_landing::handoffSeconds,0.0,1.0);
+        result.launchHandoffX=session_.flight.handoff.sourceX;
+        result.launchHandoffY=session_.flight.handoff.sourceY;
+        result.launchLandingBasisAngle=session_.flight.landing.basisAngle;
+        result.launchLandingHorizontalPosition=session_.flight.landing.horizontalPosition;
+        result.launchLandingPadX=session_.flight.landing.padGridX;
+        result.launchLandingPadY=session_.flight.landing.padGridY;
+        result.launchDescentGateArmed=session_.flight.landing.gateArmed;
+        if (result.launchLandingLocalFrame) {
+            const auto& land=session_.flight.landing;
+            const double nx=std::cos(land.basisAngle),ny=std::sin(land.basisAngle);
+            const double r=flight_geometry::bodyRadius+land.altitude/flight_landing::metersPerOrbitUnit;
+            result.launchPositionX=nx*r+ny*land.horizontalPosition/flight_landing::metersPerOrbitUnit;
+            result.launchPositionY=ny*r-nx*land.horizontalPosition/flight_landing::metersPerOrbitUnit;
+            result.launchVelocityX=(nx*land.verticalVelocity+ny*land.lateralVelocity)/flight_landing::metersPerOrbitUnit;
+            result.launchVelocityY=(ny*land.verticalVelocity-nx*land.lateralVelocity)/flight_landing::metersPerOrbitUnit;
+            result.launchHeading=land.heading+land.basisAngle-1.5707963267948966;
+        }
+        result.launchTouchdownCelebration =
+            surfaceArrival_.phase == SurfaceArrivalPhase::Touchdown;
+        result.launchTouchdownCelebrationProgress = std::clamp(
+            (surfaceArrival_.phase == SurfaceArrivalPhase::Touchdown
+                ? surfaceArrival_.elapsed
+                : 0.0) / kTouchdownCelebrationSeconds,
+            0.0,
+            1.0);
+        result.launchPredictedTrajectory.clear();
+        result.launchPredictedTrajectory.reserve(session_.flight.predictedTrajectory.size());
+        for (const FlybyTrailPoint& point : session_.flight.predictedTrajectory) {
+            result.launchPredictedTrajectory.push_back({point.x, point.y});
+        }
         result.launchAsteroidCount = std::clamp(
             flightModel.asteroidCount,
             0,
@@ -5394,8 +5991,9 @@ RenderSnapshot RocketGameApp::snapshot() const
             1.0);
         result.telemetryCount = 0;
         result.poweredFlight = session_.flightArmed &&
-            !session_.lunarImpact.active &&
-            !session_.controls.actions.cutEnginesActive;
+            !session_.destruction.active &&
+            !session_.controls.actions.cutEnginesActive &&
+            (!session_.flight.physicalFlight || std::abs(session_.flight.selectedThrottle) > 0.01);
         result.launchImpactFlash = std::clamp(
             session_.asteroidImpactFeedbackSeconds / asteroidImpactFeedbackDuration,
             0.0,
@@ -5403,7 +6001,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         const double launchStartShake = session_.flightArmed
             ? std::clamp(1.0 - session_.elapsed / tuning::session::launchShakeSeconds, 0.0, 1.0)
             : 0.0;
-        result.launchShake = session_.lunarImpact.active
+        result.launchShake = session_.destruction.active
             ? 0.0
             : std::max(launchStartShake, result.launchImpactFlash);
     } else if (!state_.lastOutcome.telemetry.empty()) {
@@ -5417,12 +6015,14 @@ RenderSnapshot RocketGameApp::snapshot() const
     }
 
     FlightInstrumentPresentation instruments;
-    if (state_.screen == Screen::Launch && session_.flightArmed && !session_.lunarImpact.active) {
+    if (state_.screen == Screen::Flight && session_.flightArmed &&
+        !session_.destruction.active && !surfaceArrival_.active() &&
+        session_.flight.mode != FlightMode::Landing) {
         instruments = launchFlightInstruments(flightModel, session_.flight);
     } else if (state_.screen == Screen::Flyby) {
-        instruments = flybyFlightInstruments(state_.run.flyby);
+        instruments = flybyFlightInstruments(state_.run.approach.flyby);
     } else if (state_.screen == Screen::Orbit) {
-        instruments = orbitFlightInstruments(state_.run.orbit);
+        instruments = orbitFlightInstruments(state_.run.approach.orbit);
     }
     result.flightInstrumentsVisible = instruments.visible;
     result.instrumentSpeed = instruments.speed;

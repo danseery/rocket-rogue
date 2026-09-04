@@ -13,15 +13,7 @@ Screen expectedScreen(NativeBenchmarkScenario scenario)
     case NativeBenchmarkScenario::Hangar:
         return Screen::Hangar;
     case NativeBenchmarkScenario::Launch:
-        return Screen::Launch;
-    case NativeBenchmarkScenario::Flyby:
-        return Screen::Flyby;
-    case NativeBenchmarkScenario::Orbit:
-        return Screen::Orbit;
-    case NativeBenchmarkScenario::SurfaceOps:
-        return Screen::SurfaceExpedition;
-    case NativeBenchmarkScenario::SurfaceScan:
-        return Screen::SurfaceScan;
+        return Screen::Flight;
     case NativeBenchmarkScenario::Mining:
         return Screen::Mining;
     }
@@ -61,18 +53,6 @@ BenchmarkScenarioSetupResult BenchmarkScenarioDriver::setup(
         for (int step = 0; step < 256 && app.inputContext() == InputContext::Preflight; ++step) {
             app.tick(1.0 / 120.0);
         }
-        break;
-    case NativeBenchmarkScenario::Flyby:
-        app.debugStartFlyby();
-        break;
-    case NativeBenchmarkScenario::Orbit:
-        app.debugStartOrbit();
-        break;
-    case NativeBenchmarkScenario::SurfaceOps:
-        app.debugShowSurfaceOps();
-        break;
-    case NativeBenchmarkScenario::SurfaceScan:
-        app.debugStartSurfaceScan();
         break;
     case NativeBenchmarkScenario::Mining:
         // Act III level 10 exercises the largest terrain/combat presentation

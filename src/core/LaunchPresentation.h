@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/GameFormat.h"
+#include "core/FlightImpactPresentation.h"
 #include "core/GameState.h"
 #include "core/GameUi.h"
 #include "core/LaunchSimulation.h"
@@ -123,9 +124,38 @@ inline void addLaunchLessonCopy(
 
 inline std::string launchStatusMessage(
     const PreparedLaunch& launch,
-    const LaunchFlightState& flight,
+    const FlightRunState& flight,
     const FlightActionState& actions)
 {
+    if (flight.physicalFlight) {
+        const double orbitPercent = std::clamp(
+            flight.orbit.stableAngularProgress / 6.28318530717958647692,
+            0.0,
+            1.0);
+        switch (flight.phase) {
+        case FlightPhase::Departure:
+        case FlightPhase::Transfer:
+            return "FLY THE SHIP — rotate, thrust, and release to coast";
+        case FlightPhase::TargetApproach:
+            return "CAPTURE ORBIT — enter the ring with a smooth sideways path • " +
+                display::percent(orbitPercent);
+        case FlightPhase::Orbiting:
+            return "ORBIT CAPTURED — fly inward through the green descent gate";
+        case FlightPhase::Descent:
+            return "DEORBITING — reduce sideways speed before the surface";
+        case FlightPhase::Landing:
+            return "LANDING — V " + display::fixed(flight.landing.verticalVelocity, 1) +
+                " m/s • L " + display::fixed(flight.landing.lateralVelocity, 1) + " m/s";
+        case FlightPhase::Landed:
+            return flight.landing.hardLanding ? "HARD LANDING" : "TOUCHDOWN";
+        case FlightPhase::Flyby:
+            return "FLYBY — destination influence exited";
+        case FlightPhase::Impact:
+            return "IMPACT";
+        case FlightPhase::Complete:
+            return "FLIGHT COMPLETE";
+        }
+    }
     if (launch.config.missionKind == LaunchMissionKind::FuelCalibration &&
         actions.returningHome) {
         switch (flight.fuelSurveyReturnTiming) {
@@ -160,7 +190,7 @@ inline std::string launchStatusMessage(
         if (launch.config.missionKind == LaunchMissionKind::FuelCalibration) {
             switch (calibrationWarning) {
             case CalibrationFuelWarning::Critical:
-                return "LATE RETURN \xE2\x80\x94 Turn Around Now \xE2\x80\xA2 -3 credits \xE2\x80\xA2 +5 stress";
+                return "LATE RETURN \xE2\x80\x94 Turn Around Now \xE2\x80\xA2 -3 credits";
             case CalibrationFuelWarning::TurnAround:
                 return "TURN AROUND NOW \xE2\x80\x94 +3 credit safety bonus";
             case CalibrationFuelWarning::Approaching:
@@ -231,7 +261,7 @@ inline LaunchPanelPresentation launchPanelPresentation(
     double,
     double,
     const FlightActionState& actions,
-    const LaunchFlightState* launchFlight = nullptr)
+    const FlightRunState* launchFlight = nullptr)
 {
     LaunchPanelPresentation presentation;
     const Destination& destination = launchDisplayDestination(state, catalog, flightModel);
@@ -289,7 +319,15 @@ inline LaunchPanelPresentation launchPanelPresentation(
         return presentation;
     }
 
-    const LaunchFlightState& flight = *launchFlight;
+    const FlightRunState& flight = *launchFlight;
+    if (flight.physicalFlight) {
+        presentation.objectiveTitle = flight.orbit.captured
+            ? "DEORBIT AND LAND"
+            : (flightModel.orbitRequired ? "CAPTURE ONE ORBIT" : "ORBIT OR LAND");
+        presentation.objectiveCopy = flight.orbit.captured
+            ? "Fly inward through the green descent gate to enter Landing."
+            : "Your trajectory is guidance, not a rail. Rotate, use forward or reverse thrust, and release to coast.";
+    }
     presentation.displayedMultiplier = flight.currentMultiplier;
     presentation.returnProgress = flight.returningHome
         ? std::clamp(1.0 - flight.travelProgress, 0.0, 1.0)
@@ -300,7 +338,23 @@ inline LaunchPanelPresentation launchPanelPresentation(
         : display::fixed(std::max(0.0, flight.fuelRemaining), 0) + " / " +
             display::fixed(flight.fuelCapacity, 0);
     presentation.metrics.push_back(panelMetric(text::labels::transferFuel, std::move(fuelValue)));
-    if (flightModel.manualControlsEnabled) {
+    if (flight.physicalFlight) {
+        presentation.metrics.push_back(panelMetric(
+            "Thrust",
+            flight.selectedThrottle > 0.01
+                ? "MAIN " + display::percent(flight.selectedThrottle)
+                : (flight.selectedThrottle < -0.01
+                      ? "REVERSE " + display::percent(std::abs(flight.selectedThrottle))
+                      : "COAST")));
+        presentation.metrics.push_back(panelMetric(
+            "Orbit",
+            flight.orbit.captured
+                ? "CAPTURED"
+                : display::percent(std::clamp(
+                      flight.orbit.stableAngularProgress / 6.28318530717958647692,
+                      0.0,
+                      1.0))));
+    } else if (flightModel.manualControlsEnabled) {
         presentation.metrics.push_back(panelMetric(
             "Throttle",
             actions.cutEnginesActive
@@ -310,18 +364,19 @@ inline LaunchPanelPresentation launchPanelPresentation(
     if (flightModel.heatEnabled) {
         presentation.metrics.push_back(panelMetric("Temperature", display::percent(flight.heat)));
     }
-    if (flightModel.asteroidsEnabled) {
+    if (flightModel.asteroidsEnabled || flight.physicalFlight) {
         presentation.metrics.push_back(panelMetric(
             "Hull",
-            display::fixed(std::max(0.0, flight.hullRemaining), 0) + " / " +
-                display::fixed(flight.hullMaximum, 0) + " HP"));
+            flightHullReadout(flight)));
     }
 
     presentation.telemetryMessage = launchStatusMessage(flightModel, flight, actions);
-    if (!straylightApproach) {
+    if (!straylightApproach && !flight.physicalFlight) {
         presentation.primaryActions = primaryFlightActions(actions);
     }
-    presentation.systemActions = systemFlightActions(flightModel, actions);
+    if (!flight.physicalFlight) {
+        presentation.systemActions = systemFlightActions(flightModel, actions);
+    }
     return presentation;
 }
 

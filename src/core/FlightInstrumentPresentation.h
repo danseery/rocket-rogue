@@ -2,6 +2,7 @@
 
 #include "core/GameFormat.h"
 #include "core/GameTypes.h"
+#include "core/FlightSystem.h"
 #include "core/LaunchSimulation.h"
 #include "core/Tuning.h"
 
@@ -36,8 +37,30 @@ inline double normalizedGaugeValue(double value, double minimum, double maximum)
 
 inline FlightInstrumentPresentation launchFlightInstruments(
     const PreparedLaunch& launch,
-    const LaunchFlightState& flight)
+    const FlightRunState& flight)
 {
+    if (flight.physicalFlight) {
+        const double speed = flight.mode == FlightMode::Landing
+            ? std::hypot(flight.landing.lateralVelocity,flight.landing.verticalVelocity)
+            : std::hypot(flight.velocityX, flight.velocityY) * flight_geometry::velocityToMetersPerSecond;
+        const double throttle = std::clamp(std::abs(flight.selectedThrottle), 0.0, 1.0);
+        return {
+            true,
+            normalizedGaugeValue(speed, 0.0, 30.0),
+            std::clamp(flight.heat, 0.0, 1.0),
+            std::clamp(flight.fuelRemaining / std::max(0.01, flight.fuelCapacity), 0.0, 1.0),
+            display::fixed(speed, 1) + " m/s",
+            display::percent(std::clamp(flight.heat, 0.0, 1.0)),
+            display::fixed(std::max(0.0, flight.fuelRemaining), 0) + " / " +
+                display::fixed(flight.fuelCapacity, 0),
+            flight.heat > tuning::launch::temperatureCriticalThreshold,
+            false, // The old scalar off-course warning is not a free-flight rule.
+            false,
+            throttle,
+            std::string(flight.selectedThrottle < 0.0 ? "Reverse " : "Thrust ") +
+                display::percent(throttle)
+        };
+    }
     const double maximumMultiplier = std::max(
         1.5,
         launch.config.burnGoalMultiplier);

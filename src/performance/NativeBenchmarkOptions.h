@@ -18,10 +18,6 @@ enum class NativeBenchmarkScenario {
     Title,
     Hangar,
     Launch,
-    Flyby,
-    Orbit,
-    SurfaceOps,
-    SurfaceScan,
     Mining,
 };
 

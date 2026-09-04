@@ -22,24 +22,7 @@ struct HangarOperationCardPresentation {
     std::string cssClass;
 };
 
-// A short emotional readout for the Hangar header. Stress still uses the
-// existing numeric rules everywhere else; this simply makes the crew chip
-// react visibly after risky assignments and difficult sorties.
-inline std::string_view crewStressLevel(int stress)
-{
-    if (stress >= 100) return "Crisis";
-    if (stress >= 90) return "Panicked";
-    if (stress >= 80) return "Alarmed";
-    if (stress >= 70) return "Overwhelmed";
-    if (stress >= 60) return "Anxious";
-    if (stress >= 50) return "Tense";
-    if (stress >= 40) return "Focused";
-    if (stress >= 20) return "Ready";
-    if (stress >= 1) return "Calm";
-    return "Sanguine";
-}
-
-// Like crew stress, hull damage remains numeric in the systems that calculate
+// Hull damage remains numeric in the systems that calculate
 // it. The Hangar turns that percentage into a quick condition readout so the
 // player can feel the ship's state change after a rough mission or repair.
 inline std::string_view hullDamageLevel(int damage)
@@ -105,35 +88,11 @@ inline std::vector<HangarOperationCardPresentation> hangarOperationCards(const G
 
     if (astronaut == nullptr) {
         cards.push_back(hangarOperationCard(
-            text::panel::ops::crewIntake,
-            std::string(text::panel::messages::emergencyReplacement),
-            display::credits(preview.recruitCost),
-            ui::actions::recruitCrew,
+            "Crew Replacement",
+            "Accept the next authored specialist with the same race/class perk.",
+            "FREE",
+            ui::actions::acceptCrewReplacement,
             preview.recruitAvailable,
-            "crew"));
-    } else if (!starterLaunchLesson) {
-        std::string simulatorDetail = text::panel::simulatorDetail(preview.trainingGain, preview.trainingStressGain);
-        std::string simulatorCost = display::credits(preview.trainingCost);
-        if (astronaut->training >= tuning::crew::maxTraining) {
-            simulatorDetail = std::string(text::panel::messages::simulatorMastered);
-            simulatorCost = std::string(text::panel::simulatorCapped);
-        } else if (astronaut->stress + preview.trainingStressGain > tuning::crew::maxStress) {
-            simulatorDetail = std::string(text::panel::messages::simulatorWouldOverstress);
-            simulatorCost = std::string(text::panel::crewTooStressed);
-        }
-        cards.push_back(hangarOperationCard(
-            text::panel::ops::simulatorBurn,
-            simulatorDetail,
-            simulatorCost,
-            ui::actions::trainCrew,
-            preview.trainingAvailable,
-            "crew"));
-        cards.push_back(hangarOperationCard(
-            text::panel::ops::medicalRest,
-            preview.restNeeded ? text::panel::restDetail(preview.restStressRecovery) : std::string(text::panel::noRestDetail),
-            preview.restNeeded ? display::credits(preview.restCost) : std::string(text::panel::crewRested),
-            ui::actions::restCrew,
-            preview.restAvailable,
             "crew"));
     }
 

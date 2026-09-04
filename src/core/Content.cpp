@@ -2,6 +2,7 @@
 #include "core/ContentIds.h"
 #include "core/GameText.h"
 #include "core/ScenarioSystem.h"
+#include "core/PayloadTransfer.h"
 #include "core/Tuning.h"
 
 #include <algorithm>
@@ -50,32 +51,6 @@ ShipModule module(
     result.surfaceDepthUpgradeKind = surfaceDepthUpgradeKind;
     result.surfaceDepthUpgradeRank = surfaceDepthUpgradeRank;
     result.rigFuelLoopRank = rigFuelLoopRank;
-    return result;
-}
-
-CrewUpgrade crewUpgrade(
-    std::string id,
-    std::string name,
-    std::string description,
-    Rarity rarity,
-    CrewUpgradeStats stats,
-    std::string unlockKey,
-    std::vector<std::string> tags,
-    RefitTrack refitTrack = RefitTrack::Control,
-    int refitRank = 0,
-    std::string prerequisiteId = {})
-{
-    CrewUpgrade result;
-    result.id = std::move(id);
-    result.name = std::move(name);
-    result.description = std::move(description);
-    result.rarity = rarity;
-    result.stats = stats;
-    result.unlockKey = std::move(unlockKey);
-    result.tags = std::move(tags);
-    result.refitTrack = refitTrack;
-    result.refitRank = refitRank;
-    result.prerequisiteId = std::move(prerequisiteId);
     return result;
 }
 
@@ -211,6 +186,14 @@ const ShipFrame* ContentCatalog::findFrame(std::string_view id) const
         return frame.id == id;
     });
     return found == frames.end() ? nullptr : &*found;
+}
+
+const CrewArchetypeDefinition* ContentCatalog::findCrewArchetype(std::string_view id) const
+{
+    const auto found = std::find_if(crewArchetypes.begin(), crewArchetypes.end(), [id](const CrewArchetypeDefinition& archetype) {
+        return archetype.id == id;
+    });
+    return found == crewArchetypes.end() ? nullptr : &*found;
 }
 
 const Astronaut* ContentCatalog::findAstronaut(std::string_view id) const
@@ -356,13 +339,9 @@ ContentCatalog createDefaultContent()
             !surfaceModule;
     }
 
-    catalog.crewUpgrades = {
-        crewUpgrade(content::crewUpgrade::analogSimBay, "Analog Simulator Bay", "Lower-stress rehearsal gear for routine burns.", Rarity::Common, {.trainingStressRelief = 8}, content::unlock::starter, {"simulator", "training"}, RefitTrack::Control),
-        crewUpgrade(content::crewUpgrade::highGSimulator, "High-G Simulator", "A better simulator that teaches more per session.", Rarity::Uncommon, {.trainingGain = 1, .trainingStressRelief = 3}, content::unlock::recovery, {"simulator", "training"}, RefitTrack::Control, 0, content::crewUpgrade::analogSimBay),
-        crewUpgrade(content::crewUpgrade::medicalRecoveryWard, "Medical Recovery Ward", "Dedicated med bays clear stress faster between launches.", Rarity::Uncommon, {.restStressBonus = 12}, content::unlock::recovery, {"medical", "stress"}, RefitTrack::Recovery),
-        crewUpgrade(content::crewUpgrade::missionPsychOffice, "Mission Psychology Office", "Debrief support reduces post-flight stress load.", Rarity::Rare, {.launchStressRelief = 5, .traitModifier = 0.10}, content::unlock::thermal, {"psych", "stress"}, RefitTrack::Control),
-        crewUpgrade(content::crewUpgrade::traitCoachingLab, "Trait Coaching Lab", "Specialist coaching amplifies astronaut trait advantages.", Rarity::Rare, {.trainingStressRelief = 2, .traitModifier = 0.25}, content::unlock::ai, {"coaching", "traits"}, RefitTrack::Recovery)
-    };
+    // Crew identity now comes from authored archetypes. Training, rest,
+    // stress, and their facility economy are intentionally absent from the current schema.
+    catalog.crewUpgrades.clear();
 
     catalog.surfaceUpgrades = {
         surfaceUpgrade(content::surfaceUpgrade::resonantDischarge, "Resonant Discharge", "A combat-tuned scanner pulse shocks enemies caught in the player-centered ring.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.scannerPulseDamage = 1}, {"scanner", "combat", "pulse"}),
@@ -439,7 +418,7 @@ ContentCatalog createDefaultContent()
 
     catalog.researchProjects = {
         researchProject(content::research::blueprintSurvey, "Research Data Survey", "Map Mars strata for recoverable ship schematics and Research Data.", Rarity::Common, 2, 2, {}, content::unlock::starter, "", {"blueprint", "survey"}),
-        researchProject(content::research::fieldProbeNetwork, "Field Probe Network", "Seed landing zones with small probes before the crew commits action kits.", Rarity::Common, 2, 2, {.common = 1}, content::unlock::starter, content::unlock::surfaceProbes, {"surface", "survey"}),
+        researchProject(content::research::fieldProbeNetwork, "Field Scanner Network", "Extend the Rig scanner's reach and make buried returns easier to read.", Rarity::Common, 2, 2, {.common = 1}, content::unlock::starter, content::unlock::surfaceProbes, {"surface", "scanner"}),
         researchProject(content::research::appliedMaterialsLab, "Applied Materials Lab", "Convert field samples into sturdier research procedures.", Rarity::Uncommon, 2, 3, {.common = 2}, content::unlock::starter, content::unlock::recovery, {"materials", "facility"}),
         researchProject(content::research::missionAnalysisLab, "Mission Analysis Lab", "Build a debrief room that turns samples and flight notes into cleaner Research Data.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::starter, content::unlock::analysisLab, {"blueprint", "facility"}),
         researchProject(content::research::regolithDrillRig, "Regolith Drill Rig", "Build compact drills that pull more useful ore from short surface sorties.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::surfaceProbes, content::unlock::surfaceDrills, {"surface", "mining"}),
@@ -458,13 +437,22 @@ ContentCatalog createDefaultContent()
         {content::frame::ark, "Ark Frame", {SlotType::Engine, SlotType::Fuel, SlotType::Hull, SlotType::Hull, SlotType::Cooling, SlotType::Escape}, {.thrust = 0.5, .fuel = 1.1, .hull = 2.0, .cooling = 0.8, .sensors = 0.5, .escape = 1.3}, 118}
     };
 
+    catalog.crewArchetypes = {
+        {"capybara_endurance", "Capybara", "Endurance Specialist", "Deep Breath", "Adds 20 seconds to rig and suit oxygen.", {.rigOxygenSeconds = 20.0, .suitOxygenSeconds = 20.0}},
+        {"beaver_engineer", "Beaver", "Rig Engineer", "Field Joinery", "Improves rig integrity and material repairs.", {.rigIntegrity = 0.15, .repairEfficiency = 0.25}},
+        {"fox_navigator", "Fox", "Navigator", "Exit Vector", "Improves flight control and emergency recovery.", {.navigationControl = 0.10, .emergencyRecovery = 0.20}},
+        {"prairie_dog_excavator", "Prairie Dog", "Excavation Scout", "Ground Sense", "Extends scans and improves physical excavation.", {.scannerRadius = 2.0, .excavationEfficiency = 0.15}},
+        {"squirrel_prospector", "Squirrel", "Resource Prospector", "Cache Sense", "Improves the chance of discovering useful resources.", {.resourceDiscovery = 0.12}},
+        {"chipmunk_eva", "Chipmunk", "EVA Specialist", "Burrow Jet", "Improves suit traversal and EVA thrust.", {.evaThrust = 0.15}}
+    };
+
     catalog.astronauts = {
-        {content::astronaut::ava, "Mara Capybara", "Capybara Tank - Survival", std::string(tuning::traits::beastMode), 2, 0, CrewStatus::Active},
-        {content::astronaut::marco, "Bram Beaver", "Beaver Engineer - Resilience", std::string(tuning::traits::hardReboot), 1, 5, CrewStatus::Active},
-        {content::astronaut::nia, "Vela Fox", "Fox Ace - Navigation", std::string(tuning::traits::outtaHere), 1, 0, CrewStatus::Active},
-        {content::astronaut::eli, "Pip Prairie Dog", "Prairie Dog Scout - Digging", std::string(tuning::traits::deepFocus), 1, 0, CrewStatus::Active},
-        {content::astronaut::jo, "Nix Squirrel", "Squirrel Hoarder - Resource Gathering", std::string(tuning::traits::rummageSale), 0, 0, CrewStatus::Active},
-        {content::astronaut::sana, "Kip Chipmunk", "Chipmunk Speedster - Exploration", std::string(tuning::traits::phaseShift), 1, 10, CrewStatus::Active}
+        {content::astronaut::ava, "Mara Capybara", "Patient rescue veteran who treats every return as a promise.", std::string(tuning::traits::beastMode), "capybara_endurance", CrewStatus::Active},
+        {content::astronaut::marco, "Bram Beaver", "Systems engineer who can make a damaged rig hold together.", std::string(tuning::traits::hardReboot), "beaver_engineer", CrewStatus::Active},
+        {content::astronaut::nia, "Vela Fox", "Instinctive navigator with a talent for finding a way home.", std::string(tuning::traits::outtaHere), "fox_navigator", CrewStatus::Active},
+        {content::astronaut::eli, "Pip Prairie Dog", "Subsurface scout who reads a seam before the scanner does.", std::string(tuning::traits::deepFocus), "prairie_dog_excavator", CrewStatus::Active},
+        {content::astronaut::jo, "Nix Squirrel", "Prospector with an uncanny memory for where resources hide.", std::string(tuning::traits::rummageSale), "squirrel_prospector", CrewStatus::Active},
+        {content::astronaut::sana, "Kip Chipmunk", "Fearless EVA specialist built for tight shafts and long tethers.", std::string(tuning::traits::phaseShift), "chipmunk_eva", CrewStatus::Active}
     };
 
     catalog.destinations = {
@@ -496,11 +484,11 @@ ContentCatalog createDefaultContent()
         if (destination.id == content::destination::moon) {
             destination.approachBriefTitle = "MOON APPROACH";
             destination.approachBriefDetail =
-                "First landing protocol: Capture Orbit, then Land with the orbital map. Flyby is introduced later at the Jupiter transfer window.";
+                "First visit: Capture Orbit, then use the mapped descent. Flyby is introduced later.";
         } else if (destination.id == content::destination::mars) {
             destination.approachBriefTitle = "MARS APPROACH";
             destination.approachBriefDetail =
-                "Capture Orbit maps the descent and removes +20 hazard. Direct Descent is an intentional blind-risk choice.";
+                "Capture Orbit maps a wider descent corridor. Direct Descent uses a narrower, more turbulent corridor.";
         } else if (destination.id == content::destination::jupiter) {
             destination.approachBriefTitle = "IO APPROACH";
             destination.approachBriefDetail =
@@ -542,6 +530,24 @@ ContentCatalog createDefaultContent()
         {content::routeLink::saturnUranus, content::destination::saturn, content::destination::uranus, 20.0, false, true},
         {content::routeLink::uranusNeptune, content::destination::uranus, content::destination::neptune, 20.0, false, true}
     };
+
+    MiningSiteDefinition lunarAnomalyCrevice;
+    lunarAnomalyCrevice.id = content::miningSite::lunarAnomalyCrevice;
+    lunarAnomalyCrevice.version = 1;
+    lunarAnomalyCrevice.arena = {MiningAct::ActOne, 1, 0, true, MiningGateType::FragileExcavation};
+    lunarAnomalyCrevice.gateType = MiningGateType::FragileExcavation;
+    lunarAnomalyCrevice.objectivePlacement = MiningSiteObjectivePlacement::EntryCentered;
+    lunarAnomalyCrevice.objectivePassage = MiningPassageClass::SuitOnly;
+    lunarAnomalyCrevice.activationMessage = "ANOMALOUS RETURN — PULSE SCANNER [E/X]";
+    lunarAnomalyCrevice.completeOnShipCapture = true;
+    lunarAnomalyCrevice.securedMessage =
+        "ARTIFACT SECURED — similar signatures are scattered across the solar system.";
+    lunarAnomalyCrevice.cocoon.id = "lunar_signal_crevice";
+    lunarAnomalyCrevice.cocoon.version = 1;
+    lunarAnomalyCrevice.cocoon.protectedObjective = {
+        ProtectedObjectiveKind::Artifact,
+        content::protectedObjective::lunarSignalArtifact};
+    catalog.miningSites.push_back(std::move(lunarAnomalyCrevice));
 
     MiningSiteDefinition thermalLayeredRecovery;
     thermalLayeredRecovery.id = content::miningSite::thermalLayeredRecovery;
@@ -586,16 +592,22 @@ ContentCatalog createDefaultContent()
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"delivery", {"briefing"}, "MOON", "Lunar Prospector Contract",
-                    "Return gray Common Ore loaded onto the Ship. Normal departure recovers every Ship manifest; only Emergency Recall loses unshipped ore.",
-                    "REWARD // DRONE OPS + PROSPECTOR FABRICATION", "Open Drone Ops", {},
+                    "Return 20 Common Ore to the ship. The contract allocation does not use permanent hold space.",
+                    "PROSPECTOR MK I SECURED", "Pulse Scanner", {},
                     ScenarioEventKind::SafeMaterialDelivered, content::destination::moon, "common",
-                    tuning::research::prospectorCommonOreGoal, 0, false, true, false,
-                    ScenarioActionKind::ClaimReward, {},
+                    tuning::research::prospectorCommonOreGoal, 0, false, false, false,
+                    ScenarioActionKind::None, {},
                     {{ScenarioRewardKind::UnlockKey, content::unlock::droneBay, 0, false},
                      {ScenarioRewardKind::DroneBaySlots, {}, 1, false},
-                     {ScenarioRewardKind::InventoryResources, {}, 0, false, {.common = 20}},
-                     {ScenarioRewardKind::UnlockKey, content::unlock::routeMars, 0, false},
-                     {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}}
+                     {ScenarioRewardKind::SupportDrone, content::drone::miningDrone, 0, true},
+                     {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}},
+                {"anomaly", {"delivery"}, "MOON", "Anomalous Return",
+                    "Mission Control is picking up a second signal. Pulse the scanner and recover its source.",
+                    "REWARD // MARS ROUTE", "Confirm Recovery", {},
+                    ScenarioEventKind::ProtectedObjectiveExtracted, {}, content::miningSite::lunarAnomalyCrevice,
+                    1, 0, false, true, false,
+                    ScenarioActionKind::ClaimReward, content::miningSite::lunarAnomalyCrevice,
+                    {{ScenarioRewardKind::UnlockKey, content::unlock::routeMars, 0, false}}}
             }
         },
         {
@@ -745,7 +757,8 @@ ContentCatalog createDefaultContent()
             if (step.goalText.empty()) step.goalText = step.title;
             if (step.gateText.empty()) step.gateText = step.detail;
             if (step.nextStepText.empty()) step.nextStepText = step.actionLabel;
-            if (!step.miningSiteDefinitionId.empty()) {
+            if (!step.miningSiteDefinitionId.empty() &&
+                step.action != ScenarioActionKind::ClaimReward) {
                 step.activity = ScenarioActivityKind::MiningSite;
             } else if (step.completionEvent == ScenarioEventKind::FlybyFinished) {
                 step.activity = ScenarioActivityKind::Flyby;
@@ -767,13 +780,13 @@ ContentCatalog createDefaultContent()
         return found == catalog.scenarios.end() ? nullptr : &*found;
     };
     if (ScenarioDefinition* lunar = authoredScenario(content::scenario::lunarProspector)) {
-        lunar->steps[1].transition = {ScenarioTransitionKind::OpenScreen, Screen::DroneOps, StoryBriefingId::None};
+        lunar->steps[2].transition = {ScenarioTransitionKind::OpenScreen, Screen::Hangar, StoryBriefingId::None};
     }
     if (ScenarioDefinition* mars = authoredScenario(content::scenario::marsBayExpansion)) {
         mars->steps[1].transition = {ScenarioTransitionKind::OpenScreen, Screen::Hangar, StoryBriefingId::None};
     }
     if (ScenarioDefinition* neptune = authoredScenario(content::scenario::neptuneDiscovery)) {
-        neptune->steps[0].transition = {ScenarioTransitionKind::PresentStoryTakeover, Screen::ArrivalOps, StoryBriefingId::StraylightDiscovery};
+        neptune->steps[0].transition = {ScenarioTransitionKind::PresentStoryTakeover, Screen::Hangar, StoryBriefingId::StraylightDiscovery};
         neptune->steps[0].presentationMode = ScenarioPresentationMode::Takeover;
         neptune->steps[0].goalText = "Investigate the impossible mass beyond Neptune.";
         neptune->steps[0].gateText = "A safe Neptune arrival is required.";
@@ -802,6 +815,9 @@ ContentCatalog createDefaultContent()
     std::string scenarioError;
     if (!validateCampaignProgressionCatalog(catalog, &scenarioError)) {
         throw std::logic_error("Invalid campaign scenario catalog: " + scenarioError);
+    }
+    if (!validateCargoRequirements(catalog, &scenarioError)) {
+        throw std::logic_error("Invalid cargo catalog: " + scenarioError);
     }
     return catalog;
 }
@@ -1168,7 +1184,7 @@ std::string_view toString(LaunchFailureCause cause)
     case LaunchFailureCause::HullBreach:
         return "Hull breach";
     case LaunchFailureCause::LunarImpact:
-        return "Lunar impact";
+        return "Collision hull loss";
     }
     return "None";
 }

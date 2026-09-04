@@ -505,11 +505,7 @@ void SdlPlatform::applyKeyboardState(RocketGameApp& app)
     case InputContext::Launch:
         app.launchMove((right ? 1.0 : 0.0) - (left ? 1.0 : 0.0), (up ? 1.0 : 0.0) - (down ? 1.0 : 0.0));
         break;
-    case InputContext::FlybyActive:
-        app.flybyMove((left ? 1.0 : 0.0) - (right ? 1.0 : 0.0), (up ? 1.0 : 0.0) - (down ? 1.0 : 0.0));
-        break;
-    case InputContext::OrbitActive:
-        app.orbitMove((right ? 1.0 : 0.0) - (left ? 1.0 : 0.0), (up ? 1.0 : 0.0) - (down ? 1.0 : 0.0));
+    case InputContext::SurfaceArrival:
         break;
     case InputContext::MiningActive:
     case InputContext::MiningService:
@@ -596,25 +592,12 @@ void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& eve
         }
         else if (event.key == SDLK_C) app.cutEngines();
         break;
-    case InputContext::FlybyActive:
-        if (event.key == SDLK_ESCAPE) app.flybyAbort();
-        break;
-    case InputContext::FlybyComplete:
-        if (event.key == SDLK_SPACE || event.key == SDLK_RETURN) app.flybyContinue();
-        break;
-    case InputContext::OrbitActive:
-        if (event.key == SDLK_ESCAPE) app.orbitAbort();
-        break;
-    case InputContext::OrbitComplete:
-        if (event.key == SDLK_SPACE || event.key == SDLK_RETURN) app.orbitContinue();
-        break;
-    case InputContext::SurfaceScan:
-        if (event.key == SDLK_SPACE) app.scanSurfacePulse();
-        else if (event.key == SDLK_B || event.key == SDLK_ESCAPE) app.scanSurfaceBank();
-        break;
-    case InputContext::SurfacePush:
-        if (event.key == SDLK_SPACE) app.pushSurfaceStep();
-        else if (event.key == SDLK_B || event.key == SDLK_ESCAPE) app.pushSurfaceBank();
+    case InputContext::SurfaceArrival:
+        if (event.key == SDLK_SPACE || event.key == SDLK_RETURN) {
+            app.deploySurfaceTeam();
+        } else if (event.key == SDLK_R) {
+            app.departSurfaceUndeployed();
+        }
         break;
     case InputContext::MiningActive:
     case InputContext::MiningService:

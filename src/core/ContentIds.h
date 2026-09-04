@@ -51,6 +51,7 @@ inline constexpr const char* uranusNeptune = "uranus_neptune";
 } // namespace routeLink
 
 namespace miningSite {
+inline constexpr const char* lunarAnomalyCrevice = "lunar_anomaly_crevice";
 inline constexpr const char* thermalLayeredRecovery = "thermal_layered_recovery";
 } // namespace miningSite
 
@@ -61,6 +62,7 @@ inline constexpr const char* riftBelt = "rift_belt";
 } // namespace postSolarSystem
 
 namespace protectedObjective {
+inline constexpr const char* lunarSignalArtifact = "lunar_signal_artifact";
 inline constexpr const char* ioMinorArtifact = "io_minor_artifact";
 } // namespace protectedObjective
 

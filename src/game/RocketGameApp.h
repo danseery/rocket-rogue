@@ -3,6 +3,7 @@
 #include "core/Content.h"
 #include "core/GameState.h"
 #include "core/LaunchSimulation.h"
+#include "core/MiningSystem.h"
 #include "core/Random.h"
 #include "game/SceneTransition.h"
 #include "input/GameInputRouter.h"
@@ -10,6 +11,7 @@
 #include "render/RenderSnapshot.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -23,6 +25,7 @@ enum class ControllerHapticCue {
     MiningHardContact,
     Damage,
     Failure,
+    Arrival,
     LevelUp
 };
 
@@ -45,6 +48,7 @@ public:
     InputContext inputContext() const;
     std::string controllerDebugStatusJson() const;
     ControllerHapticCue consumePendingControllerHapticCue();
+    std::vector<GameAudioEvent> consumePendingAudioEvents();
     std::uint64_t deterministicStateHash() const;
 
     void prepareForLaunch();
@@ -52,7 +56,6 @@ public:
     void launchMove(double steerAxis, double throttleAxis);
     void returnHome();
     void arrivalOps();
-    void skipArrivalFanfare();
     void acknowledgeStoryBriefing();
     void beginStraylightApproach();
     void cutEngines();
@@ -111,6 +114,10 @@ public:
     void miningRepairDrill();
     void miningRepairDrone();
     void miningStow();
+    void miningWaitForDrones();
+    void miningDepart();
+    void deploySurfaceTeam();
+    void departSurfaceUndeployed();
     void miningAbort();
     void miningFailureAck();
     void debugStartMining();
@@ -130,19 +137,14 @@ public:
         int postSolarSystemOverride,
         int bodyIndex,
         std::uint64_t seed) const;
-    void debugStartSurfaceScan();
-    void debugStartSurfacePush();
-    void debugStartFlyby();
-    void debugStartOrbit();
     void debugShowTitle();
     void debugShowHangar();
     void debugShowJupiterOptions(int mode);
     void debugShowResults();
-    void debugShowArrivalOps();
+    void debugShowArrivalCelebration();
     void debugShowResearch();
     void debugShowRefit();
     void debugShowSurfaceUpgrade();
-    void debugShowSurfaceOps();
     void debugShowDroneOps();
     void debugShowNavigation();
     void debugStartActOneFlow();
@@ -150,12 +152,9 @@ public:
     void debugNextActOneCheckpoint();
     int debugActOneCheckpoint() const;
     void debugStartLaunchLesson(int lessonIndex);
+    void debugStartSurfaceArrival(int destinationIndex, int phaseIndex);
     void debugExit();
     void repairShip();
-    void recruitCrew();
-    void recruitCrew(int candidateIndex);
-    void trainCrew();
-    void restCrew();
     void newGame();
     void continueGame();
     void resetSave();
@@ -189,9 +188,62 @@ private:
         double elapsed = 0.0;
     };
 
-    struct MiningExtractionState {
-        bool active = false;
+    enum class SurfaceBaySequenceKind {
+        None,
+        Deploy,
+        Extract,
+        ShipOnlyDepart
+    };
+
+    struct SurfaceBaySequenceState {
+        SurfaceBaySequenceKind kind = SurfaceBaySequenceKind::None;
+        bool handoffQueued = false;
         double elapsed = 0.0;
+
+        bool active() const noexcept
+        {
+            return kind != SurfaceBaySequenceKind::None;
+        }
+
+        void reset()
+        {
+            *this = {};
+        }
+    };
+
+    enum class SurfaceArrivalPhase {
+        None,
+        SurfaceReveal,
+        Touchdown,
+        AwaitingCommand,
+        Deploying,
+        UndeployedTakeoff,
+        Complete
+    };
+
+    struct SurfaceArrivalSequenceState {
+        SurfaceArrivalPhase phase = SurfaceArrivalPhase::None;
+        std::optional<PreparedSurfaceLanding> prepared;
+        double elapsed = 0.0;
+        bool deployQueued = false;
+        bool landingCommitted = false;
+        bool rigImpactFeedbackPlayed = false;
+        bool surfaceReadyFeedbackPlayed = false;
+        std::uint32_t audioCueMask = 0;
+        int droneAudioCueCount = 0;
+
+        bool active() const noexcept
+        {
+            return phase == SurfaceArrivalPhase::Touchdown ||
+                phase == SurfaceArrivalPhase::AwaitingCommand ||
+                phase == SurfaceArrivalPhase::Deploying ||
+                phase == SurfaceArrivalPhase::UndeployedTakeoff;
+        }
+
+        void reset()
+        {
+            *this = {};
+        }
     };
 
     struct MiningEvaDeathPresentationState {
@@ -210,7 +262,7 @@ private:
     enum class MiningSceneHandoff {
         None,
         EnterMining,
-        ReturnToSurface,
+        DepartPlanet,
         AbortMining
     };
 
@@ -229,36 +281,70 @@ private:
         int selectedOfferIndex = -1;
     };
 
-    struct LunarImpactCinematicState {
+    struct FlightDestructionCinematicState {
         bool active = false;
         double elapsed = 0.0;
         double burnMultiplier = 1.0;
+        LaunchFailureCause failureCause = LaunchFailureCause::None;
     };
 
     struct LaunchSessionState {
         PreparedLaunch preparedLaunch;
-        LaunchFlightState flight;
+        FlightRunState& flight;
         bool flightArmed = false;
         bool launchQueued = false;
         double preflightElapsed = 0.0;
         double elapsed = 0.0;
+        double autosaveElapsed = 0.0;
         double currentMultiplier = 1.0;
         double peakWarning = 0.0;
         double steerInput = 0.0;
         double throttleInput = 0.0;
         double asteroidImpactFeedbackSeconds = 0.0;
-        LunarImpactCinematicState lunarImpact;
+        FlightDestructionCinematicState destruction;
         ReturnTripState returnTrip;
         FlightControlState controls;
         ResultViewState result;
         ArrivalFanfareState arrivalFanfare;
+
+        explicit LaunchSessionState(FlightRunState& authoritativeFlight)
+            : flight(authoritativeFlight)
+        {
+        }
+
+        void reset()
+        {
+            preparedLaunch = {};
+            flight = {};
+            flightArmed = false;
+            launchQueued = false;
+            preflightElapsed = 0.0;
+            elapsed = 0.0;
+            autosaveElapsed = 0.0;
+            currentMultiplier = 1.0;
+            peakWarning = 0.0;
+            steerInput = 0.0;
+            throttleInput = 0.0;
+            asteroidImpactFeedbackSeconds = 0.0;
+            destruction = {};
+            returnTrip = {};
+            controls = {};
+            result = {};
+            arrivalFanfare = {};
+        }
     };
 
     void completeLaunch(
         double burnMultiplier,
         RecoveryMethod method,
         LaunchFailureCause failureCause = LaunchFailureCause::None);
-    void beginLunarImpactCinematic();
+    void prepareSurfaceArrivalIfNeeded(const Destination& destination);
+    bool commitSurfaceTouchdown(const Destination& destination, bool hardTouchdown);
+    void advanceSurfaceArrival(double deltaSeconds);
+    void completeSurfaceDeployment();
+    void completeUndeployedTakeoff();
+    void beginSurfaceDeploymentSequence();
+    void beginFlightDestructionCinematic(LaunchFailureCause failureCause);
     void beginArrivalFanfare();
     void finishArrivalFanfare();
     void maybeOpenLevelUpDraft();
@@ -315,6 +401,7 @@ private:
     InputContext gameplayInputContext() const;
     void updateControllerHapticState();
     void queueControllerHapticCue(ControllerHapticCue cue);
+    void queueAudioCue(GameAudioCue cue, double pitch = 1.0);
 
     struct RealtimeInputState {
         double moveX = 0.0;
@@ -334,7 +421,8 @@ private:
     ControllerPreferences controllerPreferences_;
     InputSource activeInputSource_ = InputSource::None;
     LaunchSessionState session_;
-    MiningExtractionState miningExtraction_;
+    SurfaceBaySequenceState surfaceBaySequence_;
+    SurfaceArrivalSequenceState surfaceArrival_;
     MiningEvaDeathPresentationState miningEvaDeathPresentation_;
     MiningSceneHandoff miningSceneHandoff_ = MiningSceneHandoff::None;
     bool miningSceneHandoffCommitted_ = false;
@@ -352,6 +440,7 @@ private:
     bool controllerResumeNeutralRequired_ = false;
     std::string lastControllerAction_ = "none";
     ControllerHapticCue pendingHapticCue_ = ControllerHapticCue::None;
+    std::vector<GameAudioEvent> pendingAudioEvents_;
     double lastMiningContactIntensity_ = 0.0;
     double lastMiningDroneHealth_ = 1.0;
     bool lastMiningFailurePending_ = false;

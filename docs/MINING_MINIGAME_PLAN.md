@@ -40,17 +40,16 @@ Mining is one run per surface loop. Once it has been used, the yellow availabili
 
 ## Rig Fuel And Oxygen
 
-Mining exists to make surface greed compete with route-home safety:
+Mining exists to make surface greed compete with the physical trip home:
 
-- Surface expeditions start with a 3-unit isolated rig pack plus the transfer fuel remaining at touchdown. Ark-era expeditions load up to 3 pack units from the Ark reserve.
-- Mining spends 1 fuel on deployment.
-- While oxygen remains, mining advances a normalized fuel-consumption cycle and spends another fuel when that cycle completes. The permanent Rig Fuel Loop uses a 15-second base and adds 3 seconds per rank, reaching `18 / 21 / 24` seconds at Rank I / II / III. The authoritative draw rate is the current load multiplier divided by that cycle duration. Hauler Thrusters and Vector Nozzles reduce only the heavy-load surcharge; they never change the base cycle or deployment cost. The HUD shows both the concrete cadence and percentage remaining.
-- Returning rig cargo, Support Drone haul, loose chunks, or a physically delivered artifact to the shuttle stows that payload and replenishes oxygen to the current upgraded capacity. Entering the shuttle zone empty does not refill oxygen.
-- The baseline oxygen tank is `tuning::mining::oxygenSeconds`, currently 30 seconds.
-- Oxygen can improve through crew class, Resource Support Drone coverage, and surface upgrades such as Emergency Winch.
-- If rig fuel runs dry mid-dig, the Mining Rig is recalled. The protected return stage remains ready and cannot be consumed by mining.
+- Each planetary expedition loads one visible Rig tank with its three-unit expedition allotment plus physically recovered fuel cells.
+- Thrust and drilling consume fuel while powered; simultaneous use stacks, load increases thrust cost, and coasting/idling are free.
+- Fuel cells are persistent physical loose objects and add exactly one unit only after contacting the Rig. Support Drones may carry them but never synthesize fuel.
+- Rig oxygen drains while operating away from ship service; suit oxygen drains during EVA. The inactive actor's tank pauses. Ship service refills oxygen, never fuel.
+- A zero-fuel Rig remains in the world. EVA may recover a cell, tow the disabled Rig, rescue cargo, or return alone and depart.
+- Rig Fuel Loop ranks reduce powered consumption by 10/20/30 percent.
 
-UI calls the spendable pool `Rig fuel` in every chapter. Arrival Ops separately shows recovered transfer fuel, the expedition pack, and `Return stage: READY/RESERVED`.
+The HUD shows the visible Rig tank, active actor oxygen, integrity, Rig load band, contract allocation, and ship hold. There is no shared reserve, timed whole-unit cycle, deployment fee, or protected return fuel.
 
 ## Rig And EVA Core Loop
 
@@ -219,6 +218,6 @@ The player's operator sidearm is a vulnerable recovery tool rather than the prim
 - `src/core/ScenarioSystem.*` owns scenario actions/events, claims, rewards, route requirements, and state-derived objective presentation. Mining receives a generic scenario/site context and reports typed results; it does not branch on campaign, destination, or narrative IDs.
 - `src/game/RocketGameApp.*` owns screen transitions and platform-neutral routed aim, fire, drill, scan, tether, operator-toggle, and stow/leave actions.
 - `src/render/SceneComposer.*` turns mining snapshots into backend-neutral scene packets consumed by native Vulkan and browser WebGL2, including the parked rig, static operator, independently moving Support Drones, reticle, tracer, tether, thrust, and active-actor-centered shield/scanner effects. Rendering must not decide gameplay outcomes.
-- Save version 16 persists current Mining runtime plus Expedition XP, pending choices, run ranks, grafts, selected synergies, and permanent Survey/Bore ranks. Every non-v16 or malformed campaign is cleared and immediately replaced with a fresh campaign; no legacy progression migration runs.
+- Save version 18 persists the current physical Mining runtime, loose objects, fuel cells, actor tanks, Support Drones and payload ownership, plus current expedition progression. Every non-v18 or malformed campaign is rejected and preserved until explicit New Campaign confirmation; no legacy progression migration runs.
 
 When changing mining, keep the fuel/oxygen tradeoff visible and test both Surface Ops availability and direct mining outcomes.

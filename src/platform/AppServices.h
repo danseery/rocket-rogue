@@ -247,6 +247,30 @@ enum class GraphicsFrameStatus {
     Fatal
 };
 
+enum class GameAudioCue {
+    SafeTouchdown,
+    HardTouchdown,
+    BayOpen,
+    RigEjection,
+    ArrestingBurst,
+    RigImpact,
+    DroneLaunch,
+    BayClose,
+    SurfaceReady,
+    TakeoffIgnition
+};
+
+struct GameAudioEvent {
+    GameAudioCue cue = GameAudioCue::SafeTouchdown;
+    double pitch = 1.0;
+};
+
+class IGameAudio {
+public:
+    virtual ~IGameAudio() = default;
+    virtual bool playOneShot(const GameAudioEvent& event) = 0;
+};
+
 class IGameRenderer {
 public:
     virtual ~IGameRenderer() = default;
@@ -324,6 +348,7 @@ struct AppServices {
     IGameRenderer& renderer;
     IGameUi& ui;
     IUiBridge& uiBridge;
+    IGameAudio* audio = nullptr;
 };
 
 } // namespace rocket

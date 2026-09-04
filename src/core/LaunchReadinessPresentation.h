@@ -60,7 +60,7 @@ inline LaunchReadinessPresentation launchReadinessPresentation(const GameState& 
             : disabledPanelButton(display::needCredits(hangarOps.repairCost)));
     }
     if (presentation.crewBlocked) {
-        presentation.actions.push_back(panelActionButton(text::buttons::recruitCrew, ui::actions::recruitCrew, "ok"));
+        presentation.actions.push_back(panelActionButton("Accept Replacement", ui::actions::acceptCrewReplacement, "ok"));
     }
 
     return presentation;

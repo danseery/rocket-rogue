@@ -30,7 +30,7 @@ test("completed realtime screens return input ownership to RmlUi", () => {
     "active-to-results transitions on the same Screen enum must release held realtime input",
   );
 
-  for (const helper of ["isLaunchActive", "isFlybyActive", "isOrbitActive", "isMiningActive"]) {
+  for (const helper of ["isLaunchActive", "isMiningActive"]) {
     assert.match(
       functionBody(helper),
       /rmlUiAvailable[\s\S]*currentUiHostContext\.realtimeActivityActive/,
@@ -65,33 +65,24 @@ test("realtime input cannot bypass explicit RmlUi actions", () => {
   assert.match(keyDown, /key === "c"[\s\S]*rr_cut_engines/);
   assert.doesNotMatch(keyDown, /rr_pressure_relief|rr_jettison|rr_eject/,
     "launch keyboard routing must not retain pressure, jettison, or manual-eject shortcuts");
-  assert.match(keyDown, /if \(isFlybyActive\(\)\)/);
-  assert.match(keyDown, /if \(isOrbitActive\(\)\)/);
   assert.match(keyDown, /if \(!isMiningActive\(\)\) return false/);
   assert.doesNotMatch(keyDown, /flybyContinue|orbitContinue/);
   assert.match(functionBody("releaseRealtimeInputs"), /launchKeys\.clear\(\)[\s\S]*updateLaunchMove\(\)/);
 });
 
-test("surface shortcuts preserve Survey limits and yield Push results to RmlUi", () => {
-  const globalKeyDown = shell.match(
-    /window\.addEventListener\("keydown",[\s\S]*?\n    \}\);/,
-  );
-  assert.ok(globalKeyDown, "web shell should define global keyboard routing");
-  assert.match(
-    globalKeyDown[0],
-    /screen === rrScreen\.surfaceScan && event\.key === " "[\s\S]*rr\.surfaceScanPulse\(\)/,
-    "Survey must retain Space after its last pulse so focus cannot fall through to a utility action",
-  );
-  assert.doesNotMatch(
-    globalKeyDown[0],
-    /currentUiHostContext\.realtimeActivityActive\s*&&\s*screen === rrScreen\.surfaceScan/,
-    "Survey's exhausted state must still consume its dedicated Space and bank shortcuts",
-  );
-  assert.match(
-    globalKeyDown[0],
-    /currentUiHostContext\.realtimeActivityActive[\s\S]*screen === rrScreen\.surfacePush/,
-    "Surface Push Space shortcut must only own input during active play",
-  );
+test("retired activity shortcuts stay out of the web input surface", () => {
+  for (const retiredIdentifier of [
+    "isFlybyActive",
+    "isOrbitActive",
+    "surfaceScanPulse",
+    "surfacePushStep",
+    "rr_debug_flyby",
+    "rr_debug_orbit",
+    "rr_debug_surface_scan",
+    "rr_debug_surface_push",
+  ]) {
+    assert.doesNotMatch(shell, new RegExp(retiredIdentifier));
+  }
 
   const availability = functionBody("setRmlUiEnabled");
   assert.match(availability, /realtimeActivityActive:\s*false/);
