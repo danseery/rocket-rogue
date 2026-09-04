@@ -1171,7 +1171,7 @@ LaunchFlightStep updateLocalLandingFlight(FlightRunState& flight, const Prepared
     flight.predictedTrajectory.clear();
     if (flight.mode == FlightMode::Landing && flight.active) {
         constexpr int samples = 96;
-        constexpr double step = 3.84 / (samples - 1);
+        constexpr double predictionStep = 3.84 / (samples - 1);
         LandingState predicted = land;
         const double nx = std::cos(land.basisAngle), ny = std::sin(land.basisAngle);
         const auto append = [&](const LandingState& point) {
@@ -1195,9 +1195,9 @@ LaunchFlightStep updateLocalLandingFlight(FlightRunState& flight, const Prepared
         };
         append(predicted);
         if (!endsForecast(predicted)) for (int i = 1; i < samples; ++i) {
-            const LandingState next = advance(predicted, step);
+            const LandingState next = advance(predicted, predictionStep);
             if (endsForecast(next)) {
-                double low = 0.0, high = step;
+                double low = 0.0, high = predictionStep;
                 for (int iteration = 0; iteration < 16; ++iteration) {
                     const double mid = (low+high)*0.5;
                     if (endsForecast(advance(predicted,mid))) high = mid; else low = mid;

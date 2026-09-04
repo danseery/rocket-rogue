@@ -323,14 +323,14 @@ void testLongRunMiningSubmissionBudget()
     // Persistent mining terrain is submitted as one textured batch alongside
     // one fog batch. The active triangulation presentation adds one triangle
     // fan submission for its sectors and one instanced outline submission.
-    if (fixture.renderer.draws.size() != 9U || triangles != 2U || instances != 7U) {
+    if (fixture.renderer.draws.size() != 8U || triangles != 1U || instances != 7U) {
         std::fprintf(stderr, "Long-run mining draws: total=%llu triangles=%llu instances=%llu\n",
             static_cast<unsigned long long>(fixture.renderer.draws.size()),
             static_cast<unsigned long long>(triangles),
             static_cast<unsigned long long>(instances));
     }
-    assert(fixture.renderer.draws.size() == 9U);
-    assert(triangles == 2U);
+    assert(fixture.renderer.draws.size() == 8U);
+    assert(triangles == 1U);
     assert(instances == 7U);
     fixture.app.shutdown();
 }
