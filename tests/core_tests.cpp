@@ -6405,6 +6405,7 @@ void physicalMiningArtifactsAreSingleAndDeliveryGated()
     state.run.mining.artifact.x = state.run.mining.returnZoneX +
         tuning::mining::returnZoneRadiusCells - 0.05;
     state.run.mining.artifact.y = state.run.mining.returnZoneY;
+    state.run.mining.shipDepthZone = state.run.mining.depthZone;
     // The artifact can reach the ship bay before the rig reaches the pad.
     // Its ownership must still become Ship manifest immediately.
     state.run.mining.droneX = state.run.mining.returnZoneX + 5.0;
@@ -12459,7 +12460,7 @@ void progressedSavesSkipTheFirstLaunchIntroduction()
 void saveSchemaConstantsMatchSerializedFields()
 {
     const ContentCatalog catalog = createDefaultContent();
-    require(save_schema::currentVersion == 19, "the current save schema should be version nineteen");
+    require(save_schema::currentVersion == 20, "the current save schema should be version twenty");
     GameState state = createNewGame(catalog, 12);
     state.run.credits = 123.0;
     state.run.inventoryModuleIds = {content::module::sparrowEngine, content::module::cryoLoop};

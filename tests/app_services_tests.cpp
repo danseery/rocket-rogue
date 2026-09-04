@@ -3025,15 +3025,15 @@ int main()
         fixture.runner.shutdown();
     };
     std::string v17Save = levelUpExpeditionSave();
-    const std::size_t versionOffset = v17Save.find("version=19");
+    const std::size_t versionOffset = v17Save.find("version=20");
     assert(versionOffset != std::string::npos);
     v17Save.replace(versionOffset, 10, "version=17");
     requireFreshCampaignBoundary(v17Save);
     requireFreshCampaignBoundary("RR_SAVE_V0\ncredits=1\n");
     std::string futureSave = levelUpExpeditionSave();
-    const std::size_t futureVersionOffset = futureSave.find("version=19");
+    const std::size_t futureVersionOffset = futureSave.find("version=20");
     assert(futureVersionOffset != std::string::npos);
-    futureSave.replace(futureVersionOffset, 10, "version=20");
+    futureSave.replace(futureVersionOffset, 10, "version=21");
     requireFreshCampaignBoundary(futureSave);
 
     assert(host.viewportMetrics().logicalWidth == 1280);

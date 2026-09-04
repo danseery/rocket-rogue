@@ -944,6 +944,7 @@ void ioTerrainAndArtifactSealAreDeterministic()
     recoveredMining.artifact.tethered = true;
     recoveredMining.artifact.x = recoveredMining.returnZoneX;
     recoveredMining.artifact.y = recoveredMining.returnZoneY;
+    recoveredMining.shipDepthZone = recoveredMining.depthZone;
     recoveredMining.droneX = recoveredMining.returnZoneX + 5.0;
     recoveredMining.droneY = recoveredMining.returnZoneY;
     updateMiningRun(recovered, catalog, 0.01);

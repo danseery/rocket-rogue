@@ -490,16 +490,17 @@ void launchBindingsOverrideCockpitFocus()
     frame.meaningfulInput = true;
     frame.pressed.set(index(ControllerButton::South));
     const RoutedGameInput input = router.route(InputContext::Launch, frame, preferences);
-    require(input.has(GameInputAction::ReturnHome) && !input.has(GameInputAction::ActivateFocused),
-        "Cross/South must return during launch even after cockpit focus navigation");
+    require(!input.has(GameInputAction::ReturnHome) && !input.orbitalHeld &&
+            !input.has(GameInputAction::ActivateFocused),
+        "a fresh Cross/South press must not trigger stale launch navigation actions");
 
     frame = {};
     frame.connected = true;
     frame.meaningfulInput = true;
     frame.down.set(index(ControllerButton::South));
     const RoutedGameInput heldInput = router.route(InputContext::Launch, frame, preferences);
-    require(!heldInput.has(GameInputAction::ReturnHome),
-        "a held Cross/South button must not restart the return action every frame");
+    require(heldInput.orbitalHeld && !heldInput.has(GameInputAction::ReturnHome),
+        "a held Cross/South button must remain a continuous orbital-work input");
 
     frame = {};
     frame.connected = true;
@@ -660,7 +661,7 @@ void routerTableCoversEveryInputContext()
     const std::array<ContextExpectation, 8> expectations {{
         {InputContext::Ui, GameInputAction::ActivateFocused, true},
         {InputContext::Preflight, GameInputAction::StartOrContinue, true},
-        {InputContext::Launch, GameInputAction::ReturnHome, true},
+        {InputContext::Launch, GameInputAction::ReturnHome, false},
         {InputContext::MiningActive, GameInputAction::MiningStow, false},
         {InputContext::MiningService, GameInputAction::MiningStow, false},
         {InputContext::MiningFailure, GameInputAction::MiningFailureAcknowledge, true},
