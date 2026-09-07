@@ -10,7 +10,7 @@ This system follows [AGENT_DESIGN_CONTEXT.md](AGENT_DESIGN_CONTEXT.md). Followin
 
 ## Role In The Loop
 
-Drone Bay begins as the industrial payoff for physically returning 20 Moon Common Ore. The anomaly activated by that delivery remains a separate EVA recovery objective and gates Mars. `Install Prospector Mk I` permanently owns and equips the first Prospector Support Drone (Mining role) in Slot 1. Mars then allocates 8 local Common Ore for an explicit `Fabricate Slot 2` action, leaving that slot empty. Io later commissions the first Hazard Support Drone.
+Drone Bay opens after explicit recovery of the first lunar artifact. Delivering 20 Moon Common Ore activates the anomaly but grants no drone. Confirm Recovery owns and equips Prospector MK I in Slot 1 and queues the Meet your Prospector transmission. Base Common Ore mining takes five seconds; ranks improve that rate. Existing earned drones remain owned and repeated claims cannot duplicate them. Mars retains its explicit Slot 2 reward and Io its Hazard Drone sequence.
 
 Support Drone choices should be readable and chunky:
 
@@ -67,7 +67,7 @@ Drone Ops should present this as a build table, not a hidden ruleset: the active
 
 The current implementation supports persistent Support Drone loadouts, transferable active-actor support, and hostile-mining swarm combat:
 
-- The Prospector contract unlocks Drone Ops and grants the first Prospector Support Drone.
+- The first artifact recovery unlocks Drone Ops and grants the first Prospector Support Drone.
 - Drone Support Program research adds the Resource and Survey Support Drones; Io separately commissions the first Hazard Support Drone Mk I.
 - Arkfall grants Mk I Attack and Defense Support Drones and raises undersized bays to three slots without erasing stronger equipment.
 - Perimeter Drone Network research grants Perimeter Coordination, which makes advanced combat grafts and named synergies eligible for Level Up drafts.

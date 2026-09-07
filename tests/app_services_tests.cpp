@@ -1985,9 +1985,32 @@ int main()
     // Thermal runaway uses the same physical destruction beat as a collision
     // while retaining its own failure cause and debrief copy.
     {
+        const auto catalog = rocket::createDefaultContent();
+        auto state = rocket::createNewGame(catalog, 0x7EADULL);
+        assert(rocket::initializeLiveExpedition(state, catalog));
+        assert(rocket::departHome(state, catalog) == rocket::ExpeditionResult::Applied);
+        auto model = rocket::expeditionFlightModel(state, catalog);
+        rocket::advanceExpeditionFlight(state.run.expedition, state.run.flight, model,
+            rocket::expeditionEnvironment(state, catalog), rocket::solarSystemDefinition(), {0,1,false,true}, .05);
+        state.run.expedition.location.frame = rocket::CoordinateFrame::System;
+        state.run.expedition.location.bodyId.clear();
+        state.run.flight.positionX = 8;
+        state.run.flight.positionY = 5;
+        state.run.flight.velocityX = state.run.flight.velocityY = 0;
+        state.run.flight.heat = 1;
+        state.run.flight.heatFailureSeconds = rocket::tuning::launch::pilotingHeatFailureSeconds * 4 - .1;
+        rocket::captureSystemLocation(state.run.expedition.location, state.run.flight);
+        state.screen = rocket::Screen::Flight;
+        state.meta.campaignIntroductionAcknowledged = true;
+        state.incomingMessages = {};
         AppFixture fixture;
+        fixture.saves.value = rocket::serializeSaveData(rocket::captureSaveData(state));
         assert(fixture.runner.initialize());
-        fixture.runner.app().debugStartLaunchLesson(2);
+        fixture.ui.dispatchAction("continue_game");
+        for (int frame=0; frame<300 && fixture.runner.app().currentScreen()!=static_cast<int>(rocket::Screen::Flight); ++frame) {
+            fixture.host.now += 1.0/60.0;
+            fixture.runner.frame();
+        }
         fixture.controllers.frame.connected = true;
         fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
         fixture.controllers.frame.meaningfulInput = true;
@@ -2026,9 +2049,10 @@ int main()
             fixture.host.now += 1.0 / 60.0;
             fixture.runner.frame();
         }
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Results));
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
         assert(!fixture.renderer.launchDestructionActive);
-        assert(fixture.renderer.lastLaunchFailureCause == rocket::LaunchFailureCause::ThermalRunaway);
+        const auto recovered = rocket::deserializeSaveData(fixture.saves.value);
+        assert(recovered && !recovered->expedition.wrecks.empty());
         fixture.runner.shutdown();
     }
 

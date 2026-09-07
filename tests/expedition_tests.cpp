@@ -183,7 +183,7 @@ void persistentExpeditionTests()
             check(systemBodyGravityAcceleration(body,r*1.1)==0 &&
                 systemBodyGravityAcceleration(body,r*1.1-1e-7)<1e-8,
                 "Gravity must smoothly reach zero at the outer boundary");
-            check(std::hypot(dock.x-body.position.x,dock.y-body.position.y)-.16 > r*1.1,
+            check(std::hypot(dock.x-body.position.x,dock.y-body.position.y)-expeditionDockRadius > r*1.1,
                 "The complete Earth docking range must lie outside every gravity region");
         }
         const auto coast = integrateSystemCoast({dock.x,dock.y,0,0},1,solar);

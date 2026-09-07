@@ -6133,7 +6133,7 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
             if (!body.dock) continue;
             const auto dock = systemDockPosition(body);
             const double range = std::hypot(dockPosition.position.x-dock.x,dockPosition.position.y-dock.y);
-            key << (range<=.65) << ':' << (range<=.16) << '|';
+            key << (range<=.65) << ':' << (range<=expeditionDockRadius) << '|';
         }
         for (const auto& w : e.wrecks) key << w.id << ':' << canSalvageWreck(e, state.run.flight, solarSystemDefinition(), w.id)
             << ':' << canSalvageWreck(e, state.run.flight, solarSystemDefinition(), w.id, false) << '|';

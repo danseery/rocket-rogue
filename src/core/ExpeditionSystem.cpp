@@ -376,7 +376,7 @@ ExpeditionResult dockExpedition(PersistentExpeditionState &e, FlightRunState &f,
     p = absolute(p, s);
     const SystemBodyDefinition *dock = nullptr;
     for (const auto &b : s.bodies)
-        if (b.dock && distance(p.position, e.travelInitialized ? systemDockPosition(b) : b.position) <= (e.travelInitialized ? .16 : dockRange) &&
+        if (b.dock && distance(p.position, e.travelInitialized ? systemDockPosition(b) : b.position) <= (e.travelInitialized ? expeditionDockRadius : dockRange) &&
             distance(p.velocity, b.velocity) <= rendezvousSpeed)
         {
             dock = &b;
@@ -436,7 +436,7 @@ bool canDockExpedition(const PersistentExpeditionState& e, const FlightRunState&
     captureSystemLocation(p, f);
     p = absolute(p, s);
     for (const auto& b : s.bodies)
-        if (b.dock && distance(p.position, systemDockPosition(b)) <= .16 && distance(p.velocity, b.velocity) <= rendezvousSpeed) return true;
+        if (b.dock && distance(p.position, systemDockPosition(b)) <= expeditionDockRadius && distance(p.velocity, b.velocity) <= rendezvousSpeed) return true;
     return false;
 }
 bool canSalvageWreck(const PersistentExpeditionState& e, const FlightRunState& f, const SystemDefinition& s, std::uint64_t id, bool requireMatchedSpeed) {

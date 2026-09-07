@@ -402,14 +402,6 @@ SurfaceActionOutcome spendSupply(PlanetaryExpeditionState& expedition, int amoun
     return outcome;
 }
 
-double surfaceHazardChance(double hazard, double scale, double relief)
-{
-    return std::clamp(
-        hazard * scale - relief,
-        tuning::research::surfaceHazardChanceMinimum,
-        tuning::research::surfaceHazardChanceMaximum);
-}
-
 SurfaceSiteProfile generatedSurfaceSiteProfile(const GameState& state, const Destination& destination, Random* rng)
 {
     if (rng != nullptr) {
@@ -453,42 +445,6 @@ double landingReconHazardPenalty(const GameState& state)
     return 0.0;
 }
 
-void applySurfaceHazard(
-    PlanetaryExpeditionState& expedition,
-    SurfaceActionOutcome& outcome,
-    Random& rng,
-    double scale,
-    double relief,
-    std::string_view message,
-    int supplyLoss,
-    int cargoLoss,
-    double hazardIncrease)
-{
-    if (!rng.chance(surfaceHazardChance(expedition.hazard, scale, relief))) {
-        return;
-    }
-
-    const int actualSupplyLoss = std::min(std::max(0, supplyLoss), std::max(0, expedition.supply));
-    const int actualCargoLoss = std::min(std::max(0, cargoLoss), std::max(0, expedition.cargo));
-    expedition.supply -= actualSupplyLoss;
-    expedition.cargo -= actualCargoLoss;
-    expedition.hazard += hazardIncrease;
-
-    outcome.hazardTriggered = true;
-    outcome.hazardMessage = std::string(message);
-    outcome.supplyDelta -= actualSupplyLoss;
-    outcome.cargoDelta -= actualCargoLoss;
-    outcome.hazardDelta += hazardIncrease;
-}
-
-bool hasSurfaceTooling(const MetaProgress& meta)
-{
-    return hasUnlock(meta, content::unlock::surfaceProbes)
-        || hasUnlock(meta, content::unlock::surfaceDrills)
-        || hasUnlock(meta, content::unlock::cargoRigs)
-        || hasUnlock(meta, content::unlock::perimeterDrones);
-}
-
 MiningArenaRules activeSurfaceArenaRules(const GameState& state)
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -510,94 +466,6 @@ MiningArenaRules activeSurfaceArenaRules(const GameState& state)
         landingOrdinal));
 }
 
-void applyEnemyContact(GameState& state, SurfaceActionOutcome& outcome, double encounterChance, Random& rng)
-{
-    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-    if (!expedition.enemyEncountersEnabled || !rng.chance(encounterChance)) {
-        return;
-    }
-
-    const MiningArenaRules rules = activeSurfaceArenaRules(state);
-    const bool heavyContact = rules.request.act == MiningAct::ActThree || rules.request.difficulty >= 7;
-    const int supplyPressure = tuning::research::surfaceEnemySupplyLoss + (heavyContact ? 1 : 0);
-    const int cargoPressure = tuning::research::surfaceEnemyCargoLoss
-        + (rules.request.act == MiningAct::ActThree && rules.request.difficulty >= 7 ? 1 : 0);
-    const double hazardPressure = tuning::research::surfaceEnemyHazardIncrease
-        * std::max(1.0, rules.enemyDamageScale);
-    const int actualSupplyLoss = std::min(supplyPressure, std::max(0, expedition.supply));
-    const int actualCargoLoss = std::min(cargoPressure, std::max(0, expedition.cargo));
-    expedition.supply -= actualSupplyLoss;
-    expedition.cargo -= actualCargoLoss;
-    expedition.hazard += hazardPressure;
-
-    outcome.eventType = SurfaceEventType::EnemyContact;
-    outcome.eventMessage = std::string(text::status::surfaceEnemyContact);
-    outcome.supplyDelta -= actualSupplyLoss;
-    outcome.cargoDelta -= actualCargoLoss;
-    outcome.hazardDelta += hazardPressure;
-    outcome.enemyEncounter = true;
-    state.meta.hasEncounteredEnemy = true;
-}
-
-void applySurfaceEvent(GameState& state, SurfaceActionOutcome& outcome, Random& rng)
-{
-    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-    if (!outcome.applied || outcome.hazardTriggered) {
-        return;
-    }
-
-    applyEnemyContact(state, outcome, surfaceEnemyEncounterChance(state), rng);
-    if (outcome.eventType == SurfaceEventType::EnemyContact) {
-        return;
-    }
-
-    const double eventChance = std::clamp(
-        tuning::research::surfaceEventChanceBase + expedition.hazard * tuning::research::surfaceEventChanceHazardScale,
-        0.0,
-        tuning::research::surfaceEventChanceMaximum);
-    if (!rng.chance(eventChance)) {
-        return;
-    }
-
-    const double failureShare = std::max(
-        tuning::research::surfaceEquipmentFailureMinimumShare,
-        tuning::research::surfaceEquipmentFailureShare - (hasSurfaceTooling(state.meta) ? tuning::research::surfaceToolFailureRelief : 0.0));
-    const double roll = rng.next01();
-    if (roll < failureShare) {
-        const int actualSupplyLoss = std::min(tuning::research::surfaceEquipmentFailureSupplyLoss, std::max(0, expedition.supply));
-        expedition.supply -= actualSupplyLoss;
-        expedition.hazard += tuning::research::surfaceEquipmentFailureHazardIncrease;
-        outcome.eventType = SurfaceEventType::EquipmentFailure;
-        outcome.eventMessage = std::string(text::status::surfaceEquipmentFailure);
-        outcome.supplyDelta -= actualSupplyLoss;
-        outcome.hazardDelta += tuning::research::surfaceEquipmentFailureHazardIncrease;
-        return;
-    }
-
-    if (roll < failureShare + tuning::research::surfaceUnexpectedDepositShare) {
-        MaterialInventory gain {.common = tuning::research::surfaceDepositCommonGain};
-        if (rng.chance(tuning::research::surfaceDepositRareChance + surfaceSiteProfileEffects(expedition.siteProfile).mineRareChanceBonus)) {
-            gain.rare += 1;
-        }
-        expedition.temporaryMaterials.common = std::max(0, expedition.temporaryMaterials.common + gain.common);
-        expedition.temporaryMaterials.rare = std::max(0, expedition.temporaryMaterials.rare + gain.rare);
-        expedition.temporaryMaterials.exotic = std::max(0, expedition.temporaryMaterials.exotic + gain.exotic);
-        expedition.cargo += materialCargo(gain);
-        outcome.eventType = SurfaceEventType::UnexpectedDeposit;
-        outcome.eventMessage = std::string(text::status::surfaceUnexpectedDeposit);
-        outcome.materialDelta.common += gain.common;
-        outcome.materialDelta.rare += gain.rare;
-        outcome.materialDelta.exotic += gain.exotic;
-        outcome.cargoDelta += materialCargo(gain);
-        return;
-    }
-
-    state.meta.blueprintProgress += tuning::research::surfaceCrewDiscoveryBlueprintGain;
-    outcome.eventType = SurfaceEventType::CrewDiscovery;
-    outcome.eventMessage = std::string(text::status::surfaceCrewDiscovery);
-    outcome.blueprintDelta = tuning::research::surfaceCrewDiscoveryBlueprintGain;
-}
-
 void appendSurfaceLog(PlanetaryExpeditionState& expedition, std::string entry)
 {
     if (entry.empty()) {
@@ -608,12 +476,6 @@ void appendSurfaceLog(PlanetaryExpeditionState& expedition, std::string entry)
     if (overflow > 0) {
         expedition.logEntries.erase(expedition.logEntries.begin(), expedition.logEntries.begin() + overflow);
     }
-}
-
-void finalizeSurfaceAction(GameState& state, SurfaceActionOutcome& outcome, Random& rng)
-{
-    applySurfaceEvent(state, outcome, rng);
-    appendSurfaceLog(state.run.planetaryExpedition, surfaceActionSummary(outcome));
 }
 
 std::string signedWhole(int value)
@@ -1824,14 +1686,6 @@ FlybyRunState createFlybyRun(
 
 } // namespace
 
-void completeArrivalFlyby(GameState& state, const ContentCatalog& catalog)
-{
-    applyFlybyReward(state, catalog, FlybyGrade::Good);
-    if (const Destination* destination = currentResearchDestination(state, catalog)) {
-        preserveArrivalFuelAtDestination(state, destination->id);
-    }
-}
-
 void startArrivalFlybyRun(GameState& state, const ContentCatalog& catalog)
 {
     const Destination* destination = currentResearchDestination(state, catalog);
@@ -2570,14 +2424,6 @@ void abortFlybyRun(GameState& state, const ContentCatalog& catalog)
     }
 }
 
-void acknowledgeFlybyResult(GameState& state)
-{
-    if (!state.run.approach.flyby.active || !state.run.approach.flyby.completed) {
-        return;
-    }
-    preserveArrivalFuelAtDestination(state, state.run.approach.flyby.destinationId);
-}
-
 bool canClaimSaturnCourse(const GameState& state)
 {
     const LegacyCampaignScenarioBinding* binding = legacyCampaignScenarioBinding(CampaignObjectiveId::SaturnSlingshot);
@@ -2731,19 +2577,6 @@ bool acknowledgeSaturnSlingshotFailure(GameState& state)
     writeLegacyCampaignSaveProjection(state, catalog);
     state.statusLine = outcome.message;
     return true;
-}
-
-void completeArrivalOrbit(GameState& state, const ContentCatalog& catalog)
-{
-    const Destination* destination = currentResearchDestination(state, catalog);
-    if (destination == nullptr) {
-        return;
-    }
-    addDestinationHistoryValue(state.meta.destinationOrbits, catalog, destination->id);
-    state.meta.blueprintProgress += destinationSupportsResearch(*destination) ? 2 : 1;
-    state.run.credits += std::max(18.0, destination->baseReward * 0.55);
-    unlockFromBlueprints(state);
-    preserveArrivalFuelAtDestination(state, destination->id);
 }
 
 void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog)
@@ -4086,142 +3919,6 @@ double surfaceEnemyEncounterChance(const GameState& state)
             - drones.enemyEncounterRelief,
         0.0,
         tuning::research::surfaceEnemyChanceMaximum);
-}
-
-SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng)
-{
-    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-    SurfaceActionOutcome outcome;
-    if (expedition.miningRunUsed) {
-        outcome.message = "Mining run is complete. Extract before surveying again.";
-        return outcome;
-    }
-    outcome = spendSupply(expedition, tuning::research::surveySupplyCost);
-    if (!outcome.applied) {
-        return outcome;
-    }
-
-    const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
-    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
-    const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
-    const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
-    const bool thermalSurface = surfaceUsesThermalOnlyRegolith(state);
-    const MaterialInventory gain {
-        .common = thermalSurface
-            ? 0
-            : tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus
-    };
-    addMaterials(expedition.temporaryMaterials, gain);
-    awardExpeditionExperience(state, miningMaterialExperience(gain), Screen::Mining);
-    expedition.miningSitePrepared = true;
-    expedition.cargo += materialCargo(gain);
-    outcome.materialDelta = gain;
-    outcome.cargoDelta = materialCargo(gain);
-    applySurfaceHazard(
-        expedition,
-        outcome,
-        rng,
-        tuning::research::surveyHazardChanceScale,
-        (tools.surveyCommonBonus > 0 ? tuning::research::probeHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief,
-        text::status::surfaceDustHazard,
-        tuning::research::dustHazardSupplyLoss,
-        0,
-        tuning::research::dustHazardIncrease);
-    outcome.message = thermalSurface
-        ? "Survey complete. The regolith is inert; ore signatures remain sealed inside thermal seams."
-        : std::string(text::status::surfaceSurveyed);
-    finalizeSurfaceAction(state, outcome, rng);
-    return outcome;
-}
-
-SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng)
-{
-    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-    SurfaceActionOutcome outcome = spendSupply(expedition, tuning::research::mineSupplyCost);
-    if (!outcome.applied) {
-        return outcome;
-    }
-
-    const SurfaceToolEffects tools = surfaceToolEffects(state.meta);
-    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
-    const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
-    const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
-    const bool thermalSurface = surfaceUsesThermalOnlyRegolith(state);
-    MaterialInventory gain {
-        .common = thermalSurface
-            ? 0
-            : tuning::research::mineCommonGain + tools.mineCommonBonus + crew.mineCommonBonus + site.mineCommonBonus
-    };
-    if (!thermalSurface
-        && (expedition.depth >= tuning::research::mineRareDepthThreshold
-            || rng.chance(std::min(1.0, expedition.hazard + tools.mineRareChanceBonus + crew.mineRareChanceBonus + site.mineRareChanceBonus + upgrades.oreYieldChance)))) {
-        gain.rare += 1;
-    }
-
-    addMaterials(expedition.temporaryMaterials, gain);
-    awardExpeditionExperience(state, miningMaterialExperience(gain), Screen::Mining);
-    expedition.cargo += materialCargo(gain);
-    outcome.materialDelta = gain;
-    outcome.cargoDelta = materialCargo(gain);
-    applySurfaceHazard(
-        expedition,
-        outcome,
-        rng,
-        tuning::research::mineHazardChanceScale,
-        (tools.mineCommonBonus > 0 ? tuning::research::drillHazardRelief : 0.0) + crew.hazardRelief + upgrades.hazardRelief,
-        text::status::surfaceDrillHazard,
-        0,
-        tuning::research::drillHazardCargoLoss,
-        tuning::research::drillHazardIncrease);
-    outcome.message = thermalSurface
-        ? "Regolith broken. No resource recovered; treat a thermal seam with Hazard support."
-        : std::string(text::status::surfaceMined);
-    finalizeSurfaceAction(state, outcome, rng);
-    return outcome;
-}
-
-SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng)
-{
-    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-    SurfaceActionOutcome outcome;
-    if (expedition.miningRunUsed) {
-        outcome.message = "Mining run is complete. Extract before pushing deeper.";
-        return outcome;
-    }
-    outcome = spendSupply(expedition, tuning::research::pushSupplyCost);
-    if (!outcome.applied) {
-        return outcome;
-    }
-
-    expedition.miningSitePrepared = true;
-    expedition.depth += 1;
-    awardExpeditionExperience(state, 2.0, Screen::Mining);
-    expedition.hazard += tuning::research::hazardPerDepth;
-    const SurfaceCrewEffects crew = surfaceCrewEffects(state);
-    const SurfaceSiteProfileEffects site = surfaceSiteProfileEffects(expedition.siteProfile);
-    const SurfaceUpgradeEffects upgrades = surfaceUpgradeEffects(state, createDefaultContent());
-    if (!surfaceUsesThermalOnlyRegolith(state)
-        && expedition.depth >= tuning::research::artifactDepthThreshold
-        && expedition.temporaryArtifacts.empty()
-        && rng.chance(std::min(1.0, tuning::research::artifactChanceBase + crew.artifactChanceBonus + site.artifactChanceBonus))) {
-        expedition.temporaryArtifacts.push_back({artifactId(expedition), expedition.destinationId, false});
-        outcome.artifactFound = true;
-        outcome.cargoDelta += 3;
-        expedition.cargo += 3;
-    }
-    applySurfaceHazard(
-        expedition,
-        outcome,
-        rng,
-        tuning::research::pushHazardChanceScale,
-        surfaceToolEffects(state.meta).hazardRelief + crew.hazardRelief + upgrades.hazardRelief,
-        text::status::surfaceTerrainHazard,
-        tuning::research::pushHazardSupplyLoss,
-        0,
-        tuning::research::unstableTerrainHazardIncrease);
-    outcome.message = std::string(text::status::surfacePushed);
-    finalizeSurfaceAction(state, outcome, rng);
-    return outcome;
 }
 
 bool hasPendingSurfacePayload(const MaterialInventory& materials, const std::vector<ArtifactRecord>& artifacts, int cargo)

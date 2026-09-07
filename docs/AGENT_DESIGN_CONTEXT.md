@@ -28,7 +28,7 @@ The desired aesthetic is:
 ## Core Game Shape
 
 - Physical Flight connects launch, Travel, Orbit and local Landing. Controls govern momentum; coast capture takes two real seconds without thrust on a qualifying loop.
-- Pulse Survey and Orbital Laser Dig prepare real terrain in Flight. Only Zone 1 is enabled. Survey reach and Bore reach independently constrain the shaft; ore remains physical cargo.
+- Pulse Survey and Orbital Laser Dig prepare real terrain in Flight. All six fixed sectors are enabled and persist independently. Survey reach and Bore reach independently constrain the shaft; ore remains physical cargo.
 - Manual descent preserves momentum; the explicit Land command stops and aligns before resuming gravity. Real support and rig clearance permit surface or underground touchdown.
 - Touchdown, deployment, packing and manual ascent share terrain, ship position and camera continuity. Mining clocks begin only after deployment.
 - Mining uses separate Rig/EVA actors, independent oxygen and powered-use Rig fuel. Recover physical payload to the parked ship; drones cannot bank cargo by elapsed transit time.

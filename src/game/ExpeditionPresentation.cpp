@@ -173,7 +173,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
                 if (range > .65) continue;
                 panel.contentMarkup += canDockExpedition(e,flight,system)
                     ? "<p>In range — press Dock.</p>"
-                    : (range > .16 ? "<p>Approach the DOCK marker, not Earth's surface.</p>"
+                    : (range > expeditionDockRadius ? "<p>Approach the DOCK marker, not Earth's surface.</p>"
                                    : "<p>Slow down to enable Dock.</p>");
                 break;
             }

@@ -21,7 +21,7 @@ The [OREBIT Game Design Document](Rocket_Rogue_Game_Design_Document.docx) is the
 - [Enemy Sprite Prompt Manifest](ENEMY_SPRITE_PROMPT_MANIFEST.md) - per-archetype generation records, shared prompt templates, and rejected-direction guardrails.
 - [Mining Lock-and-Key Sites](MINING_LOCK_AND_KEY_SITES.md) - artifact gate progression, capability forecasting, runtime state, and soft-lock prevention.
 
-- [Orbital Preparation](ORBITAL_PREPARATION_PROTOTYPE.md) - capture, Pulse Survey, Zone 1 laser work and explicit Land.
+- [Orbital Preparation](ORBITAL_PREPARATION_PROTOTYPE.md) - capture, SCAN, sector-selected laser work and explicit Land.
 - [Surface Arrival](HEROIC_SURFACE_ARRIVAL.md) - touchdown, deployment, camera and cues.
 - [Underground Landing and Ascent](UNDERGROUND_LANDING_PROTOTYPE.md) - cached terrain, parked ship services and manual departure.
 

@@ -7,7 +7,7 @@ OREBIT is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applications fo
 - Portable deterministic C++20 rules and shared native Vulkan/WebGL2 application state.
 - SDL 3 native Windows/Linux hosts and an Emscripten browser host, with shared RmlUi interfaces, controller actions, saves and scene composition.
 - Physical Travel, Orbit and local Landing with momentum, fuel, heat, hull and coasting forecasts.
-- Coasting orbit capture, Pulse Survey, Zone 1 orbital laser excavation and real prepared terrain carried through descent and deployment.
+- Coasting orbit capture, Pulse Survey, sector-selected orbital laser excavation and real prepared terrain carried through descent and deployment.
 - Surface and underground touchdown, Rig/EVA actors, physical cargo, separate oxygen and Rig fuel, Support Drones and manual ascent from the parked ship.
 - Deterministic mining sites, protected artifacts, cached layers, permanent ship/Drone ownership and temporary Expedition XP buildcraft.
 - Persistent solar travel, a spatial map, direct-target cruise, Earth docking, carried salvage, a deterministic Rank I shipyard, wreck recovery, and a return-or-continue decision after significant objectives.
@@ -248,7 +248,7 @@ node tools/serve.mjs build/web-release 8080
 ## Controls
 
 - Flight: A/D rotate, W/S thrust forward/reverse; the controller left stick supplies proportional input. Coasting is free.
-- Captured orbit: Space/Enter or controller South begins Pulse Survey, then a fresh hold fires the orbital laser inside Zone 1. Escape/controller East or movement resumes flight.
+- Captured orbit: Space/Enter or controller South begins Pulse Survey, then a fresh hold fires the orbital laser inside the selected sector. Escape/controller East or movement resumes flight.
 - Land: the inspection UI action stops and aligns the ship inward before gravity resumes. Manual descent through the authorized gate preserves momentum.
 - Touchdown: Space/Enter or South deploys; R or a 0.45-second East hold departs undeployed.
 - Mining/EVA: WASD/arrows or left stick move; mouse/right stick aims EVA; left click/RT fires and right click/LT drills. Space uses the Rig drill preference. E/West scans, T/North tethers, F switches actors immediately, and a 0.6-second South hold switches actors with a progress ring.

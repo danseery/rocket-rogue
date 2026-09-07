@@ -277,7 +277,6 @@ int destinationHistoryValue(const std::vector<int>& values, const ContentCatalog
 std::string arrivalOperationBlockReason(const GameState& state, const ContentCatalog& catalog, std::string_view operation);
 void clearResearchAndExpeditionState(GameState& state);
 void startArrivalOps(GameState& state, const LaunchOutcome& outcome);
-void completeArrivalFlyby(GameState& state, const ContentCatalog& catalog);
 void startArrivalFlybyRun(GameState& state, const ContentCatalog& catalog);
 void setFlybyMove(GameState& state, double xAxis, double yAxis);
 void updateFlybyRun(GameState& state, double deltaSeconds);
@@ -286,8 +285,6 @@ void applyFlybyReward(GameState& state, const ContentCatalog& catalog, FlybyGrad
 void completeFlybyRun(GameState& state, const ContentCatalog& catalog);
 void abortFlybyRun(GameState& state);
 void abortFlybyRun(GameState& state, const ContentCatalog& catalog);
-void acknowledgeFlybyResult(GameState& state);
-void completeArrivalOrbit(GameState& state, const ContentCatalog& catalog);
 void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog);
 void setOrbitMove(GameState& state, double xAxis, double yAxis);
 void updateOrbitRun(GameState& state, double deltaSeconds);
@@ -345,9 +342,6 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
 SurfaceReturnLedger surfaceReturnLedger(const GameState& state, const ContentCatalog& catalog);
 SurfaceReturnLedger surfaceReturnLedger(const GameState& state);
 double surfaceEnemyEncounterChance(const GameState& state);
-SurfaceActionOutcome surveySurfaceSite(GameState& state, Random& rng);
-SurfaceActionOutcome mineSurfaceDeposit(GameState& state, Random& rng);
-SurfaceActionOutcome pushSurfaceDeeper(GameState& state, Random& rng);
 SurfaceReturnSafetyAssessment surfaceReturnSafetyAssessment(
     const GameState& state,
     const ContentCatalog& catalog,

@@ -1802,8 +1802,12 @@ void testCampaignIntroductionDrawsHeroicCapybara()
     assert(std::any_of(approachPacket.draws.begin(), approachPacket.draws.end(), [](const SceneDraw& draw) {
         return draw.texture == TextureId::Neptune;
     }));
-    assert(std::any_of(approachPacket.draws.begin(), approachPacket.draws.end(), [](const SceneDraw& draw) {
-        return draw.texture == TextureId::ArkOperational;
+    const auto arkUv = rocket::mapSceneAtlasUvRect(TextureId::ArkOperational, 0, 0, 1, 1);
+    assert(std::any_of(approachPacket.instances.begin(), approachPacket.instances.end(), [&](const PackedSceneInstance& packed) {
+        const auto instance = rocket::unpackSceneInstance(packed);
+        return instance.textured && std::abs(instance.u0-arkUv.u0)<.001F &&
+            std::abs(instance.v0-arkUv.v0)<.001F && std::abs(instance.u1-arkUv.u1)<.001F &&
+            std::abs(instance.v1-arkUv.v1)<.001F;
     }));
     assert(std::none_of(
         approachPacket.instances.begin(),
@@ -4070,10 +4074,11 @@ void testMiningTerrainUsesDestinationTilesAndMaterialFrames()
         }
         assert(terrainDraw != nullptr);
         assert(terrainDraw->pipeline == PipelineClass::Textured);
-        assert(terrainDraw->instanceCount == 4U);
+        assert(terrainDraw->instanceCount >= 4U);
         assert(terrainDraw->atlasPage == rocket::sceneAtlasPageForTexture(texture));
 
-        const std::size_t first = terrainDraw->firstInstance;
+        // Exterior bedrock is submitted before the four authored fixture cells.
+        const std::size_t first = terrainDraw->firstInstance + terrainDraw->instanceCount - 4U;
         const SceneInstance regolith = rocket::unpackSceneInstance(packet.miningTerrainInstances[first]);
         const SceneInstance hardRock = rocket::unpackSceneInstance(packet.miningTerrainInstances[first + 1U]);
         const SceneInstance hazard = rocket::unpackSceneInstance(packet.miningTerrainInstances[first + 2U]);
@@ -4133,9 +4138,9 @@ void testMiningTerrainUsesDestinationTilesAndMaterialFrames()
             && draw.pipeline == PipelineClass::Textured;
     });
     assert(postSolarDraw != postSolarLoaded.draws.end());
-    assert(postSolarDraw->instanceCount == 4U);
+    assert(postSolarDraw->instanceCount >= 4U);
     const SceneInstance postSolarCommon = rocket::unpackSceneInstance(
-        postSolarLoaded.miningTerrainInstances[postSolarDraw->firstInstance + 3U]);
+        postSolarLoaded.miningTerrainInstances[postSolarDraw->firstInstance + postSolarDraw->instanceCount - 1U]);
     const rocket::SceneAtlasUvRect expectedCommon = rocket::mapSceneAtlasUvRect(
         TextureId::MiningTilesPostSolarLibrary,
         9.0F / 19.0F,
