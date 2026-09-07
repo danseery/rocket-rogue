@@ -1,7 +1,6 @@
-# Orbital preparation — local feel prototype
+# Orbital Preparation
 
-This v19 prototype stays on Flight. No save migration, new test suite, or
-public release is part of this pass.
+The [OREBIT Game Design Document](Rocket_Rogue_Game_Design_Document.docx) is the definitive design. This document supplies implementation detail and must agree with it. Story and progression decisions marked TBD are collected in GDD Section 8.
 
 ## Player flow
 
@@ -49,25 +48,24 @@ seconds per full layer; empty rows require no work. Pad support, protected gates
 artifact barriers, suit-only passages, fuel and oxygen pockets stop the beam.
 Ore is loose physical cargo in the modified layer, never credited from orbit.
 
-Landing commits these exact layers through the existing arrival flow. Mining
+After survey, the Land action is available during inspection inside Zone 1. It zeros linear/angular velocity and holds position while rotating the nose inward over one second; gravity and control then resume. Manual gate crossing remains available and preserves momentum. Both paths enter the same prepared terrain.
+
+Landing commits these exact layers through the arrival flow. Mining
 remains frozen through touchdown and deployment. Orbital work is session-only;
 after beginning work, saving waits until deployment or undeployed takeoff ends.
 Closing earlier returns to the preceding flight save.
 
-## Restartable feel starts
+## Debug inspection starts
 
 - Starter Moon: `/?debug_tools=1&debug_surface_arrival=orbital&debug_surface_destination=moon&build=orbital-work`
 - Upgraded Mars: `/?debug_tools=1&debug_surface_arrival=orbitaldeep&debug_surface_destination=mars&build=orbital-work`
 - Inside Zone 1: `/?debug_tools=1&debug_surface_arrival=orbitalzone&debug_surface_destination=mars&build=aligned-zone`
 
-Both start in a broad coasting ellipse and exercise confirmation naturally.
+The first two starts use a broad coasting ellipse and exercise confirmation naturally.
 `orbital` uses Survey/Bore rank 0; `orbitaldeep` uses rank 3. Swap `moon`/`mars`
 as needed. Existing arrival presets remain available. Debug sessions do not save.
 `orbitalzone` begins captured inside the active sector with starter equipment.
 
-## Validation boundary
+## Verification
 
-Build only the web target, then tune through localhost. Focused regression tests
-and the full native/web matrix remain deferred until feel approval. In particular,
-full descent/deployment, physical ore recovery, controller hardware, and repeated
-cross-layer shaft traversal still need hands-on acceptance before release.
+Exercise capture, survey pause/resume, input release across the zone boundary, heat cutoff/restart, protected terrain, partial excavation, exact-site descent and physical ore recovery. Include keyboard/controller source changes and both manual descent and the explicit Land action. End-to-end feel and hardware acceptance require direct play checks.

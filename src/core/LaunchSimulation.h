@@ -44,9 +44,12 @@ struct PreparedLaunch {
     int existingShipDamage = 0;
     bool manualControlsEnabled = true;
     bool heatEnabled = false;
+    double heatGraceMultiplier = 1.0;
     bool asteroidsEnabled = false;
     bool trainingMission = false;
     bool orbitRequired = false;
+    // Forecasts use the live integrator without recursively generating HUD forecasts.
+    bool trajectoryPreview = false;
 
     double controlChaos = 0.0;
     double controlSteeringResponseVariation = 0.0;
@@ -121,7 +124,9 @@ LaunchFlightStep updateLaunchFlight(
     const Destination& destination,
     const FlightInput& input,
     double deltaSeconds,
-    const MiningRunState* landingSite = nullptr);
+    const MiningRunState* landingSite = nullptr,
+    const SystemDefinition* system = nullptr,
+    const SystemLocation* location = nullptr);
 TelemetryEvent launchTelemetryAt(const PreparedLaunch& launch, const FlightRunState& flight);
 LaunchOutcome resolveLaunch(
     const PreparedLaunch& launch,

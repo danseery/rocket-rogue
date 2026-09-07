@@ -10349,3 +10349,76 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
     36% { transform: translate(0px, 0px); }
     to { transform: translate(0px, 0px); }
 }
+
+/* Shared Incoming Message card: content and speakers are supplied by the catalog. */
+.expedition-home { width: 704dp; max-width: 96%; margin: 12dp auto; padding: 16dp; background-color: #0b1118; border: 1dp #407382; overflow-y: auto; max-height: 94%; }
+.expedition-home h2, .expedition-home h3 { color: #62dbe8; margin: 10dp 0; }
+.expedition-home p, .expedition-map p { color: #d5e5eb; margin: 8dp 0; font-size: 13dp; }
+.expedition-shipyard { display: flex; flex-wrap: wrap; }
+.shipyard-track { width: 46%; padding: 10dp; margin: 5dp; border: 1dp #284856; }
+.shipyard-track h4 { color: #ffbd67; margin: 4dp 0; }
+.expedition-flight-bar { position: absolute; bottom: 8dp; left: 12dp; right: 12dp; background-color: #071019ee; border: 1dp #407382; padding: 8dp; }
+.expedition-flight-bar p { margin: 2dp; color: #73ddeb; font-size: 12dp; }
+.expedition-flight-bar button { margin: 3dp; font-size: 12dp; }
+/* The short flight dock reserves separate space for telemetry and navigation. */
+#rr-document.rr-bottom-dock #rr-panel.live-hud-family-panel .live-hud-header,
+#rr-document.rr-bottom-dock #rr-panel.live-hud-family-panel .rr-objective-strip,
+#rr-document.rr-bottom-dock #rr-panel.live-hud-family-panel .flight-hud { display: none; }
+#rr-document.rr-bottom-dock #rr-panel.live-hud-family-panel #rr-hud-launch-status {
+    position: absolute; top: 42dp; left: 14dp; right: 14dp; margin: 0dp; font-size: 13dp;
+}
+#rr-document.rr-bottom-dock #rr-panel.live-hud-family-panel .physical-flight-status {
+    position: absolute; top: 70dp; left: 14dp; width: 42%; margin: 0dp;
+}
+#rr-document.rr-bottom-dock #rr-panel.live-hud-family-panel .expedition-flight-bar {
+    top: 70dp; bottom: 8dp; left: 47%; right: 12dp; margin: 0dp;
+}
+.solar-map-scroll { width: 100%; overflow-x: auto; overflow-y: hidden; height: 360dp; }
+.solar-map-scroll scrollbarhorizontal { display: block; visibility: visible; width: auto; height: 10dp; background-color: #111c26; }
+.solar-map-scroll scrollbarhorizontal slidertrack { display: block; height: 10dp; background-color: #111c26; }
+.solar-map-scroll scrollbarhorizontal sliderbar { display: block; height: 8dp; min-width: 30dp; margin-top: 1dp; background-color: #4e6b80; border-radius: 4dp; }
+.solar-map-scroll scrollbarhorizontal sliderarrowdec, .solar-map-scroll scrollbarhorizontal sliderarrowinc { display: none; }
+.expedition-home button.disabled, .expedition-home button.disabled:hover, .expedition-home button.disabled:focus { color: #6f8290; border-color: #334855; background-color: #101923; }
+.solar-map { position: relative; width: 704dp; height: 350dp; background-color: #050c14; }
+.solar-body { position: absolute; }
+#rr-modal .expedition-map .solar-body button { padding: 0dp 4dp; font-size: 11dp; height: 24dp; min-height: 24dp; max-height: 24dp; line-height: 24dp; width: 100%; min-width: 0dp; background-color: #09151d; border-width: 1dp; }
+.solar-selected button { border-color: #64edff; color: #64edff; }
+.solar-hazard button { border-color: #f3a451; color: #f3a451; }
+.solar-ship, .solar-wreck { position: absolute; color: #7affae; font-size: 11dp; }
+.solar-ship { width: 8dp; height: 8dp; background-color: #7affae; border: 1dp #ffffff; margin-left: -4dp; margin-top: -4dp; }
+.solar-wreck { color: #ffbd67; }
+.solar-course { position: absolute; width: 2dp; height: 2dp; background-color: #6abde0; }
+.solar-marker { position: absolute; width: 5dp; height: 5dp; background-color: #79d4e9; }
+.solar-dock { position: absolute; color: #ffc76a; font-size: 12dp; }
+.solar-leader { position: absolute; width: 2dp; height: 2dp; background-color: #334855; }
+.expedition-warning { color: #ffbd67; }
+#rr-modal.modal-map { width: 760dp; max-width: 88%; min-width: 0dp; box-sizing: border-box; }
+@media (max-width: 560dp) { .shipyard-track { width: 94%; } .expedition-home { max-width: 88%; } }
+#rr-modal.modal-incoming_message { width: 704dp; max-width: 94%; height: auto; max-height: 90%; }
+#rr-modal-scrim.incoming-message-scrim { background-color: #05070ab8; }
+#rr-modal.modal-incoming_message .modal-scroll-body { flex: 0 1 auto; padding-right: 0dp; }
+#rr-modal.modal-incoming_message .modal-actions button { min-width: 140dp; width: auto; }
+.incoming-message-layout { display: flex; align-items: center; }
+.incoming-message-portrait { width: 210dp; flex-shrink: 0; padding: 8dp; }
+.incoming-message-portrait img { width: 100%; height: auto; }
+.incoming-message-copy { flex: 1; padding: 12dp; }
+.incoming-message-channel { color: #52d6e6; font-size: 12dp; }
+.incoming-message-copy h2 { color: #ebf4f6; margin: 8dp 0; font-size: 22dp; }
+.incoming-message-copy h3 { color: #ffbd67; margin: 8dp 0; font-size: 16dp; }
+.incoming-message-copy p { color: #d5e5eb; margin: 10dp 0; line-height: 1.45; }
+.incoming-message-hints p { color: #7bd6e3; font-size: 12dp; margin: 4dp 0; }
+@media (max-width: 560dp) {
+    .incoming-message-layout { display: block; }
+    .incoming-message-portrait { width: 120dp; padding: 4dp; margin: 0 auto; }
+    .incoming-message-copy { padding: 8dp; }
+}
+
+/* Descent and deployment occupy the same rails as the surface team. */
+.surface-flight-title { position: absolute; left: 10px; top: 4px; font-size: 11px; color: #f2c35d; }
+.surface-flight-hud .mining-vitals { left: 1%; top: 22px; width: 98%; }
+.surface-flight-hud .mining-vitals .metric { width: 16%; height: 40px; min-height: 40px; margin-right: 0.6%; }
+.surface-flight-hud .mining-vitals .metric strong { display: block; font-size: 15px; }
+.surface-flight-hud .mining-vitals .metric span { font-size: 9px; }
+.surface-flight-actions { padding: 8px 12px; display: flex; flex-direction: row; flex-wrap: wrap; align-content: flex-start; }
+.surface-flight-actions p { width: 100%; margin: 2px 0px; font-size: 12px; }
+.surface-flight-actions button { display: inline-block; width: 230px; margin-right: 10px; }

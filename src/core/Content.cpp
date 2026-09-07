@@ -267,6 +267,37 @@ const MiningSiteDefinition* ContentCatalog::findMiningSite(std::string_view id) 
 ContentCatalog createDefaultContent()
 {
     ContentCatalog catalog;
+    catalog.messageSpeakers = {{"mission_control_fennec", "Mission Control", "LUNAR OPERATIONS", "portraits/mission-control-fennec.png", "portraits/mission-control-fennec-concerned.png"}};
+    catalog.incomingMessages = {
+        {"lunar_scan", "mission_control_fennec", "Use your tools", "On it", true,
+            {{"default", "Contract delivery confirmed. There may be something else down there. Send out a scanner pulse and let's see what comes back.", {MessageHint::Scanner}}}},
+        {"lunar_recovery", "mission_control_fennec", "Anomaly found", "Understood", true,
+            {{"default", "There it is - an anomalous signal. That crevice is too narrow for the Rig. Head out on EVA, clear the seal with your hand drill, then tether the artifact and bring it back to the ship.", {MessageHint::ExitRig, MessageHint::Drill, MessageHint::Tether}},
+             {"eva", "There it is - an anomalous signal. Your suit can fit through that crevice. Clear the seal with your hand drill, then tether the artifact and bring it back to the ship.", {MessageHint::Drill, MessageHint::Tether}}}}
+    };
+    for (auto& message : catalog.incomingMessages) message.context = MessageDeliveryContext::Mining;
+    catalog.incomingMessages.push_back({"lunar_approach", "mission_control_fennec", "Earth launch clearance", "Ready to launch", true,
+        {{"default", "You're cleared for launch. The Moon is above and to your right. Use thrust to climb away, then steer toward its orbit bands. Your trajectory shows where you will coast; adjust it to establish orbit before surveying a landing site.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
+
+    catalog.incomingMessages.push_back({"opening_retry", "mission_control_fennec", "Emergency recovery", "Retry launch", false,
+        {{"default", "Can you hear me? Your emergency pods deployed. You're safe, but the ship is cooked.", {}},
+         {"heat_tips", "Pods recovered. You're safe, but the engines overheated. Use short thrust pulses, then release both thrust and reverse to coast and cool down. Keep an eye on the temperature gauge: reverse thrust makes heat too.", {MessageHint::FlightThrust}},
+         {"tips", "Pods recovered. You're safe. Try short thrust pulses, then coast. Watch your trajectory: if it crosses the Moon, slow down early and steer it clear. Aim for a loop around the Moon, not through it.", {MessageHint::FlightSteer, MessageHint::FlightThrust}},
+         {"crater", "Pods recovered. Again. Are you trying to set the record for the largest crater? Because we're supposed to be mining the Moon, not becoming part of it. Short burns, brake early, and keep that trajectory clear.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
+
+    catalog.incomingMessages.back().concerned = true;
+    catalog.incomingMessages.push_back({"earth_dock_intro", "mission_control_fennec", "Earth orbital dock", "Understood", false,
+        {{"moon_first", "That's Earth's orbital dock. Bring your salvage here to bank it, refuel, repair the ship, and install ship upgrades. For now, head to the Moon and complete your first mining contract. The dock will be here when you return.", {}},
+         {"services", "That's Earth's orbital dock. Bring your salvage here to bank it, refuel, repair the ship, and install ship upgrades before your next expedition.", {}}}});
+
+    catalog.incomingMessages.push_back({"hard_landing_tip", "mission_control_fennec", "Easy on the landing gear", "Understood", true,
+        {{"default", "You're down safely, but that impact damaged the hull. Keep the ship upright and apply forward thrust before touchdown to slow your descent. Use short pulses to settle gently onto the ground. A softer landing will spare the ship.", {MessageHint::FlightThrust}}}});
+    catalog.incomingMessages.back().concerned = true;
+
+    catalog.incomingMessages.push_back({"rig_full_tip", "mission_control_fennec", "Rig cargo full", "Heading back", true,
+        {{"default", "Your Rig is full. Return to the parked ship to unload your ore, then head back out if you have room and supplies to keep mining.", {}}}, MessageDeliveryContext::Mining});
+    catalog.incomingMessages.push_back({"ship_full_tip", "mission_control_fennec", "Ship cargo full", "Understood", true,
+        {{"default", "The ship's hold is full. It can't accept more ore. Extra ore stays with the Rig or Prospector, and will be left here when you depart. Return to the dock to bank your cargo and make room.", {}}}, MessageDeliveryContext::Mining});
 
     catalog.modules = {
         module(content::module::fuelTanks1, "Fuel Tanks I", SlotType::Fuel, Rarity::Common, {}, content::unlock::starter, {"launch", "fuel"}, {}, RefitTrack::Reach, 1, "", true, LaunchUpgradeKind::FuelTanks, 1),
@@ -344,6 +375,7 @@ ContentCatalog createDefaultContent()
     catalog.crewUpgrades.clear();
 
     catalog.surfaceUpgrades = {
+        surfaceUpgrade("ore_magnet", "Ore Magnet", "Pull nearby loose ore into the Rig. Each rank adds 1 cell of collection radius, up to 3 ranks.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.oreAttractionRadius = 1.0}, {"drone", "cargo", "collection"}),
         surfaceUpgrade(content::surfaceUpgrade::resonantDischarge, "Resonant Discharge", "A combat-tuned scanner pulse shocks enemies caught in the player-centered ring.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.scannerPulseDamage = 1}, {"scanner", "combat", "pulse"}),
         surfaceUpgrade(content::surfaceUpgrade::thermalDrillJackets, "Thermal Drill Jackets", "Insulated drill collars bleed heat before the bit redlines and steady deeper pushes.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillCooling = 2.4, .drillDurability = 0.4}, {"drill", "cooling", "depth"}),
         surfaceUpgrade(content::surfaceUpgrade::widebandPulse, "Wideband Pulse", "A wider scanner ping maps shadowed ore seams, bad pockets, and one deeper layer.", Rarity::Common, SurfaceUpgradeCategory::Scanner, {.scannerRadius = 2.5, .hazardRelief = 0.02}, {"scanner", "reveal", "depth"}),
@@ -538,7 +570,7 @@ ContentCatalog createDefaultContent()
     lunarAnomalyCrevice.gateType = MiningGateType::FragileExcavation;
     lunarAnomalyCrevice.objectivePlacement = MiningSiteObjectivePlacement::EntryCentered;
     lunarAnomalyCrevice.objectivePassage = MiningPassageClass::SuitOnly;
-    lunarAnomalyCrevice.activationMessage = "ANOMALOUS RETURN — PULSE SCANNER [E/X]";
+    lunarAnomalyCrevice.activationMessage = "20 ORE DELIVERED — lunar anomaly detected. Pulse scanner; exit Rig for EVA recovery.";
     lunarAnomalyCrevice.completeOnShipCapture = true;
     lunarAnomalyCrevice.securedMessage =
         "ARTIFACT SECURED — similar signatures are scattered across the solar system.";
@@ -633,8 +665,8 @@ ContentCatalog createDefaultContent()
                       {ScenarioRewardKind::UnlockKey, content::unlock::routeJupiter, 0, false},
                       {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}},
                 {"funding", {"delivery"}, "JUPITER TRANSFER", "The Jupiter Window",
-                    "Create five fuel of transfer margin. Build it into the ship, take it from Mars's gravity, or stack both.",
-                    "FUEL TANKS III OR GOOD-OR-BETTER MARS SLINGSHOT — BENEFITS STACK", "Review Jupiter Options", {},
+                    "Io is the next exploration lead. Return to Earth to bank and service, or plot an onward course using your remaining fuel. Watch Jupiter's gravity on approach.",
+                    "COMPARE FUEL MARGIN AND HAZARDS ON THE SYSTEM MAP", "Understood", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}}
             }
@@ -819,6 +851,8 @@ ContentCatalog createDefaultContent()
     if (!validateCargoRequirements(catalog, &scenarioError)) {
         throw std::logic_error("Invalid cargo catalog: " + scenarioError);
     }
+    std::string messageError;
+    if (!validateIncomingMessages(catalog, &messageError)) throw std::runtime_error(messageError);
     return catalog;
 }
 

@@ -489,6 +489,9 @@
         </button>
         <div class="debug-accordion-panel" id="debug-menu-mission-prep" hidden>
           <button type="button" data-debug-action="hangar">Hangar board</button>
+          <button type="button" data-debug-action="incoming-message">Incoming Message</button>
+          <button type="button" data-debug-action="expedition">Persistent Expedition</button>
+          <button type="button" data-debug-action="moon-approach">Earth Launch</button>
           <button type="button" data-debug-action="jupiter-neither">Jupiter: neither</button>
           <button type="button" data-debug-action="jupiter-tanks">Jupiter: tanks</button>
           <button type="button" data-debug-action="jupiter-slingshot">Jupiter: Good slingshot</button>
@@ -822,9 +825,12 @@
     }
 
     function setRmlUiModalOpen(open) {
+      const wasOpen = rmlUiModalOpen;
       rmlUiModalOpen = Boolean(open);
       document.body.classList.toggle("rmlui-modal-open", rmlUiModalOpen);
-      if (rmlUiModalOpen) releaseRealtimeInputs();
+      // Acknowledgement arms the core's neutral-input guard. Supply neutral
+      // on dismissal too, before the player's first new movement press.
+      if (rmlUiModalOpen || wasOpen) releaseRealtimeInputs();
     }
 
     function setRmlUiEnabled(enabled) {
@@ -875,13 +881,13 @@
         window.localStorage.removeItem("rocket_rogue_save_v1");
       },
       loadCheckpoint() {
-        return window.localStorage.getItem("rocket_rogue_checkpoint_v18") || "";
+        return window.localStorage.getItem("rocket_rogue_checkpoint_v21") || "";
       },
       storeCheckpoint(data) {
-        window.localStorage.setItem("rocket_rogue_checkpoint_v18", data || "");
+        window.localStorage.setItem("rocket_rogue_checkpoint_v21", data || "");
       },
       clearCheckpoint() {
-        window.localStorage.removeItem("rocket_rogue_checkpoint_v18");
+        window.localStorage.removeItem("rocket_rogue_checkpoint_v21");
       },
       gameSpeedMultiplier
     };
@@ -941,6 +947,7 @@
         "string"),
       debugSwarmArena: () => rrCall("rr_debug_swarm_arena"),
       debugHangar: () => rrCall("rr_debug_hangar"),
+      debugIncomingMessage: () => rrCall("rr_debug_incoming_message"),
       debugJupiterOptions: (mode) => rrCall("rr_debug_jupiter_options", [mode], ["number"]),
       debugResults: () => rrCall("rr_debug_results"),
       debugResearch: () => rrCall("rr_debug_research"),
@@ -1083,6 +1090,9 @@
       "mining-launch": launchDebugMiningArena,
       "mining-swarm": () => rr.debugSwarmArena(),
       hangar: () => rr.debugHangar(),
+      "incoming-message": () => rr.debugIncomingMessage(),
+      "expedition": () => rrCall("rr_debug_expedition"),
+      "moon-approach": () => rrCall("rr_debug_moon_approach"),
       "jupiter-neither": () => rr.debugJupiterOptions(0),
       "jupiter-tanks": () => rr.debugJupiterOptions(1),
       "jupiter-slingshot": () => rr.debugJupiterOptions(2),
@@ -1295,12 +1305,18 @@
         } else if (key === "escape") {
           rr.resumeOrbitalFlight();
         } else if (movement.includes(key)) {
+          if (event.repeat && !launchKeys.has(key)) {
+            event.preventDefault();
+            return true;
+          }
           launchKeys.add(key);
           updateLaunchMove();
         } else if (!event.repeat && key === "r") {
           rr.returnHome();
         } else if (!event.repeat && key === "c") {
-          rrCall("rr_cut_engines");
+          rrCall("rr_toggle_cruise");
+        } else if (!event.repeat && key === "m") {
+          rrCall("rr_open_navigation");
         } else {
           return false;
         }
@@ -1309,6 +1325,10 @@
       }
       if (!isMiningActive()) return false;
       if (movement.includes(key)) {
+        if (event.repeat && !miningKeys.has(key)) {
+          event.preventDefault();
+          return true;
+        }
         miningKeys.add(key);
         updateMiningMove();
       } else if (key === " ") {

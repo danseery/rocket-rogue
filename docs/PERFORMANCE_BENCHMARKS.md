@@ -12,6 +12,8 @@ Use `build/native-release/bin/RocketRogue.exe` for timing. The `native-profile` 
 
 ## One capture
 
+The save-isolated `expedition-dock`, `expedition-map`, and `expedition-flight` scenarios exercise Earth servicing, paused spatial navigation, and physical departure through the shared application. Use them with the same screenshot and resolution options for native layout checks; they do not replace complete journey playtests.
+
 ```powershell
 build\native-release\bin\RocketRogue.exe `
   --benchmark-scenario mining `
@@ -34,7 +36,7 @@ Available scenarios are `title`, `hangar`, `launch`, `flyby`, `orbit`, `surface-
 
 `--benchmark-screenshot <path.png>` is optional. It performs one Vulkan swapchain readback only after timed sampling is complete, renders that image without another simulation tick, canonicalizes BGRA/RGBA surfaces to tightly packed RGBA8, and writes the PNG atomically. The benchmark's final gameplay hash is sampled before the extra render and verified again afterwards. Ordinary shipping frames do not allocate a readback buffer or issue an image copy. A platform whose present surface does not expose transfer-source usage reports the capture as unsupported without weakening the shipping Vulkan requirements.
 
-The screenshot mechanism provides reproducible resolution, scenario setup, pixel layout, and capture timing relative to the benchmark. It does not by itself approve a golden image: presentation and CSS animations may still be at different phases in wall-clock benchmark runs. Capture Title, Hangar, Launch, Flyby, Orbit, Surface Ops, and fixed-seed Mining with their matching scenario names on an approved machine, review those PNGs visually, then adopt them as references and compare fresh captures with a documented perceptual threshold. Keep the approved references and diff policy out of this performance report until that human acceptance pass is complete.
+The screenshot mechanism provides reproducible resolution, scenario setup, pixel layout, and capture timing relative to the benchmark. It does not by itself approve a golden image: presentation and CSS animations may still be at different phases in wall-clock benchmark runs. Capture Title, Hangar, physical Flight, orbital inspection, local Landing, deployment and fixed-seed Mining using available matching scenarios or manual setups on an approved machine, review those PNGs visually, then adopt them as references and compare fresh captures with a documented perceptual threshold. Keep the approved references and diff policy out of this performance report until that human acceptance pass is complete.
 
 Each report contains CPU/GPU/limiter distributions, queue-present return cadence and deadline misses, scene submissions, uploaded bytes, pipeline events, device memory, hardware identity, active refresh, and canonical initial/final gameplay-state hashes. CPU work excludes time deliberately blocked on frame retirement, FIFO swapchain acquisition, or an explicit software deadline; that time is reported as limiter/idle so Vulkan FIFO and OpenGL VSync runs remain comparable. Pipeline creation and texture initialization finish before the timed capture. Queue-present return cadence is a CPU-side pacing diagnostic, not proof of scanout timing; the 99% displayed-frame acceptance criterion requires runtime-supported presentation timing or an external frame-capture tool.
 
@@ -77,3 +79,5 @@ Physical Steam Deck acceptance is separate: repeat 1280x800 at Smooth 60, Balanc
 ## Frozen OpenGL baseline
 
 The native OpenGL backend is not part of shipping packages. If a preserved pre-migration baseline executable is available, run it only from its frozen build directory and label results `opengl`. The Vulkan-only executable deliberately rejects `--benchmark-renderer=opengl`.
+
+The `expedition-flight` visual fixture starts the Earth departure with the instruction acknowledged and Launch applied; the browser Earth Launch debug entry includes the instruction pause and held launch berth. Both are save-isolated fixtures.

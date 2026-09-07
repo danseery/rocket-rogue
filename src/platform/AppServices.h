@@ -100,6 +100,7 @@ struct RealtimeHudPatch {
 // screen is active. Element ids refer to stable nodes emitted by GamePanel;
 // changing screen structure uses setPanelPresentation().
 struct RealtimeHudState {
+    double surfaceFramingProgress = -1.0;
     std::vector<RealtimeHudPatch> patches;
 };
 

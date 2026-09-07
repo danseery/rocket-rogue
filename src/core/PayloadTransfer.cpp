@@ -4,6 +4,7 @@
 #include "core/GameState.h"
 #include "core/ScenarioSystem.h"
 #include "core/Tuning.h"
+#include "core/SystemContent.h"
 
 #include <algorithm>
 #include <string>
@@ -40,13 +41,18 @@ int materialCargoMass(const MaterialInventory& materials)
 
 int shipHoldCapacity(const GameState& state, const ContentCatalog&)
 {
-    constexpr int capacities[] {12, 16, 20, 24};
+    constexpr int capacities[] {60, 64, 68, 72};
     return capacities[std::clamp(state.meta.shipHoldRank, 0, 3)];
+}
+
+const MaterialInventory& shipHoldMaterials(const GameState& state)
+{
+    return state.run.expedition.travelInitialized ? state.run.expedition.cargo.materials : state.meta.materials;
 }
 
 int shipHoldUsed(const GameState& state)
 {
-    return materialCargoMass(state.meta.materials);
+    return materialCargoMass(shipHoldMaterials(state));
 }
 
 int shipHoldAvailable(const GameState& state, const ContentCatalog& catalog)
@@ -60,6 +66,10 @@ MaterialInventory activeContractMaterialNeed(
     std::string_view destinationId)
 {
     MaterialInventory need;
+    if (state.run.expedition.travelInitialized) {
+        const auto* body = systemBody(solarSystemDefinition(), state.run.expedition.location.bodyId);
+        if (!body || !body->authoredObjectives) return need;
+    }
     for (const ScenarioInstance& instance : state.meta.scenarios) {
         const ScenarioDefinition* authored = scenarioDefinitionForRuntimeId(
             state,
@@ -147,7 +157,7 @@ void applyPayloadTransferPlan(
     record("common", plan.toContract.common);
     record("rare", plan.toContract.rare);
     record("exotic", plan.toContract.exotic);
-    add(state.meta.materials, plan.toShipHold);
+    add(state.run.expedition.travelInitialized ? state.run.expedition.cargo.materials : state.meta.materials, plan.toShipHold);
 }
 
 bool validateCargoRequirements(const ContentCatalog& catalog, std::string* error)

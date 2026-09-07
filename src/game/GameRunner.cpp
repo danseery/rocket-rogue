@@ -248,6 +248,10 @@ void GameRunner::dispatchPendingHaptic()
     case ControllerHapticCue::Arrival:
         services_.host.haptic(0.180, 0.34, 0.62);
         break;
+    case ControllerHapticCue::Touchdown:
+        if (const double scale = app_.touchdownFeedbackScale(); scale > 0.001)
+            services_.host.haptic(0.180 * scale, 0.34, 0.62);
+        break;
     case ControllerHapticCue::LevelUp:
         services_.host.haptic(0.100, 0.25, 0.50);
         break;

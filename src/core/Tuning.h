@@ -224,12 +224,10 @@ inline constexpr double controlDampingChaosRelief = 0.55;
 inline constexpr double controlAutoTrimMinimum = 0.05;
 inline constexpr double controlAutoTrimChaosRelief = 0.20;
 
-inline constexpr double poweredHeatIdleInput = 0.010;
-// At Mars, an uninterrupted 60% qualification burn crosses the visible
-// warning and fails before returning home. Brief engine cuts are therefore
-// the taught skill, while low throttle remains a cooler skilled alternative.
-inline constexpr double poweredHeatThrottleInput = 0.280;
-inline constexpr double poweredHeatHazardInput = 0.018;
+// Moderate correction burns should leave room for manual orbit adjustment.
+inline constexpr double poweredHeatIdleInput = 0.005;
+inline constexpr double poweredHeatThrottleInput = 0.140;
+inline constexpr double poweredHeatHazardInput = 0.009;
 inline constexpr double poweredHeatCoolingBase = 0.020;
 inline constexpr double temperatureCriticalThreshold = 0.80;
 inline constexpr double temperatureWarningBlinkHz = 3.0;
@@ -612,7 +610,7 @@ inline constexpr double operatorToggleHoldSeconds = 0.60;
 inline constexpr double operatorSafeExitSearchRadiusCells = 2.25;
 inline constexpr double operatorIntegrityRepairCommonCost = 3.0;
 inline constexpr double operatorDrillRangeCells = 1.2;
-inline constexpr double operatorDrillPowerScale = 0.45;
+inline constexpr double operatorDrillPowerScale = 1.00;
 inline constexpr double operatorSidearmDamage = 2.4;
 inline constexpr double operatorSidearmRangeCells = 8.0;
 inline constexpr double operatorSidearmIntervalSeconds = 0.18;
@@ -828,6 +826,7 @@ inline constexpr double defenseDroneTrackingSlerpPerSecond(int upgradeLevel)
     return defenseDroneBaseTrackingSlerpPerSecond +
         static_cast<double>(std::clamp(upgradeLevel, 1, 3) - 1) * defenseDroneTrackingSlerpPerUpgrade;
 }
+inline constexpr double rigOreAttractionRadiusCells = 2.15;
 inline constexpr double resourceDroneCollectionRadiusCells = 2.05;
 inline constexpr double resourceDroneMinimumSpacingCells = 1.60;
 inline constexpr double resourceDroneCollectionEnterToleranceCells = 0.82;

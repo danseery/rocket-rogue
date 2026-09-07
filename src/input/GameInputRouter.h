@@ -18,6 +18,7 @@ enum class GameInputAction : std::size_t {
     StartOrContinue,
     ReturnHome,
     ToggleEngines,
+    ToggleCruise,
     DeploySurfaceTeam,
     ResumeOrbitalFlight,
     DepartSurfaceUndeployed,
@@ -156,9 +157,8 @@ public:
             result.moveY = preferences.invertFlightY ? frame.leftY : -frame.leftY;
             result.orbitalHeld = frame.down.test(static_cast<std::size_t>(ControllerButton::South));
             if (frame.wasPressed(ControllerButton::East)) add(GameInputAction::ResumeOrbitalFlight);
-            if (frame.wasPressed(ControllerButton::West)) {
-                add(GameInputAction::ToggleEngines);
-            }
+            if (frame.wasPressed(ControllerButton::LeftStick)) add(GameInputAction::ToggleCruise);
+            if (frame.wasPressed(ControllerButton::View)) add(GameInputAction::OpenMap);
             break;
 
         case InputContext::SurfaceArrival:

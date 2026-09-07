@@ -1,5 +1,7 @@
 # Mining Lock-and-Key Sites
 
+The [OREBIT Game Design Document](Rocket_Rogue_Game_Design_Document.docx) is the definitive design. This document supplies implementation detail and must agree with it. Story and progression decisions marked TBD are collected in GDD Section 8.
+
 This is the implementation contract for deterministic protected-objective site gates. `MiningProgression.cpp` is authoritative; campaign forecasts, Arena Lab, generation, runtime checks, saves, and tests consume the same typed rules. Scenario/site/cocoon authoring is specified in [SCENARIO_FRAMEWORK.md](SCENARIO_FRAMEWORK.md).
 
 ## Progression Contract
@@ -25,7 +27,7 @@ Act 1 uses at most one lock, Act 2 uses at most two, and Act 3 uses at most thre
 - `MiningGateDefinition` is the immutable contract: components, Hazard mark/affinity, player-facing key, and alternatives.
 - `MiningGateRuntime` owns discovery, shell cells, assigned enemies, scan markers, open/completed state, protected-objective identity, and soft-lock modifiers. Its compatibility-critical marker is set only while restoring a pre-scenario active gate.
 - `MiningCapabilityProfile` derives role marks and rig capability from equipped Support Drones, upgrades, crew, and ship. It is forecast-only and never changes arena difficulty.
-- Gate-associated cells and enemies serialize with the active arena. New authored and procedural sites are held by `ScenarioInstance` plus `MiningSiteDefinition`; active v18 runs resume their own persisted site state without reconstructing pre-scenario provenance.
+- Gate-associated cells and enemies serialize with the active arena. New authored and procedural sites are held by `ScenarioInstance` plus `MiningSiteDefinition`; active v21 runs resume their own persisted site state without reconstructing pre-scenario provenance.
 
 Scenario sites reuse their resolved request and protected-objective identity until the payload is physically delivered to the ship and survives Surface extraction. Abort, rig loss, payload destruction, emergency recall, and rough Surface extraction do not complete the site. Completion is credited by protected-objective identity, not by a destination or narrative tag.
 
@@ -51,7 +53,7 @@ Runtime progress stores the authored cocoon ID/version, protected objective, act
 
 ## Player and Debug Communication
 
-Surface Ops and Drone Ops show the upcoming gate, required capability, current loadout readiness, and alternatives. The mining HUD shows gate type/state. Gate cells pulse, locked artifacts use a seal ring, and triangulation origins use crosshair markers.
+Drone Ops and objective presentation describe known gates, required capability, loadout readiness and alternatives while respecting discovery rules. The mining HUD shows gate type/state. Gate cells pulse, locked artifacts use a seal ring, and triangulation uses a three-slice aura without exposing hidden signal coordinates.
 
 Arena Lab includes a gate override and prints the gate, requirement, and alternatives before launch. Debug HUD retains Act, level, seed, ruleset, and gate metadata. Debug runs remain save-ineligible.
 

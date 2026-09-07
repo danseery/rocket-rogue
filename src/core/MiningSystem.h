@@ -90,9 +90,11 @@ struct SurfaceLandingBuildRequest {
     std::string scenarioStepId;
     std::string miningSiteDefinitionId;
     std::string zoneId = "zone_1";
+    bool allowScenarioObjectives = true;
 };
 
-struct PreparedSurfaceLanding {
+struct PreparedSurfaceLanding : OrbitalSiteProgress {
+    std::string systemId, bodyId, persistentSiteId;
     std::uint64_t preparationKey = 0;
     SurfaceLandingBuildRequest request;
     PlanetaryExpeditionState expeditionTemplate;
@@ -105,14 +107,6 @@ struct PreparedSurfaceLanding {
     std::string error;
     // Session-only orbital preparation. Modified terrain already uses the
     // existing Mining layer persistence when the landing is committed.
-    std::vector<OrbitalSurveyLayer> surveyLayers;
-    int surveyedDepth = -1;
-    int laserDepth = 0;
-    int laserRow = 0;
-    int shaftX = 0;
-    double laserRowWork = 0.0;
-    bool laserBlocked = false;
-    bool laserComplete = false;
 };
 
 bool prepareOrbitalSurvey(const GameState&, const ContentCatalog&, PreparedSurfaceLanding&, int depth);
@@ -127,6 +121,8 @@ bool preparedSurfaceLandingCurrent(
     const GameState& state,
     const ContentCatalog& catalog,
     const PreparedSurfaceLanding& prepared);
+PreparedSurfaceLanding restoreSurfaceLanding(const GameState&, const ContentCatalog&,
+    const SurfaceLandingBuildRequest&, const PersistentSiteState&);
 bool commitPreparedSurfaceLanding(
     GameState& state,
     PreparedSurfaceLanding&& prepared,
@@ -267,7 +263,11 @@ void setMiningOperatorToggleProgress(GameState& state, double progress);
 bool toggleMiningOperator(GameState& state);
 MiningTetherTargetResolution resolveMiningTetherTarget(const MiningRunState& mining);
 void toggleMiningTether(GameState& state);
-void pulseMiningScanner(GameState& state, const ContentCatalog& catalog);
+struct MiningScannerResult {
+    bool pulsed = false;
+    std::string discoveredObjectiveId;
+};
+MiningScannerResult pulseMiningScanner(GameState& state, const ContentCatalog& catalog);
 bool repairMiningOperator(GameState& state);
 void updateMiningRun(GameState& state, const ContentCatalog& catalog, double deltaSeconds);
 SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& catalog, bool abort);

@@ -1,4 +1,6 @@
+#include "core/RigGeometry.h"
 #include "render/SceneComposer.h"
+#include "core/ExpeditionSystem.h"
 
 #include "core/FlightInstrumentLayout.h"
 #include "core/SurfaceBayTiming.h"
@@ -14,6 +16,8 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -61,8 +65,8 @@ constexpr float kLaunchThrustMinimumWidthScale = 0.72F;
 // can be anchored to the moving nozzle without an inferred texture offset.
 constexpr float kThrustSheetLeadingTransparentShare = 0.27F;
 constexpr float kMiningShipExhaustNozzleShare = 0.465F;
-constexpr float kMiningRigSpriteCells = 3.25F;
-constexpr float kMiningRigIdleDrillCells = 2.30F;
+constexpr float kMiningRigSpriteCells = static_cast<float>(rig_geometry::spriteSize);
+constexpr float kMiningRigIdleDrillCells = static_cast<float>(rig_geometry::drillSpriteLength);
 constexpr float kMiningSupportDroneSpriteCells = 1.50F;
 // The bottom dock produces a deliberately shallow scene. The local-system
 // backdrop reaches roughly 1.75 world units below center (the large authored
@@ -71,6 +75,7 @@ constexpr float kMiningSupportDroneSpriteCells = 1.50F;
 constexpr float kBottomDockSceneViewportPadding = 0.56F;
 constexpr float kMiningLightRadiusCells = 2.15F;
 constexpr float kMiningScannerExpandSeconds = 0.34F;
+constexpr double kOuterOrbitGuideRadius = 1.20;
 constexpr float kMiningScannerFadeSeconds = 0.30F;
 constexpr float kMiningScannerWavefrontCells = 0.65F;
 constexpr float kMiningPickupTextLifetimeSeconds = 2.0F;
@@ -327,7 +332,8 @@ struct MiningViewTransform {
 MiningViewTransform miningViewTransform(
     const RenderSnapshot& snapshot,
     float sceneAspect,
-    float normalViewBlend)
+    float normalViewBlend,
+    const SurfaceCameraPresentation* surface = nullptr)
 {
     MiningViewTransform result;
     result.left = -sceneAspect;
@@ -359,15 +365,20 @@ MiningViewTransform miningViewTransform(
     result.cellHeight = std::lerp(arrivalCellHeight, normalCellHeight, blend);
     result.top = std::lerp(arrivalTop, normalTop + snapshot.miningFrameTopRow*normalCellHeight, blend);
     result.bottom = result.top - static_cast<float>(height) * result.cellHeight;
+    if (surface && surface->active) {
+        result.left = surface->left;
+        result.right = result.left + width * surface->cellWidth;
+        result.top = surface->top;
+        result.bottom = result.top - height * surface->cellHeight;
+        result.cellWidth = surface->cellWidth;
+        result.cellHeight = surface->cellHeight;
+    }
     return result;
 }
 
-float miningShuttleSize(const RenderSnapshot& snapshot, const MiningViewTransform& view)
+float miningShuttleSize(const RenderSnapshot&, const MiningViewTransform& view)
 {
-    const float cellSize = std::min(view.cellWidth, view.cellHeight);
-    const float groundY = view.top - static_cast<float>(snapshot.miningReturnZoneY) * view.cellHeight;
-    return std::min(cellSize * 8.50F, std::max(cellSize * 7.25F,
-        (view.top - groundY - view.cellHeight * 0.85F) / 0.955F));
+    return std::min(view.cellWidth, view.cellHeight) * 8.50F;
 }
 
 struct RouteCurve {
@@ -632,6 +643,48 @@ FlightCameraView physicalFlightCamera(
         result.transfer.rotation
     };
     result.camera = blendCamera(result.transfer, orbitCamera, result.approachBlend);
+    if (snapshot.systemTravel) {
+        const auto& g = snapshot.flightGuidance;
+        const auto* frameBody = snapshot.systemLocation.frame == CoordinateFrame::Body
+            ? systemBody(solarSystemDefinition(),snapshot.systemLocation.bodyId) : nullptr;
+        const bool local = frameBody && !frameBody->dock;
+        const SystemVector focus = local ? SystemVector{} : g.targetPosition;
+        const double dx = snapshot.launchPositionX-focus.x, dy = snapshot.launchPositionY-focus.y;
+        const double range = std::hypot(dx,dy);
+        const double fitRange = std::min(range,5.0);
+        const double fraction = range > .001 ? fitRange/range : 0;
+        // Keep a bounded target-facing view, then blend into the established
+        // body-centered orbit camera. Distant targets use an edge marker.
+        const Vec2 center {static_cast<float>(snapshot.launchPositionX-dx*fraction*.5),
+            static_cast<float>(snapshot.launchPositionY-dy*fraction*.5)};
+        const float scale = static_cast<float>(std::clamp(1.45/(fitRange+.70),.25,.90));
+        // Earth below-left and Moon above-right use their real system positions.
+        constexpr float departureRotation = kPi / 3.0F;
+        result.transfer = {center,{0,0},scale,departureRotation};
+        if (frameBody && frameBody->id == "earth" && g.targetId == "moon") {
+            // Fill the launch view, then ease back to travel framing on departure.
+            const float launchBlend = 1.0F - smootherstep(static_cast<float>(
+                std::clamp((radius - .80) / (frameBody->influenceRadius * 1.1 - .80), 0.0, 1.0)));
+            auto launchCamera = result.transfer;
+            launchCamera.scale *= 1.8F;
+            const auto earth = launchCamera.point(0, 0);
+            const auto moon = launchCamera.point(g.targetPosition.x, g.targetPosition.y);
+            const float earthExtent = static_cast<float>(frameBody->radius * 1.25) * launchCamera.scale;
+            const float moonExtent = static_cast<float>(outerOrbitRadius) * launchCamera.scale;
+            const float left = std::min(earth.x-earthExtent, moon.x-moonExtent);
+            const float right = std::max(earth.x+earthExtent, moon.x+moonExtent);
+            const float bottom = std::min(earth.y-earthExtent, moon.y-moonExtent);
+            const float top = std::max(earth.y+earthExtent, moon.y+moonExtent);
+            const float fit = std::min(1.0F, 2.20F / std::max(right-left, top-bottom));
+            launchCamera.scale *= fit;
+            launchCamera.anchor = {-(left+right)*.5F*fit, -(bottom+top)*.5F*fit};
+            result.transfer = blendCamera(result.transfer, launchCamera, launchBlend);
+        }
+        const Camera2D bodyCamera {{static_cast<float>(focus.x),static_cast<float>(focus.y)},
+            {0,.20F},outerOrbitScreenRadius/static_cast<float>(outerOrbitRadius),departureRotation};
+        const float blend = local ? smootherstep(static_cast<float>(std::clamp((1.42-range)/.90,0.0,1.0))) : 0;
+        result.camera = blendCamera(result.transfer,bodyCamera,blend);
+    }
 
     double landingBlend = snapshot.launchLandingBlend;
     if (!std::isfinite(landingBlend) || landingBlend < 0.0) {
@@ -1725,9 +1778,7 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
         static_cast<int>(cssWidth),
         static_cast<int>(cssHeight),
         surface);
-    const float miningLayoutBlend = snapshot.surfaceArrivalPhase == 4
-        ? smootherstep((static_cast<float>(snapshot.surfaceArrivalProgress) - 0.38F) / 0.49F)
-        : 0.0F;
+    const float miningLayoutBlend = smootherstep(static_cast<float>(snapshot.surfaceFramingProgress));
     if (miningLayoutBlend > 0.0F) {
         const UiRect miningRect = resolveUiViewportLayout(
             static_cast<int>(cssWidth), static_cast<int>(cssHeight), UiSurfaceKind::Mining).sceneRect;
@@ -1755,7 +1806,7 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
     const float baseScenePadding = surface == UiSurfaceKind::Mining
         ? 1.0F
         : (layout.layoutClass == UiLayoutClass::BottomDock
-            ? kBottomDockSceneViewportPadding
+            ? (snapshot.systemTravel && snapshot.screen == Screen::Flight ? kSceneViewportPadding : kBottomDockSceneViewportPadding)
             : kSceneViewportPadding);
     const float scenePadding = std::lerp(baseScenePadding, 1.0F, miningLayoutBlend);
     sceneWorldUnit_ = std::max(
@@ -1772,6 +1823,91 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
     sceneWorldUnitX_ = sceneWorldUnit_;
     sceneWorldUnitY_ = sceneWorldUnit_;
     sceneAspect_ = std::max(0.10F, sceneWidthPixels / sceneHeightPixels);
+    const bool surfaceActive = snapshot.screen == Screen::Mining ||
+        (snapshot.surfaceArrivalPrepared && snapshot.launchLandingLocalFrame);
+    if (surfaceActive && snapshot.miningWidth > 0 && snapshot.miningHeight > 0) {
+        const bool wasActive = surfaceCamera_.active;
+        const double now = presentationTimeSeconds_ >= 0.0 ? presentationTimeSeconds_ : snapshot.animationTime;
+        const double dt = wasActive && now >= surfaceCamera_.lastTime
+            ? std::clamp(now - surfaceCamera_.lastTime, 0.0, 0.1) : 0.0;
+        const double followBlend = 1.0 - std::exp(-8.0 * dt);
+        surfaceCamera_.lastTime = now;
+        surfaceCamera_.active = true;
+        surfaceCamera_.viewport = layout.sceneRect;
+        surfaceCamera_.progress = snapshot.screen == Screen::Mining ? 1.0F : miningLayoutBlend;
+        const auto normal = miningViewTransform(snapshot, sceneAspect_, 1.0F);
+        float cw = std::min(normal.cellWidth, normal.cellHeight) * 1.25F, ch = cw;
+        const double shipGridX = snapshot.launchLandingPadX + .5 +
+            snapshot.launchLandingHorizontalPosition / flight_landing::metersPerCell;
+        const double shipFootY = snapshot.launchLandingPadY -
+            snapshot.launchLandingAltitude / flight_landing::metersPerCell;
+        double padX = snapshot.miningReturnZoneX + .5;
+        double padY = snapshot.miningReturnZoneY;
+        if (snapshot.screen == Screen::Flight && !snapshot.surfaceArrivalActive) {
+            // Frame the actual local floor, including excavated underground bays.
+            // This is only a camera interest point; collision owns touchdown.
+            const int column = std::clamp(static_cast<int>(shipGridX), 0, snapshot.miningWidth-1);
+            for (int row = std::max(0, static_cast<int>(std::ceil(shipFootY))); row < snapshot.miningHeight; ++row) {
+                const auto index = static_cast<std::size_t>(row*snapshot.miningWidth+column);
+                if (index < snapshot.miningCells.size() && miningMaterialSolid(snapshot.miningCells[index].material)) {
+                    padX = shipGridX; padY = row; break;
+                }
+            }
+        }
+        double focusX = padX, focusY = padY;
+        if (snapshot.screen == Screen::Mining) {
+            const double actorX = snapshot.miningOperatorActive ? snapshot.miningOperatorX : snapshot.miningDroneX;
+            const double actorY = snapshot.miningOperatorActive ? snapshot.miningOperatorY : snapshot.miningDroneY;
+            if (!wasActive || surfaceCamera_.frameTopRow != snapshot.miningFrameTopRow) {
+                surfaceCamera_.followX = padX + std::copysign(std::max(0.0, std::abs(actorX-padX)-6.0), actorX-padX);
+                surfaceCamera_.followY = padY + std::copysign(std::max(0.0, std::abs(actorY-padY)-7.0), actorY-padY);
+            }
+            const double dx = actorX - surfaceCamera_.followX;
+            const double dy = actorY - surfaceCamera_.followY;
+            // A grid-space dead zone lets deployment finish without pulling the camera.
+            const double targetX = surfaceCamera_.followX + std::copysign(std::max(0.0,std::abs(dx)-6.0),dx);
+            const double targetY = surfaceCamera_.followY + std::copysign(std::max(0.0,std::abs(dy)-7.0),dy);
+            surfaceCamera_.followX = std::lerp(surfaceCamera_.followX,targetX,followBlend);
+            surfaceCamera_.followY = std::lerp(surfaceCamera_.followY,targetY,followBlend);
+            focusX = surfaceCamera_.followX; focusY = surfaceCamera_.followY;
+            // Keep the full parked ship clear of the HUD while working beside it.
+            if (snapshot.miningShipPresent && focusY > padY) {
+                const float away = smootherstep(static_cast<float>(std::clamp(
+                    (std::max(std::abs(actorX-padX), std::abs(actorY-padY))-12.0)/16.0, 0.0, 1.0)));
+                focusY = std::lerp(padY, focusY, static_cast<double>(away));
+            }
+
+        } else { surfaceCamera_.followX = padX; surfaceCamera_.followY = padY; }
+        surfaceCamera_.frameTopRow = snapshot.miningFrameTopRow;
+        const double lateralCells = snapshot.screen == Screen::Flight && !snapshot.surfaceArrivalActive ? shipGridX-padX : 0.0;
+        if (snapshot.screen == Screen::Flight) focusX += lateralCells * .5;
+        const float available = std::max(1.0F,sceneHeightPixels-40.0F);
+        const float altitudeCells = snapshot.screen == Screen::Flight
+            ? static_cast<float>(std::max(0.0, padY - shipFootY)) : 0.0F;
+        const float shipHeight = std::min(cw,ch)*8.5F;
+        const float fit = std::min(std::min(1.0F, (sceneWidthPixels*.8F-24.0F) /
+            std::max(1.0F, (static_cast<float>(std::abs(lateralCells))*cw+shipHeight)*sceneWorldUnit_)),(available*.70F-24.0F)/
+            std::max(1.0F,(altitudeCells*ch+shipHeight)*sceneWorldUnit_));
+        cw *= fit; ch *= fit;
+        const float clearance = (altitudeCells*ch + std::min(cw,ch)*8.5F)*sceneWorldUnit_+24.0F;
+        const float padPixels = 40.0F + std::max(available*.28F,clearance);
+        surfaceCamera_.cellWidth = cw; surfaceCamera_.cellHeight = ch;
+        surfaceCamera_.left = -static_cast<float>(focusX)*cw;
+        surfaceCamera_.top = (sceneHeightPixels*.5F-padPixels)/sceneWorldUnit_ + static_cast<float>(focusY)*ch;
+        if (surfaceCamera_.progress < 1.0F) {
+            auto old = miningViewTransform(snapshot,sceneAspect_,0.0F);
+            const auto anchor = physicalSurfaceContactPoint(snapshot,flightCameraPresentation_.approachBlend);
+            const auto oldShip = old.cellCenter(snapshot.miningReturnZoneX,padY);
+            old.left += anchor.x-oldShip.x;
+            old.top += anchor.y-(old.top-static_cast<float>(padY)*old.cellHeight+miningShuttleSize(snapshot,old)*.455F);
+            const float t = surfaceCamera_.progress;
+            surfaceCamera_.left = std::lerp(old.left,surfaceCamera_.left,t);
+            surfaceCamera_.top = std::lerp(old.top,surfaceCamera_.top,t);
+            surfaceCamera_.cellWidth = std::lerp(old.cellWidth,cw,t);
+            surfaceCamera_.cellHeight = std::lerp(old.cellHeight,ch,t);
+        }
+    } else { surfaceCamera_ = {}; }
+    packet_.surfaceCamera = surfaceCamera_;
     const bool cameraShakeEnabled = cameraShakeEnabled_;
     const float launchShake = cameraShakeEnabled ? static_cast<float>(std::clamp(snapshot.launchShake, 0.0, 1.0)) : 0.0F;
     if (launchShake > 0.0F) {
@@ -1779,12 +1915,13 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
         scenePixelCenterX_ += std::sin(static_cast<float>(snapshot.animationTime) * 72.0F) * shake * 7.0F;
         scenePixelCenterY_ += std::cos(static_cast<float>(snapshot.animationTime) * 61.0F) * shake * 5.0F;
     }
-    if (cameraShakeEnabled && snapshot.launchTouchdownCelebration) {
+    if (cameraShakeEnabled && snapshot.launchTouchdownCelebration && snapshot.launchTouchdownFeedbackScale > 0.001) {
         const float age = static_cast<float>(snapshot.launchTouchdownCelebrationProgress * 2.0);
-        const float envelope = 1.0F - std::clamp(age / 0.62F, 0.0F, 1.0F);
-        const float impact = envelope * envelope * (snapshot.surfaceArrivalHardLanding ? 1.45F : 1.0F);
-        scenePixelCenterX_ += std::sin(age * 89.0F) * impact * 8.5F;
-        scenePixelCenterY_ += std::cos(age * 73.0F) * impact * 5.8F;
+        const float duration = 0.36F * static_cast<float>(snapshot.launchTouchdownFeedbackScale);
+        const float envelope = 1.0F - std::clamp(age / duration, 0.0F, 1.0F);
+        const float impact = envelope * envelope * (snapshot.surfaceArrivalHardLanding ? 1.25F : 1.0F);
+        scenePixelCenterX_ += std::sin(age * 89.0F) * impact * 5.0F;
+        scenePixelCenterY_ += std::cos(age * 73.0F) * impact * 3.2F;
     }
     if (cameraShakeEnabled && snapshot.surfaceArrivalPhase == 4) {
         const float rigImpactAge = static_cast<float>(snapshot.surfaceArrivalProgress) - 0.40F;
@@ -3137,7 +3274,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             : 0.0F;
         if (snapshot.manualAscentCameraProgress<1.0)
             normalViewBlend=1.0F-smootherstep(static_cast<float>(snapshot.manualAscentCameraProgress));
-        const MiningViewTransform preview = miningViewTransform(snapshot, sceneAspect_, normalViewBlend);
+        const MiningViewTransform preview = miningViewTransform(snapshot, sceneAspect_, normalViewBlend, &surfaceCamera_);
         const float previewGroundY = preview.top -
             static_cast<float>(snapshot.miningReturnZoneY) * preview.cellHeight;
         const float previewShipSize = miningShuttleSize(snapshot, preview);
@@ -3148,6 +3285,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         const Vec2 flightShip = physicalSurfaceContactPoint(snapshot, approachBlend);
         miningViewOffsetX = (flightShip.x - normalShip.x) * (1.0F - normalViewBlend);
         miningViewOffsetY = (flightShip.y - normalShip.y) * (1.0F - normalViewBlend);
+        if (surfaceCamera_.active) miningViewOffsetX = miningViewOffsetY = 0.0F;
     }
     drawOpacity_ = previousOpacity * arrivalOpacity;
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.0F, 0.0F, 0.0F, 1.0F}, false);
@@ -3156,7 +3294,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         return;
     }
 
-    const MiningViewTransform view = miningViewTransform(snapshot, sceneAspect_, normalViewBlend);
+    const MiningViewTransform view = miningViewTransform(snapshot, sceneAspect_, normalViewBlend, &surfaceCamera_);
     const float left = view.left;
     const float right = view.right;
     const float top = view.top;
@@ -3404,6 +3542,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         snapshot.miningGeologySeed,
         sceneAspect_,
         top,
+        left,
         cellH,
         miningViewOffsetX,
         miningViewOffsetY,
@@ -3514,6 +3653,37 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         }
         miningBackdropFogInstanceCount_ =
             static_cast<std::uint32_t>(packedMiningTerrainInstances_.size());
+
+        // Continue the solid boundary beyond the finite site, using the same
+        // square tiles. Only visible columns are submitted as the camera follows.
+        const int visibleLeft = static_cast<int>(std::floor((-sceneAspect_-left-miningViewOffsetX)/cellW))-1;
+        const int visibleRight = static_cast<int>(std::ceil((sceneAspect_-left-miningViewOffsetX)/cellW))+1;
+        const int visibleTop = std::max(0, static_cast<int>(std::floor((top+miningViewOffsetY-1.0F)/cellH))-1);
+        const int visibleBottom = std::min(snapshot.miningHeight-1,
+            static_cast<int>(std::ceil((top+miningViewOffsetY+1.0F)/cellH))+1);
+        for (int y=visibleTop; y<=visibleBottom; ++y) {
+            for (int x=visibleLeft; x<=visibleRight; ++x) {
+                if (x>=0 && x<snapshot.miningWidth) continue;
+                const int edgeX=x<0 ? 0 : snapshot.miningWidth-1;
+                const auto edgeIndex=static_cast<std::size_t>(y*snapshot.miningWidth+edgeX);
+                if (edgeIndex>=snapshot.miningCells.size() ||
+                    !miningMaterialSolid(snapshot.miningCells[edgeIndex].material)) continue;
+                const auto center=cellCenter(x,y);
+                const int frame=miningTileFrame(MiningCellMaterial::Bedrock,
+                    snapshot.miningCells[edgeIndex].hazardAffinity,x,y,
+                    snapshot.destinationTier,snapshot.miningGeologySeed);
+                const auto uv=mapSceneAtlasUvRect(tileTexture,
+                    static_cast<float>(frame)/kMiningTileFrameCount,
+                    postSolarTiles ? static_cast<float>(snapshot.miningPostSolarGeologyRow)/kPostSolarMiningGeologyRows : 0.0F,
+                    static_cast<float>(frame+1)/kMiningTileFrameCount,
+                    postSolarTiles ? static_cast<float>(snapshot.miningPostSolarGeologyRow+1)/kPostSolarMiningGeologyRows : 1.0F);
+                if (texturedTiles && uv.valid && uv.page==tileAtlas.page)
+                    appendTerrainRect(center.x,center.y,cellW*1.002F,cellH*1.002F,
+                        {0.72F,0.72F,0.72F,1.0F},uv.u0,uv.v0,uv.u1,uv.v1,true);
+                else appendTerrainRect(center.x,center.y,cellW*1.002F,cellH*1.002F,
+                    {0.18F,0.20F,0.23F,1.0F});
+            }
+        }
 
         for (std::size_t index = 0; index < renderedCellCount; ++index) {
             const MiningCell& cell = snapshot.miningCells[index];
@@ -3703,11 +3873,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
     // The packed bay sprites leave a little transparent margin below the exhaust,
     // so their visible foot sits well below the texture center.
     const float shipVisibleFootShare = 0.455F;
-    const float desiredShipSpriteSize = cellSize * 8.50F;
-    const float maxShipSpriteSize = std::max(
-        cellSize * 7.25F,
-        (top - shipGroundY - cellH * 0.85F) / (0.5F + shipVisibleFootShare));
-    const float shipSpriteSize = std::min(desiredShipSpriteSize, maxShipSpriteSize);
+    const float shipSpriteSize = miningShuttleSize(snapshot, view);
     const float shipVisibleFootOffset = shipSpriteSize * shipVisibleFootShare;
     const float shipSpriteY = shipGroundY + shipVisibleFootOffset +
         (snapshot.manualSurfaceDeparture ? 0.0F : extractionLaunch * (top - shipGroundY + shipSpriteSize * 0.45F));
@@ -4219,8 +4385,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         miningVisualRecoilY_ += (targetVisualRecoil.y - miningVisualRecoilY_) * recoilResponse;
     }
     Vec2 drone = gridPoint(snapshot.miningDroneX, snapshot.miningDroneY);
-    drone.x += miningVisualRecoilX_ * cellW;
-    drone.y -= miningVisualRecoilY_ * cellH;
+    // Physical artwork stays on the accepted pose; recoil remains an effects cue.
     Vec2 operatorPosition = gridPoint(snapshot.miningOperatorX, snapshot.miningOperatorY);
     const float evaDeathProgress = static_cast<float>(
         std::clamp(snapshot.miningEvaDeathProgress, 0.0, 1.0));
@@ -4501,23 +4666,16 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         static_cast<float>(snapshot.miningHullDirX) * cellW,
         -static_cast<float>(snapshot.miningHullDirY) * cellH
     });
-    if (!miningVisualHeadingInitialized_ || elapsed <= 0.0 || elapsed > 0.25) {
-        miningVisualHeadingX_ = targetHullDirection.x;
-        miningVisualHeadingY_ = targetHullDirection.y;
-        miningVisualHeadingInitialized_ = true;
-    } else {
-        const float response = 1.0F - std::exp(-static_cast<float>(tuning::mining::visualHeadingSlerpPerSecond * elapsed));
-        const Vec2 smoothed = slerpDirection({miningVisualHeadingX_, miningVisualHeadingY_}, targetHullDirection, response);
-        miningVisualHeadingX_ = smoothed.x;
-        miningVisualHeadingY_ = smoothed.y;
-    }
+    miningVisualHeadingX_ = targetHullDirection.x;
+    miningVisualHeadingY_ = targetHullDirection.y;
+    miningVisualHeadingInitialized_ = true;
     miningVisualHeadingTime_ = visualHeadingTime;
     const Vec2 hullDirection {miningVisualHeadingX_, miningVisualHeadingY_};
     const Vec2 operatorAimDirection = normalize({
         static_cast<float>(snapshot.miningOperatorAimX) * cellW,
         -static_cast<float>(snapshot.miningOperatorAimY) * cellH
     });
-    // The rig bit is a physical part of the recoil-adjusted rig sprite. Do
+    // The rig bit is a physical part of the accepted rig pose. Do
     // not source it from the logical active-actor anchor: that anchor drives
     // swarm and support effects, but intentionally does not include visual
     // contact recoil.
@@ -5126,7 +5284,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             std::clamp(snapshot.miningScannerRechargeProgress, 0.0, 1.0));
         const bool operatorActive = snapshot.miningOperatorPresent && snapshot.miningOperatorActive;
         const Vec2 pulseCenter = operatorActive ? operatorPosition : drone;
-        const float pulseRadius = (operatorActive ? operatorSize : droneSize) * 0.68F;
+        const float pulseRadius = operatorActive ? operatorSize * 0.68F
+            : cellW * static_cast<float>(snapshot.miningOreAttractionRadius);
         constexpr Color pulseTrack {0.025F, 0.14F, 0.18F, 0.72F};
         constexpr Color pulseCyan {0.18F, 0.96F, 1.0F, 0.96F};
         drawEllipseLine(
@@ -5312,10 +5471,16 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             snapshot.miningOperatorActive
                 ? tuning::mining::operatorColliderRadiusCells
                 : tuning::mining::rigColliderRadiusCells);
-        const Vec2 contactPoint {
+        Vec2 contactPoint {
             collisionCenter.x + collisionDirection.x * colliderRadius * cellW,
             collisionCenter.y + collisionDirection.y * colliderRadius * cellH
         };
+        if (!snapshot.miningOperatorActive && snapshot.rigContactX >= 0) {
+            // Anchor feedback to the contacted terrain face, including tip hits.
+            const auto cell = cellCenter(snapshot.rigContactX,snapshot.rigContactY);
+            contactPoint = {std::clamp(contactPoint.x,cell.x-cellW*.5F,cell.x+cellW*.5F),
+                std::clamp(contactPoint.y,cell.y-cellH*.5F,cell.y+cellH*.5F)};
+        }
         const float pulse = 0.78F + 0.22F * std::sin(static_cast<float>(snapshot.animationTime) * 48.0F);
         const float alpha = collisionIndicator * (0.62F + 0.30F * pulse);
         const float halfBarrier = cellSize * (0.32F + 0.12F * (1.0F - collisionIndicator));
@@ -5536,17 +5701,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
 
     if (!snapshot.miningExtractionActive &&
         snapshot.miningRigPresent &&
-        !snapshot.miningOperatorActive &&
-        !snapshot.miningRigDisabled &&
-        textureReady(DrillBitAsset) &&
-        !drillBroken) {
+        textureReady(DrillBitAsset)) {
         float drillH = cellSize * kMiningRigIdleDrillCells;
-        if (snapshot.miningTargetDrillable) {
-            const float dx = target.x - drillOrigin.x;
-            const float dy = target.y - drillOrigin.y;
-            const float contactDistance = std::max(0.0F, dx * drillDirection.x + dy * drillDirection.y);
-            drillH = std::clamp(contactDistance + cellSize * 0.55F, drillH, cellSize * 3.75F);
-        }
         const float drillW = drillH * 0.88F;
         const Vec2 bitCenter {
             drillOrigin.x + drillDirection.x * drillH * 0.5F,
@@ -5556,7 +5712,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             drillOrigin.x + drillDirection.x * drillH,
             drillOrigin.y + drillDirection.y * drillH
         };
-        const int drillFrame = snapshot.miningDrilling ? static_cast<int>(snapshot.animationTime * 18.0) % 6 : 0;
+        const int drillFrame = snapshot.miningDrilling && !snapshot.miningOperatorActive && !snapshot.miningRigDisabled && !drillBroken
+            ? static_cast<int>(snapshot.animationTime * 18.0) % 6 : 0;
         drawSpriteRotated(
             bitCenter.x,
             bitCenter.y,
@@ -5568,6 +5725,24 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             DrillBitAsset,
             drillFrame,
             6);
+    }
+    if ((rigCollisionDebug_ || snapshot.debugSessionActive) && snapshot.miningRigPresent && !snapshot.miningExtractionActive) {
+        const auto center=gridPoint(snapshot.miningDroneX,snapshot.miningDroneY);
+        drawEllipseLine(center.x,center.y,cellW*rig_geometry::bodyRadius,cellH*rig_geometry::bodyRadius,
+            {1,.85F,.15F,.95F},48,0,2*kPi);
+        const auto triangle=rig_geometry::triangle(snapshot.miningDroneX,snapshot.miningDroneY,
+            snapshot.miningHullDirX,snapshot.miningHullDirY);
+        for(int i=0;i<3;++i) {
+            const auto a=gridPoint(triangle[i].x,triangle[i].y),b=gridPoint(triangle[(i+1)%3].x,triangle[(i+1)%3].y);
+            drawLine(a.x,a.y,b.x,b.y,{1,.85F,.15F,.95F},2);
+        }
+        if(snapshot.miningContactIndicatorSeconds>0 && snapshot.rigContactX>=0) {
+            const auto c=gridPoint(snapshot.rigContactX+.5,snapshot.rigContactY+.5);
+            const Color color=snapshot.rigContactPassage ? Color{1,.2F,1,.5F}:Color{1,.3F,.1F,.5F};
+            drawRect(c.x,c.y,cellW,cellH,color);
+            drawLine(c.x,c.y,c.x+snapshot.rigContactNormalX*cellW*2,
+                c.y-snapshot.rigContactNormalY*cellH*2,{1,1,1,1},2);
+        }
     }
     if (!snapshot.miningExtractionActive &&
         snapshot.miningOperatorActive &&
@@ -5636,8 +5811,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             const float angle = static_cast<float>(i) * 1.73F + t * kPi * 2.0F;
             const float failureScale = static_cast<float>(snapshot.miningFailurePulse);
             const float radius = (0.2F + t * (0.9F + static_cast<float>(snapshot.miningContactIntensity) * 0.7F + failureScale * 1.3F)) * std::min(cellW, cellH);
-            const float px = particleAnchor.x + std::cos(angle) * radius;
-            const float py = particleAnchor.y + std::sin(angle) * radius;
+            const float px = particleAnchor.x + std::cos(angle) * radius + miningVisualRecoilX_ * cellW * t * .15F;
+            const float py = particleAnchor.y + std::sin(angle) * radius - miningVisualRecoilY_ * cellH * t * .15F;
             const Color spark = snapshot.miningFailurePulse > 0.0
                 ? mix({1.0F, 0.18F, 0.08F, 0.95F}, {1.0F, 0.78F, 0.22F, 0.20F}, t)
                 : mix({1.0F, 0.82F, 0.28F, 0.95F}, {0.72F, 0.48F, 0.34F, 0.15F}, t);
@@ -5803,10 +5978,10 @@ void SceneComposer::drawSurfaceArrival(const RenderSnapshot& snapshot)
     constexpr int takingOffPhase = 5;
     const float deploymentProgress = static_cast<float>(
         std::clamp(snapshot.surfaceArrivalProgress, 0.0, 1.0));
-    const float follow = snapshot.surfaceArrivalPhase == deployingPhase
+    const float follow = surfaceCamera_.active ? 1.0F : snapshot.surfaceArrivalPhase == deployingPhase
         ? smootherstep((deploymentProgress - 0.38F) / 0.49F)
         : 0.0F;
-    const MiningViewTransform view = miningViewTransform(snapshot, sceneAspect_, follow);
+    const MiningViewTransform view = miningViewTransform(snapshot, sceneAspect_, follow, &surfaceCamera_);
     const float top = view.top;
     const float cellW = view.cellWidth;
     const float cellH = view.cellHeight;
@@ -6991,18 +7166,41 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
     if (snapshot.screen == Screen::Flight && snapshot.launchPhysicalFlight) {
         const float approachBlend = flightCameraPresentation_.approachBlend;
         const FlightCameraView view = physicalFlightCamera(snapshot, approachBlend);
-        const Vec2 center = physicalFlightPoint(snapshot, 0.0, 0.0, approachBlend);
+        const auto orbitPosition = snapshot.systemTravel ? snapshot.flightGuidance.orbitPosition : SystemVector{};
+        const Vec2 center = physicalFlightPoint(snapshot, orbitPosition.x, orbitPosition.y, approachBlend);
         const float localScale = view.camera.scale;
         const float target = static_cast<float>(snapshot.launchOrbitTargetRadius) * localScale;
         const float band = static_cast<float>(snapshot.launchOrbitGoodBand) * localScale;
+        // Visual guidance for wide playable orbits; physics owns qualification.
+        const float outerRadius = static_cast<float>(kOuterOrbitGuideRadius) * localScale;
         const Color orbitColor = snapshot.launchOrbitCaptured
             ? Color{0.34F, 1.0F, 0.66F, 0.78F * (1.0F - view.landingBlend)}
             : Color{0.36F, 0.82F, 1.0F, 0.52F * (1.0F - view.landingBlend)};
-        drawEllipseLine(center.x, center.y, target - band, target - band, orbitColor, 72, 0.0F, 2.0F * kPi);
-        drawEllipseLine(center.x, center.y, target + band, target + band, orbitColor, 72, 0.0F, 2.0F * kPi);
-        if (!snapshot.launchLandingLocalFrame) {
+        if (!snapshot.systemTravel || !snapshot.flightGuidance.orbitBodyId.empty()) {
+            drawEllipseLine(center.x, center.y, target - band, target - band, orbitColor, 72, 0.0F, 2.0F * kPi);
+            drawEllipseLine(center.x, center.y, outerRadius, outerRadius, orbitColor, 96, 0.0F, 2.0F * kPi);
+        }
+        if (snapshot.systemTravel && !snapshot.launchLandingLocalFrame) {
+            const auto& g = snapshot.flightGuidance;
+            if (!g.targetId.empty()) {
+                const auto p = view.camera.point(g.targetPosition.x,g.targetPosition.y);
+                const float limitX=.84F, limitY=.78F;
+                const float factor=std::max({1.0F,std::abs(p.x)/limitX,std::abs(p.y)/limitY});
+                const float x=p.x/factor,y=p.y/factor;
+                if (factor>1) {
+                    const float angle=std::atan2(p.y,p.x);
+                    for (float side : {-1.0F,1.0F}) drawLine(x,y,x-.035F*std::cos(angle+side*.6F),y-.035F*std::sin(angle+side*.6F),{1,.8F,.25F,1},3);
+                } else drawEllipseLine(x,y,.04F,.04F,{1,.8F,.25F,1},24,0,2*kPi);
+                std::ostringstream label;
+                label << g.targetName << " / " << std::fixed << std::setprecision(1) << g.targetDistance << " u";
+                const float labelY = factor>1 ? y+(y>0 ? -.07F : .07F) : y+static_cast<float>(snapshot.launchOrbitTargetRadius+snapshot.launchOrbitGoodBand)*view.camera.scale+.055F;
+                drawPoiLabel(std::clamp(x,-.68F,.68F),std::clamp(labelY,-.70F,.85F),.0040F,label.str(),PoiGuidanceKind::Ship);
+            }
+        }
+        if (!snapshot.launchLandingLocalFrame && (!snapshot.systemTravel || (snapshot.systemLocation.frame == CoordinateFrame::Body &&
+            snapshot.flightGuidance.orbitBodyId == snapshot.systemLocation.bodyId))) {
           for (const auto& zone : snapshot.landingZones) {
-            if (!zone.enabled) continue;
+            if (!zone.enabled || zone.id != snapshot.orbitalZone.id) continue;
             const double gateAngle=zone.centerBearing;
             const Color gateColor=snapshot.launchLandingAuthorized && snapshot.launchDescentGateArmed
                 ? Color{0.30F,1.0F,0.60F,0.90F*(1.0F-view.landingBlend)}
@@ -7017,26 +7215,50 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
                 drawLine(previous.x,previous.y,next.x,next.y,gateColor,3.0F);
                 previous=next;
             }
+            if (!snapshot.launchOrbitCaptured || !snapshot.orbitalZoneSurveyed) {
+            const double guidanceRadius = snapshot.launchOrbitCaptured
+                ? flight_geometry::landingBoundary : kOuterOrbitGuideRadius;
+            const Vec2 gateAnchor=physicalFlightPoint(snapshot,
+                std::cos(gateAngle)*guidanceRadius,
+                std::sin(gateAngle)*guidanceRadius,approachBlend);
+            const Vec2 labelAnchor=physicalFlightPoint(snapshot,
+                std::cos(gateAngle)*(guidanceRadius+0.14),
+                std::sin(gateAngle)*(guidanceRadius+0.14),approachBlend);
+            drawLine(gateAnchor.x,gateAnchor.y,labelAnchor.x,labelAnchor.y,gateColor,1.5F);
+            drawPoiLabel(labelAnchor.x,labelAnchor.y,0.0036F,snapshot.orbitalZoneLabel,PoiGuidanceKind::Ship);
+            }
           }
-        } else {
+        } else if (snapshot.launchLandingLocalFrame) {
             const double n= snapshot.launchLandingBasisAngle;
             const double r=flight_geometry::bodyRadius+flight_landing::departureAltitude/flight_landing::metersPerOrbitUnit;
             const Vec2 left=physicalFlightPoint(snapshot,std::cos(n)*r-std::sin(n)*2.0,
                 std::sin(n)*r+std::cos(n)*2.0,approachBlend);
             const Vec2 right=physicalFlightPoint(snapshot,std::cos(n)*r+std::sin(n)*2.0,
                 std::sin(n)*r-std::cos(n)*2.0,approachBlend);
-            drawLine(left.x,left.y,right.x,right.y,{0.25F,0.85F,1.0F,0.65F},2.0F);
+            if (surfaceCamera_.active) {
+                const float y = surfaceCamera_.top - static_cast<float>(snapshot.launchLandingPadY-
+                    flight_landing::departureAltitude/flight_landing::metersPerCell)*surfaceCamera_.cellHeight;
+                drawLine(-sceneAspect_,y,sceneAspect_,y,{0.25F,0.85F,1.0F,0.65F},2.0F);
+            } else drawLine(left.x,left.y,right.x,right.y,{0.25F,0.85F,1.0F,0.65F},2.0F);
         }
 
+        const auto projectTrajectory = [&](double x, double y) {
+            if (!surfaceCamera_.active) return physicalFlightPoint(snapshot, x, y, approachBlend);
+            const double nx = std::cos(snapshot.launchLandingBasisAngle);
+            const double ny = std::sin(snapshot.launchLandingBasisAngle);
+            const double horizontal = (ny*x-nx*y)*flight_landing::metersPerOrbitUnit;
+            const double altitude = (nx*x+ny*y-flight_geometry::bodyRadius)*flight_landing::metersPerOrbitUnit;
+            const auto surface = miningViewTransform(snapshot, sceneAspect_, 1.0F, &surfaceCamera_);
+            auto point = surface.gridPoint(snapshot.launchLandingPadX+.5+horizontal/flight_landing::metersPerCell,
+                snapshot.launchLandingPadY-altitude/flight_landing::metersPerCell);
+            point.y += miningShuttleSize(snapshot, surface)*.455F;
+            return point;
+        };
         const std::vector<FlightTrajectoryPointSnapshot>& displayedTrajectory =
             displayedFlightTrajectory(snapshot);
         if (displayedTrajectory.size() > 1U) {
             std::vector<SceneVertex>& prediction = scratchVertices(displayedTrajectory.size() * 6);
-            Vec2 previous = physicalFlightPoint(
-                snapshot,
-                displayedTrajectory.front().x,
-                displayedTrajectory.front().y,
-                approachBlend);
+            Vec2 previous = projectTrajectory(displayedTrajectory.front().x, displayedTrajectory.front().y);
             constexpr float endpointFadeStart = 0.78F;
             const auto trajectoryColor = [=](float progress) {
                 constexpr Color purple {0.68F, 0.34F, 1.0F, 0.54F};
@@ -7057,11 +7279,7 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
             Color previousColor = trajectoryColor(0.0F);
             for (std::size_t index = 1; index < displayedTrajectory.size(); ++index) {
                 const FlightTrajectoryPointSnapshot& point = displayedTrajectory[index];
-                const Vec2 next = physicalFlightPoint(
-                    snapshot,
-                    point.x,
-                    point.y,
-                    approachBlend);
+                const Vec2 next = projectTrajectory(point.x, point.y);
                 const float progress = static_cast<float>(index) /
                     static_cast<float>(displayedTrajectory.size() - 1U);
                 const Color nextColor = trajectoryColor(progress);
@@ -7320,7 +7538,8 @@ void SceneComposer::rebuildFlightTrajectoryCurve(const RenderSnapshot& snapshot)
     dense.reserve(controls.size()*subdivisions);
     dense.push_back(ship);
     const double silhouette=flight_geometry::bodyRadius*bodySilhouetteScale;
-    bool clipped=!snapshot.launchLandingLocalFrame && std::hypot(ship.x,ship.y)<=silhouette;
+    const bool clipLocalBody = !snapshot.launchLandingLocalFrame && (!snapshot.systemTravel || snapshot.systemLocation.frame == CoordinateFrame::Body);
+    bool clipped=clipLocalBody && std::hypot(ship.x,ship.y)<=silhouette;
     for (std::size_t i=0;i+1<controls.size() && !clipped;++i) {
         const double interval=knots[i+1]-knots[i];
         for (int sample=1;sample<=subdivisions;++sample) {
@@ -7332,7 +7551,7 @@ void SceneComposer::rebuildFlightTrajectoryCurve(const RenderSnapshot& snapshot)
                 h00*controls[i].y+h10*interval*tangents[i].y+
                     h01*controls[i+1].y+h11*interval*tangents[i+1].y};
             FlightTrajectoryPointSnapshot contact;
-            if (!snapshot.launchLandingLocalFrame &&
+            if (clipLocalBody &&
                 trajectoryCircleEntry(dense.back(),point,silhouette,contact)) {
                 dense.push_back(contact);clipped=true;break;
             }
@@ -7479,14 +7698,14 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         forward = {static_cast<float>(std::cos(settled)), static_cast<float>(std::sin(settled))};
     }
     float ascentSpriteSize=0.0F;
-    if (snapshot.surfaceArrivalPrepared && snapshot.manualAscentCameraProgress<1.0) {
+    if (surfaceCamera_.active || (snapshot.surfaceArrivalPrepared && snapshot.manualAscentCameraProgress<1.0)) {
         const float normalBlend=1.0F-smootherstep(static_cast<float>(snapshot.manualAscentCameraProgress));
-        const auto view=miningViewTransform(snapshot,sceneAspect_,normalBlend);
+        const auto view=miningViewTransform(snapshot,sceneAspect_,normalBlend,&surfaceCamera_);
         ascentSpriteSize=miningShuttleSize(snapshot,view);
         const auto parked=view.gridPoint(snapshot.miningReturnZoneX+0.5,snapshot.miningReturnZoneY);
         const auto anchor=physicalSurfaceContactPoint(snapshot,flightCameraPresentation_.approachBlend);
-        const Vec2 offset{(anchor.x-parked.x)*(1.0F-normalBlend),
-            (anchor.y-parked.y-ascentSpriteSize*0.455F)*(1.0F-normalBlend)};
+        const Vec2 offset{surfaceCamera_.active ? 0.0F : (anchor.x-parked.x)*(1.0F-normalBlend),
+            surfaceCamera_.active ? 0.0F : (anchor.y-parked.y-ascentSpriteSize*0.455F)*(1.0F-normalBlend)};
         route=view.gridPoint(snapshot.launchLandingPadX+snapshot.launchLandingHorizontalPosition/4.0+0.5,
             snapshot.launchLandingPadY-snapshot.launchLandingAltitude/4.0,offset);
         route.y+=ascentSpriteSize*0.455F;
@@ -7495,17 +7714,16 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
     const float hangarLift = snapshot.screen == Screen::Hangar ? 0.02F : 0.0F;
     const float cx = route.x;
     const float cy = route.y + hangarLift;
+    // Body encounters change the camera's approach blend. Keep the ship's
+    // readable flight size independent of that frame-local zoom.
     float scale = snapshot.launchPhysicalFlight
-        ? 0.17F * std::lerp(
-              1.0F,
-              1.35F,
-              flightCameraPresentation_.approachBlend)
+        ? 0.17F * 1.35F
         : std::clamp(0.26F - static_cast<float>(snapshot.travelProgress) * 0.06F, 0.16F, 0.26F);
     if (snapshot.surfaceArrivalPrepared) {
         const float landingBlend = physicalFlightCamera(
             snapshot, flightCameraPresentation_.approachBlend).landingBlend;
         scale = std::lerp(scale,
-            miningShuttleSize(snapshot, miningViewTransform(snapshot, sceneAspect_, 0.0F)),
+            miningShuttleSize(snapshot, miningViewTransform(snapshot, sceneAspect_, 0.0F, &surfaceCamera_)),
             landingBlend);
     }
     if (ascentSpriteSize>0.0F) scale=ascentSpriteSize;
@@ -7641,7 +7859,7 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
             -right.x * movementDirection,
             -right.y * movementDirection
         };
-        const float rocketSize = 0.86F * scale;
+        const float rocketSize = (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale;
         const float nozzleOffset = rocketSize
             * (kManeuverBoosterNozzleOffset / kOrbitRocketSize);
         const Vec2 nozzle {
@@ -7674,7 +7892,7 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         const float closeProgress = closeLinear * closeLinear * (3.0F - 2.0F * closeLinear);
 
         if (textureReady(RocketOpenAsset)) {
-            texturedQuad(RocketOpenAsset, 0.86F * scale, 0.86F * scale, {1.0F, 1.0F, 1.0F, 1.0F});
+            texturedQuad(RocketOpenAsset, (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale, (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale, {1.0F, 1.0F, 1.0F, 1.0F});
         }
         if (textureReady(MiningDroneAsset) && entryProgress < 0.995F) {
             const float droneX = 0.60F * (1.0F - entryProgress);
@@ -7692,15 +7910,15 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
                 MiningDroneAsset);
         }
         if (textureReady(RocketClosedAsset) && closeProgress > 0.0F) {
-            texturedQuad(RocketClosedAsset, 0.86F * scale, 0.86F * scale, {1.0F, 1.0F, 1.0F, closeProgress});
+            texturedQuad(RocketClosedAsset, (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale, (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale, {1.0F, 1.0F, 1.0F, closeProgress});
         }
         return;
     }
 
     if (snapshot.screen == Screen::Hangar) {
-        texturedQuad(RocketOpenAsset, 0.86F * scale, 0.86F * scale, {1.0F, 1.0F, 1.0F, 1.0F});
+        texturedQuad(RocketOpenAsset, (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale, (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale, {1.0F, 1.0F, 1.0F, 1.0F});
     } else {
-        texturedQuad(RocketClosedAsset, 0.86F * scale, 0.86F * scale, {1.0F, 1.0F, 1.0F, 1.0F});
+        texturedQuad(RocketClosedAsset, (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale, (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale, {1.0F, 1.0F, 1.0F, 1.0F});
         const bool temperatureCritical = snapshot.screen == Screen::Flight &&
             snapshot.instrumentTemperature > tuning::launch::temperatureCriticalThreshold;
         const bool temperatureBlinkOn = static_cast<int>(std::floor(
@@ -7711,8 +7929,8 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
             // red in sync with the critical temperature instruments.
             texturedQuad(
                 RocketClosedAsset,
-                0.86F * scale,
-                0.86F * scale,
+                (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale,
+                (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale,
                 {1.0F, 0.10F, 0.08F,
                     tuning::launch::temperatureShipFlashOpacity});
         }
@@ -7723,6 +7941,57 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
 {
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
     drawSolarBackground(snapshot, 0.70F, snapshot.screen != Screen::Flight);
+    if (snapshot.systemTravel && snapshot.screen == Screen::Flight && !snapshot.launchLandingLocalFrame && snapshot.orbitalOverlay <= .001) {
+        const auto* frame = snapshot.systemLocation.frame == CoordinateFrame::Body ? systemBody(snapshot.system, snapshot.systemLocation.bodyId) : nullptr;
+        const SystemVector offset = frame ? frame->position : SystemVector{};
+        const auto view = physicalFlightCamera(snapshot, 0);
+        for (const auto& body : snapshot.system.bodies) {
+            const auto p = view.camera.point(body.position.x - offset.x, body.position.y - offset.y);
+            const float radius = static_cast<float>(body.radius) * view.camera.scale;
+            const float pixelX = scenePixelCenterX_ + p.x * sceneWorldUnitX_;
+            const float pixelY = sceneCssHeight_ - scenePixelCenterY_ - p.y * sceneWorldUnitY_;
+            const auto& clip = packet_.logicalSceneClip;
+            const float halfWidth = radius * 1.25F * sceneWorldUnitX_;
+            const float halfHeight = radius * 1.25F * sceneWorldUnitY_;
+            const bool bodyOffscreen = pixelX + halfWidth < clip.x ||
+                pixelX - halfWidth > clip.x + clip.width || pixelY + halfHeight < clip.y ||
+                pixelY - halfHeight > clip.y + clip.height;
+            if (body.id == "earth" && body.id != snapshot.flightGuidance.targetId &&
+                bodyOffscreen) {
+                const float factor = std::max(std::abs(p.x)/.84F,std::abs(p.y)/.70F);
+                const float x=p.x/factor,y=p.y/factor;
+                const float angle=std::atan2(p.y,p.x);
+                const float tipX=x+.08F*std::cos(angle),tipY=y+.08F*std::sin(angle);
+                for (float side : {-1.0F,1.0F})
+                    drawLine(tipX,tipY,tipX-.04F*std::cos(angle+side*.6F),tipY-.04F*std::sin(angle+side*.6F),{.35F,.9F,1,1},3);
+                drawSprite(x,y,.10F,.10F,{1,1,1,1},EarthAsset);
+                drawPoiLabel(std::clamp(x,-.68F,.68F),y+(y>0 ? -.09F : .09F),.004F,"EARTH / HOME",PoiGuidanceKind::Ship);
+            }
+            if (body.dock) {
+                const auto dock = systemDockPosition(body);
+                const auto d = view.camera.point(dock.x-offset.x,dock.y-offset.y);
+                drawEllipseLine(d.x,d.y,.035F,.035F,{.3F,1,.8F,1},24,0,2*kPi);
+                drawSprite(d.x,d.y,.058F,.058F,{1,1,1,1},static_cast<int>(TextureId::ServiceDock)-1);
+                drawPoiLabel(d.x,d.y+.06F,.003F,"DOCK",PoiGuidanceKind::Ship);
+            }
+            if (bodyOffscreen) continue;
+            const int asset = body.id == "earth" ? EarthAsset : body.id == "mars" ? MarsAsset : body.id == "mercury" ? MercuryAsset : body.id == "venus" ? VenusAsset :
+                body.id == "jupiter" ? JupiterAsset : body.id == "saturn" ? SaturnAsset : body.id == "uranus" ? UranusAsset : body.id == "neptune" ? NeptuneAsset : MoonAsset;
+            if (body.kind == SystemBodyKind::Star) drawCircle(p.x,p.y,radius,{1,.65F,.15F,1},64);
+            else if (body.kind == SystemBodyKind::Station) drawSprite(p.x,p.y,radius*3,radius*3,{1,1,1,1},ArkDamagedAsset);
+            else drawSprite(p.x,p.y,radius*2.5F,radius*2.5F,{1,1,1,1},asset);
+            if (body.id != snapshot.flightGuidance.targetId)
+                drawPoiLabel(p.x,p.y+radius+.045F,.0035F,body.name,PoiGuidanceKind::Ship);
+        }
+        for (const auto& wreck : snapshot.wrecks) {
+            const auto w = convertSystemFrame(wreck.location,CoordinateFrame::System,"",snapshot.system);
+            const auto p = view.camera.point(w.position.x-offset.x,w.position.y-offset.y);
+            drawEllipseLine(p.x,p.y,.04F,.04F,{1,.6F,.2F,1},16,0,2*kPi);
+            drawPoiLabel(p.x,p.y+.07F,.003F,"WRECK " + std::to_string(wreck.id),PoiGuidanceKind::Ship);
+        }
+        drawRoute(snapshot);
+        return;
+    }
 
     // After discovery, Surface Ops keeps the Ark in view as the team's base away from Earth.
     const bool surfaceArkVisible = snapshot.screen == Screen::SurfaceExpedition
@@ -7916,17 +8185,52 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             if (snapshot.orbitalSurveying) {
                 const float r = radius * (1.0F - reveal / 5.5F);
                 zoneArc(r, {0.65F, 1.0F, 0.94F, alpha}, 2.5F);
+                // Match the Rig's expanding cyan scanner pulse, emitted by the ship.
+                const Vec2 ship = physicalFlightPoint(snapshot, snapshot.launchPositionX,
+                    snapshot.launchPositionY, approachBlend);
+                const float age = static_cast<float>(snapshot.orbitalSurveyProgress) * 2.0F;
+                const auto pulseEase = [](float value) {
+                    const float t = std::clamp(value, 0.0F, 1.0F);
+                    return t*t*(3.0F-2.0F*t);
+                };
+                const float expansion = pulseEase(age / kMiningScannerExpandSeconds);
+                const float fade = 1.0F - pulseEase(
+                    (age - kMiningScannerExpandSeconds) / kMiningScannerFadeSeconds);
+                const float opacity = (age <= kMiningScannerExpandSeconds
+                    ? 0.35F + expansion * 0.65F : fade) * destinationAlpha;
+                const float pulseRadius = (std::hypot(ship.x-c.x, ship.y-c.y) + radius)
+                    * (0.08F + expansion * 0.92F);
+                if (opacity > 0.001F) {
+                    drawRadialGlow(ship.x, ship.y, pulseRadius * 0.78F,
+                        {0.18F, 0.96F, 1.0F, opacity * 0.075F}, 64);
+                    drawEllipseLine(ship.x, ship.y, pulseRadius, pulseRadius,
+                        {0.18F, 0.96F, 1.0F, opacity * 0.96F}, 96, 0, 2*kPi);
+                }
             }
             const Vec2 pad = zonePoint(zone.centerBearing, radius);
             const Vec2 shaft = zonePoint(snapshot.orbitalShaftBearing, radius);
+            if (snapshot.launchOrbitCaptured && snapshot.orbitalZoneSurveyed && !snapshot.launchLandingLocalFrame) {
+                Vec2 label = zonePoint(snapshot.orbitalShaftBearing, radius + 0.12F);
+                // Offset across the approach lane rather than sitting on the beam.
+                const float dx = shaft.x-c.x, dy = shaft.y-c.y;
+                const float length = std::max(0.00001F,std::hypot(dx,dy));
+                const float side = dx < 0.0F ? 1.0F : -1.0F;
+                label.x += -dy/length * 0.28F * side;
+                label.y += dx/length * 0.28F * side;
+                drawLine(shaft.x,shaft.y,label.x,label.y,{0.30F,1.0F,0.65F,destinationAlpha},1.5F);
+                drawPoiLabel(label.x,label.y-0.035F,0.0036F,snapshot.orbitalZoneLabel,PoiGuidanceKind::Ship);
+            }
             drawCircle(pad.x,pad.y,0.009F,{0.30F,1.0F,0.65F,alpha},16);
-            drawCircle(shaft.x,shaft.y,0.009F,{1.0F,0.08F,0.06F,alpha},16);
+            if (snapshot.orbitalLaserFiring)
+                drawCircle(shaft.x,shaft.y,0.009F,{1.0F,0.08F,0.06F,alpha},16);
             if (snapshot.orbitalLaserDepth > 0.0 || snapshot.orbitalLaserFiring) {
                 const float endR = radius * (1.0F - static_cast<float>(snapshot.orbitalLaserDepth) / 5.5F);
                 const Vec2 frontier = zonePoint(snapshot.orbitalShaftBearing, endR);
                 drawLine(shaft.x,shaft.y,frontier.x,frontier.y,
-                    {1.0F, 0.08F, 0.06F, alpha * 0.8F}, 8.0F);
+                    {0.20F, 1.0F, 0.45F, destinationAlpha}, 8.0F);
                 if (snapshot.orbitalLaserFiring) {
+                    drawLine(shaft.x,shaft.y,frontier.x,frontier.y,
+                        {1.0F,0.08F,0.06F,alpha*0.9F},6.0F);
                     const Vec2 ship = physicalFlightPoint(snapshot, snapshot.launchPositionX, snapshot.launchPositionY, approachBlend);
                     drawLine(ship.x, ship.y, shaft.x, shaft.y, {1.0F, 0.08F, 0.06F, alpha * 0.85F}, 6.0F);
                     drawRadialGlow(frontier.x, frontier.y, 0.055F,
@@ -8733,6 +9037,7 @@ void SceneComposer::finalizePacket()
 
 void SceneComposer::reset()
 {
+    surfaceCamera_ = {};
     packet_ = {};
     vertices_.clear();
     lineVertices_.clear();

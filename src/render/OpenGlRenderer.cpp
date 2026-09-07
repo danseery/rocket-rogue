@@ -681,6 +681,7 @@ void WebGlGraphicsBackend::shutdown()
 void WebGlGraphicsBackend::setPreferences(const AppPreferences& preferences)
 {
     composer_.setCameraShakeEnabled(!preferences.cameraShakeDisabled);
+    composer_.setRigCollisionDebug(preferences.debugToolsEnabled);
 }
 
 RendererDiagnostics WebGlGraphicsBackend::diagnostics() const

@@ -1391,6 +1391,7 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
         return presentation;
     }
 
+    if (state.run.expedition.travelInitialized && step->activity == ScenarioActivityKind::Flyby) return presentation;
     presentation.available = true;
     presentation.scenarioId = instance->id;
     presentation.stepId = step->id;
@@ -1611,7 +1612,7 @@ ScenarioObjectivePresentation scenarioObjectiveForMining(
 CampaignNextStep campaignNextStep(const GameState& state, const ContentCatalog& catalog)
 {
     CampaignNextStep result;
-    if (state.run.routeTransit.active()) {
+    if (!state.run.expedition.travelInitialized && state.run.routeTransit.active()) {
         const Destination* target = catalog.findDestination(state.run.routeTransit.targetDestinationId);
         result.available = target != nullptr;
         result.location = "OUTBOUND TRANSFER";
@@ -1672,7 +1673,7 @@ CampaignNextStep campaignNextStep(const GameState& state, const ContentCatalog& 
 CampaignProgressionAuditResult auditCampaignProgression(const GameState& state, const ContentCatalog& catalog)
 {
     CampaignProgressionAuditResult result;
-    if (state.run.routeTransit.active()) {
+    if (!state.run.expedition.travelInitialized && state.run.routeTransit.active()) {
         const RouteLinkDefinition* route = routeLinkForTransit(catalog, state.run.routeTransit);
         if (route == nullptr || currentDestination(state, catalog).id != state.run.routeTransit.originDestinationId) {
             return {false, CampaignProgressionIssue::InvalidPhysicalRoute,
@@ -1691,6 +1692,9 @@ CampaignProgressionAuditResult auditCampaignProgression(const GameState& state, 
             }
         }
     }
+    // Physical solar travel always supplies a route home or a recoverable loss.
+    // Validate scenario ownership above, but legacy route eligibility is not a travel invariant.
+    if (state.run.expedition.travelInitialized) return result;
     const CampaignNextStep next = campaignNextStep(state, catalog);
     if (!next.available && !next.terminal) {
         return {false, CampaignProgressionIssue::MissingPrimaryNextStep,

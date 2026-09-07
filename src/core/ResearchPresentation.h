@@ -440,6 +440,7 @@ inline std::vector<PanelMetricPresentation> surfaceUpgradeChips(const SurfaceUpg
     addPercentChip(chips, "Recoil", stats.hardRockBounceRelief);
     addPercentChip(chips, "Ore yield", stats.oreYieldChance);
     addDoubleChip(chips, "Scanner", stats.scannerRadius);
+    addDoubleChip(chips, "Pickup radius", stats.oreAttractionRadius);
     addPercentChip(chips, text::labels::hazard, stats.hazardRelief);
     addDoubleChip(chips, "Rig speed", stats.droneSpeed);
     if (stats.oxygenSeconds > 0.0) {
@@ -898,7 +899,7 @@ inline std::vector<PanelMetricPresentation> droneCombatForecastChips(const MiniD
 
 inline int tunedDroneCount(const GameState& state)
 {
-    return static_cast<int>(std::count_if(state.run.planetaryExpedition.runDroneRanks.begin(), state.run.planetaryExpedition.runDroneRanks.end(), [](const RunDroneRank& record) {
+    return static_cast<int>(std::count_if(state.run.expedition.progression.runDroneRanks.begin(), state.run.expedition.progression.runDroneRanks.end(), [](const RunDroneRank& record) {
         return record.rank > 1;
     }));
 }
@@ -963,10 +964,10 @@ inline std::vector<DroneLoadoutSlotPresentation> droneLoadoutSlots(const GameSta
     };
     auto graftForSlot = [&](int slot) -> const DroneFrameModuleAssignment* {
         const auto found = std::find_if(
-            state.run.planetaryExpedition.droneModuleAssignments.begin(),
-            state.run.planetaryExpedition.droneModuleAssignments.end(),
+            state.run.expedition.progression.droneModuleAssignments.begin(),
+            state.run.expedition.progression.droneModuleAssignments.end(),
             [&](const DroneFrameModuleAssignment& assignment) { return assignment.equippedFrame == slot; });
-        return found == state.run.planetaryExpedition.droneModuleAssignments.end() ? nullptr : &*found;
+        return found == state.run.expedition.progression.droneModuleAssignments.end() ? nullptr : &*found;
     };
     auto graftDefinition = [&](const DroneFrameModuleAssignment* assignment) -> const DroneModuleDefinition* {
         if (assignment == nullptr) {
@@ -1104,7 +1105,7 @@ inline std::vector<DroneBuildRecipePresentation> droneBuildRecipes(const GameSta
     std::vector<DroneBuildRecipePresentation> recipes;
     const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
 
-    for (const DroneFrameModuleAssignment& assignment : expedition.droneModuleAssignments) {
+    for (const DroneFrameModuleAssignment& assignment : state.run.expedition.progression.droneModuleAssignments) {
         const auto module = std::find_if(
             catalog.droneModules.begin(),
             catalog.droneModules.end(),
@@ -1131,7 +1132,7 @@ inline std::vector<DroneBuildRecipePresentation> droneBuildRecipes(const GameSta
         });
     }
 
-    for (const std::string& synergyId : expedition.selectedSynergyIds) {
+    for (const std::string& synergyId : state.run.expedition.progression.selectedSynergyIds) {
         const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(synergyId);
         if (synergy == nullptr) {
             continue;
@@ -1261,7 +1262,7 @@ inline std::string droneTunePriority(const GameState& state, const ContentCatalo
 
 inline DroneBuildGuidancePresentation droneBuildGuidance(const GameState& state, const ContentCatalog& catalog, const MiniDroneLoadoutEffects& effects)
 {
-    for (const std::string& synergyId : state.run.planetaryExpedition.selectedSynergyIds) {
+    for (const std::string& synergyId : state.run.expedition.progression.selectedSynergyIds) {
         const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(synergyId);
         if (synergy == nullptr) {
             continue;
@@ -1282,7 +1283,7 @@ inline DroneBuildGuidancePresentation droneBuildGuidance(const GameState& state,
             };
         }
     }
-    if (state.run.planetaryExpedition.selectedSynergyIds.empty()) {
+    if (state.run.expedition.progression.selectedSynergyIds.empty()) {
         return {
             "Await Level Up",
             "Chosen synergy",
@@ -1364,7 +1365,7 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
                 : (capacityObjective.available
                     ? capacityObjective.title + " // " + capacityObjective.rewardPreview
                     : "Claim a scenario reward that installs a second bay slot.")),
-        detailPresentationRow("Selected synergies", state.run.planetaryExpedition.selectedSynergyIds.empty() ? "None" : miniDroneSynergySummary(effects)),
+        detailPresentationRow("Selected synergies", state.run.expedition.progression.selectedSynergyIds.empty() ? "None" : miniDroneSynergySummary(effects)),
         detailPresentationRow("Mining support", effects.passiveMiningRate > 0.0 ? ("+" + display::fixed(effects.passiveMiningRate * 60.0, 1) + " common/min") : "None"),
         detailPresentationRow("Oxygen support", effects.oxygenSeconds > 0.0 ? ("+" + std::to_string(static_cast<int>(std::round(effects.oxygenSeconds))) + "s") : "None"),
         detailPresentationRow("Scanner support", effects.scannerRadius > 0.0 ? ("+" + display::fixed(effects.scannerRadius, 1) + " radius") : "None"),
@@ -1416,7 +1417,8 @@ inline DroneOpsPresentation droneOpsPresentation(GameState state, const ContentC
                     ? panelActionButton("Add slot", ui::actions::upgradeDroneSlot, "ok")
                     : disabledPanelButton(blockedSlotLabel)));
     presentation.backAction = panelActionButton(
-        state.run.planetaryExpedition.active ? "Return to Mining" : "Return to Hangar",
+        state.run.expedition.travelInitialized && !state.run.expedition.active ? "Return to Dock"
+            : state.run.planetaryExpedition.active ? "Return to Mining" : "Return to Hangar",
         ui::actions::backToSurfaceOps,
         "drone-done-action");
     return presentation;
@@ -2040,12 +2042,12 @@ inline SurfaceExpeditionPresentation planetaryExpeditionPresentation(const GameS
     });
     presentation.logEntries = expedition.logEntries;
     presentation.selectedUpgradeNames = upgrades.names;
-    for (const RunDroneRank& rank : expedition.runDroneRanks) {
+    for (const RunDroneRank& rank : state.run.expedition.progression.runDroneRanks) {
         if (const MiniDrone* drone = catalog.findMiniDrone(rank.droneId)) {
             presentation.selectedUpgradeNames.push_back(drone->name + " Mk " + runUpgradeRankLabel(rank.rank));
         }
     }
-    for (const DroneFrameModuleAssignment& assignment : expedition.droneModuleAssignments) {
+    for (const DroneFrameModuleAssignment& assignment : state.run.expedition.progression.droneModuleAssignments) {
         const auto module = std::find_if(catalog.droneModules.begin(), catalog.droneModules.end(), [&](const DroneModuleDefinition& candidate) {
             return candidate.kind == assignment.module;
         });
@@ -2053,24 +2055,24 @@ inline SurfaceExpeditionPresentation planetaryExpeditionPresentation(const GameS
             presentation.selectedUpgradeNames.push_back(module->name + " / Slot " + std::to_string(assignment.equippedFrame + 1));
         }
     }
-    for (const std::string& synergyId : expedition.selectedSynergyIds) {
+    for (const std::string& synergyId : state.run.expedition.progression.selectedSynergyIds) {
         if (const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(synergyId)) {
             presentation.selectedUpgradeNames.push_back(synergy->name);
         }
     }
-    if (expedition.runUpgradeOfferPending) {
-        for (int i = 0; i < expedition.runUpgradeOfferCount && i < static_cast<int>(expedition.runUpgradeOffers.size()); ++i) {
+    if (state.run.expedition.progression.runUpgradeOfferPending) {
+        for (int i = 0; i < state.run.expedition.progression.runUpgradeOfferCount && i < static_cast<int>(state.run.expedition.progression.runUpgradeOffers.size()); ++i) {
             presentation.upgradeOffers.push_back(runUpgradeOfferCardPresentation(
                 state,
                 catalog,
-                expedition.runUpgradeOffers[static_cast<std::size_t>(i)],
+                state.run.expedition.progression.runUpgradeOffers[static_cast<std::size_t>(i)],
                 i));
         }
     }
     presentation.metrics = {
-        panelMetric("Expedition level", std::to_string(std::max(1, expedition.expeditionLevel))),
-        panelMetric("Experience", std::to_string(static_cast<int>(std::floor(std::max(0.0, expedition.expeditionExperience)))) + "/" + std::to_string(static_cast<int>(expeditionExperienceThreshold(expedition.expeditionLevel)))),
-        panelMetric("Level-up choices", std::to_string(std::max(0, expedition.pendingRunUpgradeChoices))),
+        panelMetric("Expedition level", std::to_string(std::max(1, state.run.expedition.progression.expeditionLevel))),
+        panelMetric("Experience", std::to_string(static_cast<int>(std::floor(std::max(0.0, state.run.expedition.progression.expeditionExperience)))) + "/" + std::to_string(static_cast<int>(expeditionExperienceThreshold(state.run.expedition.progression.expeditionLevel)))),
+        panelMetric("Level-up choices", std::to_string(std::max(0, state.run.expedition.progression.pendingRunUpgradeChoices))),
         panelMetric(text::labels::site, std::string(surfaceSiteProfileName(expedition.siteProfile))),
         panelMetric(text::labels::fieldKit, surfaceFieldKitSummary(state.meta)),
         panelMetric(text::labels::hazard, display::percent(expedition.hazard)),

@@ -2,11 +2,11 @@
 
 Deterministic scenario-authored and optional protected-objective gates are specified in [MINING_LOCK_AND_KEY_SITES.md](MINING_LOCK_AND_KEY_SITES.md). Their reusable authoring contract is [SCENARIO_FRAMEWORK.md](SCENARIO_FRAMEWORK.md). They reuse the physical artifact, scanner, hazard, towing, terrain, EVA, and autonomous-combat systems described here.
 
-See `docs/AGENT_DESIGN_CONTEXT.md` before extending this system. The current mining direction should follow `docs/reference/USG_NOTES.md` first: chunky/mobile, Straylight-inspired, fog-of-war, destructible terrain, excavation/logistics/endurance roles, and enemy combat only after Arkfall near Khepri Prime.
+The [OREBIT Game Design Document](Rocket_Rogue_Game_Design_Document.docx) is the definitive design. This document supplies implementation detail and must agree with it. Story and progression decisions marked TBD are collected in GDD Section 8.
 
 See `docs/MINI_DRONE_SYSTEM.md` for the persistent Support Drone Bay layer that modifies mining, scanner, logistics, oxygen, extraction, and later autonomous-defense behavior. The `MiniDrone*` names in C++ are legacy internal identifiers; UI and design copy use Support Drone.
 
-This note describes the current playable mining phase layered onto the post-arrival Surface Ops flow. Mining does not replace launch, arrival, research, or surface-expedition architecture; it resolves back into the same `SurfaceActionOutcome` path so cargo, materials, hazards, artifacts, Expedition XP, temporary upgrades, and log entries stay consistent.
+Mining is the continuous landed expedition entered after physical touchdown and deployment. Core outcomes reconcile cargo, materials, artifacts and Expedition XP with the expedition; supporting type names do not imply a separate phase board.
 
 ## Mechanical Touchstone: Solar Jetman
 
@@ -18,31 +18,24 @@ OREBIT deliberately modernizes that foundation with voluntary EVA, twin-stick ai
 
 Mining is the landed version of the rocket launch loop:
 
-- The player chooses how much arrival-derived rig fuel to spend, how much cargo to load, and when to return and leave or abort. The return stage remains reserved.
+- The player chooses how much Rig fuel and oxygen to spend, how much cargo to load, and when to return, recover equipment, or depart.
 - Better crew, tools, Support Drones, and surface upgrades make risk more readable and controllable, but never remove it.
-- Early solar-system mining is environmental: oxygen pressure, drill heat, hard-rock bounce, hazard pockets, low fuel, and visible field-action hazard chances.
+- Early solar-system mining is environmental: oxygen pressure, drill heat, hard-rock bounce, hazard pockets, low fuel, and physical cargo pressure.
 - Hostile terrain and enemies stay out of the solar system and Aaru Vale. Enemy pressure begins only after Arkfall near Khepri Prime, when the agency is stranded in a hostile system.
 - The rig is durable, fast, and cargo-capable; the operator is slower but more agile, accelerates faster, and can enter suit-only passages.
 - Recoveries stay physical. Gravity, tether mass, loose chunks, a disabled rig, and the need to return discoveries to the shuttle create the pressure.
 
 ## Entry Point
 
-Current flow:
+Fly to the destination, capture an orbit where required, optionally survey and excavate from Zone 1, then enter local descent. The ship collides with the actual prepared/cached terrain and may park underground. A two-second touchdown celebration accepts deploy or undeployed departure; a three-second deployment places the Rig and equipped drones beside the parked ship before Mining control and resource clocks begin.
 
-1. Reach a destination.
-2. Commit to Pass Through, Orbit Capture, or Direct Descent. Orbit Capture can continue into mapped landing; Direct Descent carries the visible `+0.20` hazard.
-3. Landing opens Research, then Surface Ops.
-4. Surface Ops shows Survey, Mine deposit, Push Deeper, Return, and Drone Ops when unlocked. Mine deposit remains unavailable until Survey Site or Push Deeper prepares the site.
-5. Push Deeper guarantees a bankable layer +1. Collapse risk begins on the attempt for layer +2; a scanned artifact becomes guaranteed when its mapped layer succeeds.
-6. Pressing the prepared `Mine deposit` action spends 1 rig fuel and opens the direct-control Mining Rig screen at the selected start depth. The ship remains fixed at surface depth `0`.
-
-Mining is one run per surface loop. Once it has been used, the yellow availability copy should say `Mining Rig offline` for the mining card and `Extract payload` for the field-action cards, with disabled buttons labeled `Unavailable`. `Survey site` and `Push Deeper` are both disabled after mining because the dig commits the field team to the current extraction window.
+Prepared orbital excavation becomes the exact Mining site. Packing settles payload once and ignition resumes manual local ascent from the parked ship. See [Flight and Surface Flow](POST_ARRIVAL_PHASES.md) for simulation and persistence boundaries.
 
 ## Rig Fuel And Oxygen
 
 Mining exists to make surface greed compete with the physical trip home:
 
-- Each planetary expedition loads one visible Rig tank with its three-unit expedition allotment plus physically recovered fuel cells.
+- The expedition owns one visible home-supplied Rig tank retained across planetary visits, supplemented by physically recovered fuel cells.
 - Thrust and drilling consume fuel while powered; simultaneous use stacks, load increases thrust cost, and coasting/idling are free.
 - Fuel cells are persistent physical loose objects and add exactly one unit only after contacting the Rig. Support Drones may carry them but never synthesize fuel.
 - Rig oxygen drains while operating away from ship service; suit oxygen drains during EVA. The inactive actor's tank pauses. Ship service refills oxygen, never fuel.
@@ -131,25 +124,25 @@ Generation may create explicit suit-only passages and pockets. These block the r
 
 Exit requires a safe adjacent suit position. Entry requires the same layer and a distance no greater than `1.25` cells. If the rig is destroyed, the nearest safe cell receives an emergency-ejected operator, the rig becomes disabled, and the swarm transfers to the operator before the next combat update. Rig cargo remains with the wreck; previously stowed ship payload remains safe; a tethered artifact stays with the suit.
 
-Normal extraction requires a functioning rig and operator in the return zone. After emergency ejection, reaching the shuttle ends the deployment safely and may secure a physically delivered artifact. Suit integrity is separate from rig health: zero integrity releases the tether, freezes swarm behavior with the failure state, and ends the run. Stowed Common material repairs the suit at the shuttle.
+The controlled actor must reach the parked ship service zone to depart: Rig in Rig mode, operator in EVA. The operator may leave without a functioning Rig. Cargo and drones that have not physically returned are not teleported or credited. Suit integrity is separate from rig health: zero integrity releases the tether, freezes swarm behavior with the failure state, and ends the run. Stowed Common material repairs the suit at the shuttle.
 
 ## Mining Resources
 
-- Rig fuel: the 3-unit expedition pack plus transfer fuel preserved at touchdown. This is the central endurance tradeoff and must stay visible in Surface Ops and Mining; the protected return stage is shown separately.
+- Rig fuel: a separate home-supplied tank retained across visits plus recovered physical cells, consumed by powered thrust and drilling; idle/coasting are free.
 - Oxygen: short-run timer, currently 30 seconds before upgrades.
 - Drill integrity: durability. Low integrity raises failure pressure; zero integrity disables drilling until the bit is repaired at the ship or the run ends.
 - Ship service: while inside the shuttle ring, stowed Common material can fully repair the rig drill, rig health, or suit integrity. Cost scales with missing integrity or health, and spent materials leave the recovered cargo.
 - Drill heat: drilling and hard rock raise heat; overheated drilling slows and damages integrity.
 - Cargo load: reward now; it is secure once loaded onto the Ship.
 - Loose chunks: spatial ore and salvage created by suit drilling or suit kills. They are not carried by the suit and must be collected by the rig or Mining/Resource Support Drones.
-- Hazard delta: mining-specific danger that feeds back into visible surface-action hazard chances.
+- Environmental hazards: revealed physical terrain and encounter threats; protected objectives retain their authored reveal rules.
 - Scanner cooldown: limits how often the player can reveal hidden terrain.
 
 ## Terrain And Rewards
 
 Mining terrain is generated from the destination, surface site profile, and depth:
 
-- A fresh deployment depth is normal mining terrain. Once the player descends, the layer left behind receives a permanent two-cell-wide central return shaft from its ascent seam to its descent seam. Intermediate layers generated while climbing receive the same shaft, so every previously traversed route back to the surface stays open across cached layers and reloads without changing normal rig movement.
+- Cached layers preserve actual generation and excavation. Underground traversal, collision and delivery use real open seams; unopened seam lips remain physical barriers. The ship stays at its actual parked layer and position.
 - Regolith and hard rock define tunneling speed and bounce.
 - Baseline hard-rock contact produces a broad, floaty rebound. Shock Mounts and Recoil Braces reduce that impulse so upgraded rigs can hold the drill on target.
 - After a hard contact, thrust eases back to full speed instead of snapping forward immediately; bounce relief starts the recovery closer to full control.
@@ -177,16 +170,16 @@ Training still levels the active crewmember. Animal class traits affect both men
 
 ## Research, Support Drones, And Expedition Upgrades
 
-Research improves mining through specific tools:
+Research and contract content supplies these progression hooks. Economy and unlock pacing are TBD S2 in the GDD; the deferred research board is not a campaign phase:
 
-- Field Probe Network: more action-kit margin and better survey support.
+- TBD S2: reconcile research/facility unlocks and effects with orbital survey and the physical expedition; retained project definitions do not establish active field-action mechanics.
 - Regolith Drill Rig: stronger mining yield and rare-material odds.
 - Cargo Return Rig: lower extraction penalty from heavy payloads.
 - Mission Analysis Lab: extra Research Data from recovered field notes in the deferred debug Research board.
-- Moon mining contract: 30 safely delivered lunar Common Ore enters a saved ready-to-claim state; `Install Prospector Mk I` consumes the reserve, owns/equips the first Prospector Support Drone, and opens Slot 1.
-- Mars bay contract: 40 safely delivered Mars Common Ore enters a saved ready-to-claim state; `Fabricate Slot 2` consumes the reserve and opens an empty specialist slot.
+- Moon mining contract: 20 safely delivered lunar Common Ore enters a saved ready-to-claim state; `Install Prospector Mk I` consumes the reserve, owns/equips the first Prospector Support Drone, and opens Slot 1.
+- Mars bay contract: 8 safely delivered Mars Common Ore enters a saved ready-to-claim state; `Fabricate Slot 2` consumes the reserve and opens an empty specialist slot.
 - Drone Support Program: adds the Resource and Survey Support Drones. Io separately commissions the first Hazard Support Drone Mk I into the open Mars slot. Open slots may also fabricate paid duplicate Support Drone frames.
-- Current Io volcanic site: ordinary Regolith pays nothing, Thermal lava is the only ore source, treatment always exposes gray Common Ore, and a 60-second authored arena stages outer `0/4` and inner `0/4` lava layers around a protected Artifact. The same `MiningCocoonDefinition` can protect a different objective with any number of authored layers.
+- Current Io volcanic site: ordinary Regolith pays nothing, Thermal lava is the only ore source, treatment always exposes gray Common Ore, and a 60-second authored arena stages one four-segment thermal seal around a protected Artifact. The same `MiningCocoonDefinition` can protect a different objective with any number of authored layers.
 - Arkfall emergency kit: Mk I Attack and Defense Support Drones, hostile-contact mitigation, and at least three Drone Bay slots without replacing stronger existing equipment.
 - Perimeter Drone Network: Perimeter Coordination makes advanced combat grafts and named synergies eligible in Level Up drafts.
 
@@ -218,6 +211,6 @@ The player's operator sidearm is a vulnerable recovery tool rather than the prim
 - `src/core/ScenarioSystem.*` owns scenario actions/events, claims, rewards, route requirements, and state-derived objective presentation. Mining receives a generic scenario/site context and reports typed results; it does not branch on campaign, destination, or narrative IDs.
 - `src/game/RocketGameApp.*` owns screen transitions and platform-neutral routed aim, fire, drill, scan, tether, operator-toggle, and stow/leave actions.
 - `src/render/SceneComposer.*` turns mining snapshots into backend-neutral scene packets consumed by native Vulkan and browser WebGL2, including the parked rig, static operator, independently moving Support Drones, reticle, tracer, tether, thrust, and active-actor-centered shield/scanner effects. Rendering must not decide gameplay outcomes.
-- Save version 18 persists the current physical Mining runtime, loose objects, fuel cells, actor tanks, Support Drones and payload ownership, plus current expedition progression. Every non-v18 or malformed campaign is rejected and preserved until explicit New Campaign confirmation; no legacy progression migration runs.
+- Save version 21 persists the current physical Mining runtime, loose objects, fuel cells, actor tanks, Support Drones and payload ownership, plus current expedition progression. Every non-v21 or malformed campaign is rejected and preserved until explicit New Campaign confirmation; no legacy progression migration runs.
 
-When changing mining, keep the fuel/oxygen tradeoff visible and test both Surface Ops availability and direct mining outcomes.
+When changing mining, keep the fuel/oxygen tradeoff visible and test deployment handoffs, direct mining outcomes, parked-layer service and manual ascent.

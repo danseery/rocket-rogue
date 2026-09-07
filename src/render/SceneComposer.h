@@ -2,6 +2,7 @@
 
 #include "render/RenderSnapshot.h"
 #include "render/ScenePacket.h"
+#include "render/SurfaceCameraPresentation.h"
 
 #include <array>
 #include <cstddef>
@@ -26,6 +27,7 @@ public:
     void setViewport(SceneViewport viewport) noexcept;
     void setPresentationTime(double seconds) noexcept;
     void setCameraShakeEnabled(bool enabled) noexcept;
+    void setRigCollisionDebug(bool enabled) noexcept { rigCollisionDebug_ = enabled; }
     void setTextureReady(TextureId texture, bool ready) noexcept;
     const ScenePacket& compose(const RenderSnapshot& snapshot);
     void reset();
@@ -178,6 +180,7 @@ private:
         std::uint64_t geologySeed = 0;
         float sceneAspect = 0.0F;
         float viewTop = 0.0F;
+        float viewLeft = 0.0F;
         float cellHeight = 0.0F;
         float viewOffsetX = 0.0F;
         float viewOffsetY = 0.0F;
@@ -276,6 +279,8 @@ private:
     float sceneWorldUnitX_ = 360.0F;
     float sceneWorldUnitY_ = 360.0F;
     float sceneAspect_ = 16.0F / 9.0F;
+    SurfaceCameraPresentation surfaceCamera_;
+    bool rigCollisionDebug_ = false;
     double presentationTimeSeconds_ = -1.0;
     bool cameraShakeEnabled_ = true;
     float drawOpacity_ = 1.0F;

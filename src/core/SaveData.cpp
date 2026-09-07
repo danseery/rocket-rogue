@@ -1,4 +1,6 @@
 #include "core/SaveData.h"
+#include "core/ExpeditionPersistence.h"
+#include "core/SystemContent.h"
 #include "core/ContentIds.h"
 #include "core/GameText.h"
 #include "core/GameUi.h"
@@ -1199,7 +1201,7 @@ std::array<std::string, 3> vectorToOfferArray(const std::vector<std::string>& va
 
 bool parseRunProgressionSaveField(SaveData& save, std::string_view key, std::string_view value)
 {
-    PlanetaryExpeditionState& expedition = save.planetaryExpedition;
+    ExpeditionProgressionState& expedition = save.expedition.progression;
     if (key == save_schema::field::expeditionLevel) expedition.expeditionLevel = std::max(1, parseInt(value, 1));
     else if (key == save_schema::field::expeditionExperience) expedition.expeditionExperience = std::max(0.0, parseDouble(value, 0.0));
     else if (key == save_schema::field::pendingRunUpgradeChoices) expedition.pendingRunUpgradeChoices = std::max(0, parseInt(value, 0));
@@ -1480,7 +1482,8 @@ std::string serializeFlightState(const FlightRunState& flight)
         << flight.landing.touchdownDepthZone << save_schema::crewFieldDelimiter
         << flight.landing.siteCommitted << save_schema::crewFieldDelimiter
         << flight.landing.departureActive << save_schema::crewFieldDelimiter
-        << flight.landing.launchSupportActive;
+        << flight.landing.launchSupportActive << save_schema::crewFieldDelimiter
+        << static_cast<int>(flight.failureCause);
     return out.str();
 }
 
@@ -1488,7 +1491,7 @@ FlightRunState parseFlightState(std::string_view text)
 {
     FlightRunState flight;
     const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
-    if (fields.size() != 56) {
+    if (fields.size() != 56 && fields.size() != 57) {
         return flight;
     }
     std::size_t index = 0;
@@ -1548,6 +1551,10 @@ FlightRunState parseFlightState(std::string_view text)
     flight.landing.siteCommitted = parseInt(fields[index++],0) != 0;
     flight.landing.departureActive = parseInt(fields[index++],0) != 0;
     flight.landing.launchSupportActive = parseInt(fields[index++],0) != 0;
+    if (index < fields.size()) {
+        flight.failureCause = static_cast<LaunchFailureCause>(std::clamp(
+            parseInt(fields[index], 0), 0, static_cast<int>(LaunchFailureCause::LunarImpact)));
+    }
     flight.fuelRemaining = std::min(flight.fuelRemaining, flight.fuelCapacity);
     flight.hullRemaining = std::min(flight.hullRemaining, flight.hullMaximum);
     return flight;
@@ -2879,6 +2886,7 @@ SaveData captureSaveData(const GameState& state)
         break;
     }
     save.flight = state.run.flight;
+    save.expedition = state.run.expedition;
     save.campaignMilestone = state.meta.campaignMilestone;
     save.chapter = state.meta.chapter;
     save.ark = state.meta.ark;
@@ -2890,6 +2898,7 @@ SaveData captureSaveData(const GameState& state)
     save.launchLessons = state.meta.launchLessons;
     save.storyBriefing = state.storyBriefing;
     save.acknowledgedActivityBriefingIds = state.meta.acknowledgedActivityBriefingIds;
+    save.incomingMessages = state.incomingMessages;
     save.campaignIntroductionAcknowledged = state.meta.campaignIntroductionAcknowledged;
     save.straylightDiscoveryAcknowledged = state.meta.straylightDiscoveryAcknowledged;
     save.crewLossPending = state.meta.crewLossPending;
@@ -2904,8 +2913,8 @@ SaveData captureSaveData(const GameState& state)
     save.researchProjectIds = arrayToVector(state.run.researchProjectIds);
     save.planetaryExpedition = state.run.planetaryExpedition;
     save.mining = state.run.mining;
-    save.droneModuleAssignments = state.run.planetaryExpedition.droneModuleAssignments;
-    save.droneModuleRuntime = state.run.planetaryExpedition.droneModuleRuntime;
+    save.droneModuleAssignments = state.run.expedition.progression.droneModuleAssignments;
+    save.droneModuleRuntime = state.run.expedition.progression.droneModuleRuntime;
     save.scannerCooldownSeconds = state.run.planetaryExpedition.scannerCooldownSeconds;
     save.treasureMarks = state.run.planetaryExpedition.treasureMarks;
     save.reclamationOxygenUses = state.run.planetaryExpedition.reclamationOxygenUses;
@@ -2997,6 +3006,23 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         tuning::launch::pilotingCourseLost);
     state.run.routeTransit = save.routeTransit;
     state.run.flight = save.flight;
+    state.run.expedition = save.expedition;
+    // Only an explicitly attached service ship follows an authored dock move.
+    {
+    auto& expedition = state.run.expedition;
+    if (expedition.travelInitialized && !expedition.active && !state.run.flight.active &&
+        expedition.location.systemId == "solar" && expedition.location.bodyId == "earth" &&
+        expedition.location.siteId == "earth.dock" && !save.mining.active &&
+        state.run.flight.mode != FlightMode::Landing) {
+        const auto& system = solarSystemDefinition();
+        const auto* earth = systemBody(system, "earth");
+        const auto dock = systemDockPosition(*earth);
+        expedition.location.position = expedition.location.frame == CoordinateFrame::Body
+            ? SystemVector{dock.x-earth->position.x, dock.y-earth->position.y} : dock;
+        state.run.flight.positionX = expedition.location.position.x;
+        state.run.flight.positionY = expedition.location.position.y;
+    }
+    }
     if (routeLinkForTransit(catalog, state.run.routeTransit) == nullptr) {
         state.run.routeTransit = {};
     }
@@ -3015,11 +3041,15 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.researchProjectIds = vectorToOfferArray(save.researchProjectIds);
     state.run.approach = {};
     state.run.planetaryExpedition = save.planetaryExpedition;
-    state.run.planetaryExpedition.droneModuleAssignments = save.droneModuleAssignments;
+    state.run.expedition.progression.droneModuleAssignments = save.droneModuleAssignments;
     state.run.planetaryExpedition.scannerCooldownSeconds = save.scannerCooldownSeconds;
     state.run.planetaryExpedition.treasureMarks = save.treasureMarks;
-    state.run.planetaryExpedition.droneModuleRuntime = save.droneModuleRuntime;
+    state.run.expedition.progression.droneModuleRuntime = save.droneModuleRuntime;
     state.run.mining = save.mining;
+    if (state.run.flight.landing.siteCommitted && !state.run.expedition.location.siteId.empty() &&
+        !state.run.expedition.location.siteId.ends_with(".dock") &&
+        state.run.expedition.location.siteId.find(":zone_") == std::string::npos)
+        state.run.expedition.location.siteId += ":zone_1";
     {
         MiningRunState& mining = state.run.mining;
         constexpr double tau = 6.28318530717958647692;
@@ -3173,8 +3203,8 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         state.screen = Screen::Hangar;
     }
     if (state.screen == Screen::SurfaceUpgrade &&
-        (!state.run.planetaryExpedition.runUpgradeOfferPending ||
-         state.run.planetaryExpedition.runUpgradeOfferCount <= 0)) {
+        (!state.run.expedition.progression.runUpgradeOfferPending ||
+         state.run.expedition.progression.runUpgradeOfferCount <= 0)) {
         state.screen = state.run.planetaryExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
     }
     if (state.screen == Screen::Mining && (!state.run.planetaryExpedition.active || !state.run.mining.active)) {
@@ -3204,6 +3234,9 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.prospectorCommonOreRecovered = std::clamp(save.prospectorCommonOreRecovered, 0, tuning::research::prospectorCommonOreGoal);
     state.meta.lunarMiningBriefingAcknowledged = save.lunarMiningBriefingAcknowledged;
     state.meta.lunarProspectorClaimed = save.lunarProspectorClaimed;
+    if (state.run.expedition.moonTutorialZone.empty() &&
+        (save.lunarProspectorClaimed || (save.mining.destinationId == "moon" && !save.mining.terrain.cells.empty())))
+        state.run.expedition.moonTutorialZone = "zone_1";
     state.meta.marsCommonOreRecovered = std::clamp(save.marsCommonOreRecovered, 0, tuning::research::marsBayCommonOreGoal);
     state.meta.marsMiningBriefingAcknowledged = save.marsMiningBriefingAcknowledged;
     state.meta.marsBayExpansionClaimed = save.marsBayExpansionClaimed;
@@ -3217,6 +3250,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.saturnSlingshotFailureAcknowledged = save.saturnSlingshotFailureAcknowledged;
     state.meta.hasEncounteredEnemy = save.hasEncounteredEnemy;
     state.meta.acknowledgedActivityBriefingIds = save.acknowledgedActivityBriefingIds;
+    state.incomingMessages = save.incomingMessages;
     ensureDroneBayState(state, catalog);
     if (state.screen == Screen::DroneOps && !droneBayUnlocked(state)) {
         state.screen = state.run.planetaryExpedition.active ? Screen::SurfaceExpedition : Screen::Hangar;
@@ -3403,6 +3437,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::routeTransitIntent, static_cast<int>(save.routeTransit.intent));
     writeField(out, save_schema::field::screen, screenToInt(save.screen));
     writeField(out, save_schema::field::flightState, serializeFlightState(save.flight));
+    writeField(out, "persistentExpedition", serializeExpedition(save.expedition));
     writeField(out, save_schema::field::campaignMilestone, campaignMilestoneToInt(save.campaignMilestone));
     writeField(out, save_schema::field::chapter, gameChapterToInt(save.chapter));
     writeField(out, save_schema::field::arkCondition, arkConditionToInt(save.ark.condition));
@@ -3428,6 +3463,7 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::storyPending, storyBriefingToInt(save.storyBriefing.pending));
     writeField(out, save_schema::field::storyContinuation, screenToInt(save.storyBriefing.continuation));
     writeField(out, save_schema::field::acknowledgedActivityBriefings, join(save.acknowledgedActivityBriefingIds, save_schema::listDelimiter));
+    writeField(out, "incomingMessages", serializeIncomingMessages(save.incomingMessages));
     writeField(out, save_schema::field::campaignIntroductionAcknowledged, save.campaignIntroductionAcknowledged ? 1 : 0);
     writeField(out, save_schema::field::straylightDiscoveryAcknowledged, save.straylightDiscoveryAcknowledged ? 1 : 0);
     writeField(out, save_schema::field::crewLossPending, save.crewLossPending ? 1 : 0);
@@ -3456,18 +3492,18 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::surfacePendingMiningSite, save.planetaryExpedition.pendingMiningSiteDefinitionId);
     writeField(out, save_schema::field::surfaceBankedMiningArena, serializeSurfaceBankedMiningArena(save.planetaryExpedition));
     writeField(out, save_schema::field::surfaceLog, join(save.planetaryExpedition.logEntries, save_schema::textListDelimiter));
-    writeField(out, save_schema::field::expeditionLevel, save.planetaryExpedition.expeditionLevel);
-    writeField(out, save_schema::field::expeditionExperience, save.planetaryExpedition.expeditionExperience);
-    writeField(out, save_schema::field::pendingRunUpgradeChoices, save.planetaryExpedition.pendingRunUpgradeChoices);
+    writeField(out, save_schema::field::expeditionLevel, save.expedition.progression.expeditionLevel);
+    writeField(out, save_schema::field::expeditionExperience, save.expedition.progression.expeditionExperience);
+    writeField(out, save_schema::field::pendingRunUpgradeChoices, save.expedition.progression.pendingRunUpgradeChoices);
     writeField(out, save_schema::field::runUpgradeOffers, serializeRunUpgradeOffers(
-        save.planetaryExpedition.runUpgradeOffers,
-        save.planetaryExpedition.runUpgradeOfferCount));
-    writeField(out, save_schema::field::runUpgradeOfferCount, save.planetaryExpedition.runUpgradeOfferCount);
-    writeField(out, save_schema::field::runUpgradeOfferPending, save.planetaryExpedition.runUpgradeOfferPending ? 1 : 0);
-    writeField(out, save_schema::field::runUpgradeReturnScreen, screenToInt(save.planetaryExpedition.runUpgradeReturnScreen));
-    writeField(out, save_schema::field::runRigUpgradeRanks, serializeRunRigUpgradeRanks(save.planetaryExpedition.runRigUpgradeRanks));
-    writeField(out, save_schema::field::runDroneRanks, serializeRunDroneRanks(save.planetaryExpedition.runDroneRanks));
-    writeField(out, save_schema::field::selectedSynergyIds, join(save.planetaryExpedition.selectedSynergyIds, save_schema::listDelimiter));
+        save.expedition.progression.runUpgradeOffers,
+        save.expedition.progression.runUpgradeOfferCount));
+    writeField(out, save_schema::field::runUpgradeOfferCount, save.expedition.progression.runUpgradeOfferCount);
+    writeField(out, save_schema::field::runUpgradeOfferPending, save.expedition.progression.runUpgradeOfferPending ? 1 : 0);
+    writeField(out, save_schema::field::runUpgradeReturnScreen, screenToInt(save.expedition.progression.runUpgradeReturnScreen));
+    writeField(out, save_schema::field::runRigUpgradeRanks, serializeRunRigUpgradeRanks(save.expedition.progression.runRigUpgradeRanks));
+    writeField(out, save_schema::field::runDroneRanks, serializeRunDroneRanks(save.expedition.progression.runDroneRanks));
+    writeField(out, save_schema::field::selectedSynergyIds, join(save.expedition.progression.selectedSynergyIds, save_schema::listDelimiter));
     writeField(out, save_schema::field::droneModuleAssignments, serializeDroneModuleAssignments(save.droneModuleAssignments));
     writeField(out, save_schema::field::droneModuleRuntime, serializeDroneModuleRuntime(save.droneModuleRuntime));
     writeField(out, save_schema::field::scannerCooldownSeconds, save.scannerCooldownSeconds);
@@ -3627,6 +3663,14 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
 
         const std::string_view key = line.substr(0, equals);
         const std::string_view value = line.substr(equals + 1);
+
+        if (key == "persistentExpedition") {
+            auto expedition = deserializeExpedition(value);
+            if (!expedition) return std::nullopt;
+            expedition->progression = std::move(save.expedition.progression);
+            save.expedition = std::move(*expedition);
+            continue;
+        }
 
         if (parseMiningProgressionField(save, key, value)) {
             continue;
@@ -3798,6 +3842,8 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.storyBriefing.continuation = screenFromInt(parseInt(value, 0));
         } else if (key == save_schema::field::acknowledgedActivityBriefings) {
             save.acknowledgedActivityBriefingIds = split(value, save_schema::listDelimiter);
+        } else if (key == "incomingMessages") {
+            if (!deserializeIncomingMessages(value, save.incomingMessages)) return std::nullopt;
         } else if (key == save_schema::field::campaignIntroductionAcknowledged) {
             save.campaignIntroductionAcknowledged = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::straylightDiscoveryAcknowledged) {

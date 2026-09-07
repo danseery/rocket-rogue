@@ -1,6 +1,7 @@
 #include <volk.h>
 
 #include "render/VulkanRmlRenderHost.h"
+#include "render/RmlImageLoader.h"
 
 #include "platform/AppServices.h"
 #include "render/IVulkanRmlFrameContext.h"
@@ -469,12 +470,7 @@ public:
         Rml::Vector2i& textureDimensions,
         const Rml::String& source) override
     {
-        (void)textureDimensions;
-        Rml::Log::Message(
-            Rml::Log::LT_WARNING,
-            "RmlUi texture file loading is not used by OREBIT: %s",
-            source.c_str());
-        return 0;
+        return loadRmlImage(*this, textureDimensions, source);
     }
 
     Rml::TextureHandle GenerateTexture(

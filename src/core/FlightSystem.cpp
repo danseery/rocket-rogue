@@ -15,7 +15,7 @@ const std::array<PlanetLandingZone, 6>& planetLandingZones()
         for (int i = 0; i < 6; ++i) {
             result[i] = {"zone_" + std::to_string(i + 1), i,
                 std::remainder(inbound + sector * i, 6.283185307179586),
-                sector * 0.5, i == 0, i == 0 ? "inbound_site" : ""};
+                sector * 0.5, true, i == 0 ? "inbound_site" : ""};
         }
         return result;
     }();
@@ -30,9 +30,13 @@ const PlanetLandingZone* planetLandingZone(std::string_view id)
 
 bool landingZoneContains(const PlanetLandingZone& zone, double bearing)
 {
-    const double delta = flightWrappedAngleDelta(zone.centerBearing, bearing);
-    // Half-open intervals: a shared edge belongs to exactly one sector.
-    return delta >= -zone.halfAngle && delta < zone.halfAngle;
+    if (!std::isfinite(bearing)) return false;
+    constexpr double sector = 1.0471975511965976, tau = sector * 6;
+    const double relative = std::fmod(std::fmod(bearing - planetLandingZones()[0].centerBearing + sector*.5, tau) + tau, tau);
+    // Quantize once against the common origin. Independent floating-point
+    // edge comparisons can otherwise assign a shared boundary twice.
+    const int index = static_cast<int>(std::floor(relative / sector + 1e-12)) % 6;
+    return zone.id == planetLandingZones()[index].id;
 }
 
 const PlanetLandingZone* enabledLandingZoneAt(double bearing)
@@ -261,6 +265,8 @@ void leaveLocalLanding(FlightRunState& flight)
     flight.handoff = {FlightMode::Landing, FlightMode::Orbit, 0.0,
         flight.positionX, flight.positionY, flight.heading};
     flight.mode = FlightMode::Orbit;
+    flight.orbit.captured = false;
+    flight.orbit.confirmationSeconds = 0.0;
     flight.phase = flight.orbit.captured ? FlightPhase::Orbiting : FlightPhase::TargetApproach;
     flight.orbit.previousAngle = std::atan2(flight.positionY, flight.positionX);
     flight.landing.departureActive = false;

@@ -55,9 +55,13 @@ struct PanelRenderContext {
     bool orbitalLaserBlocked = false;
     bool orbitalLaserComplete = false;
     bool orbitalInsideZone = false;
+    bool incomingMessageDeliveryAllowed = true;
 };
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);
+std::optional<ModalPresentation> buildIncomingMessageCard(
+    const PanelRenderContext& context, std::string_view messageId,
+    std::string_view variantId, const std::string& action);
 void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& result);
 std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context);
 

@@ -1,23 +1,29 @@
-# Rocket Rogue Documentation Map
+# OREBIT Documentation Map
 
-Use this page to choose the right source before changing gameplay, presentation, platforms, or release behavior. Filenames that include `PLAN` are retained for stable links, but their documents describe the current implementation as well as explicitly marked future work.
+The [OREBIT Game Design Document](Rocket_Rogue_Game_Design_Document.docx) is the definitive design. Supporting documents must agree with it; code supplies implementation evidence and reference extracts supply inspiration. Specific unresolved story/progression relationships are marked TBD in GDD Section 8. Use this page to find implementation detail. Filenames that include `PLAN` are retained for stable links, but their documents describe the current implementation as well as explicitly marked future work.
 
 ## Consolidated design
 
-- [Rocket Rogue Game Design Document](Rocket_Rogue_Game_Design_Document.docx) - formatted, shareable game design document.
+- [Rocket Rogue Game Design Document](Rocket_Rogue_Game_Design_Document.docx) - definitive game design, including story and progression TBDs.
 - [Design Notes](DESIGN.md) - current gameplay loop, balance principles, architecture ownership, and persistence contracts.
 - [Agent Design Context](AGENT_DESIGN_CONTEXT.md) - implementation priority order and condensed project direction; start here before extending a game system.
-- [Scenario Framework](SCENARIO_FRAMEWORK.md) - campaign goals, gates, typed transitions, route safety validation, checkpoint recovery, and the Neptune-only Straylight takeover.
+- [Scenario Framework](SCENARIO_FRAMEWORK.md) - campaign goals, explicit claims, typed events, saved acknowledgements, and battery/Ark integration boundaries.
 
 ## Playable systems
 
-- [Post-Arrival Phases](POST_ARRIVAL_PHASES.md) - research, Surface Ops, extraction, and the boundary between the launch and surface loops.
+- [Persistent Expeditions](PERSISTENT_EXPEDITIONS.md) - solar travel, spatial map, cruise, home shipyard, banking, recovery, and return-or-continue decisions.
+
+- [Post-Arrival Phases](POST_ARRIVAL_PHASES.md) - connected Flight/Mining journey, simulation ownership and persistence handoffs.
 - [Support Drone System](MINI_DRONE_SYSTEM.md) - Drone Bay roles, owned frames, paid duplicates, upgrades, capacity, and passive support/combat contract.
-- [Mining Mini-Game](MINING_MINIGAME_PLAN.md) - current entry flow, shared-fuel tradeoff, controls, rewards, failure states, and implementation ownership.
+- [Mining Mini-Game](MINING_MINIGAME_PLAN.md) - deployment, Rig/EVA controls, independent resources, physical recovery and implementation ownership.
 - [Mining and Combat Progression](MINING_COMBAT_PROGRESSION.md) - deterministic Act/level rules, encounter budgets, campaign mapping, and persistence invariants.
 - [Themed Enemy Sprite Library](ENEMY_SPRITE_LIBRARY.md) - side-view animation contract, reusable GenAI prompt bible, deterministic importer, theme mechanics, and provenance.
 - [Enemy Sprite Prompt Manifest](ENEMY_SPRITE_PROMPT_MANIFEST.md) - per-archetype generation records, shared prompt templates, and rejected-direction guardrails.
 - [Mining Lock-and-Key Sites](MINING_LOCK_AND_KEY_SITES.md) - artifact gate progression, capability forecasting, runtime state, and soft-lock prevention.
+
+- [Orbital Preparation](ORBITAL_PREPARATION_PROTOTYPE.md) - capture, Pulse Survey, Zone 1 laser work and explicit Land.
+- [Surface Arrival](HEROIC_SURFACE_ARRIVAL.md) - touchdown, deployment, camera and cues.
+- [Underground Landing and Ascent](UNDERGROUND_LANDING_PROTOTYPE.md) - cached terrain, parked ship services and manual departure.
 
 ## Application, UI, and release
 
@@ -32,8 +38,8 @@ Use this page to choose the right source before changing gameplay, presentation,
 
 The files under `reference/` are source extracts, not descriptions of current implementation. Preserve their original wording even when current code or canon differs.
 
-- [USG Notes](reference/USG_NOTES.md) - primary extracted design direction; its retained PDF is under `reference/source-pdfs/`.
+- [USG Notes](reference/USG_NOTES.md) - preserved design inspiration; its retained PDF is under `reference/source-pdfs/`.
 - [Roguelike Outline](reference/ROGUELIKE_OUTLINE.md) - supporting extracted source; its retained PDF is under `reference/source-pdfs/`.
 - [Roguelite Elements](reference/ROGUELITE_ELEMENTS.md) - supporting extract whose original PDF was removed because it contained account-specific URLs.
 
-When documents disagree, follow the priority order in [Agent Design Context](AGENT_DESIGN_CONTEXT.md), then reconcile the affected current-system document and the formatted GDD so implementation, UI copy, and design intent do not drift.
+When documents disagree, the GDD governs design. Reconcile supporting notes with it; use specific TBDs for unresolved story/progression conflicts rather than treating older reference material or retained code paths as overriding design.

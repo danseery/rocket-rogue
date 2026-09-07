@@ -19,6 +19,10 @@ enum class NativeBenchmarkScenario {
     Hangar,
     Launch,
     Mining,
+    Message,
+    ExpeditionDock,
+    ExpeditionMap,
+    ExpeditionFlight,
 };
 
 enum class NativeBenchmarkRenderer {

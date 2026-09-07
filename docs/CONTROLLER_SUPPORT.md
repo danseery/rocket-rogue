@@ -1,5 +1,7 @@
 # Controller Support
 
+The [OREBIT Game Design Document](Rocket_Rogue_Game_Design_Document.docx) is the definitive design. This document supplies implementation detail and must agree with it. Story and progression decisions marked TBD are collected in GDD Section 8.
+
 Rocket Rogue's native Windows/Linux and web builds share one controller-complete player-facing input path. Web gamepads must expose the W3C `standard` mapping; native builds use SDL's standard gamepad mapping. Xbox pads, DualShock 4, DualSense, and Steam Deck controls resolve into the same portable snapshots, prompt families, and semantic actions. Steam Input, gyro, touchpads, rear paddles, multiplayer, and full binding remaps remain separate platform work.
 
 ## Architecture contract
@@ -32,17 +34,15 @@ Controller names use positions so the same rule applies to every prompt family: 
 |---|---|
 | Menus, cards, drafts, settings, modals | Left stick or D-pad navigates; South confirms; East backs out; right stick scrolls; Menu opens the system menu; View opens Map; North opens Inventory outside real-time play. |
 | Preflight, fanfare, results | South launches or continues. During Mining Rig transfer, South queues launch and the burn begins automatically when the bay seals. |
-| Active launch | Fuel Survey ignores movement input and South turns around at the fuel light. From Controls Calibration onward, left stick steers left/right and raises/lowers persistent throttle; South turns around without ending the flight. West toggles engines only after Temperature is introduced. Manual Eject, pressure relief, and launch cargo jettison are not bound. |
-| Flyby | Left stick steers and throttles; South continues after completion; hold East 0.45 s to abort. |
-| Orbit | Left stick supplies radial and tangential thrust; South continues after completion; hold East 0.45 s to abort. |
-| Surface Scan / Push Deeper | South pulses or pushes; West returns with the current validated result or selected start depth; hold East 0.45 s to abort. Screen actions remain spatially focusable. |
+| Physical Flight | Left stick controls rotation and proportional forward/reverse thrust. Left-stick click / C toggles cruise; View / M opens the paused system map. Manual steering/thrust cancels cruise. South starts Pulse Survey or holds Orbital Laser Dig when available; East resumes flight from inspection. |
+| Touchdown | South deploys; hold East 0.45 s to depart undeployed. The first accepted command owns the sequence. |
 | Mining - rig | Left stick thrusts and faces the rig; RT drills; West scans; North tethers; release South quickly to stow cargo or leave; hold South 0.6 s to exit; LB repairs the drill; RB repairs the rig; hold East 0.45 s for emergency recall. |
 | Mining - EVA | Left stick thrusts; right stick aims independently; RT fires the sidearm; LT hand-drills; West scans; North tethers; release South quickly to stow cargo or leave when valid; hold South 0.6 s to enter the rig; hold East 0.45 s for emergency recall. |
-| Real-time UI access | Preflight and active launch never enter D-pad UI focus: South launches or returns, and dedicated flight buttons stay authoritative. Options/Menu explicitly opens the system menu. Steering and drilling contexts still use D-pad UI focus and pause. Gameplay input remains suppressed while a modal is open. |
+| Real-time UI access | Preflight and active launch never enter D-pad UI focus: South follows the active launch/orbital-work context, and dedicated flight controls remain active outside inspection. Options/Menu explicitly opens the system menu. Steering and drilling contexts still use D-pad UI focus and pause. Gameplay input remains suppressed while a modal is open. |
 
 The Mining Rig drill stays forward-facing. EVA uses twin-stick movement and independent aim: the right stick rotates the reticle while RT fires an immediate shot and continues at a 0.18-second cadence. LT is the suit hand drill. Support Drone targeting remains autonomous around the active actor.
 
-During launch, keyboard WASD/arrows steer left/right and raise/lower throttle after the first Fuel Survey, `C` cuts or restores engines after Temperature is introduced, and `R` turns around. Launch has no keyboard binding for manual eject, pressure relief, or cargo jettison. In mining, keyboard and mouse use WASD/arrows for thrust, mouse for operator aim, left click for sidearm fire, right click for the hand drill, `E` for scan, `T` for tether, and `F` for immediate exit/entry. Space retains the rig drill's configured Toggle/Hold behavior, and `R` retains stow/leave at the shuttle.
+In physical Flight, A/D rotate and W/S apply forward/reverse thrust. Space/Enter starts survey or holds the orbital laser when available; Escape resumes flight from inspection. The Land UI action during completed-survey inspection in Zone 1 stops and aligns the ship before gravity resumes. At touchdown, Space/Enter deploys and R departs undeployed. In mining, WASD/arrows move, mouse aims EVA, left click fires, right click drills, E scans, T tethers, F switches actor and R performs the contextual ship action. Space uses the Rig drill Toggle/Hold preference. Packing leads into manually controlled ascent.
 
 Holding South displays an `EXIT` or `ENTER` progress ring around the rig. The threshold is exactly 0.6 seconds; releasing before it fires routes through the existing tap action. `F` switches immediately and produces a confirmation pulse.
 
@@ -56,7 +56,7 @@ Native and web input adapters must use the same mining viewport transform for po
 - Modals trap focus and return it to their opener. Mining Failure behaves as a blocking modal even when it opens automatically; South acknowledges it directly even if a document rebuild has not restored focus yet.
 - Select controls change with left/right; South toggles checkboxes. Focus automatically scrolls into view.
 - System menus, blocking modals, host focus/visibility loss, input-source switching, and active-controller loss pause real-time simulation and immediately clear gameplay axes, aim, thrust, fire, drilling, and operator-toggle progress. Reconnection requires an observed neutral frame followed by explicit Resume.
-- Entering preflight clears prior menu focus. Preflight and active launch do not expose D-pad UI focus: Cross/South always launches, queues launch, or returns according to the flight phase. Opening a modal or the system menu still pauses and takes input priority.
+- Entering preflight clears prior menu focus. Flight and touchdown interpret the primary action by active context; a modal or system menu pauses simulation and takes input priority.
 - A neutral connected controller does not steal the active source or release a held keyboard input.
 
 ## Input tuning
@@ -71,8 +71,16 @@ Native and web input adapters must use the same mining viewport transform for po
 
 ## Verification matrix
 
-Automated checks cover deadzones, trigger hysteresis, button edges, holds, repeats, active-pad selection, source arbitration, prompt detection/override, disconnect release, rig/EVA tap-versus-hold behavior, independent aim, held-action clearing, UI-consumed pointer clicks, and context-menu suppression. Player-route verification should cover Hangar, Navigation, Launch, Results, Arrival, Flyby, Orbit, Research, Surface Ops, Scan, Push Deeper, Mining, Drone Ops, both drafts, Settings, Map, Inventory, and failure/confirmation modals.
+Existing input tests cover routing, deadzones, edges/holds, source arbitration, pause and disconnect behavior. Journey verification must cover preflight, physical Flight, orbit survey/laser, Land/manual descent, touchdown, deployment, Mining/EVA, ship service, packing and ascent, plus management and blocking modals. Verify each claimed behavior against the relevant tests; hardware and visual acceptance require direct checks.
 
 Before release, perform physical passes with Xbox, DualShock 4, DualSense, and Steam Deck on native Windows/Linux plus the web build at localhost and production HTTPS. Include disconnect/reconnect and source switching while moving, aiming, firing, drilling, and holding the operator-toggle action. Check RmlUi prompt and focus layout at 1280x800, 1080p, 1440p, and 4K on native and web.
 
 Developer forms remain mouse/keyboard tools. The debug Controller Lab is for inspecting devices, axes, buttons, resolved context, focus, actions, pause state, and deterministic synthetic input. Synthetic frames use a separate preview-only router: they may move focus and report the semantic action that would fire, but they never dispatch gameplay actions or touch campaign saves.
+
+## Incoming Message controls
+
+Incoming Messages use the shared modal focus scope: Accept activates the single acknowledgement button; Cancel/Escape cannot dismiss the message. The card shows context-appropriate controls: scanner E / West, Exit Rig F / hold South, hand drill Space or right mouse / LT, tether T / North. Movement and tool inputs held across acknowledgement must return to neutral before they resume. Simulation and oxygen pause while the card is open; XP selections and physical transitions retain priority.
+
+## Earth launch and dock departure
+
+The first-flight Mission Control card shows current steering and thrust bindings and requires an explicit Ready to launch acknowledgement. The ship remains held at Earth afterward. Activate the focused Launch button with Accept (Enter / controller South), or click it, to begin flight; fresh steering and thrust inputs are required. Earth appears below-left and Moon above-right. Left-stick horizontal input steers; vertical input supplies forward/reverse thrust with the configured Y inversion. After Depart dock, forward thrust releases the dock; plotting a course never steers or undocks. The selected-target marker, coast trajectory and next-action hint are shared with keyboard/web play.

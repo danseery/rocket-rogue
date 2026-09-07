@@ -2239,6 +2239,7 @@ void VulkanGraphicsBackend::updateMemoryDiagnostics()
 void VulkanGraphicsBackend::setPreferences(const AppPreferences& preferences)
 {
     composer_.setCameraShakeEnabled(!preferences.cameraShakeDisabled);
+    composer_.setRigCollisionDebug(preferences.debugToolsEnabled);
     if (frameLimitMode_ != preferences.frameLimitMode) {
         frameLimitMode_ = preferences.frameLimitMode;
         refreshFrameLimit();

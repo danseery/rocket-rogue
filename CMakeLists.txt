@@ -49,6 +49,8 @@ endforeach()
 set(ROCKET_UI_ASSET_DIRECTORY "${CMAKE_SOURCE_DIR}/assets/ui")
 set(ROCKET_AUDIO_ASSET_DIRECTORY "${CMAKE_SOURCE_DIR}/assets/audio")
 set(ROCKET_REQUIRED_UI_ASSETS
+    portraits/mission-control-fennec.png
+    portraits/mission-control-fennec-concerned.png
     panel.rml
     styles/all.rcss
     styles/tokens.rcss
@@ -74,7 +76,8 @@ foreach(ROCKET_UI_ASSET IN LISTS ROCKET_REQUIRED_UI_ASSETS)
 endforeach()
 file(GLOB_RECURSE ROCKET_UI_ASSET_FILES CONFIGURE_DEPENDS
     "${ROCKET_UI_ASSET_DIRECTORY}/*.rml"
-    "${ROCKET_UI_ASSET_DIRECTORY}/*.rcss")
+    "${ROCKET_UI_ASSET_DIRECTORY}/*.rcss"
+    "${ROCKET_UI_ASSET_DIRECTORY}/portraits/*.png")
 list(SORT ROCKET_UI_ASSET_FILES)
 file(GLOB_RECURSE ROCKET_FONT_ASSET_FILES CONFIGURE_DEPENDS
     "${ROCKET_FONT_ASSET_DIRECTORY}/*")
@@ -110,6 +113,12 @@ add_library(rocket_core
     src/core/ArtifactProgression.cpp
     src/core/Content.cpp
     src/core/FlightSystem.cpp
+    src/core/SystemContent.cpp
+    src/core/ExpeditionSystem.cpp
+    src/core/LiveExpedition.cpp
+    src/core/IncomingMessages.cpp
+    src/core/LunarDiscoveryMessages.cpp
+    src/core/ExpeditionPersistence.cpp
     src/core/GameState.cpp
     src/core/LaunchSimulation.cpp
     src/core/MiniDroneCoordination.cpp
@@ -177,20 +186,24 @@ else()
 endif()
 
 add_library(rocket_game_panel
-    src/game/GamePanel.cpp)
+    src/game/GamePanel.cpp
+    src/game/ExpeditionPresentation.cpp)
 target_link_libraries(rocket_game_panel PUBLIC rocket_core)
 target_include_directories(rocket_game_panel PUBLIC src)
 
 add_library(rocket_app
+    third_party/lodepng/lodepng.cpp
     src/game/GameRmlUi.cpp
     src/game/GameRunner.cpp
     src/game/RocketGameApp.cpp
+    src/game/ExpeditionActions.cpp
     src/performance/PerformanceMetrics.cpp
     src/render/FrameCapture.cpp
     src/render/SceneComposer.cpp)
 target_link_libraries(rocket_app PUBLIC rocket_core rocket_game_panel PRIVATE rmlui_core)
 target_include_directories(rocket_app PUBLIC
     src
+    third_party/lodepng
     "${ROCKET_RMLUI_SOURCE_DIR}/Backends"
     PRIVATE "${ROCKET_RMLUI_SOURCE_DIR}/Source/Debugger")
 target_compile_definitions(rocket_app PRIVATE RMLUI_STATIC_LIB)
@@ -203,7 +216,7 @@ if(EMSCRIPTEN)
     target_compile_options(rocket_app PRIVATE -sUSE_FREETYPE=1)
 endif()
 
-add_executable(rocket_core_tests tests/core_tests.cpp)
+add_executable(rocket_core_tests tests/core_tests.cpp tests/expedition_tests.cpp tests/incoming_message_tests.cpp)
 target_link_libraries(rocket_core_tests PRIVATE rocket_core rocket_game_panel)
 set_target_properties(rocket_core_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
 

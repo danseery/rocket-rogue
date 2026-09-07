@@ -1,5 +1,7 @@
 # Post-Solar Procedural Bodies
 
+The [OREBIT Game Design Document](Rocket_Rogue_Game_Design_Document.docx) is the definitive design. This document supplies implementation detail and must agree with it. Story and progression decisions marked TBD are collected in GDD Section 8.
+
 ## Scope
 
 Sol remains an authored destination sequence with its existing Moon-through-Neptune

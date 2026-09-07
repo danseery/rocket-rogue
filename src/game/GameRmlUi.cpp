@@ -1350,8 +1350,8 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
         static_cast<float>(std::min(sceneRect.width, sceneRect.height)) * 0.5F * nativeScenePadding);
     const int nativeSceneCenterX = sceneRect.x + sceneRect.width / 2;
     const int nativeSceneCenterY = sceneRect.y + sceneRect.height / 2;
-    const int launchAnchorX = nativeSceneCenterX - static_cast<int>(0.18F * nativeSceneUnit);
-    const int launchAnchorY = nativeSceneCenterY + static_cast<int>(0.50F * nativeSceneUnit);
+    const int launchAnchorX = nativeSceneCenterX - static_cast<int>(0.30F * nativeSceneUnit);
+    const int launchAnchorY = nativeSceneCenterY + static_cast<int>(0.20F * nativeSceneUnit);
     const int nativeLaunchWidth = std::min(196, std::max(1, hudSafeRect.width));
     const int nativeLaunchHeight = std::min(62, std::max(1, hudSafeRect.height));
     const int nativeLaunchLeft = std::clamp(
@@ -3056,6 +3056,10 @@ void GameRmlUi::setRealtimeHudState(const RealtimeHudState& state)
         return;
     }
 
+    if (state.surfaceFramingProgress >= 0.0) {
+        if (auto* surface = g_document->GetElementById("rr-surface-hud"))
+            surface->SetProperty("opacity", std::to_string(state.surfaceFramingProgress));
+    }
     for (const RealtimeHudPatch& patch : state.patches) {
         Rml::Element* element = g_document->GetElementById(patch.elementId);
         if (!element) {
@@ -4061,6 +4065,9 @@ bool GameRmlUi::rebuildModalHost()
             + "</div>";
         modalHost->SetInnerRML(
             "<template src=\"rr-modal-shell\">" + modalContent + "</template>");
+        if (auto* scrim = g_document->GetElementById("rr-modal-scrim")) {
+            scrim->SetClass("incoming-message-scrim", activeModal->id == "incoming_message");
+        }
         Rml::Element* modalElement = g_document->GetElementById("rr-modal");
         if (!modalElement) {
             const std::filesystem::path templatePath =

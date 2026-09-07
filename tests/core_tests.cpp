@@ -1,3 +1,4 @@
+#include "core/RigGeometry.h"
 #include "core/Content.h"
 #include "core/ContentIds.h"
 #include "core/CrewPresentation.h"
@@ -3603,28 +3604,28 @@ void expeditionExperienceQueuesDistinctSelectableOffers()
             }),
         "later rig ranks should also omit the redundant Progression label");
     const ExpeditionExperienceAward award = awardExpeditionExperience(state, 75.0, state.screen);
-    require(award.levelsGained == 3 && state.run.planetaryExpedition.expeditionLevel == 4,
+    require(award.levelsGained == 3 && state.run.expedition.progression.expeditionLevel == 4,
         "75 expedition XP should cross the 10, 16, and 25 thresholds");
-    require(std::abs(state.run.planetaryExpedition.expeditionExperience - 24.0) < 0.001 &&
-            state.run.planetaryExpedition.pendingRunUpgradeChoices == 3,
+    require(std::abs(state.run.expedition.progression.expeditionExperience - 24.0) < 0.001 &&
+            state.run.expedition.progression.pendingRunUpgradeChoices == 3,
         "75 expedition XP should leave 24 XP and queue three mandatory choices");
     Random rng(643);
     require(generateRunUpgradeOffers(state, catalog, rng), "a queued level should generate a persisted offer");
     const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-    require(expedition.runUpgradeOfferPending && expedition.runUpgradeOfferCount == 3,
+    require(state.run.expedition.progression.runUpgradeOfferPending && state.run.expedition.progression.runUpgradeOfferCount == 3,
         "a populated run-upgrade pool should expose three cards");
-    for (int left = 0; left < expedition.runUpgradeOfferCount; ++left) {
-        for (int right = left + 1; right < expedition.runUpgradeOfferCount; ++right) {
-            const RunUpgradeOffer& a = expedition.runUpgradeOffers[static_cast<std::size_t>(left)];
-            const RunUpgradeOffer& b = expedition.runUpgradeOffers[static_cast<std::size_t>(right)];
+    for (int left = 0; left < state.run.expedition.progression.runUpgradeOfferCount; ++left) {
+        for (int right = left + 1; right < state.run.expedition.progression.runUpgradeOfferCount; ++right) {
+            const RunUpgradeOffer& a = state.run.expedition.progression.runUpgradeOffers[static_cast<std::size_t>(left)];
+            const RunUpgradeOffer& b = state.run.expedition.progression.runUpgradeOffers[static_cast<std::size_t>(right)];
             require(a.kind != b.kind || a.definitionId != b.definitionId || a.slotIndex != b.slotIndex,
                 "one level-up board must not repeat an identical offer target");
         }
     }
     const Screen originalScreen = state.screen;
     require(chooseRunUpgrade(state, catalog, 0), "selecting a valid persisted offer should apply it");
-    require(state.run.planetaryExpedition.pendingRunUpgradeChoices == 2 &&
-            !state.run.planetaryExpedition.runUpgradeOfferPending,
+    require(state.run.expedition.progression.pendingRunUpgradeChoices == 2 &&
+            !state.run.expedition.progression.runUpgradeOfferPending,
         "selection should consume exactly one choice and clear only the current board");
     require(state.screen == originalScreen,
         "core offer selection must not mutate screens or auto-open the next board");
@@ -3827,15 +3828,15 @@ void exhaustedRunUpgradePoolConsumesQueuedChoices()
     catalog.droneSynergies.clear();
 
     GameState state = createNewGame(catalog, 6421);
-    state.run.planetaryExpedition.pendingRunUpgradeChoices = 2;
+    state.run.expedition.progression.pendingRunUpgradeChoices = 2;
     Random rng(6422);
     require(!generateRunUpgradeOffers(state, catalog, rng) &&
-            state.run.planetaryExpedition.pendingRunUpgradeChoices == 1 &&
-            !state.run.planetaryExpedition.runUpgradeOfferPending,
+            state.run.expedition.progression.pendingRunUpgradeChoices == 1 &&
+            !state.run.expedition.progression.runUpgradeOfferPending,
         "an exhausted finite pool should consume exactly one mandatory choice without opening an empty board");
     require(!generateRunUpgradeOffers(state, catalog, rng) &&
-            state.run.planetaryExpedition.pendingRunUpgradeChoices == 0 &&
-            state.run.planetaryExpedition.runUpgradeOfferCount == 0,
+            state.run.expedition.progression.pendingRunUpgradeChoices == 0 &&
+            state.run.expedition.progression.runUpgradeOfferCount == 0,
         "queued choices should drain deterministically when every eligible upgrade is installed");
 }
 
@@ -3850,31 +3851,31 @@ void combatRunUpgradesWaitForFirstEnemyEncounter()
     catalog.droneSynergies.clear();
 
     GameState state = createNewGame(catalog, 6423);
-    state.run.planetaryExpedition.pendingRunUpgradeChoices = 1;
+    state.run.expedition.progression.pendingRunUpgradeChoices = 1;
     Random rng(6424);
     require(generateRunUpgradeOffers(state, catalog, rng), "non-combat upgrades should remain available before enemy contact");
-    require(state.run.planetaryExpedition.runUpgradeOfferCount == 1 &&
-            state.run.planetaryExpedition.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::thermalDrillJackets,
+    require(state.run.expedition.progression.runUpgradeOfferCount == 1 &&
+            state.run.expedition.progression.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::thermalDrillJackets,
         "Resonant Discharge should stay out of the early upgrade pool before an enemy is encountered");
 
-    state.run.planetaryExpedition.runUpgradeOffers = {{
+    state.run.expedition.progression.runUpgradeOffers = {{
         {RunUpgradeKind::Rig, content::surfaceUpgrade::resonantDischarge, 1, -1}}};
-    state.run.planetaryExpedition.runUpgradeOfferCount = 1;
-    state.run.planetaryExpedition.runUpgradeOfferPending = true;
+    state.run.expedition.progression.runUpgradeOfferCount = 1;
+    state.run.expedition.progression.runUpgradeOfferPending = true;
     require(generateRunUpgradeOffers(state, catalog, rng) &&
-            state.run.planetaryExpedition.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::thermalDrillJackets,
+            state.run.expedition.progression.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::thermalDrillJackets,
         "a saved pre-contact combat draft should be rerolled without consuming its earned pick");
 
     state.meta.hasEncounteredEnemy = true;
-    state.run.planetaryExpedition.runUpgradeOffers = {};
-    state.run.planetaryExpedition.runUpgradeOfferCount = 0;
-    state.run.planetaryExpedition.runUpgradeOfferPending = false;
+    state.run.expedition.progression.runUpgradeOffers = {};
+    state.run.expedition.progression.runUpgradeOfferCount = 0;
+    state.run.expedition.progression.runUpgradeOfferPending = false;
     require(generateRunUpgradeOffers(state, catalog, rng) &&
-            state.run.planetaryExpedition.runUpgradeOfferCount == 2,
+            state.run.expedition.progression.runUpgradeOfferCount == 2,
         "the combat upgrade should enter the pool after the first hostile encounter");
     require(std::any_of(
-                state.run.planetaryExpedition.runUpgradeOffers.begin(),
-                state.run.planetaryExpedition.runUpgradeOffers.begin() + state.run.planetaryExpedition.runUpgradeOfferCount,
+                state.run.expedition.progression.runUpgradeOffers.begin(),
+                state.run.expedition.progression.runUpgradeOffers.begin() + state.run.expedition.progression.runUpgradeOfferCount,
                 [](const RunUpgradeOffer& offer) {
                     return offer.definitionId == content::surfaceUpgrade::resonantDischarge;
                 }),
@@ -3893,30 +3894,30 @@ void droneGraftOffersAreDistinctPerCompatibleSlot()
     state.meta.droneBaySlots = 2;
     state.meta.ownedDroneIds = {content::drone::miningDrone, content::drone::miningDrone};
     state.meta.equippedDroneIds = state.meta.ownedDroneIds;
-    state.run.planetaryExpedition.runDroneRanks = {{content::drone::miningDrone, 3}};
-    state.run.planetaryExpedition.pendingRunUpgradeChoices = 1;
+    state.run.expedition.progression.runDroneRanks = {{content::drone::miningDrone, 3}};
+    state.run.expedition.progression.pendingRunUpgradeChoices = 1;
     Random rng(6432);
     require(generateRunUpgradeOffers(state, catalog, rng), "compatible empty drone slots should create graft candidates");
     const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-    require(expedition.runUpgradeOfferCount == 3,
+    require(state.run.expedition.progression.runUpgradeOfferCount == 3,
         "four slot-specific Mining graft candidates should produce a three-card board");
     bool sameGraftDifferentSlots = false;
-    for (int left = 0; left < expedition.runUpgradeOfferCount; ++left) {
-        const RunUpgradeOffer& a = expedition.runUpgradeOffers[static_cast<std::size_t>(left)];
+    for (int left = 0; left < state.run.expedition.progression.runUpgradeOfferCount; ++left) {
+        const RunUpgradeOffer& a = state.run.expedition.progression.runUpgradeOffers[static_cast<std::size_t>(left)];
         require(a.kind == RunUpgradeKind::DroneGraft && (a.slotIndex == 0 || a.slotIndex == 1),
             "the exhausted filtered pool should contain only pre-bound compatible grafts");
-        for (int right = left + 1; right < expedition.runUpgradeOfferCount; ++right) {
-            const RunUpgradeOffer& b = expedition.runUpgradeOffers[static_cast<std::size_t>(right)];
+        for (int right = left + 1; right < state.run.expedition.progression.runUpgradeOfferCount; ++right) {
+            const RunUpgradeOffer& b = state.run.expedition.progression.runUpgradeOffers[static_cast<std::size_t>(right)];
             sameGraftDifferentSlots = sameGraftDifferentSlots ||
                 (a.definitionId == b.definitionId && a.slotIndex != b.slotIndex);
         }
     }
     require(sameGraftDifferentSlots,
         "duplicate Drone types must allow the same graft definition to target separate slots");
-    const RunUpgradeOffer chosen = expedition.runUpgradeOffers[0];
+    const RunUpgradeOffer chosen = state.run.expedition.progression.runUpgradeOffers[0];
     require(chooseRunUpgrade(state, catalog, 0) &&
-            state.run.planetaryExpedition.droneModuleAssignments.size() == 1 &&
-            state.run.planetaryExpedition.droneModuleAssignments.front().equippedFrame == chosen.slotIndex,
+            state.run.expedition.progression.droneModuleAssignments.size() == 1 &&
+            state.run.expedition.progression.droneModuleAssignments.front().equippedFrame == chosen.slotIndex,
         "choosing a graft should install it directly on its offered slot without assignment UI");
 }
 
@@ -3926,17 +3927,17 @@ void postExtractionLevelUpDraftRestoresWithoutSurfaceRuntime()
     GameState state = createNewGame(catalog, 6433);
     PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     expedition.active = false;
-    expedition.expeditionLevel = 4;
-    expedition.expeditionExperience = 24.0;
-    expedition.pendingRunUpgradeChoices = 1;
-    expedition.runUpgradeOffers[0] = {
+    state.run.expedition.progression.expeditionLevel = 4;
+    state.run.expedition.progression.expeditionExperience = 24.0;
+    state.run.expedition.progression.pendingRunUpgradeChoices = 1;
+    state.run.expedition.progression.runUpgradeOffers[0] = {
         RunUpgradeKind::Rig,
         content::surfaceUpgrade::thermalDrillJackets,
         1,
         -1};
-    expedition.runUpgradeOfferCount = 1;
-    expedition.runUpgradeOfferPending = true;
-    expedition.runUpgradeReturnScreen = Screen::Hangar;
+    state.run.expedition.progression.runUpgradeOfferCount = 1;
+    state.run.expedition.progression.runUpgradeOfferPending = true;
+    state.run.expedition.progression.runUpgradeReturnScreen = Screen::Hangar;
     state.screen = Screen::SurfaceUpgrade;
 
     const std::optional<SaveData> save = deserializeSaveData(
@@ -3948,9 +3949,9 @@ void postExtractionLevelUpDraftRestoresWithoutSurfaceRuntime()
     require(restored.screen == Screen::SurfaceUpgrade,
         "an open post-extraction Level Up draft should restore even after Surface runtime ends");
     require(!restored.run.planetaryExpedition.active &&
-            restored.run.planetaryExpedition.runUpgradeOfferPending &&
-            restored.run.planetaryExpedition.runUpgradeOfferCount == 1 &&
-            restored.run.planetaryExpedition.runUpgradeReturnScreen == Screen::Hangar,
+            restored.run.expedition.progression.runUpgradeOfferPending &&
+            restored.run.expedition.progression.runUpgradeOfferCount == 1 &&
+            restored.run.expedition.progression.runUpgradeReturnScreen == Screen::Hangar,
         "post-extraction draft offers and their eventual return screen should round trip intact");
 }
 
@@ -3962,7 +3963,7 @@ void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
     startSurfaceExpedition(baseline, catalog);
 
     GameState upgraded = baseline;
-    upgraded.run.planetaryExpedition.runRigUpgradeRanks = {
+    upgraded.run.expedition.progression.runRigUpgradeRanks = {
         {content::surfaceUpgrade::thermalDrillJackets, 1},
         {content::surfaceUpgrade::widebandPulse, 1},
         {content::surfaceUpgrade::cargoSkids, 1},
@@ -3993,7 +3994,7 @@ void surfaceUpgradesAndDronesModifyScanMiniGame()
     baseline.run.planetaryExpedition.hazard = 0.35;
 
     GameState upgraded = baseline;
-    upgraded.run.planetaryExpedition.runRigUpgradeRanks = {
+    upgraded.run.expedition.progression.runRigUpgradeRanks = {
         {content::surfaceUpgrade::widebandPulse, 1},
         {content::surfaceUpgrade::oreScentArray, 1},
         {content::surfaceUpgrade::deepEchoMapper, 1}
@@ -4032,7 +4033,7 @@ void surfaceUpgradesAndDronesModifyPushDeeperMiniGame()
     baseline.run.planetaryExpedition.depthProspects.push_back({1, 1});
 
     GameState upgraded = baseline;
-    upgraded.run.planetaryExpedition.runRigUpgradeRanks = {
+    upgraded.run.expedition.progression.runRigUpgradeRanks = {
         {content::surfaceUpgrade::thermalDrillJackets, 1},
         {content::surfaceUpgrade::shockMounts, 1},
         {content::surfaceUpgrade::recoilBraces, 1},
@@ -4103,7 +4104,7 @@ void surfaceDepthRatingsReplaceTemporaryEnvelopeBonuses()
         "rank I Survey and Bore systems should expose current through depth +2 and two legal Dig steps");
 
     GameState scannerUpgraded = baseline;
-    scannerUpgraded.run.planetaryExpedition.runRigUpgradeRanks = {
+    scannerUpgraded.run.expedition.progression.runRigUpgradeRanks = {
         {content::surfaceUpgrade::widebandPulse, 1},
         {content::surfaceUpgrade::deepEchoMapper, 1}
     };
@@ -4116,7 +4117,7 @@ void surfaceDepthRatingsReplaceTemporaryEnvelopeBonuses()
         "temporary scanner upgrades and Survey Drones must not change hard Survey or Bore limits");
 
     GameState structureUpgraded = baseline;
-    structureUpgraded.run.planetaryExpedition.runRigUpgradeRanks = {
+    structureUpgraded.run.expedition.progression.runRigUpgradeRanks = {
         {content::surfaceUpgrade::thermalDrillJackets, 1},
         {content::surfaceUpgrade::shockMounts, 1},
         {content::surfaceUpgrade::recoilBraces, 1}
@@ -4413,7 +4414,7 @@ void runUpgradesSurviveEmergencyRecall()
     brokenBit.run.destinationIndex = 2;
     startSurfaceExpedition(brokenBit, catalog);
     prepareMiningSiteForTest(brokenBit);
-    brokenBit.run.planetaryExpedition.runRigUpgradeRanks = {{content::surfaceUpgrade::shockMounts, 1}};
+    brokenBit.run.expedition.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::shockMounts, 1}};
     require(startMiningRun(brokenBit, catalog).applied, "mining should start for drill break upgrade test");
     brokenBit.run.mining.drillIntegrity = 0.0;
     updateMiningRun(brokenBit, catalog, 0.08);
@@ -4425,16 +4426,16 @@ void runUpgradesSurviveEmergencyRecall()
     recalled.run.destinationIndex = 2;
     startSurfaceExpedition(recalled, catalog);
     prepareMiningSiteForTest(recalled);
-    recalled.run.planetaryExpedition.runRigUpgradeRanks = {
+    recalled.run.expedition.progression.runRigUpgradeRanks = {
         {content::surfaceUpgrade::shockMounts, 1},
         {content::surfaceUpgrade::oreHopper, 1}
     };
-    recalled.run.planetaryExpedition.expeditionLevel = 3;
-    recalled.run.planetaryExpedition.expeditionExperience = 7.0;
-    recalled.run.planetaryExpedition.runDroneRanks = {{content::drone::miningDrone, 2}};
-    recalled.run.planetaryExpedition.droneModuleAssignments = {
+    recalled.run.expedition.progression.expeditionLevel = 3;
+    recalled.run.expedition.progression.expeditionExperience = 7.0;
+    recalled.run.expedition.progression.runDroneRanks = {{content::drone::miningDrone, 2}};
+    recalled.run.expedition.progression.droneModuleAssignments = {
         {0, content::drone::miningDrone, DroneModuleKind::CombatDrill}};
-    recalled.run.planetaryExpedition.selectedSynergyIds = {"long_haul_rig"};
+    recalled.run.expedition.progression.selectedSynergyIds = {"long_haul_rig"};
     require(startMiningRun(recalled, catalog).applied, "mining should start for emergency recall upgrade test");
     recalled.run.mining.droneHealth = 0.0;
     updateMiningRun(recalled, catalog, 0.08);
@@ -4448,11 +4449,11 @@ void runUpgradesSurviveEmergencyRecall()
     require(runRigUpgradeRank(recalled, content::surfaceUpgrade::shockMounts) == 1 &&
             runRigUpgradeRank(recalled, content::surfaceUpgrade::oreHopper) == 1,
         "emergency recall should preserve run-scoped upgrades");
-    require(recalled.run.planetaryExpedition.expeditionLevel == 3 &&
-            std::abs(recalled.run.planetaryExpedition.expeditionExperience - 7.0) < 0.001 &&
+    require(recalled.run.expedition.progression.expeditionLevel == 3 &&
+            std::abs(recalled.run.expedition.progression.expeditionExperience - 7.0) < 0.001 &&
             expeditionDroneRank(recalled, content::drone::miningDrone) == 2 &&
-            recalled.run.planetaryExpedition.droneModuleAssignments.size() == 1 &&
-            recalled.run.planetaryExpedition.selectedSynergyIds == std::vector<std::string>{"long_haul_rig"},
+            recalled.run.expedition.progression.droneModuleAssignments.size() == 1 &&
+            recalled.run.expedition.progression.selectedSynergyIds == std::vector<std::string>{"long_haul_rig"},
         "emergency recall should preserve XP, temporary Drone ranks, grafts, and selected synergies together");
 }
 
@@ -4461,24 +4462,24 @@ void runUpgradeLifetimeFollowsTheTransport()
     const ContentCatalog catalog = createDefaultContent();
     auto seedBuild = [](GameState& state) {
         PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-        expedition.expeditionLevel = 4;
-        expedition.expeditionExperience = 11.0;
-        expedition.pendingRunUpgradeChoices = 1;
-        expedition.runRigUpgradeRanks = {{content::surfaceUpgrade::widebandPulse, 2}};
-        expedition.runDroneRanks = {{content::drone::surveyDrone, 3}};
-        expedition.droneModuleAssignments = {
+        state.run.expedition.progression.expeditionLevel = 4;
+        state.run.expedition.progression.expeditionExperience = 11.0;
+        state.run.expedition.progression.pendingRunUpgradeChoices = 1;
+        state.run.expedition.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::widebandPulse, 2}};
+        state.run.expedition.progression.runDroneRanks = {{content::drone::surveyDrone, 3}};
+        state.run.expedition.progression.droneModuleAssignments = {
             {0, content::drone::surveyDrone, DroneModuleKind::PulseStrike}};
-        expedition.selectedSynergyIds = {"pathfinder_loop"};
+        state.run.expedition.progression.selectedSynergyIds = {"pathfinder_loop"};
     };
     auto requireBuild = [](const GameState& state, std::string_view transition) {
         const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-        require(expedition.expeditionLevel == 4 &&
-                std::abs(expedition.expeditionExperience - 11.0) < 0.001 &&
-                expedition.pendingRunUpgradeChoices == 1 &&
+        require(state.run.expedition.progression.expeditionLevel == 4 &&
+                std::abs(state.run.expedition.progression.expeditionExperience - 11.0) < 0.001 &&
+                state.run.expedition.progression.pendingRunUpgradeChoices == 1 &&
                 runRigUpgradeRank(state, content::surfaceUpgrade::widebandPulse) == 2 &&
                 expeditionDroneRank(state, content::drone::surveyDrone) == 3 &&
-                expedition.droneModuleAssignments.size() == 1 &&
-                expedition.selectedSynergyIds == std::vector<std::string>{"pathfinder_loop"},
+                state.run.expedition.progression.droneModuleAssignments.size() == 1 &&
+                state.run.expedition.progression.selectedSynergyIds == std::vector<std::string>{"pathfinder_loop"},
             std::string("the complete run build should survive ") + std::string(transition));
     };
 
@@ -4498,13 +4499,13 @@ void runUpgradeLifetimeFollowsTheTransport()
     requireBuild(state, "a survived launch");
 
     startNewExpedition(state, catalog);
-    require(state.run.planetaryExpedition.expeditionLevel == 1 &&
-            state.run.planetaryExpedition.expeditionExperience == 0.0 &&
-            state.run.planetaryExpedition.pendingRunUpgradeChoices == 0 &&
-            state.run.planetaryExpedition.runRigUpgradeRanks.empty() &&
-            state.run.planetaryExpedition.runDroneRanks.empty() &&
-            state.run.planetaryExpedition.droneModuleAssignments.empty() &&
-            state.run.planetaryExpedition.selectedSynergyIds.empty(),
+    require(state.run.expedition.progression.expeditionLevel == 1 &&
+            state.run.expedition.progression.expeditionExperience == 0.0 &&
+            state.run.expedition.progression.pendingRunUpgradeChoices == 0 &&
+            state.run.expedition.progression.runRigUpgradeRanks.empty() &&
+            state.run.expedition.progression.runDroneRanks.empty() &&
+            state.run.expedition.progression.droneModuleAssignments.empty() &&
+            state.run.expedition.progression.selectedSynergyIds.empty(),
         "New Expedition should reset XP and every temporary upgrade family atomically");
 
     GameState destroyed = createNewGame(catalog, 6492);
@@ -4514,11 +4515,11 @@ void runUpgradeLifetimeFollowsTheTransport()
     loss.destinationId = content::destination::earthOrbit;
     applyLaunchOutcome(destroyed, catalog, loss);
     require(!destroyed.run.active &&
-            destroyed.run.planetaryExpedition.expeditionLevel == 1 &&
-            destroyed.run.planetaryExpedition.runRigUpgradeRanks.empty() &&
-            destroyed.run.planetaryExpedition.runDroneRanks.empty() &&
-            destroyed.run.planetaryExpedition.droneModuleAssignments.empty() &&
-            destroyed.run.planetaryExpedition.selectedSynergyIds.empty(),
+            destroyed.run.expedition.progression.expeditionLevel == 1 &&
+            destroyed.run.expedition.progression.runRigUpgradeRanks.empty() &&
+            destroyed.run.expedition.progression.runDroneRanks.empty() &&
+            destroyed.run.expedition.progression.droneModuleAssignments.empty() &&
+            destroyed.run.expedition.progression.selectedSynergyIds.empty(),
         "Transport destruction should clear XP progression and every temporary upgrade family");
 }
 
@@ -4619,9 +4620,9 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
              tuning::research::marsBayCommonOreGoal,
              0}),
         "the Mars slot fixture should complete its delivery through a generic scenario event");
-    require(state.run.planetaryExpedition.expeditionLevel == 2 &&
-            std::abs(state.run.planetaryExpedition.expeditionExperience) < 0.001 &&
-            state.run.planetaryExpedition.pendingRunUpgradeChoices == 1,
+    require(state.run.expedition.progression.expeditionLevel == 2 &&
+            std::abs(state.run.expedition.progression.expeditionExperience) < 0.001 &&
+            state.run.expedition.progression.pendingRunUpgradeChoices == 1,
         "completing an authored material-delivery objective should award exactly 10 expedition XP");
     require(claimMarsBayExpansion(state, catalog), "the completed Mars objective should explicitly fabricate Slot 2");
     require(state.meta.droneBaySlots == 2 && state.meta.equippedDroneIds.size() == 1,
@@ -4638,7 +4639,7 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
     const MiningDrillStats resourceSupported = miningDrillStats(state, catalog);
     require(resourceSupported.oxygenSeconds > miningSupported.oxygenSeconds, "resource drone should extend oxygen");
     const MiniDroneLoadoutEffects beforeTune = miniDroneLoadoutEffects(state, catalog);
-    state.run.planetaryExpedition.runDroneRanks = {{content::drone::miningDrone, 2}};
+    state.run.expedition.progression.runDroneRanks = {{content::drone::miningDrone, 2}};
     require(expeditionDroneRank(state, content::drone::miningDrone) == 2,
         "a run-scoped Drone rank should advance every Prospector copy to Mk II");
     const MiniDroneLoadoutEffects afterTune = miniDroneLoadoutEffects(state, catalog);
@@ -4683,7 +4684,7 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
         return drone.role == MiniDroneRole::Defense;
     });
     require(defenseIndex != catalog.miniDrones.end(), "default content should include a Defense drone");
-    restored.run.planetaryExpedition.selectedSynergyIds = {"killbox_screen"};
+    restored.run.expedition.progression.selectedSynergyIds = {"killbox_screen"};
     const MiniDroneLoadoutEffects uncoordinated = miniDroneLoadoutEffects(restored, catalog);
     require(uncoordinated.synergyNames.empty(),
         "a selected combat formation should remain dormant before its required research");
@@ -5051,7 +5052,7 @@ void explicitSolarCampaignObjectivesGateRewardsAndRoutes()
     require(creditRecoveredIoArtifact(state, ioArtifact)
             && !creditRecoveredIoArtifact(state, ioArtifact)
             && state.meta.ioArtifactRecovered
-            && state.run.planetaryExpedition.runDroneRanks.empty(),
+            && state.run.expedition.progression.runDroneRanks.empty(),
         "a protected objective should record exactly once without granting a free permanent Drone rank");
 
     state.screen = Screen::Hangar;
@@ -5600,9 +5601,9 @@ void scenarioUiActionsDoNotAwardExpeditionExperience()
             && state.meta.ownedDroneIds == std::vector<std::string>{content::drone::hazardDrone}
             && state.meta.equippedDroneIds == std::vector<std::string>{content::drone::hazardDrone},
         "Io commissioning should provide a usable bay and assigned Hazard frame even when route access came from outside the early campaign");
-    require(state.run.planetaryExpedition.expeditionLevel == 1 &&
-            state.run.planetaryExpedition.expeditionExperience == 0.0 &&
-            state.run.planetaryExpedition.pendingRunUpgradeChoices == 0,
+    require(state.run.expedition.progression.expeditionLevel == 1 &&
+            state.run.expedition.progression.expeditionExperience == 0.0 &&
+            state.run.expedition.progression.pendingRunUpgradeChoices == 0,
         "briefings, manual actions, equipment assignment, and other UI actions must not grant expedition XP");
 
 }
@@ -7650,7 +7651,7 @@ void hazardDroneTreatsAffinityLadderAndBatches()
         state.meta.equippedDroneIds = {content::drone::hazardDrone};
         state.run.destinationIndex = 2;
         startSurfaceExpedition(state, catalog);
-        state.run.planetaryExpedition.runDroneRanks = {{content::drone::hazardDrone, level}};
+        state.run.expedition.progression.runDroneRanks = {{content::drone::hazardDrone, level}};
         prepareMiningSiteForTest(state);
         require(startMiningRun(state, catalog).applied, "hazard treatment test run should start");
         MiningRunState& mining = state.run.mining;
@@ -7899,7 +7900,7 @@ void hazardDroneFinishesCommittedTreatmentBeforeFollowingMovedPlayer()
     state.meta.equippedDroneIds = {content::drone::hazardDrone};
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
-    state.run.planetaryExpedition.runDroneRanks = {{content::drone::hazardDrone, 1}};
+    state.run.expedition.progression.runDroneRanks = {{content::drone::hazardDrone, 1}};
     prepareMiningSiteForTest(state);
     require(startMiningRun(state, catalog).applied,
         "the committed Hazard Drone fixture should start a mining run");
@@ -8721,7 +8722,7 @@ void resourceDroneRunsTimedMaterialShuttles()
         state.meta.equippedDroneIds = {content::drone::resourceDrone};
         state.run.destinationIndex = 2;
         startSurfaceExpedition(state, catalog);
-        state.run.planetaryExpedition.runDroneRanks = {{content::drone::resourceDrone, upgradeLevel}};
+        state.run.expedition.progression.runDroneRanks = {{content::drone::resourceDrone, upgradeLevel}};
         prepareMiningSiteForTest(state);
         require(startMiningRun(state, catalog).applied, "resource shuttle mining run should start");
         clearMiningTerrainForEvaTest(state.run.mining);
@@ -8734,6 +8735,8 @@ void resourceDroneRunsTimedMaterialShuttles()
     };
 
     GameState state = createResourceRun(91938, 1);
+    // Leave twelve units free in the expanded starter hold.
+    state.meta.materials.common = shipHoldCapacity(state, catalog) - 12;
     auto resource = std::find_if(state.run.mining.miniDrones.begin(), state.run.mining.miniDrones.end(), [](const MiningMiniDroneAgent& agent) {
         return agent.role == MiniDroneRole::Resource;
     });
@@ -8919,7 +8922,7 @@ void miningDroneRunsTimedCapacityShuttles()
     state.meta.equippedDroneIds = {content::drone::miningDrone};
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
-    state.run.planetaryExpedition.runDroneRanks = {{content::drone::miningDrone, 1}};
+    state.run.expedition.progression.runDroneRanks = {{content::drone::miningDrone, 1}};
     prepareMiningSiteForTest(state);
     require(startMiningRun(state, catalog).applied, "mining shuttle run should start");
     state.run.mining.enemies.clear();
@@ -9596,10 +9599,10 @@ void miningDrillBreaksCellsAndMarksChunks()
     MiningRunState& mining = state.run.mining;
     setMiningAim(state, 1.0, mining.droneY / static_cast<double>(mining.terrain.height - 1));
     setMiningMove(state, -1.0, 0.0);
-    require(mining.hullDirX < -0.99 && std::abs(mining.hullDirY) < 0.01, "hull heading should follow movement input");
+    require(mining.hullDirY > 0.99, "movement requests must not rotate collision geometry before simulation");
     require(mining.aimDirX < -0.99 && std::abs(mining.aimDirY) < 0.01, "drill direction should remain fixed to the hull heading");
     setMiningMove(state, 0.0, 0.0);
-    require(mining.hullDirX < -0.99, "hull heading should persist after movement stops");
+    require(mining.hullDirY > 0.99, "accepted heading stays unchanged until the next simulation step");
     require(mining.aimDirX < -0.99, "drill direction should persist with the stopped hull heading");
 
     require(std::abs(mining.rigOxygen.current - tuning::mining::oxygenSeconds) < 0.000001, "starter mining run should begin with configured oxygen");
@@ -9608,11 +9611,13 @@ void miningDrillBreaksCellsAndMarksChunks()
     MiningCell* ore = miningCellAt(mining.terrain, 33, 4);
     require(ore != nullptr, "test ore cell should exist");
     *ore = {MiningCellMaterial::CommonOre, 0.25, 0.25, true, false};
-    MiningCell* farOre = miningCellAt(mining.terrain, 34, 4);
+    MiningCell* farOre = miningCellAt(mining.terrain, 33, 3);
     require(farOre != nullptr, "test far ore cell should exist");
     *farOre = {MiningCellMaterial::CommonOre, 0.45, 0.45, true, false};
     std::fill(mining.terrain.dirtyChunks.begin(), mining.terrain.dirtyChunks.end(), 0);
-    mining.droneX = 32.0;
+    mining.droneX = 33.0 - rig_geometry::drillTip + .01;
+        mining.hullDirX=1.0;mining.hullDirY=0.0;
+        mining.rigGeometryValidated=true;
     mining.droneY = 4.0;
     setMiningMove(state, 1.0, 0.0);
     setMiningMove(state, 0.0, 0.0);
@@ -9687,12 +9692,14 @@ void miningDrillFootprintCapsWearToWorstContact()
         require(rock != nullptr, "primary rock should exist");
         *rock = {MiningCellMaterial::HardRock, 40.0, 40.0, true, false};
         if (secondRock) {
-            MiningCell* extraRock = miningCellAt(mining.terrain, 34, 4);
+            MiningCell* extraRock = miningCellAt(mining.terrain, 33, 3);
             require(extraRock != nullptr, "secondary rock should exist");
             *extraRock = {MiningCellMaterial::HardRock, 40.0, 40.0, true, false};
         }
 
-        mining.droneX = 32.0;
+        mining.droneX = 33.0 - rig_geometry::drillTip + .01;
+        mining.hullDirX=1.0;mining.hullDirY=0.0;
+        mining.rigGeometryValidated=true;
         mining.droneY = 4.0;
         mining.drillHeat = 0.96;
         mining.drillIntegrity = 1.0;
@@ -9710,7 +9717,7 @@ void miningDrillFootprintCapsWearToWorstContact()
     require(doubleLoss <= singleLoss + 0.000001, "multiple footprint contacts should not stack drill integrity wear");
 
     const MiningCell* first = miningCellAt(doubleContact.run.mining.terrain, 33, 4);
-    const MiningCell* second = miningCellAt(doubleContact.run.mining.terrain, 34, 4);
+    const MiningCell* second = miningCellAt(doubleContact.run.mining.terrain, 33, 3);
     require(first != nullptr && first->remainingToughness < first->maxToughness, "first hard rock should still take drill damage");
     require(second != nullptr && second->remainingToughness < second->maxToughness, "second hard rock should still take drill damage");
 }
@@ -9729,30 +9736,33 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     MiningRunState& mining = state.run.mining;
     clearMiningTerrainForEvaTest(mining);
     const double softContactStartX =
-        33.0 - tuning::mining::rigHullHalfLengthCells - 0.12;
+        33.0 - rig_geometry::drillTip - 0.12;
     mining.droneX = softContactStartX;
     mining.droneY = 10.0;
+    mining.hullDirX = 1.0;
+    mining.hullDirY = 0.0;
     MiningCell* soft = miningCellAt(mining.terrain, 33, 10);
     require(soft != nullptr, "soft contact cell should exist");
     *soft = {MiningCellMaterial::Regolith, 3.0, 3.0, false, false};
     setMiningMove(state, 1.0, 0.0);
     setMiningDrilling(state, true);
     updateMiningRun(state, catalog, 0.08);
-
+    updateMiningRun(state, catalog, 0.08); // Arrive at contact, then cut on the next tick.
+    updateMiningRun(state, catalog, 0.08);
     require(mining.droneX > softContactStartX, "drilling into regolith should let the drone grind forward slowly");
-    require(mining.droneX + tuning::mining::rigHullHalfLengthCells <= 33.001,
+    require(mining.droneX + rig_geometry::drillTip <= 33.001,
         "the full oriented hull should not overlap unbroken regolith before the drill clears it");
     require(mining.contactIntensity > 0.0, "soft contact should set mining feedback intensity");
     require(soft->remainingToughness < soft->maxToughness, "pushing into regolith while drilling should do terrain work");
 
-    for (int i = 0; i < 12 && soft->material != MiningCellMaterial::Empty; ++i) {
+    for (int i = 0; i < 64 && soft->material != MiningCellMaterial::Empty; ++i) {
         updateMiningRun(state, catalog, 0.08);
     }
 
     require(soft->material == MiningCellMaterial::Empty, "continued drilling should visibly clear soft terrain before the drone passes through");
 
     const double hardContactStartX =
-        33.0 - tuning::mining::rigHullHalfLengthCells - 0.03;
+        33.0 - rig_geometry::drillTip - 0.02;
     mining.droneX = hardContactStartX;
     mining.droneY = 12.0;
     MiningCell* hard = miningCellAt(mining.terrain, 33, 12);
@@ -9766,19 +9776,20 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     setMiningMove(state, 1.0, 0.0);
     setMiningDrilling(state, true);
     GameState dampedState = state;
-    dampedState.run.planetaryExpedition.runRigUpgradeRanks = {{content::surfaceUpgrade::shockMounts, 1}};
+    dampedState.run.expedition.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::shockMounts, 1}};
     updateMiningRun(state, catalog, 0.08);
     updateMiningRun(dampedState, catalog, 0.08);
 
-    const double hardContactBoundary = 33.0 - tuning::mining::rigHullHalfLengthCells;
+    const double hardContactBoundary = 33.0 - rig_geometry::drillTip;
     require(
-        mining.droneX > hardContactStartX + 0.02 && mining.droneX < hardContactBoundary + 0.001,
+        mining.droneX > hardContactStartX && mining.droneX < hardContactBoundary + 0.001,
         "a hard-rock collision should sweep the rig to the physical boundary instead of leaving a full movement-step gap");
     require(mining.recoilX < 0.0, "hard contact should push feedback opposite travel");
     require(mining.contactIntensity > 0.5, "hard contact should produce stronger mining feedback");
     require(
-        mining.contactIndicatorSeconds > 0.0 && mining.contactIndicatorDirX > 0.99 &&
-            std::abs(mining.contactIndicatorDirY) < 0.01,
+        mining.contactIndicatorSeconds > 0.0 && mining.rigContactX == 33 &&
+            nearlyEqual(mining.contactIndicatorDirX,-mining.rigContactNormalX) &&
+            nearlyEqual(mining.contactIndicatorDirY,-mining.rigContactNormalY),
         "a player-driven rig collision should retain a short-lived indicator on the contacted edge");
     require(
         mining.contactBounce > 0.0 || mining.contactBounceVelocity > 0.0 || mining.contactBounceCooldown > 0.0,
@@ -9804,7 +9815,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
         updateMiningRun(state, catalog, 0.08);
     }
     require(hard->material == MiningCellMaterial::HardRock, "hard rock should require several hard contacts before breaking");
-    for (int i = 0; i < 16 && hard->material != MiningCellMaterial::Empty; ++i) {
+    for (int i = 0; i < 96 && hard->material != MiningCellMaterial::Empty; ++i) {
         updateMiningRun(state, catalog, 0.08);
     }
     require(hard->material == MiningCellMaterial::Empty, "default hard rock should clear in a short arcade burst");
@@ -9841,7 +9852,8 @@ void miningDrillTargetsFirstSolidCellOnRay()
     require(startMiningRun(state, catalog).applied, "mining should start for targeting test");
 
     MiningRunState& mining = state.run.mining;
-    mining.droneX = 33.0 - tuning::mining::rigHullHalfLengthCells - 0.10;
+    clearMiningTerrainForEvaTest(mining);
+    mining.droneX = 33.0 - rig_geometry::drillTip - 0.01;
     mining.droneY = 10.0;
     MiningCell* nearOre = miningCellAt(mining.terrain, 33, 10);
     MiningCell* farOre = miningCellAt(mining.terrain, 34, 10);
@@ -9849,6 +9861,7 @@ void miningDrillTargetsFirstSolidCellOnRay()
     *nearOre = {MiningCellMaterial::CommonOre, 1.0, 1.0, true, false};
     *farOre = {MiningCellMaterial::RareOre, 1.0, 1.0, true, false};
 
+    mining.hullDirX=1; mining.hullDirY=0;
     setMiningMove(state, 1.0, 0.0);
     setMiningMove(state, 0.0, 0.0);
 
@@ -10077,7 +10090,7 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
     GameState state = createNewGame(catalog, 95959);
     state.run.destinationIndex = 2;
     startSurfaceExpedition(state, catalog);
-    state.run.planetaryExpedition.runRigUpgradeRanks = {
+    state.run.expedition.progression.runRigUpgradeRanks = {
         {content::surfaceUpgrade::cargoSkids, 1},
         {content::surfaceUpgrade::emergencyWinch, 1}
     };
@@ -10170,7 +10183,7 @@ void miningSwarmNestPreviewAndPersistence()
         "Swarm preview must be repeatable for the same expedition seed");
 
     GameState lucky = state;
-    lucky.run.planetaryExpedition.runRigUpgradeRanks = {{content::surfaceUpgrade::widebandPulse, 1}};
+    lucky.run.expedition.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::widebandPulse, 1}};
     const MiningSwarmPreview luckyPreview = miningSwarmPreview(lucky, catalog, resolveMiningArenaRules(request), 0);
     require(luckyPreview.available && luckyPreview.artifactChance >= preview.artifactChance,
         "current scanner luck modifiers should never reduce Swarm artifact chance");
@@ -10438,12 +10451,19 @@ void miningSwarmNestPreviewAndPersistence()
     mining.rigVelocityX = 0.0;
     mining.rigVelocityY = 0.0;
     const auto verifySwarmRetreat = [&](MiningEnemyType type, double startRadius, double cooldown) {
+        GameState retreatState = state;
+        MiningRunState& retreatMining = retreatState.run.mining;
+        // Retreat applies inside the nest; outside it enemies are still ingressing.
+        retreatMining.droneX = retreatMining.swarm.cacheX;
+        retreatMining.droneY = retreatMining.swarm.cacheY;
         const auto found = std::find_if(
-            mining.enemies.begin(),
-            mining.enemies.end(),
+            retreatMining.enemies.begin(),
+            retreatMining.enemies.end(),
             [](const MiningEnemy& enemy) { return enemy.active && enemy.swarmAssociated; });
-        require(found != mining.enemies.end(), "Swarm retreat fixture requires an active enemy");
-        const std::size_t enemyIndex = static_cast<std::size_t>(std::distance(mining.enemies.begin(), found));
+        require(found != retreatMining.enemies.end(), "Swarm retreat fixture requires an active enemy");
+        const std::size_t enemyIndex = static_cast<std::size_t>(std::distance(retreatMining.enemies.begin(), found));
+        // Isolate steering from the crowded horde's separation response.
+        for (auto& other : retreatMining.enemies) other.active = &other == &*found;
         MiningEnemy& enemy = *found;
         enemy.type = type;
         enemy.maxHealth = 1000.0;
@@ -10453,15 +10473,15 @@ void miningSwarmNestPreviewAndPersistence()
         const double orbitDirection = enemyIndex % 2 == 0 ? 1.0 : -1.0;
         const double slotAngle = std::fmod(
             static_cast<double>(enemyIndex + 1) * goldenAngle +
-                static_cast<double>(mining.swarm.wave) * 0.61 +
-                mining.elapsedSeconds * tuning::mining::swarmOrbitRadiansPerSecond * orbitDirection,
+                static_cast<double>(retreatMining.swarm.wave) * 0.61 +
+                retreatMining.elapsedSeconds * tuning::mining::swarmOrbitRadiansPerSecond * orbitDirection,
             6.28318530718);
-        enemy.x = mining.droneX + std::cos(slotAngle) * startRadius;
-        enemy.y = mining.droneY +
+        enemy.x = retreatMining.droneX + std::cos(slotAngle) * startRadius;
+        enemy.y = retreatMining.droneY +
             std::sin(slotAngle) * startRadius * tuning::mining::swarmVerticalRingScale;
-        const double before = std::hypot(enemy.x - mining.droneX, enemy.y - mining.droneY);
-        updateMiningRun(state, catalog, 0.08);
-        const double after = std::hypot(enemy.x - mining.droneX, enemy.y - mining.droneY);
+        const double before = std::hypot(enemy.x - retreatMining.droneX, enemy.y - retreatMining.droneY);
+        updateMiningRun(retreatState, catalog, 0.08);
+        const double after = std::hypot(retreatMining.enemies[enemyIndex].x - retreatMining.droneX, retreatMining.enemies[enemyIndex].y - retreatMining.droneY);
         require(after > before,
             "Swarm enemies on attack cooldown should retreat from the player before re-engaging");
         if (type == MiningEnemyType::Flying) {
@@ -10642,7 +10662,7 @@ void miningLoadBurdenAndUpgradeRelief()
     require(heavyLoad.speedMultiplier >= tuning::mining::minLoadedSpeedMultiplier, "load slowdown should keep the minimum speed floor");
 
     GameState upgraded = loaded;
-    upgraded.run.planetaryExpedition.runRigUpgradeRanks = {
+    upgraded.run.expedition.progression.runRigUpgradeRanks = {
         {content::surfaceUpgrade::expandablePanniers, 1},
         {content::surfaceUpgrade::vectorNozzles, 1}
     };
@@ -10721,7 +10741,7 @@ void miningEvaFixedDrillProfileIgnoresRigUpgrades()
         content::module::coolantSleeve,
         content::module::diamondBearings
     };
-    upgraded.run.planetaryExpedition.runRigUpgradeRanks = {
+    upgraded.run.expedition.progression.runRigUpgradeRanks = {
         {content::surfaceUpgrade::thermalDrillJackets, 1},
         {content::surfaceUpgrade::shockMounts, 1},
         {content::surfaceUpgrade::oreScentArray, 1},
@@ -10732,7 +10752,7 @@ void miningEvaFixedDrillProfileIgnoresRigUpgrades()
     upgraded.meta.droneBaySlots = 1;
     upgraded.meta.ownedDroneIds = {content::drone::defenseDrone};
     upgraded.meta.equippedDroneIds = {content::drone::defenseDrone};
-    upgraded.run.planetaryExpedition.runDroneRanks = {
+    upgraded.run.expedition.progression.runDroneRanks = {
         {content::drone::defenseDrone, 3}
     };
 
@@ -12460,7 +12480,7 @@ void progressedSavesSkipTheFirstLaunchIntroduction()
 void saveSchemaConstantsMatchSerializedFields()
 {
     const ContentCatalog catalog = createDefaultContent();
-    require(save_schema::currentVersion == 20, "the current save schema should be version twenty");
+    require(save_schema::currentVersion == 21, "the current save schema should be version twenty-one");
     GameState state = createNewGame(catalog, 12);
     state.run.credits = 123.0;
     state.run.inventoryModuleIds = {content::module::sparrowEngine, content::module::cryoLoop};
@@ -12737,6 +12757,33 @@ void unifiedPhysicalFlightCapturesOrbitAndResolvesTouchdown()
     };
     require(touchdown(-0.10).safeTouchdown,
         "settled local terrain contact should land safely");
+    {
+        FlightRunState landing = beginLaunchFlight(launch, *moon);
+        landing.orbit.captured = true;
+        landing.mode = FlightMode::Landing;
+        landing.phase = FlightPhase::Landing;
+        landing.landing.heading = 1.5707963267948966;
+        landing.landing.altitude = -0.01;
+        landing.landing.verticalVelocity = 0.50;
+        const auto contact = updateLaunchFlight(
+            landing, launch, *moon, {}, 0.01, &prepared.miningTemplate);
+        require(contact.safeTouchdown && !landing.active,
+            "upright supported contact should land immediately despite slight upward drift");
+    }
+    {
+        FlightRunState landing = beginLaunchFlight(launch, *moon);
+        landing.orbit.captured = true;
+        landing.mode = FlightMode::Landing;
+        landing.phase = FlightPhase::Landing;
+        landing.landing.heading = 1.5707963267948966 + 0.6108652381980153;
+        landing.landing.altitude = 0.001;
+        landing.landing.verticalVelocity = -0.10;
+        const auto contact = updateLaunchFlight(
+            landing, launch, *moon, {}, 0.01, &prepared.miningTemplate);
+        require(landing.contactEpisode && landing.active &&
+                !contact.safeTouchdown && !contact.hardTouchdown,
+            "supported contact beyond the thirty-degree posture limit should rebound instead of landing");
+    }
     require(touchdown(-18.0).hardTouchdown,
         "a survivable local impact should rebound and settle with visible hull damage");
     require(touchdown(-35.0).failed,
@@ -12901,7 +12948,7 @@ void arkDiscoveryAndScriptedJumpProgression()
         "Arkfall should grant a Defense drone");
     require(expeditionDroneRank(state, content::drone::attackDrone) == 1 &&
             expeditionDroneRank(state, content::drone::defenseDrone) == 1 &&
-            state.run.planetaryExpedition.runDroneRanks.empty(),
+            state.run.expedition.progression.runDroneRanks.empty(),
         "Arkfall combat drones should enter service at baseline Mk I without free run upgrades");
     require(state.screen == Screen::Navigation, "gravity-well disaster should land the player on Navigation");
 
@@ -12913,7 +12960,7 @@ void arkDiscoveryAndScriptedJumpProgression()
     upgraded.meta.ownedDroneIds = {content::drone::attackDrone};
     require(performArkJump(upgraded, catalog), "pre-upgraded Ark should still resolve the scripted disaster");
     require(upgraded.meta.droneBaySlots == 5, "Arkfall should never shrink an already expanded Drone Bay");
-    require(upgraded.run.planetaryExpedition.runDroneRanks.empty(),
+    require(upgraded.run.expedition.progression.runDroneRanks.empty(),
         "Arkfall should grant ownership without silently granting temporary Drone ranks");
 }
 
@@ -13722,24 +13769,24 @@ void secondaryMiningStateRoundTrips()
     auto& expedition = state.run.planetaryExpedition;
     expedition.active = true;
     state.screen = Screen::SurfaceUpgrade;
-    expedition.expeditionLevel = 4;
-    expedition.expeditionExperience = 37.5;
-    expedition.pendingRunUpgradeChoices = 2;
-    expedition.runUpgradeOffers = {{
+    state.run.expedition.progression.expeditionLevel = 4;
+    state.run.expedition.progression.expeditionExperience = 37.5;
+    state.run.expedition.progression.pendingRunUpgradeChoices = 2;
+    state.run.expedition.progression.runUpgradeOffers = {{
         {RunUpgradeKind::Rig, content::surfaceUpgrade::thermalDrillJackets, 2, -1},
         {RunUpgradeKind::DroneRank, content::drone::surveyDrone, 3, -1},
         {RunUpgradeKind::DroneGraft, "pulse_strike", 0, 1}}};
-    expedition.runUpgradeOfferCount = 3;
-    expedition.runUpgradeOfferPending = true;
-    expedition.runUpgradeReturnScreen = Screen::Mining;
-    expedition.runRigUpgradeRanks = {{content::surfaceUpgrade::thermalDrillJackets, 2}};
-    expedition.runDroneRanks = {{content::drone::surveyDrone, 3}};
-    expedition.selectedSynergyIds = {"relic_pathfinder", "full_spectrum_swarm"};
+    state.run.expedition.progression.runUpgradeOfferCount = 3;
+    state.run.expedition.progression.runUpgradeOfferPending = true;
+    state.run.expedition.progression.runUpgradeReturnScreen = Screen::Mining;
+    state.run.expedition.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::thermalDrillJackets, 2}};
+    state.run.expedition.progression.runDroneRanks = {{content::drone::surveyDrone, 3}};
+    state.run.expedition.progression.selectedSynergyIds = {"relic_pathfinder", "full_spectrum_swarm"};
     state.meta.hasEncounteredEnemy = true;
     expedition.scannerCooldownSeconds = 2.5;
     expedition.treasureMarks.push_back({4, 5, 2});
-    expedition.droneModuleAssignments.push_back({1, content::drone::surveyDrone, DroneModuleKind::PulseStrike});
-    expedition.droneModuleRuntime.push_back({1, 0.4, 1.2, {}});
+    state.run.expedition.progression.droneModuleAssignments.push_back({1, content::drone::surveyDrone, DroneModuleKind::PulseStrike});
+    state.run.expedition.progression.droneModuleRuntime.push_back({1, 0.4, 1.2, {}});
     MiningMiniDroneAgent agent;
     agent.haulMaterials = {4, 2, 1};
     agent.uncreditedHaulMaterials = {3, 1, 1};
@@ -13749,30 +13796,30 @@ void secondaryMiningStateRoundTrips()
     GameState restored = createNewGame(catalog, 1);
     restoreSaveData(restored, catalog, *parsed);
     const auto& restoredExpedition = restored.run.planetaryExpedition;
-    require(restoredExpedition.expeditionLevel == 4 && std::abs(restoredExpedition.expeditionExperience - 37.5) < 0.001 &&
-            restoredExpedition.pendingRunUpgradeChoices == 2,
+    require(restored.run.expedition.progression.expeditionLevel == 4 && std::abs(restored.run.expedition.progression.expeditionExperience - 37.5) < 0.001 &&
+            restored.run.expedition.progression.pendingRunUpgradeChoices == 2,
         "expedition level, experience, and queued run choices should round trip");
-    require(restoredExpedition.runUpgradeOfferPending && restoredExpedition.runUpgradeOfferCount == 3 &&
-            restoredExpedition.runUpgradeOffers[0].kind == RunUpgradeKind::Rig &&
-            restoredExpedition.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::thermalDrillJackets &&
-            restoredExpedition.runUpgradeOffers[1].kind == RunUpgradeKind::DroneRank &&
-            restoredExpedition.runUpgradeOffers[1].targetRank == 3 &&
-            restoredExpedition.runUpgradeOffers[2].kind == RunUpgradeKind::DroneGraft &&
-            restoredExpedition.runUpgradeOffers[2].slotIndex == 1 &&
-            restoredExpedition.runUpgradeReturnScreen == Screen::Mining &&
+    require(restored.run.expedition.progression.runUpgradeOfferPending && restored.run.expedition.progression.runUpgradeOfferCount == 3 &&
+            restored.run.expedition.progression.runUpgradeOffers[0].kind == RunUpgradeKind::Rig &&
+            restored.run.expedition.progression.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::thermalDrillJackets &&
+            restored.run.expedition.progression.runUpgradeOffers[1].kind == RunUpgradeKind::DroneRank &&
+            restored.run.expedition.progression.runUpgradeOffers[1].targetRank == 3 &&
+            restored.run.expedition.progression.runUpgradeOffers[2].kind == RunUpgradeKind::DroneGraft &&
+            restored.run.expedition.progression.runUpgradeOffers[2].slotIndex == 1 &&
+            restored.run.expedition.progression.runUpgradeReturnScreen == Screen::Mining &&
             restored.screen == Screen::SurfaceUpgrade,
         "the pending level-up draft and return screen should round trip");
-    require(restoredExpedition.runRigUpgradeRanks.size() == 1 &&
-            restoredExpedition.runRigUpgradeRanks.front().rank == 2 &&
-            restoredExpedition.runDroneRanks.size() == 1 &&
-            restoredExpedition.runDroneRanks.front().rank == 3 &&
-            restoredExpedition.selectedSynergyIds.size() == 2,
+    require(restored.run.expedition.progression.runRigUpgradeRanks.size() == 1 &&
+            restored.run.expedition.progression.runRigUpgradeRanks.front().rank == 2 &&
+            restored.run.expedition.progression.runDroneRanks.size() == 1 &&
+            restored.run.expedition.progression.runDroneRanks.front().rank == 3 &&
+            restored.run.expedition.progression.selectedSynergyIds.size() == 2,
         "temporary rig ranks, drone ranks, and selected synergies should round trip");
     require(restored.meta.hasEncounteredEnemy,
         "enemy encounter knowledge should round trip with the campaign save");
     require(restored.run.planetaryExpedition.scannerCooldownSeconds > 2.4 && restored.run.planetaryExpedition.treasureMarks.size() == 1,
         "scanner cooldown and treasure marks should round trip");
-    require(restored.run.planetaryExpedition.droneModuleAssignments.size() == 1 && restored.run.planetaryExpedition.droneModuleRuntime.size() == 1,
+    require(restored.run.expedition.progression.droneModuleAssignments.size() == 1 && restored.run.expedition.progression.droneModuleRuntime.size() == 1,
         "module assignments and runtime should round trip");
     require(restored.run.mining.miniDrones.size() == 1 &&
             restored.run.mining.miniDrones.front().uncreditedHaulMaterials.common == 3 &&
@@ -13791,15 +13838,15 @@ void secondaryPulseUsesUnifiedCooldownAndStrongestHit()
     state.meta.equippedDroneIds = {content::drone::surveyDrone};
     state.meta.droneBaySlots = 1;
     state.meta.unlockKeys = {content::unlock::droneBay, content::unlock::droneSupportSuite};
-    state.run.planetaryExpedition.runDroneRanks.push_back({content::drone::surveyDrone, 3});
+    state.run.expedition.progression.runDroneRanks.push_back({content::drone::surveyDrone, 3});
     mining.active = true;
     mining.terrain.width = 12; mining.terrain.height = 12; mining.terrain.cells.resize(144);
     mining.droneX = mining.operatorX = 6.0; mining.droneY = mining.operatorY = 6.0;
     MiningEnemy enemy = createMiningEnemy(MiningEnemyType::Mammal, MiningCellFeature::EncounterZone, 6.0, 6.0);
     enemy.health = enemy.maxHealth = 20.0; mining.enemies.push_back(enemy);
     MiningMiniDroneAgent survey; survey.role = MiniDroneRole::Survey; survey.roleIndex = 0; survey.equippedFrame = 0; survey.upgradeLevel = 3; survey.x = 6.0; survey.y = 6.0; mining.miniDrones.push_back(survey);
-    state.run.planetaryExpedition.droneModuleAssignments.push_back({0, content::drone::surveyDrone, DroneModuleKind::PulseStrike});
-    state.run.planetaryExpedition.runRigUpgradeRanks.push_back({content::surfaceUpgrade::resonantDischarge, 3});
+    state.run.expedition.progression.droneModuleAssignments.push_back({0, content::drone::surveyDrone, DroneModuleKind::PulseStrike});
+    state.run.expedition.progression.runRigUpgradeRanks.push_back({content::surfaceUpgrade::resonantDischarge, 3});
     pulseMiningScanner(state, catalog);
     const double healthAfterPulse = mining.enemies.front().health;
     require(healthAfterPulse == 17.0, "pulse should leave enemy state valid after activation");
@@ -13817,7 +13864,7 @@ void treasurePingMarksRareFirstAndSkipsExcludedMaterials()
     mining.active = true; mining.terrain.width = 10; mining.terrain.height = 10; mining.terrain.cells.resize(100);
     state.meta.equippedDroneIds = {content::drone::resourceDrone};
     state.meta.droneBaySlots = 1;
-    state.run.planetaryExpedition.runDroneRanks.push_back({content::drone::resourceDrone, 2});
+    state.run.expedition.progression.runDroneRanks.push_back({content::drone::resourceDrone, 2});
     state.meta.unlockKeys.push_back(content::unlock::droneBay);
     state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
     mining.droneX = mining.operatorX = 5.0; mining.droneY = mining.operatorY = 5.0;
@@ -13829,7 +13876,7 @@ void treasurePingMarksRareFirstAndSkipsExcludedMaterials()
     mining.terrain.cells[22].material = MiningCellMaterial::ExoticVein;
     mining.terrain.cells[23].material = MiningCellMaterial::ArtifactCache;
     MiningMiniDroneAgent resource; resource.role = MiniDroneRole::Resource; resource.roleIndex = 0; resource.equippedFrame = 0; resource.upgradeLevel = 2; mining.miniDrones.push_back(resource);
-    state.run.planetaryExpedition.droneModuleAssignments.push_back({0, content::drone::resourceDrone, DroneModuleKind::TreasurePing});
+    state.run.expedition.progression.droneModuleAssignments.push_back({0, content::drone::resourceDrone, DroneModuleKind::TreasurePing});
     pulseMiningScanner(state, catalog);
     require(state.run.planetaryExpedition.treasureMarks.size() == 2, "Mk II Treasure Ping should mark two tiles");
     require(state.run.planetaryExpedition.treasureMarks.front().x == 3, "Treasure Ping should prioritize Rare ore");
@@ -13847,12 +13894,12 @@ void treasurePingMarksRareFirstAndSkipsExcludedMaterials()
     require(state.run.planetaryExpedition.treasureMarks.size() >= first.size(), "repeated Treasure Ping should preserve existing marks and select new tiles");
     resource.upgradeLevel = 3;
     mining.miniDrones.front().upgradeLevel = 3;
-    state.run.planetaryExpedition.runDroneRanks.front().rank = 3;
+    state.run.expedition.progression.runDroneRanks.front().rank = 3;
     state.run.planetaryExpedition.treasureMarks.clear();
     state.run.planetaryExpedition.scannerCooldownSeconds = 0.0;
     pulseMiningScanner(state, catalog);
     require(state.run.planetaryExpedition.treasureMarks.size() == 3, "Mk III Treasure Ping should mark three tiles");
-    state.run.planetaryExpedition.runDroneRanks.front().rank = 1;
+    state.run.expedition.progression.runDroneRanks.front().rank = 1;
     mining.miniDrones.front().upgradeLevel = 1;
     state.run.planetaryExpedition.treasureMarks.clear();
     state.run.planetaryExpedition.scannerCooldownSeconds = 0.0;
@@ -13985,8 +14032,42 @@ void postSolarBodiesAndGeologiesAreDeterministicAndPersistent()
 
 } // namespace
 
-int main()
+void persistentExpeditionTests();
+void incomingMessageTests();
+
+void rigCompoundCollisionSweepsAndRecovery()
 {
+    MiningTerrain terrain;terrain.width=20;terrain.height=20;terrain.cells.resize(400);
+    for(auto& cell:terrain.cells) cell.material=MiningCellMaterial::Empty;
+    for(int y=0;y<20;++y) terrain.cells[y*20+10].material=MiningCellMaterial::HardRock;
+    const auto wall=rig_geometry::sweep(terrain,6,8,0,14,8,0);
+    require(wall.fraction<1 && nearlyEqual(6+8*wall.fraction+rig_geometry::drillTip,10,.003),
+        "solid drill must stop at the wall and cannot tunnel through it");
+    const auto turn=rig_geometry::sweep(terrain,8.5,8,-1.5707963267948966,8.5,8,0);
+    require(turn.fraction<1 && turn.fraction>0,"turning must stop before the drill enters a wall");
+    const auto away=rig_geometry::sweep(terrain,8.5,8,0,6,8,0);
+    require(away.fraction>0,"an overlapping Rig must be able to reduce penetration");
+    double x=8.5,y=8;rig_geometry::recoverOverlap(terrain,x,y,0);
+    require(std::hypot(x-8.5,y-8)<=rig_geometry::bodyRadius*2+.001,"recovery must stay within one body diameter");
+    require(rig_geometry::contacts(terrain,x,y,1,0).empty(),"nearby recoverable overlap must resolve to a clear pose");
+    terrain.cells[7*20+7].material=MiningCellMaterial::HardRock;
+    require(rig_geometry::contacts(terrain,6,6,1,0).empty(),"empty rectangle corners must not block the circular body");
+    terrain.cells[7*20+7].material=MiningCellMaterial::Empty;
+    terrain.cells[6*20+8].suitOnlyPassage=true;
+    require(!rig_geometry::contacts(terrain,6,6,1,0).empty(),"the solid drill must respect EVA-only passage cells");
+}
+
+int main(int argc, char** argv)
+{
+    if (argc > 1 && std::string_view(argv[1]) == "--expedition-only") {
+        persistentExpeditionTests();
+        std::cout << "Expedition checks passed\n";
+        return 0;
+    }
+    rigCompoundCollisionSweepsAndRecovery();
+    try { persistentExpeditionTests(); }
+    catch (const std::exception& error) { std::cerr << "Expedition: " << error.what() << '\n'; return 1; }
+    incomingMessageTests();
     proceduralScenarioTemplatesStayDormantUntilInstanced();
     launchThermalManagementIsPlayerDriven();
     launchAsteroidsAreDeterministicFairAndHullScaled();

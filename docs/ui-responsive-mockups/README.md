@@ -1,5 +1,8 @@
 # Zero-Overlap Responsive UI Mockups
 
+These are layout reference images, not the current gameplay specification. Screen names and actions depicted here do not establish active mechanics. The [GDD](../Rocket_Rogue_Game_Design_Document.docx) governs the player flow; use the current system notes for behavior.
+
+
 These mockups define the layout families for OREBIT's responsive UI pass. They preserve the shipped dark cockpit identity and existing game artwork while reducing persistent information. They are design references, not replacement game art and not runtime golden captures.
 
 The invariant is simple: persistent UI, its scroll region, and its hit targets stay entirely outside `sceneRect`. Only an intentional modal shown by the player or a mandatory paused-state dialog may cover the scene.

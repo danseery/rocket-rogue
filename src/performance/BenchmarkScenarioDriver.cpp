@@ -11,10 +11,14 @@ Screen expectedScreen(NativeBenchmarkScenario scenario)
     switch (scenario) {
     case NativeBenchmarkScenario::Title:
     case NativeBenchmarkScenario::Hangar:
+    case NativeBenchmarkScenario::ExpeditionDock:
+    case NativeBenchmarkScenario::ExpeditionMap:
         return Screen::Hangar;
     case NativeBenchmarkScenario::Launch:
+    case NativeBenchmarkScenario::ExpeditionFlight:
         return Screen::Flight;
     case NativeBenchmarkScenario::Mining:
+    case NativeBenchmarkScenario::Message:
         return Screen::Mining;
     }
     return Screen::Hangar;
@@ -35,6 +39,16 @@ BenchmarkScenarioSetupResult BenchmarkScenarioDriver::setup(
     }
 
     switch (options.scenario) {
+    case NativeBenchmarkScenario::ExpeditionDock:
+    case NativeBenchmarkScenario::ExpeditionMap:
+    case NativeBenchmarkScenario::ExpeditionFlight:
+        app.debugStartExpedition();
+        if (options.scenario == NativeBenchmarkScenario::ExpeditionMap) app.runExpeditionAction("expedition:map");
+        if (options.scenario == NativeBenchmarkScenario::ExpeditionFlight) app.debugStartMoonApproach(true);
+        break;
+    case NativeBenchmarkScenario::Message:
+        app.debugShowIncomingMessage();
+        break;
     case NativeBenchmarkScenario::Title:
         app.debugShowTitle();
         break;

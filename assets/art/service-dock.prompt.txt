@@ -1,0 +1,3 @@
+Generated with the built-in image generation tool.
+
+Use case: stylized-concept. Create a single OREBIT game sprite: a compact orbital service dock, viewed top-down with slight mechanical depth, isolated on a genuinely transparent background. Pixel-art matching a detailed retro spaceship game: off-white and steel gray plating, dark navy recesses, small cyan docking lights and amber hazard stripes. A clear U-shaped docking cradle with two short arms and a central service hub, readable at 40 pixels across. Center the complete station with modest transparent margin, square composition. No spaceship, planet, scenery, text, labels, enclosing circle, or cast shadow. Crisp pixel clusters, strong silhouette, restrained detail. Output one transparent PNG.

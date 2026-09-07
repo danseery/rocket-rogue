@@ -1,4 +1,5 @@
 #include "core/GameState.h"
+#include "core/ExpeditionSystem.h"
 #include "core/ContentIds.h"
 #include "core/GameText.h"
 #include "core/ScenarioSystem.h"
@@ -671,6 +672,9 @@ const ShipModule* nextLaunchUpgrade(
 
 bool launchUpgradeUnlocked(const GameState& state, LaunchUpgradeKind kind, int rank)
 {
+    if (state.run.expedition.travelInitialized)
+        return kind != LaunchUpgradeKind::None && rank == launchUpgradeRank(state, kind) + 1 &&
+            rank <= batteryResearchRank(state.run.expedition) && operationalHomeDocked(state.run.expedition);
     if (rank < 1 || rank > tuning::launchProgression::maximumUpgradeRank) {
         return false;
     }
@@ -778,6 +782,9 @@ bool surfaceDepthUpgradeUnlocked(
     SurfaceDepthUpgradeKind kind,
     int rank)
 {
+    if (state.run.expedition.travelInitialized)
+        return kind != SurfaceDepthUpgradeKind::None && rank == surfaceDepthUpgradeRank(state, kind) + 1 &&
+            rank <= batteryResearchRank(state.run.expedition) && operationalHomeDocked(state.run.expedition);
     if (kind == SurfaceDepthUpgradeKind::None || rank < 1 ||
         rank > tuning::surfaceDepthProgression::maximumUpgradeRank) {
         return false;
@@ -802,7 +809,7 @@ bool canInstallSurfaceDepthUpgrade(
 {
     const ShipModule* module = nextSurfaceDepthUpgrade(state, catalog, kind);
     return module != nullptr &&
-        !surfaceDepthPurchasedThisRefit(state, kind) &&
+        (state.run.expedition.travelInitialized || !surfaceDepthPurchasedThisRefit(state, kind)) &&
         surfaceDepthUpgradeUnlocked(state, kind, module->surfaceDepthUpgradeRank) &&
         state.run.credits >= static_cast<double>(moduleOfferCost(*module));
 }
@@ -814,7 +821,7 @@ bool installSurfaceDepthUpgrade(
 {
     const ShipModule* module = nextSurfaceDepthUpgrade(state, catalog, kind);
     if (module == nullptr ||
-        surfaceDepthPurchasedThisRefit(state, kind) ||
+        (!state.run.expedition.travelInitialized && surfaceDepthPurchasedThisRefit(state, kind)) ||
         !surfaceDepthUpgradeUnlocked(state, kind, module->surfaceDepthUpgradeRank)) {
         return false;
     }
@@ -1120,6 +1127,7 @@ void startNewExpedition(GameState& state, const ContentCatalog& catalog)
     state.run.inventoryModuleIds = state.meta.ownedModuleIds;
     state.run.equippedModuleIds = state.meta.defaultEquippedModuleIds;
     state.run.planetaryExpedition = {};
+    state.run.expedition.progression = {};
     state.run.surfaceScan = {};
     state.run.surfacePush = {};
     state.run.mining = {};
@@ -2310,6 +2318,7 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         state.meta.shipsLost += 1;
         state.run.credits = std::max(expeditionCreditFloor(state), state.run.credits - tuning::mission::destroyedCreditPenalty);
         state.run.planetaryExpedition = {};
+    state.run.expedition.progression = {};
         state.run.surfaceScan = {};
         state.run.surfacePush = {};
         state.run.mining = {};
@@ -2529,6 +2538,7 @@ const Astronaut* activeAstronaut(const GameState& state)
 
 const Destination& currentDestination(const GameState& state, const ContentCatalog& catalog)
 {
+    if (state.run.expedition.travelInitialized) return expeditionEnvironment(state, catalog);
     const int index = std::clamp(state.run.destinationIndex, 0, static_cast<int>(catalog.destinations.size()) - 1);
     return catalog.destinations[static_cast<std::size_t>(index)];
 }

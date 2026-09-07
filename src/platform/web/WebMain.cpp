@@ -332,6 +332,21 @@ void rr_cut_engines()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_toggle_cruise() { if (g_app) g_app->toggleCruiseControl(); }
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_expedition() { if (g_app) g_app->debugStartExpedition(); }
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_moon_approach() { if (g_app) g_app->debugStartMoonApproach(); }
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_next()
 {
     if (g_app) {
@@ -758,6 +773,14 @@ void rr_debug_hangar()
     if (g_app) {
         g_app->debugShowHangar();
     }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_incoming_message()
+{
+    if (g_app) g_app->debugShowIncomingMessage();
 }
 
 #ifdef __EMSCRIPTEN__

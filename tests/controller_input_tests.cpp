@@ -619,10 +619,11 @@ void routerMapsEveryGameplayContext()
     frame = routedFrame();
     frame.pressed.set(index(ControllerButton::West));
     frame.pressed.set(index(ControllerButton::North));
+    frame.pressed.set(index(ControllerButton::LeftStick));
     input = router.route(InputContext::Launch, frame, preferences);
-    require(input.has(GameInputAction::ToggleEngines), "West should toggle engines during launch");
+    require(input.has(GameInputAction::ToggleCruise), "Left-stick click should toggle cruise during flight");
     require(input.actions.count() == 1,
-        "launch should expose only the engine toggle; the retired pressure control must not route");
+        "flight must not route the retired engine toggle or pressure control");
 
     router.reset();
     frame = routedFrame();

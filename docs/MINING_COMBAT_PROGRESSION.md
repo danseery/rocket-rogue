@@ -1,5 +1,7 @@
 # Mining and Combat Progression Contract
 
+The [OREBIT Game Design Document](Rocket_Rogue_Game_Design_Document.docx) is the definitive design. This document supplies implementation detail and must agree with it. Story and progression decisions marked TBD are collected in GDD Section 8.
+
 Protected-objective lock progression is defined in [MINING_LOCK_AND_KEY_SITES.md](MINING_LOCK_AND_KEY_SITES.md), and scenario/site authoring is defined in [SCENARIO_FRAMEWORK.md](SCENARIO_FRAMEWORK.md). Gate selection is part of the same Act/level rules request and never changes difficulty from the player's actual loadout.
 
 Status: authoritative implementation contract for mining progression, procedural arenas, combat pacing, and rich-material availability.
@@ -19,7 +21,7 @@ Each act has ten difficulty levels split into four teaching bands:
 | Pressure | 7-8 | Add counters and overlapping pressures. |
 | Mastery | 9-10 | Test the act's complete rule set before the next act changes the problem. |
 
-A tutorial callout appears at a band transition, not at every number. Swarm combat remains autonomous, while the EVA operator can aim a limited sidearm for vulnerable self-defense. The player pilots, drills, scans, tethers, manages endurance, and chooses routes. Mining remains the single fuel-only deployment opened by Survey Site or Push Deeper in a surface loop.
+A tutorial callout appears at a band transition, not at every number. Swarm combat remains autonomous, while the EVA operator can aim a limited sidearm for vulnerable self-defense. The player pilots, drills, scans, tethers, manages endurance, and chooses routes. Mining begins after touchdown and physical deployment into the prepared site.
 
 Optional Swarm Nests are horde set-pieces rather than ordinary room encounters. Their simultaneous enemy cap starts at 24, reaches 32 in the Act 2 Combine band used by the debug Swarm Arena, and scales to 64 in Act 3 Mastery. Each nest sends three rapid waves containing 1x, 1.5x, and 2x the simultaneous cap. Every wave begins after a short seeded delay and enters at irregular seeded intervals. Golden-angle perimeter coverage remains the hidden distribution base, but angular, tangential, and outward jitter keep the off-screen starting points from exposing a geometric pattern; nearby entrants are rejected and retried before spawning. The debug arena skips discovery but uses this same staged entrance instead of materializing a complete wave.
 
@@ -27,7 +29,7 @@ Swarm enemies have reduced individual health and damage so the threat comes from
 
 ### Coherent enemy ecologies
 
-Each mining site has one fixed visual ecology: Neutral, Lava, Ice, Radioactive, or Toxic. The site keeps that ecology across every depth and save/load. Authored sites select it directly; the existing Thermal Lava recovery site is always Lava. Generic sites remain Neutral until Elementals enter the progression, then choose deterministically from affinities legal at that Act and level. The Surface Ops forecast shows the ecology before deployment.
+Each mining site has one fixed visual ecology: Neutral, Lava, Ice, Radioactive, or Toxic. The site keeps that ecology across every depth and save/load. Authored sites select it directly; the existing Thermal Lava recovery site is always Lava. Generic sites remain Neutral until Elementals enter the progression, then choose deterministically from affinities legal at that Act and level. Orbital findings and site presentation communicate revealed geology before deployment.
 
 Ordinary enemies use the site theme cosmetically and keep their existing stats and AI. Elementals and true elites—explicit Swarm elites, Minibosses, Bosses, and elite Spawners—also receive the matching existing affinity mechanics. Lava maps to Thermal, Ice to Cryo, Radioactive to Radiation, and Toxic to Toxic. Ordinary units spawned by an elite Spawner inherit the site skin but not its affinity unless they are independently Elemental or elite.
 
@@ -40,7 +42,7 @@ Act 1 never creates enemies or exotic minerals.
 | Level | New rules introduced | Reference capability |
 |---:|---|---|
 | 1 | Open main route, rig gravity/inertia, drilling, return zone, Regolith, Common Ore | Main rig |
-| 2 | Voluntary EVA, suit gravity/inertia, re-entry, fog/scanner, oxygen/shared-fuel endurance | Rig + operator |
+| 2 | Voluntary EVA, suit gravity/inertia, re-entry, fog/scanner, independent oxygen and powered Rig-fuel endurance | Rig + operator |
 | 3 | Hand drill, loose chunks, suit-only branch routes, hard rock | Rig + operator |
 | 4 | Drill heat, integrity, rebound, field repairs, first Rare Ore | Mining/Resource Mk I, up to 2 slots |
 | 5 | Cargo drag, artifact tether burden, active-actor swarm transfer | Mining/Resource Mk I, up to 2 slots |
@@ -116,7 +118,7 @@ First-clear progress is stored per act/band in `MetaProgress::miningFirstClearPr
 
 ## Campaign mapping and deterministic arenas
 
-`resolveCampaignMiningProgression` maps campaign state into an act, allowed range, and current difficulty. Surface depth adds one difficulty per Push Deeper step and clamps inside the chapter range.
+`resolveCampaignMiningProgression` maps campaign state into an act, allowed range, and current difficulty. Site depth contributes to difficulty within the chapter range; orbital excavation and traversal share the same prepared layers.
 
 | Campaign chapter | Mining range |
 |---|---|
@@ -150,9 +152,9 @@ The stable shared types live in `GameTypes.h`:
 
 The stable resolver and query API lives in `MiningProgression.h`. Consumers should use the whitelist helpers instead of indexing the fixed arrays directly.
 
-Active version-18 saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies, and restore never rerolls serialized terrain. The same payload persists in-progress XP, pending choices, run ranks, grafts, synergies, physical loose objects, and each Support Drone's haul provenance. Every non-v18 payload is rejected at the fresh-start boundary instead of being migrated.
+Active version-21 saves persist arena metadata under `miningArenaMetadata`; this metadata identifies the rules that produced serialized terrain and enemies, and restore never rerolls serialized terrain. The same payload persists in-progress XP, pending choices, run ranks, grafts, synergies, physical loose objects, and each Support Drone's haul provenance. Every non-v21 payload is rejected at the fresh-start boundary instead of being migrated.
 
-The current `miningArenaRulesVersion` is `3`. Increment it only when a rule change can alter deterministic generation or reward allocation. Exact v18 active arenas retain their serialized terrain; new schema boundaries do not migrate older arenas.
+The current `miningArenaRulesVersion` is `3`. Increment it only when a rule change can alter deterministic generation or reward allocation. Exact v21 active arenas retain their serialized terrain; new schema boundaries do not migrate older arenas.
 
 ## Integration invariants
 

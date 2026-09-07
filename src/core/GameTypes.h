@@ -1,7 +1,9 @@
 #pragma once
+#include "core/IncomingMessages.h"
 
 #include "core/ContentIds.h"
 #include "core/GameText.h"
+#include "core/SystemContent.h"
 
 #include <array>
 #include <cstdint>
@@ -892,6 +894,7 @@ struct CrewUpgradeStats {
 };
 
 struct SurfaceUpgradeStats {
+    double oreAttractionRadius = 0.0;
     double drillPower = 0.0;
     double drillCooling = 0.0;
     double drillDurability = 0.0;
@@ -1756,6 +1759,22 @@ struct ApproachRunState {
     ApproachRewardLedger rewards;
 };
 
+struct ExpeditionProgressionState {
+    std::vector<DroneFrameModuleAssignment> droneModuleAssignments;
+    std::vector<DroneModuleRuntimeState> droneModuleRuntime;
+
+    int expeditionLevel = 1;
+    double expeditionExperience = 0.0;
+    int pendingRunUpgradeChoices = 0;
+    std::array<RunUpgradeOffer, 3> runUpgradeOffers {};
+    int runUpgradeOfferCount = 0;
+    bool runUpgradeOfferPending = false;
+    Screen runUpgradeReturnScreen = Screen::Mining;
+    std::vector<RunRigUpgradeRank> runRigUpgradeRanks;
+    std::vector<RunDroneRank> runDroneRanks;
+    std::vector<std::string> selectedSynergyIds;
+};
+
 struct PlanetaryExpeditionState {
     bool active = false;
     std::string destinationId;
@@ -1776,16 +1795,6 @@ struct PlanetaryExpeditionState {
     int prospectArtifacts = 0;
     std::vector<SurfaceDepthProspect> depthProspects;
     std::vector<std::string> logEntries;
-    int expeditionLevel = 1;
-    double expeditionExperience = 0.0;
-    int pendingRunUpgradeChoices = 0;
-    std::array<RunUpgradeOffer, 3> runUpgradeOffers {};
-    int runUpgradeOfferCount = 0;
-    bool runUpgradeOfferPending = false;
-    Screen runUpgradeReturnScreen = Screen::Mining;
-    std::vector<RunRigUpgradeRank> runRigUpgradeRanks;
-    std::vector<RunDroneRank> runDroneRanks;
-    std::vector<std::string> selectedSynergyIds;
     bool enemyEncountersEnabled = false;
     bool miningSitePrepared = false;
     bool miningRunUsed = false;
@@ -1798,8 +1807,6 @@ struct PlanetaryExpeditionState {
     bool bankedMiningProgressionEligible = false;
     MiningArenaMetadata bankedMiningArenaMetadata;
     MaterialInventory bankedMiningMaterials;
-    std::vector<DroneFrameModuleAssignment> droneModuleAssignments;
-    std::vector<DroneModuleRuntimeState> droneModuleRuntime;
     double scannerCooldownSeconds = 0.0;
     std::vector<TreasureMark> treasureMarks;
     int reclamationOxygenUses = 0;
@@ -2100,6 +2107,11 @@ struct MiningDepthLayerState {
 };
 
 struct MiningRunState {
+    int rigContactX = -1, rigContactY = -1;
+    double rigContactNormalX = 0, rigContactNormalY = 0;
+    bool rigContactPassage = false;
+    bool rigGeometryValidated = false; // Runtime-only: validate legacy/spawn poses once.
+
     bool active = false;
     MiningArenaMetadata arenaMetadata;
     MiningRewardBudget rewardBudget;
@@ -2314,8 +2326,8 @@ struct OrbitalSurveyLayer {
 struct OrbitalWorkState {
     OrbitalWorkPhase phase = OrbitalWorkPhase::Inactive;
     double landingStartHeading = 0.0, landingTargetHeading = 0.0;
-    double elapsed = 0.0, heat = 0.0, overlay = 0.0, captureDelay = 0.0;
-    bool held = false, releaseRequired = true, overheated = false, surveyComplete = false;
+    double elapsed = 0.0, overlay = 0.0, captureDelay = 0.0;
+    bool held = false, releaseRequired = true, surveyComplete = false;
     bool touchedSite = false;
     std::uint64_t preparationKey = 0;
     int surveyDepth = 0;
@@ -2416,7 +2428,106 @@ struct FlightRunState {
     bool flybyRecorded = false;
     bool orbitCelebrationPending = false;
     bool touchdownCelebrationPending = false;
+    double touchdownImpactSpeed = 0.0; // Session-only supported-contact feedback.
     std::vector<FlybyTrailPoint> predictedTrajectory;
+    bool predictedImpact = false;
+    double predictionAge = 1.0;
+    double courseNoticeSeconds = 0.0;
+};
+
+enum class CoordinateFrame { System, Body };
+struct SystemLocation {
+    std::string systemId = "solar";
+    std::string bodyId = "earth";
+    CoordinateFrame frame = CoordinateFrame::Body;
+    SystemVector position;
+    SystemVector velocity;
+    double heading = 0.0;
+    std::string siteId = "earth.dock";
+};
+struct CoursePlan {
+    std::string targetBodyId;
+    bool estimateValid = true;
+    double approachFuel = 0.0;
+    double returnMargin = 0.0;
+    double manualCaptureAllowance = 1.0;
+    std::vector<SystemVector> trajectory;
+    std::vector<std::string> intersectedHazards;
+};
+struct FlightGuidance {
+    std::string targetId, targetName, orbitBodyId, nextAction;
+    SystemVector targetPosition, orbitPosition; // Current simulation frame.
+    double targetDistance = 0, targetBearing = 0;
+    bool predictedImpact = false;
+};
+struct CruiseState { bool active = false; };
+enum class BatteryOwner { Site, Ship, EarthStorage, Wreck, ArkSlot };
+struct BeaconBatteryState {
+    std::string id;
+    std::string sourceSiteId;
+    BatteryOwner owner = BatteryOwner::Site;
+    std::uint64_t wreckId = 0;
+    bool discovered = false;
+    bool researchEarned = false;
+};
+struct ExpeditionCargo {
+    MaterialInventory materials;
+    double shipPropellant = 0.0;
+    double shipRepair = 0.0;
+    double credits = 0.0;
+};
+struct WreckState {
+    std::uint64_t id = 0;
+    SystemLocation location;
+    ExpeditionCargo cargo;
+};
+struct OrbitalSiteProgress {
+    std::vector<OrbitalSurveyLayer> surveyLayers;
+    int surveyedDepth = -1;
+    int laserDepth = 0, laserRow = 0, shaftX = 0;
+    double laserRowWork = 0.0, surveyElapsed = 0.0;
+    bool laserBlocked = false, laserComplete = false, surveyComplete = false;
+};
+struct PersistentSiteState {
+    std::string systemId;
+    std::string bodyId;
+    std::string siteId;
+    PlanetaryExpeditionState surface;
+    MiningRunState mining;
+    OrbitalSiteProgress orbital;
+};
+struct ExpeditionDecisionState {
+    std::string pendingId;
+    std::vector<std::string> acknowledgedIds;
+    bool awaitingAscent = false;
+};
+struct PersistentExpeditionState {
+    bool travelInitialized = false;
+    bool openingInitialized = false;
+    bool departureHistoryKnown = false;
+    unsigned departureCount = 0;
+    bool undockReady = false;
+    ResourceTankState rigFuel;
+    std::vector<std::string> discoveredBodies;
+    ExpeditionProgressionState progression;
+    bool active = false;
+    bool arkActivated = false;
+    std::string homeBodyId = "earth";
+    SystemLocation location;
+    CoursePlan course;
+    CruiseState cruise;
+    ExpeditionCargo cargo;
+    std::vector<PersistentSiteState> sites;
+    std::string selectedOrbitBody, selectedOrbitZone = "zone_1";
+    std::string moonTutorialZone;
+    std::array<BeaconBatteryState, 6> batteries {{
+        {"moon", "moon.beacon"}, {"mars", "mars.beacon"},
+        {"io", "io.beacon"}, {"saturn", "saturn.beacon"},
+        {"uranus", "uranus.beacon"}, {"neptune", "neptune.beacon"}
+    }};
+    std::vector<WreckState> wrecks;
+    std::uint64_t nextWreckId = 1;
+    ExpeditionDecisionState decision;
 };
 
 struct RunState {
@@ -2441,6 +2552,7 @@ struct RunState {
     SurfacePushRunState surfacePush;
     MiningRunState mining;
     FlightRunState flight;
+    PersistentExpeditionState expedition;
     // Serialized under the compatibility field name nextLaunchFuelBoost.
     // The value is powered-route fuel saved by existing Flyby momentum; it
     // never changes the physical Transfer Tank capacity.
@@ -2458,6 +2570,7 @@ struct RunState {
 };
 
 struct GameState {
+    IncomingMessageState incomingMessages;
     Screen screen = Screen::Hangar;
     std::uint64_t seed = 0xC0DEC0FFEEULL;
     RunState run;

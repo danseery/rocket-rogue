@@ -1,16 +1,17 @@
-# Underground landing and manual ascent — v20 feel pass
+# Underground Landing and Manual Ascent
+
+The [OREBIT Game Design Document](Rocket_Rogue_Game_Design_Document.docx) is the definitive design. This document supplies implementation detail and must agree with it. Story and progression decisions marked TBD are collected in GDD Section 8.
 
 Landing physics and its forecast now query one Cartesian projection of the real
 cached Mining layers. Layer offsets accumulate actual layer heights at four
 metres per cell. Adjacent layers are prepared ahead of camera, swept collision,
 and forecast range. Generation and excavation remain core-owned; rendering
 cannot create terrain or passages. Intact bedrock boundaries remain physical.
-The former -400 m failure is removed.
+Depth itself is not a fatal altitude threshold.
 
 The mothership's layer/position is independent of geological entry. A surviving
 upright contact still needs real supporting ground and rig staging clearance.
-No underground bay is stamped. Touchdown and deployment keep their existing
-two/three-second timing. Nearby ship illumination reveals terrain without
+No underground bay is stamped. Touchdown lasts two seconds; deployment lasts three seconds. Nearby ship illumination reveals terrain without
 revealing protected objectives.
 
 Packing settles payload once and retains the modified site. Ignition hands
@@ -25,7 +26,7 @@ use the parked layer. Support Drone deliveries follow a terrain path through
 cached layers; their manifests are not banked by an elapsed transit timer.
 Unopened seam lips cannot be crossed by Mining actors.
 
-Saves are v20 only. Local pose, fixed surface origin, mothership location,
+Saves are v21 only. Local pose, fixed surface origin, mothership location,
 departure/support state, drone transit depth, and exact cached terrain persist.
 Prepared arrivals remain session-only. Arrival and packing save only at their
 completed handoffs. Old saves are not migrated or overwritten on loading.
@@ -44,5 +45,6 @@ Presets use real generation and excavation, not special landing bays. Debug
 sandboxes do not write the player's save. Normal campaign Continue is required
 to feel-check persisted Mining/ascent. Existing surface arrival presets remain.
 
-Build only the web game for this pass. No new automated suite or broad matrix.
-The visual/handling constants remain provisional for player feedback.
+## Verification
+
+Check shaft seams, surviving and fatal floor/wall impacts, upright support and rig clearance, parked-layer services, physical drone delivery, packing once, ascent contacts, the +60 m Orbit exit, and save/Continue of underground Mining and departure. Handling and camera acceptance require direct player review.

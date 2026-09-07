@@ -17,6 +17,7 @@ struct PayloadTransferPlan {
 };
 
 int materialCargoMass(const MaterialInventory& materials);
+const MaterialInventory& shipHoldMaterials(const GameState& state);
 int shipHoldCapacity(const GameState& state, const ContentCatalog& catalog);
 int shipHoldUsed(const GameState& state);
 int shipHoldAvailable(const GameState& state, const ContentCatalog& catalog);

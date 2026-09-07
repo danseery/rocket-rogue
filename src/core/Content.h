@@ -8,6 +8,8 @@
 namespace rocket {
 
 struct ContentCatalog {
+    std::vector<MessageSpeaker> messageSpeakers;
+    std::vector<IncomingMessageDefinition> incomingMessages;
     std::vector<ShipModule> modules;
     std::vector<CrewUpgrade> crewUpgrades;
     std::vector<SurfaceUpgrade> surfaceUpgrades;

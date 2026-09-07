@@ -167,8 +167,8 @@ inline int activeMiningCritTextCount(const MiningRunState& mining)
 inline int tunedMiningDroneCount(const GameState& state)
 {
     return static_cast<int>(std::count_if(
-        state.run.planetaryExpedition.runDroneRanks.begin(),
-        state.run.planetaryExpedition.runDroneRanks.end(),
+        state.run.expedition.progression.runDroneRanks.begin(),
+        state.run.expedition.progression.runDroneRanks.end(),
         [](const RunDroneRank& record) {
             return record.rank > 1;
         }));
@@ -683,6 +683,12 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
         presentation.objective = currentDepth == 0
             ? "SURFACE \xE2\x80\xA2 "
             : "DEPTH +" + std::to_string(currentDepth) + " \xE2\x80\xA2 ";
+    }
+    if (mining.gate.objectivePassage == MiningPassageClass::SuitOnly && mining.artifact.present
+        && mining.artifact.state != MiningArtifactState::Delivered) {
+        presentation.objective = mining.artifact.revealed
+            ? "EVA: TOW ARTIFACT TO SHIP"
+            : "PULSE SCANNER: FIND THE SIGNAL";
     }
     if (mining.gate.type == MiningGateType::SurveyTriangulation &&
         !mining.gate.surveyComplete) {

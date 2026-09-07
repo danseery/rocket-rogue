@@ -1,63 +1,45 @@
-# One Flight, One Surface
+# Flight and Surface Flow
 
-This document describes the current version-18 activity flow. It replaces the retired Arrival Ops, standalone Flyby/Orbit, Surface Ops, Survey, and Push phase-board designs.
+The [OREBIT Game Design Document](Rocket_Rogue_Game_Design_Document.docx) is the definitive design. This document supplies implementation detail and must agree with it. Story and progression decisions marked TBD are collected in GDD Section 8.
 
-## Player-facing flow
+## Activity ownership
 
-`Launch ritual -> physical Flight -> orbit or flyby -> deorbit and land -> touchdown celebration -> physical Mining/EVA -> takeoff ritual`
+`Earth dock -> physical system/body flight -> local Landing -> touchdown -> deployment -> Mining/EVA -> packing -> manual ascent -> return home or continue travel`
 
-Flight is one continuous player-controlled simulation. Position, velocity, heading, fuel, heat, and hull carry through transfer, orbit capture, descent, and landing. The prediction line is guidance, not a rail. A/D rotates, W provides main thrust, S provides braking thrust, and coasting is free. Orbit is earned by maintaining a valid path through the visible annulus; landing grades come from actual vertical speed, lateral speed, and tilt.
+Orbit survey and laser excavation are optional preparation within Flight. A qualifying coasting loop held for two seconds earns capture. Survey pauses flight; excavation requires Zone 1 and a fresh held input. Manual descent crosses an authorized gate with momentum intact. The explicit Land action from surveyed inspection stops and aligns the ship before normal gravity resumes.
 
-The two-second touchdown celebration and the complete planetary takeoff animation are automatic ceremonies, not acknowledgement screens. They preserve impact and place without adding another decision.
+## Handoffs
+
+| Transition | Control and simulation | Persistence |
+| --- | --- | --- |
+| Travel to Orbit | Approach zoom; close flight uses 40% world speed and full controls. | Authoritative Flight state. |
+| Survey and laser | Flight pauses; inspection and beam/cooling advance. | Prepared findings/excavation remain session-only. |
+| Orbit to Landing | 1.25-second camera blend; local controls and collisions use real terrain. | Prepared terrain is not yet committed as a deployed expedition. |
+| Touchdown | Two-second flourish; fresh deploy input may buffer; first accepted deploy/depart command wins. | Landing commits in memory. |
+| Deployment | Three-second bay/rig/drone staging and camera handoff; Mining/resource clocks stopped. | Completed deployment saves Mining. |
+| Undeployed departure | Ship-only sequence then flight routing. | Save at completed handoff. |
+| Packing and ignition | Settle payload once; resume local flight at parked ship. | Completed packing handoff saves the retained site and departure state. |
+| Ascent to Orbit | Exit at +60 m surface-relative altitude and >=2 m/s upward; inverse momentum conversion. | Persist physical flight and retained site. |
 
 ## Continuous landed world
 
-Mining, scanning, drilling, towing, EVA, Support Drones, cargo, and mothership service all occur in `Screen::Mining`. The service zone banks only payload that physically reaches the ship. Oxygen service never creates fuel. A disabled zero-fuel rig remains recoverable by EVA, towing, or a physical fuel cell.
+Mining, EVA, scanning, drilling, towing, Support Drones, cargo and ship services occupy one physical site. Excavated and cached layers survive handoffs. Ship location is independent of geological entry. Underground services, extraction and drone delivery use the parked layer; unopened seam lips remain barriers.
 
-The Mining Rig has a hard 24-mass payload cap. Load changes its movement and powered fuel cost immediately:
+Rig fuel uses an independent home-supplied tank retained across visits and gains fuel from physical cells. Thrust and drilling consume independently; idle/coast consume neither. Rig oxygen and Suit oxygen are separate; ship oxygen service does not create fuel. A disabled Rig remains recoverable. The Rig holds at most 24 mass, and excess ore remains loose. Contract allocation precedes ordinary ship storage; drone manifests are credited only after physical delivery.
 
-| Band | Mass | Speed | Fuel use |
-|---|---:|---:|---:|
-| Light | 0-5 | 100% | x1.00 |
-| Standard | 6-11 | 90% | x1.15 |
-| Laden | 12-17 | 72% | x1.40 |
-| Packrat | 18-23 | 55% | x1.70 |
-| Full | 24 | 50% | x1.75 |
+Packing does not teleport the ship to orbit. Pilot the ascent through the same terrain. Departure thrust spends no fuel until the Orbit exit, while gravity, heat and collision remain active.
 
-Drilling always creates physical loose objects. At capacity, the intake reports `FULL` and excess ore stays in the world. Support Drone payload counts only after the drone returns and unloads. `Leave Now` remains available and names the drones and payload that will be lost.
+## Campaign connection
 
-## Lunar opening
+The lunar 20-Common-Ore delivery activates the anomaly during the expedition. Scanner discovery, EVA access, physical artifact recovery and explicit claim establish the Mars lead. Mars currently requires 8 Common Ore. After a significant objective and ascent, a saved compact decision offers home, the next lead, or the map. Docking banks and services once; continuing preserves resource pressure and XP. See [Persistent Expeditions](PERSISTENT_EXPEDITIONS.md). Battery missions and flexible-order story reconciliation remain TBD S3. Ark and endgame integration are TBD S4.
 
-The first Moon expedition teaches the complete game instead of preparatory calibration sorties:
+## Detailed references
 
-1. Fly to the Moon, capture a physical orbit, deorbit, and land.
-2. Mine and return 20 Common Ore in one intended haul.
-3. Contract allocation accepts the 20 ore before permanent ship storage.
-4. The twentieth ore activates an anomaly while the player remains landed.
-5. Pulse the scanner, follow its world-space bearing, and reach the marked suit-only crevice.
-6. Exit the rig, hand-drill, tether, and physically recover the artifact.
-7. Claiming the artifact unlocks the Mars route; the ore contract alone does not.
+- [Orbital Preparation](ORBITAL_PREPARATION_PROTOTYPE.md)
+- [Surface Arrival](HEROIC_SURFACE_ARRIVAL.md)
+- [Underground Landing and Ascent](UNDERGROUND_LANDING_PROTOTYPE.md)
+- [Mining and EVA](MINING_MINIGAME_PLAN.md)
 
-Prompts appear only when their verb matters. Mission Control transmissions are at most two short sentences plus one concrete action. Heat stays hidden during the first Moon lesson; fuel, oxygen, and load are active immediately.
+## Opening and return continuity
 
-## Progression and storage
-
-Permanent ship storage remains 12/16/20/24 mass and never exceeds 24. Contract allocation happens before ordinary storage, so mission cargo does not need to fit the persistent hold. Overflow remains with its physical owner. A single-haul contract may not exceed guaranteed Rig capacity; multi-haul contracts must be explicitly authored.
-
-Mars currently requires 8 Common Ore until separately retuned. The first lunar industrial delivery requires 20 Common Ore.
-
-Crew are authored characters with fixed species/class perks. Training, stress, rest, related facilities, and Psyche placeholders are not part of version 18.
-
-## Architecture and save boundary
-
-`GameState` is authoritative. `FlightRunState` lives in `RunState` and persists the active physical trajectory, finite resources, hull, orbit progress, and landing state. Core systems mutate state; typed presentation and render snapshots only display it. Native and web use the same gameplay actions and rules.
-
-Version 18 is an intentional clean campaign boundary:
-
-- Only v18 is accepted.
-- There is no v17 migration or partial restoration.
-- Incompatible campaign and checkpoint data is not loaded.
-- The old campaign remains untouched until the player explicitly confirms `New Campaign`.
-- A confirmed new campaign writes a clean v18 save and uses a v18-specific checkpoint key.
-
-Current v18 output does not serialize Action Kits, shared surface fuel, fuel-cycle progress, Surface Scan/Push payloads, training chores, stress, or retired screen state.
+The first expedition starts with explicit Launch from the Earth berth after a saved Incoming Message acknowledgement. Earth is framed below-left and the Moon above-right. The initial departure impulse is applied once; all subsequent motion follows physical flight. Later travel retains physical position and resources. Home departure waits attached until forward thrust. Target guidance stays distinct from actual-body orbit bands, and Moon ascent retains its committed site until physical frame exit.

@@ -8,6 +8,7 @@
 namespace rocket {
 
 struct SaveData {
+    IncomingMessageState incomingMessages;
     int version = save_schema::currentVersion;
     std::uint64_t seed = 0xC0DEC0FFEEULL;
     double credits = 0.0;
@@ -28,6 +29,7 @@ struct SaveData {
     RouteTransitState routeTransit;
     Screen screen = Screen::Hangar;
     FlightRunState flight;
+    PersistentExpeditionState expedition;
     CampaignMilestone campaignMilestone = CampaignMilestone::SolarTutorial;
     GameChapter chapter = GameChapter::ProvingGround;
     ArkState ark;

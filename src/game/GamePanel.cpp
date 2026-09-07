@@ -1,4 +1,7 @@
+#include "core/SurfacePresentation.h"
 #include "game/GamePanel.h"
+#include "game/ExpeditionPresentation.h"
+#include "core/ExpeditionSystem.h"
 #include "core/CrewPresentation.h"
 #include "core/FlightInstrumentPresentation.h"
 #include "core/FlightSystem.h"
@@ -48,11 +51,19 @@ std::string orbitalWorkLabel(const PanelRenderContext& c)
     const auto& w = *c.orbitalWork;
     if (w.phase == OrbitalWorkPhase::Surveying) return "SURVEYING";
     if (!w.surveyComplete) return "PULSE SURVEY";
-    if (!c.orbitalInsideZone) return w.active() ? "RESUME FLIGHT" : "ENTER ZONE 1 TO DIG";
+    if (!c.orbitalInsideZone) return w.active() ? "RESUME FLIGHT" : "RETURN TO SELECTED WEDGE";
     if (c.orbitalLaserBlocked) return "SURFACE TOOLS REQUIRED";
     if (c.orbitalLaserComplete) return "SHAFT READY";
-    if (w.overheated) return "COOLING";
     return "ORBITAL LASER DIG";
+}
+
+std::string orbitalLaserHint(const PanelRenderContext& c)
+{
+    const std::string limit = "Bore reach +" + std::to_string(
+        surfaceDepthRating(c.state, SurfaceDepthUpgradeKind::BoreSystem));
+    if (c.orbitalLaserBlocked) return limit + " · Obstruction reached. Continue with surface tools.";
+    if (c.orbitalLaserComplete) return limit + " · Depth limit reached. Ready to land.";
+    return limit + " · Hold to drill; release to stop.";
 }
 
 bool surfaceDescentForContext(const PanelRenderContext& context)
@@ -60,6 +71,13 @@ bool surfaceDescentForContext(const PanelRenderContext& context)
     return context.state.screen == Screen::Flight && context.launchFlight != nullptr &&
         context.launchFlight->physicalFlight && context.launchFlight->mode == FlightMode::Landing &&
         !context.surfaceArrivalActive;
+}
+
+bool surfaceHudForContext(const PanelRenderContext& context)
+{
+    return context.state.screen == Screen::Flight && context.launchFlight &&
+        context.launchFlight->landing.siteBound &&
+        (context.surfaceArrivalActive || surfaceDescentForContext(context));
 }
 
 std::string physicalFlightControlHint(const PanelRenderContext& context)
@@ -1241,6 +1259,7 @@ std::string saturnSlingshotFailureModal(const GameState& state)
 
 bool jupiterWindowAvailable(const GameState& state, const ContentCatalog& catalog)
 {
+    if (state.run.expedition.travelInitialized) return false;
     const TransferAssistDefinition* definition = catalog.findTransferAssist(content::transferAssist::marsJupiter);
     const Destination* next = nextDestination(state, catalog);
     return definition != nullptr && next != nullptr &&
@@ -1563,7 +1582,7 @@ std::string scenarioObjectiveModalForDestination(
 {
     const ScenarioObjectivePresentation objective =
         scenarioObjectiveForDestination(state, catalog, destinationId);
-    if (objective.scenarioId == content::scenario::marsBayExpansion &&
+    if (!state.run.expedition.travelInitialized && objective.scenarioId == content::scenario::marsBayExpansion &&
         objective.stepId == "funding") {
         // The Jupiter Window owns a three-action, non-exclusive briefing.
         // The generic one-action scenario modal would falsely imply a single
@@ -2569,7 +2588,7 @@ std::string debriefPhaseTrack(const std::vector<PhaseStepPresentation>& steps)
 constexpr int kExpeditionXpSegments = 12;
 constexpr double kLevelUpDraftFanfareSeconds = 0.70;
 
-int expeditionXpFilledSegments(const PlanetaryExpeditionState& expedition)
+int expeditionXpFilledSegments(const ExpeditionProgressionState& expedition)
 {
     const double required = std::max(1.0, expeditionExperienceThreshold(expedition.expeditionLevel));
     const double progress = std::clamp(expedition.expeditionExperience / required, 0.0, 1.0);
@@ -2588,7 +2607,7 @@ std::string expeditionXpClass(bool pulse, bool hero = false)
 }
 
 std::string expeditionXpMarkup(
-    const PlanetaryExpeditionState& expedition,
+    const ExpeditionProgressionState& expedition,
     std::string_view id,
     bool pulse,
     bool hero = false)
@@ -2627,7 +2646,7 @@ std::string levelUpDraftClass(const PanelRenderContext& context)
     return result;
 }
 
-std::string surfaceQuickbar(const PlanetaryExpeditionState& expedition, bool xpPulse)
+std::string surfaceQuickbar(const PlanetaryExpeditionState& expedition, const ExpeditionProgressionState& progression, bool xpPulse)
 {
     std::ostringstream out;
     out << "<section class=\"surface-quickbar phase-lane phase-row\">";
@@ -2635,7 +2654,7 @@ std::string surfaceQuickbar(const PlanetaryExpeditionState& expedition, bool xpP
     out << surfaceQuickMetric(text::labels::rigFuel, display::fixed(expedition.rigFuel, 1) + "/" + display::fixed(std::max(0.0, expedition.rigFuelCapacity), 1));
     out << surfaceQuickMetric(text::labels::cargo, std::to_string(expedition.cargo));
     out << surfaceQuickMetric("On Ship", std::to_string(expedition.temporaryMaterials.common) + " CM", "", true);
-    out << expeditionXpMarkup(expedition, "rr-hud-surface-xp", xpPulse);
+    out << expeditionXpMarkup(progression, "rr-hud-surface-xp", xpPulse);
     out << "</section>";
     return out.str();
 }
@@ -3827,69 +3846,56 @@ std::string buildGamePanelMarkup(
     }
 
     if (layoutMode == PanelLayoutMode::ControlPanel && state.screen == Screen::Flight) {
-        if (context.surfaceArrivalActive) {
-            constexpr int touchdownPhase = 2;
-            constexpr int awaitingCommandPhase = 3;
-            constexpr int deployingPhase = 4;
-            constexpr int takingOffPhase = 5;
-            const bool touchdown = context.surfaceArrivalPhase == touchdownPhase;
-            const bool awaiting = context.surfaceArrivalPhase == awaitingCommandPhase;
-            const bool deploying = context.surfaceArrivalPhase == deployingPhase;
-            const bool takingOff = context.surfaceArrivalPhase == takingOffPhase;
-            const bool hardTouchdown = touchdown && context.launchFlight != nullptr &&
-                context.launchFlight->landing.hardLanding;
-            const std::string_view title = takingOff
-                ? "TAKING OFF"
-                : (deploying ? "DEPLOYING" : (touchdown
-                    ? (hardTouchdown ? "HARD LANDING" : "TOUCHDOWN") : "LANDED"));
-            const std::string_view detail = takingOff
-                ? "Ignition committed. Returning to orbital operations."
-                : (deploying
-                    ? "Rig and equipped Support Drones are entering the staging lane."
-                    : (context.surfaceArrivalDeployQueued
-                        ? "Deployment queued. Touchdown checks are finishing."
-                        : "The shuttle is secure on the ground."));
-            out << "<div data-surface-arrival=\"1\" data-surface-arrival-phase=\""
-                << context.surfaceArrivalPhase << "\" hidden></div>";
-            out << "<section class=\"live-hud-header surface-arrival-hud\"><div><span>PLANETARY ARRIVAL</span><h2>"
-                << htmlEscape(title) << "</h2></div><p class=\"phase-copy\">"
-                << htmlEscape(detail) << "</p></section>";
-            if ((touchdown || awaiting) && context.surfaceArrivalLandingCommitted) {
-                out << "<div class=\"actions action-row primary-actions surface-arrival-actions\">"
-                    << button(
-                        context.surfaceArrivalDeployQueued ? "DEPLOYMENT QUEUED" : "DEPLOY SURFACE TEAM",
-                        ui::actions::deploySurfaceTeam,
-                        "ok",
-                        true);
-                if (awaiting) {
-                    out << button("TAKE OFF", ui::actions::departSurfaceUndeployed, "ghost");
+        if (surfaceHudForContext(context)) {
+            const FlightRunState& flight = *context.launchFlight;
+            const bool landed = context.surfaceArrivalActive;
+            const bool touchdown = landed && context.surfaceArrivalPhase == 2;
+            const bool awaiting = landed && context.surfaceArrivalPhase == 3;
+            const bool deploying = landed && context.surfaceArrivalPhase == 4;
+            const std::string title = deploying ? "DEPLOYING" : touchdown ? "TOUCHDOWN" : awaiting ? "LANDED"
+                : flight.landing.departureActive ? "MANUAL ASCENT" : "FINAL DESCENT";
+            const auto metric = [&out](std::string_view id, std::string_view label, const std::string& value) {
+                out << "<div class=\"metric\"><span>" << label << "</span><strong id=\"" << id
+                    << "\">" << htmlEscape(value) << "</strong></div>";
+            };
+            out << "<section id=\"rr-surface-hud\" class=\"mining-fullscreen surface-flight-hud\" data-panel-mode=\"mining-fullscreen\" style=\"opacity:"
+                << surfacePresentationProgress(flight, landed) << "\">"
+                << "<header class=\"mining-top-rail\"><div class=\"surface-flight-title\">" << title
+                << "</div><section class=\"mining-vitals\">";
+            metric("rr-landing-fuel", "SHIP FUEL", display::fixed(flight.fuelRemaining, 1));
+            metric("rr-landing-hull", "HULL", display::fixed(flight.hullRemaining, 0) + " HP");
+            metric("rr-landing-altitude", flight.landing.altitude < 0.0 ? "DEPTH" : "ALTITUDE", display::fixed(std::abs(flight.landing.altitude), 1) + " m");
+            metric("rr-landing-vertical", "VERTICAL", display::fixed(flight.landing.verticalVelocity, 1) + " m/s");
+            metric("rr-landing-lateral", "LATERAL", display::fixed(flight.landing.lateralVelocity, 1) + " m/s");
+            metric("rr-landing-tilt", "TILT", display::fixed(flight.landing.surfaceAngle * 57.29577951308232, 0) + " deg");
+            out << "</section></header><footer class=\"mining-bottom-rail surface-flight-actions\">";
+            if (landed) {
+                out << "<div data-surface-arrival=\"1\" data-surface-arrival-phase=\""
+                    << context.surfaceArrivalPhase << "\" hidden></div>";
+                if ((touchdown || awaiting) && context.surfaceArrivalLandingCommitted) {
+                    out << button(context.surfaceArrivalDeployQueued ? "DEPLOYMENT QUEUED" : "DEPLOY SURFACE TEAM",
+                        ui::actions::deploySurfaceTeam, "ok", true);
                 }
-                out << "</div>";
-            } else if (awaiting) {
-                out << "<div class=\"actions action-row primary-actions surface-arrival-actions\">"
-                    << button("TAKE OFF", ui::actions::departSurfaceUndeployed, "ghost", true)
-                    << "</div>";
+                if (awaiting) out << button("TAKE OFF", ui::actions::departSurfaceUndeployed, "ghost", !context.surfaceArrivalLandingCommitted);
+                if (deploying) out << "<p>Opening bay · Deploying surface team</p>";
+            } else {
+                out << "<p>" << htmlEscape(landingControlHint(context)) << "</p><p>"
+                    << htmlEscape(physicalFlightControlHint(context)) << "</p>";
             }
+            out << "</footer></section>";
             out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
             return out.str();
         }
         if (surfaceDescentForContext(context)) {
-            const FlightRunState& flight = *context.launchFlight;
-            out << "<section class=\"live-hud-header\"><h2>"
-                << (flight.phase == FlightPhase::Impact ? "IMPACT" : (flight.landing.departureActive ? "MANUAL ASCENT" : "FINAL DESCENT"))
-                << "</h2><p class=\"phase-copy\">" << htmlEscape(landingControlHint(context))
-                << "</p></section>"
-                << "<div class=\"flight-status-list\">"
+            const auto& flight = *context.launchFlight;
+            out << "<section class=\"live-hud-header\"><h2>FINAL DESCENT</h2></section><div class=\"flight-status-list\">"
                 << flightStatusRow("rr-landing-fuel", "Fuel", display::fixed(flight.fuelRemaining, 1))
-                << flightStatusRow("rr-landing-hull", "Hull", flightHullReadout(flight))
-                << flightStatusRow("rr-landing-altitude", flight.landing.altitude < 0.0 ? "Depth" : "Altitude", display::fixed(std::abs(flight.landing.altitude), 1) + " m")
+                << flightStatusRow("rr-landing-hull", "Hull", display::fixed(flight.hullRemaining, 0) + " HP")
+                << flightStatusRow("rr-landing-altitude", "Altitude", display::fixed(std::abs(flight.landing.altitude), 1) + " m")
                 << flightStatusRow("rr-landing-vertical", "Vertical", display::fixed(flight.landing.verticalVelocity, 1) + " m/s")
                 << flightStatusRow("rr-landing-lateral", "Lateral", display::fixed(flight.landing.lateralVelocity, 1) + " m/s")
                 << flightStatusRow("rr-landing-tilt", "Tilt", display::fixed(flight.landing.surfaceAngle * 57.29577951308232, 0) + " deg")
-                  << "</div><p class=\"phase-copy\">" << htmlEscape(physicalFlightControlHint(context))
-                  << "</p><p class=\"phase-copy\">Climb above "
-                  << display::fixed(flight_landing::departureAltitude, 0)
-                  << " m to return to Orbit.</p>";
+                << "</div><p>" << htmlEscape(landingControlHint(context)) << "</p>";
             out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
             return out.str();
         }
@@ -3939,7 +3945,7 @@ std::string buildGamePanelMarkup(
         }
 
         out << "<p id=\"rr-hud-launch-status\" class=\"" << launchStatusSeverity(context) << "\">"
-            << htmlEscape(launchPanel.telemetryMessage) << "</p>";
+            << htmlEscape(state.run.expedition.travelInitialized ? expeditionGuidance(state,context.orbitalWork && context.orbitalWork->surveyComplete,context.orbitalLaserComplete).nextAction : launchPanel.telemetryMessage) << "</p>";
         const bool hasAdvancedFlightControls = !launchPanel.systemActions.empty();
         if (orbitalWorkVisible(context)) {
             const auto& w = *context.orbitalWork;
@@ -3950,11 +3956,11 @@ std::string buildGamePanelMarkup(
                 std::abs(context.launchFlight->selectedThrottle) <= 0.001);
             const bool outside = w.surveyComplete && !context.orbitalInsideZone;
             out << "<div data-orbital-work=\"1\" class=\"actions primary-actions\">"
-                << (outside && !w.active() ? panelButton(disabledPanelButton("ENTER ZONE 1 TO DIG"))
+                << (outside && !w.active() ? panelButton(disabledPanelButton("RETURN TO SELECTED WEDGE"))
                     : ready ? button(orbitalWorkLabel(context), ui::actions::orbitalWork, "ok", true)
                     : panelButton(disabledPanelButton("ESTABLISH A SAFE LOOP")))
-                << "</div><p id=\"rr-orbital-heat\" class=\"phase-copy\">"
-                << (w.surveyComplete ? "LASER " + display::fixed(w.heat, 0) + "% · Hold to bore; release to cool."
+                << "</div><p id=\"rr-orbital-status\" class=\"phase-copy\">"
+                << (w.surveyComplete ? orbitalLaserHint(context)
                     : "Survey reach +" + std::to_string(surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray)))
                 << "</p>";
             if (w.active() && w.surveyComplete && !outside)
@@ -3975,7 +3981,9 @@ std::string buildGamePanelMarkup(
                     : "Autoguidance engaged"))
                 : (!context.droneTransferEnabled ? "Launch corridor clear" : (context.preflightReady ? "Launch corridor clear" : "Securing Mining Rig"))) << "</strong></div>";
         if (!context.flightArmed) {
-            const std::string_view preflightCopy = context.launchQueued
+            const std::string_view preflightCopy = earthLaunchReady(state.run.expedition)
+                ? "Select Launch beside the ship to leave Earth. Thrust toward the Moon above-right, then establish orbit."
+                : context.launchQueued
                 ? "Launch queued. The burn will begin automatically when the bay seals."
                 : (!context.droneTransferEnabled
                     ? "Bay sealed. Use the cockpit launch control beside the vehicle."
@@ -4869,7 +4877,7 @@ std::string buildGamePanelMarkup(
             out << modalButton(text::panel::sections::missionLog, ui::modals::missionLog, "ghost");
         }
         out << "</div></div>";
-        out << surfaceQuickbar(expedition, context.expeditionXpPulse);
+        out << surfaceQuickbar(expedition, state.run.expedition.progression, context.expeditionXpPulse);
         if (scenarioSurface) {
             out << scenarioObjectiveMarkup(displayedSurfaceScenario);
             if (surfaceDelivery.objective.available &&
@@ -4976,17 +4984,17 @@ std::string buildGamePanelMarkup(
 
     if (state.screen == Screen::SurfaceUpgrade) {
         const SurfaceExpeditionPresentation surfacePanel = planetaryExpeditionPresentation(state, catalog);
-        const int pendingPicks = std::max(0, state.run.planetaryExpedition.pendingRunUpgradeChoices);
+        const int pendingPicks = std::max(0, state.run.expedition.progression.pendingRunUpgradeChoices);
         const int fanfarePicks = std::max(pendingPicks, context.levelUpBatchChoices);
         std::string levelUpClass = levelUpDraftClass(context);
         levelUpClass.erase(0, std::string("phase-board ").size());
         out << phaseBoardOpen(levelUpClass, state.statusLine, true, "rr-level-up-draft");
         out << "<section class=\"draft-hero level-up-stamp\"><div><span>"
             << htmlEscape(fanfarePicks > 1 ? "LEVEL UP \xC3\x97" + std::to_string(fanfarePicks) : "LEVEL UP")
-            << "</span><h2>EXPEDITION LEVEL " << std::max(1, state.run.planetaryExpedition.expeditionLevel)
+            << "</span><h2>EXPEDITION LEVEL " << std::max(1, state.run.expedition.progression.expeditionLevel)
             << "</h2><p>Choose one upgrade</p><strong>" << pendingPicks << " PICKS REMAIN</strong></div>"
             << expeditionXpMarkup(
-                state.run.planetaryExpedition,
+                state.run.expedition.progression,
                 "rr-hud-level-up-xp",
                 context.expeditionXpPulse,
                 true)
@@ -5602,6 +5610,39 @@ bool usesGameplayInputHelper(const PanelRenderContext& context)
 
 } // namespace
 
+std::optional<ModalPresentation> buildIncomingMessageCard(
+    const PanelRenderContext& context, std::string_view messageId,
+    std::string_view variantId, const std::string& action)
+{
+    const auto* message = incomingMessage(context.catalog, messageId);
+    const auto* speaker = message ? messageSpeaker(context.catalog, message->speakerId) : nullptr;
+    const auto* variant = message ? messageVariant(*message, variantId) : nullptr;
+    if (!speaker || !variant) return std::nullopt;
+            std::ostringstream body;
+            body << "<section class=\"incoming-message modal-body\"><div class=\"incoming-message-layout\">"
+                 << "<div class=\"incoming-message-portrait\"><img src=\"" << htmlEscape(message->concerned ? speaker->concernedPortrait : speaker->portrait)
+                 << "\" alt=\"" << htmlEscape(speaker->name) << "\" /></div>"
+                 << "<div class=\"incoming-message-copy\"><div class=\"incoming-message-channel\">" << htmlEscape(speaker->channel)
+                 << "</div><h2>" << htmlEscape(speaker->name) << "</h2><h3>" << htmlEscape(message->title)
+                 << "</h3><p>" << htmlEscape(variant->body) << "</p><div class=\"incoming-message-hints\">";
+            for (const auto hint : variant->hints) {
+                const bool pad = context.controllerFlightControls;
+                const char* label = "";
+                switch (hint) {
+                case MessageHint::Scanner: label = pad ? "Scanner: X / West" : "Scanner: E"; break;
+                case MessageHint::ExitRig: label = pad ? "Exit Rig: hold A / South" : "Exit Rig: F"; break;
+                case MessageHint::Drill: label = pad ? "Hand drill: LT" : "Hand drill: Space"; break;
+                case MessageHint::Tether: label = pad ? "Tether: Y / North" : "Tether: T"; break;
+                case MessageHint::FlightSteer: label = pad ? "Steer: left stick" : "Steer: A / D or Left / Right"; break;
+                case MessageHint::FlightThrust: label = pad ? (context.invertFlightY ? "Thrust / reverse: left stick down / up" : "Thrust / reverse: left stick up / down") : "Thrust / reverse: W / S or Up / Down"; break;
+                }
+                body << "<p>" << label << "</p>";
+            }
+            body << "</div></div></div><div class=\"modal-actions action-row rr-action-footer\">"
+                 << button(message->acknowledgement, action, "ok", true) << "</div></section>";
+    return ModalPresentation{"incoming_message", "INCOMING MESSAGE", body.str(), action, true, false, false, ModalTone::Neutral};
+}
+
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context)
 {
     PanelDocumentPresentation result;
@@ -5616,6 +5657,14 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
         result.templateKind != PanelTemplateKind::LegacyRaw
         && legacyContentOwnsLaneGeometry(context);
     result.metadata.variant = variantForContext(context);
+    if (surfaceHudForContext(context)) {
+        result.templateKind = PanelTemplateKind::Mining;
+        result.metadata.visualFamily = PanelVisualFamily::MiningHud;
+        result.metadata.layoutMode = PanelLayoutMode::Fullscreen;
+        result.metadata.surface = PanelSurfaceKind::Mining;
+        result.metadata.overlay = PanelOverlayKind::MiningExperience;
+        result.metadata.legacyContentOwnsLaneGeometry = true;
+    }
 
     result.runtime.titleScreen = context.titleScreenActive;
     result.runtime.responsiveViewport = usesResponsiveViewport(context);
@@ -5626,19 +5675,19 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
     result.runtime.launchQueued = context.launchQueued;
     result.runtime.miningEvaActive =
         context.state.screen == Screen::Mining && miningOperatorIsEva(context.state.run.mining);
-    if (context.state.screen == Screen::Mining) {
+    if (context.state.screen == Screen::Mining || surfaceHudForContext(context)) {
         const PlanetaryExpeditionState& expedition = context.state.run.planetaryExpedition;
         const int required = static_cast<int>(std::ceil(std::max(
             1.0,
-            expeditionExperienceThreshold(expedition.expeditionLevel))));
-        result.runtime.expeditionLevel = std::max(1, expedition.expeditionLevel);
+            expeditionExperienceThreshold(context.state.run.expedition.progression.expeditionLevel))));
+        result.runtime.expeditionLevel = std::max(1, context.state.run.expedition.progression.expeditionLevel);
         result.runtime.expeditionExperienceRequired = required;
         result.runtime.expeditionExperienceCurrent = std::clamp(
-            static_cast<int>(std::floor(expedition.expeditionExperience + 0.0001)),
+            static_cast<int>(std::floor(context.state.run.expedition.progression.expeditionExperience + 0.0001)),
             0,
             required);
-        result.runtime.expeditionExperienceFilledSegments = expeditionXpFilledSegments(expedition);
-        result.runtime.expeditionPendingPicks = std::max(0, expedition.pendingRunUpgradeChoices);
+        result.runtime.expeditionExperienceFilledSegments = expeditionXpFilledSegments(context.state.run.expedition.progression);
+        result.runtime.expeditionPendingPicks = std::max(0, context.state.run.expedition.progression.pendingRunUpgradeChoices);
         result.runtime.expeditionXpPulse = context.expeditionXpPulse;
     }
     if (context.state.screen == Screen::Mining) {
@@ -5716,11 +5765,38 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
             });
         }
     }
+    const auto& messages = context.state.incomingMessages;
+    const auto& mining = context.state.run.mining;
+    const bool stableMessageContext = !context.titleScreenActive && !context.titleLaunchActive
+        && context.sceneFadeToBlack <= 0.0
+        && (!context.surfaceArrivalActive || context.surfaceArrivalPhase == 3) // Landed, awaiting deployment.
+        && !context.miningExtractionActive && context.incomingMessageDeliveryAllowed
+        && context.state.run.expedition.progression.pendingRunUpgradeChoices <= 0
+        && context.state.screen != Screen::SurfaceUpgrade
+        && context.state.screen != Screen::StoryBriefing
+        && (context.state.screen != Screen::Mining || (!mining.failurePending
+            && mining.depthTransitionCooldownSeconds <= 0.0 && mining.scannerPulseSeconds <= 0.0));
+    if (stableMessageContext && !messages.pending.empty()
+        && std::none_of(result.modals.begin(), result.modals.end(), [](const auto& modal) { return modal.autoOpen; })) {
+        const auto& occurrence = messages.pending.front();
+        const auto* message = incomingMessage(context.catalog, occurrence.messageId);
+        const auto* speaker = message ? messageSpeaker(context.catalog, message->speakerId) : nullptr;
+        const auto* variant = message ? messageVariant(*message, occurrence.variantId) : nullptr;
+        if (speaker && variant && (message->context == MessageDeliveryContext::Any || context.state.screen == Screen::Mining)) {
+            const std::string action = "ack_incoming_message:" + occurrence.id;
+            if (auto card = buildIncomingMessageCard(context, occurrence.messageId, occurrence.variantId, action))
+                result.modals.push_back(std::move(*card));
+        }
+    }
+    appendExpeditionPresentation(context, result);
     return result;
 }
 
 void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& result)
 {
+    result.surfaceFramingProgress = surfaceHudForContext(context)
+        ? surfacePresentationProgress(*context.launchFlight, context.surfaceArrivalActive) : -1.0;
+
     const GameState& state = context.state;
     const ContentCatalog& catalog = context.catalog;
     result.patches.clear();
@@ -5775,19 +5851,19 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
         const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
         const int required = static_cast<int>(std::ceil(std::max(
             1.0,
-            expeditionExperienceThreshold(expedition.expeditionLevel))));
+            expeditionExperienceThreshold(state.run.expedition.progression.expeditionLevel))));
         const int current = std::clamp(
-            static_cast<int>(std::floor(expedition.expeditionExperience + 0.0001)),
+            static_cast<int>(std::floor(state.run.expedition.progression.expeditionExperience + 0.0001)),
             0,
             required);
-        const int filled = expeditionXpFilledSegments(expedition);
+        const int filled = expeditionXpFilledSegments(state.run.expedition.progression);
         const std::string xpClass = std::string(id) == "rr-hud-mining-xp"
             ? "mining-scene-xp " + expeditionXpClass(context.expeditionXpPulse, hero)
             : expeditionXpClass(context.expeditionXpPulse, hero);
         appendHudClass(result, id, xpClass);
-        appendHudText(result, std::string(id) + "-level", "LV " + std::to_string(std::max(1, expedition.expeditionLevel)));
+        appendHudText(result, std::string(id) + "-level", "LV " + std::to_string(std::max(1, state.run.expedition.progression.expeditionLevel)));
         appendHudText(result, std::string(id) + "-value", std::to_string(current) + " / " + std::to_string(required) + " XP");
-        appendHudText(result, std::string(id) + "-pending", std::to_string(std::max(0, expedition.pendingRunUpgradeChoices)) + " PICKS");
+        appendHudText(result, std::string(id) + "-pending", std::to_string(std::max(0, state.run.expedition.progression.pendingRunUpgradeChoices)) + " PICKS");
         for (int segment = 0; segment < kExpeditionXpSegments; ++segment) {
             appendHudClass(
                 result,
@@ -5840,7 +5916,7 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
         if (surfaceDescentForContext(context)) {
             const FlightRunState& flight = *context.launchFlight;
             appendHudText(result, "rr-landing-fuel", display::fixed(flight.fuelRemaining, 1));
-            appendHudText(result, "rr-landing-hull", flightHullReadout(flight));
+            appendHudText(result, "rr-landing-hull", display::fixed(flight.hullRemaining, 0) + " HP");
             appendHudText(result, "rr-landing-altitude", display::fixed(std::abs(flight.landing.altitude), 1) + " m");
             appendHudText(result, "rr-landing-vertical", display::fixed(flight.landing.verticalVelocity, 1) + " m/s");
             appendHudText(result, "rr-landing-lateral", display::fixed(flight.landing.lateralVelocity, 1) + " m/s");
@@ -5871,10 +5947,9 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
                 display::fixed(std::max(0.0, context.launchFlight->hullRemaining), 0) + " / " +
                     display::fixed(context.launchFlight->hullMaximum, 0) + " HP");
         }
-        appendHudText(result, "rr-hud-launch-status", launchPanel.telemetryMessage);
+        appendHudText(result, "rr-hud-launch-status", state.run.expedition.travelInitialized ? expeditionGuidance(state,context.orbitalWork && context.orbitalWork->surveyComplete,context.orbitalLaserComplete).nextAction : launchPanel.telemetryMessage);
         if (orbitalWorkVisible(context) && context.orbitalWork->surveyComplete)
-            appendHudText(result, "rr-orbital-heat", "LASER " + display::fixed(context.orbitalWork->heat, 0) +
-                "% · Hold to bore; release to cool.");
+            appendHudText(result, "rr-orbital-status", orbitalLaserHint(context));
         appendHudClass(result, "rr-hud-launch-status", launchStatusSeverity(context));
         return;
     }
@@ -6043,7 +6118,17 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
 {
     const GameState& state = context.state;
     std::ostringstream key;
+    if (state.run.expedition.travelInitialized) {
+        const auto& e = state.run.expedition;
+        key << e.location.bodyId << ':' << e.cruise.active << ':' << e.course.targetBodyId << ':' << e.decision.pendingId << ':' << e.decision.awaitingAscent << ':'
+            << canDockExpedition(e, state.run.flight, solarSystemDefinition()) << '|';
+        for (const auto& w : e.wrecks) key << w.id << ':' << canSalvageWreck(e, state.run.flight, solarSystemDefinition(), w.id)
+            << ':' << canSalvageWreck(e, state.run.flight, solarSystemDefinition(), w.id, false) << '|';
+    }
     // A scene handoff deliberately unmounts the panel while the renderer owns
+    key << context.incomingMessageDeliveryAllowed << ':' << context.controllerFlightControls << ':';
+    for (const auto& item : state.incomingMessages.pending) key << item.id << ':' << item.variantId << '|';
+    key << (state.run.mining.scannerPulseSeconds <= 0.0) << ':' << (state.run.mining.depthTransitionCooldownSeconds <= 0.0) << '|';
     // the blackout. Treat that empty document as a distinct structure so the
     // first frame after the fade rebuilds the HUD before realtime patches run.
     key << static_cast<int>(state.screen) << '|'
@@ -6053,7 +6138,7 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
         key << (context.launchFlight && context.launchFlight->landing.departureActive) << '|';
         if (context.orbitalWork) key << orbitalWorkVisible(context) << ':' << context.orbitalWork->active() << ':'
             << static_cast<int>(context.orbitalWork->phase) << ':' << context.orbitalWork->surveyComplete << ':'
-            << context.orbitalWork->overheated << ':' << context.orbitalLaserBlocked << ':' << context.orbitalLaserComplete << ':'
+            << context.orbitalLaserBlocked << ':' << context.orbitalLaserComplete << ':'
             << context.orbitalInsideZone << ':'
             << (context.launchFlight && context.launchFlight->orbit.loopQualifies) << ':'
             << (context.launchFlight && std::abs(context.launchFlight->selectedThrottle) > 0.001) << '|';

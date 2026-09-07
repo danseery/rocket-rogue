@@ -1,4 +1,5 @@
 #include "core/LaunchSimulation.h"
+#include "core/ExpeditionSystem.h"
 
 #include "core/FlightSystem.h"
 
@@ -723,14 +724,16 @@ LaunchFlightStep updateSpaceFlight(
     const PreparedLaunch& launch,
     const FlightInput& input,
     double deltaSeconds,
-    const MiningRunState* landingSite)
+    const MiningRunState* landingSite, const SystemDefinition* system, const SystemLocation* location)
 {
     LaunchFlightStep result;
     if (!flight.active) {
         return result;
     }
 
-    constexpr double bodyRadius = flight_geometry::bodyRadius;
+    const auto* body = system && location && location->frame == CoordinateFrame::Body ? systemBody(*system, location->bodyId) : nullptr;
+    const bool systemFrame = system && location && location->frame == CoordinateFrame::System;
+    const double bodyRadius = body ? body->radius : flight_geometry::bodyRadius;
     constexpr double influenceRadius = flight_geometry::influenceRadius;
     constexpr double thrustAcceleration = 0.23;
     constexpr double turnAcceleration = flight_controls::turnAcceleration;
@@ -750,7 +753,19 @@ LaunchFlightStep updateSpaceFlight(
         (flight.positionX - physicalFlightStartX) / -physicalFlightStartX,
         0.0,
         1.0);
-    const FlightScaleProfile scaleProfile = flightScaleProfile(flight);
+    FlightScaleProfile scaleProfile = systemFrame ? FlightScaleProfile{} : flightScaleProfile(flight);
+    if (system && location && (systemFrame || (body && body->id == "earth"))) {
+        if (const auto* earth = systemBody(*system, "earth")) {
+            const double x = flight.positionX + (body ? body->position.x : 0.0);
+            const double y = flight.positionY + (body ? body->position.y : 0.0);
+            const double radius = std::hypot(x-earth->position.x, y-earth->position.y);
+            // Reach normal travel timing before leaving Earth's encounter frame.
+            // Position-based easing also gives forecasts and return flights the same clock.
+            const double t = std::clamp((radius / earth->influenceRadius - .60) / .50, 0.0, 1.0);
+            const double blend = t*t*t*(t*(t*6.0-15.0)+10.0);
+            scaleProfile.timeScale = std::lerp(.4, 1.0, blend);
+        }
+    }
     (void)currentTravelProgress;
     const double worldDt = realDt * scaleProfile.timeScale;
     const double controlDt = realDt * scaleProfile.controlScale;
@@ -783,8 +798,9 @@ LaunchFlightStep updateSpaceFlight(
         signedThrust = 0.0;
     }
     if (std::abs(signedThrust) > 0.001) {
-        flight.velocityX += std::cos(flight.heading) * signedThrust * thrustAcceleration * controlDt;
-        flight.velocityY += std::sin(flight.heading) * signedThrust * thrustAcceleration * controlDt;
+        const double thrustAssist = system ? 1.0 + launch.flightControlRank * tuning::orbit::flightControlsThrustAssistPerRank : 1.0;
+        flight.velocityX += std::cos(flight.heading) * signedThrust * thrustAcceleration * controlDt * thrustAssist;
+        flight.velocityY += std::sin(flight.heading) * signedThrust * thrustAcceleration * controlDt * thrustAssist;
         flight.fuelRemaining = std::max(
             0.0,
             flight.fuelRemaining - std::abs(signedThrust) * 0.13 * controlDt);
@@ -816,7 +832,7 @@ LaunchFlightStep updateSpaceFlight(
                 0.0,
                 flight.heatFailureSeconds - worldDt * 1.5);
         }
-        if (flight.heatFailureSeconds >= tuning::launch::pilotingHeatFailureSeconds) {
+        if (flight.heatFailureSeconds >= (tuning::launch::pilotingHeatFailureSeconds * launch.heatGraceMultiplier)) {
             flight.active = false;
             flight.phase = FlightPhase::Impact;
             flight.failureCause = LaunchFailureCause::ThermalRunaway;
@@ -830,12 +846,37 @@ LaunchFlightStep updateSpaceFlight(
 
     const double previousX = flight.positionX;
     const double previousY = flight.positionY;
-    const double radiusBefore = std::max(0.0001, std::hypot(flight.positionX, flight.positionY));
-    const double gravity = flightGravityAcceleration(radiusBefore, scaleProfile.landingBlend);
-    flight.velocityX += (-flight.positionX / radiusBefore) * gravity * worldDt;
-    flight.velocityY += (-flight.positionY / radiusBefore) * gravity * worldDt;
-    flight.positionX += flight.velocityX * worldDt;
-    flight.positionY += flight.velocityY * worldDt;
+    if (system && location) {
+        auto pose = *location;
+        captureSystemLocation(pose, flight);
+        const auto global = convertSystemFrame(pose, CoordinateFrame::System, "", *system);
+        const auto next = integrateSystemCoast({global.position.x, global.position.y, global.velocity.x, global.velocity.y}, worldDt, *system);
+        auto moved = global;
+        moved.position = {next.x, next.y}; moved.velocity = {next.vx, next.vy};
+        moved = convertSystemFrame(moved, location->frame, location->bodyId, *system);
+        restoreSystemLocation(moved, flight);
+        // Swept collisions include bodies which are not the navigation target.
+        for (const auto& obstacle : system->bodies) {
+            if (body && obstacle.id == body->id) continue;
+            if (pointToSegmentDistance(obstacle.position.x, obstacle.position.y,
+                global.position.x, global.position.y, next.x, next.y) <= obstacle.radius) {
+                flight.hullRemaining = 0; flight.active = false;
+                flight.phase = FlightPhase::Impact; flight.failureCause = LaunchFailureCause::HullBreach;
+                result.failed = true; result.failureCause = flight.failureCause;
+                return result;
+            }
+        }
+        if (systemFrame) {
+            return result;
+        }
+    } else {
+        const double radiusBefore = std::max(0.0001, std::hypot(flight.positionX, flight.positionY));
+        const double gravity = flightGravityAcceleration(radiusBefore, scaleProfile.landingBlend);
+        flight.velocityX += (-flight.positionX / radiusBefore) * gravity * worldDt;
+        flight.velocityY += (-flight.positionY / radiusBefore) * gravity * worldDt;
+        flight.positionX += flight.velocityX * worldDt;
+        flight.positionY += flight.velocityY * worldDt;
+    }
 
     if (launch.asteroidsEnabled && flight.asteroidInvulnerabilitySeconds <= 0.0) {
         for (int index = 0; index < launch.asteroidCount; ++index) {
@@ -904,9 +945,12 @@ LaunchFlightStep updateSpaceFlight(
         }
     }
 
-    const auto loop = flight.mode == FlightMode::Orbit ? assessOrbitLoop(flight) : OrbitLoopAssessment{};
+    const auto loop = flight.mode == FlightMode::Orbit && !launch.trajectoryPreview ? assessOrbitLoop(flight) : OrbitLoopAssessment{};
     flight.orbit.loopQualifies = loop.qualifies;
     flight.orbit.loopPerfect = loop.perfect;
+    // Capture also authorizes the subsequent deorbit. Land deliberately
+    // removes orbital velocity, so losing a qualifying loop must not revoke
+    // the surface handoff. Body departure/ascent reset capture separately.
     if (!flight.orbit.captured) {
         flight.orbit.confirmationSeconds = loop.qualifies && std::abs(flight.selectedThrottle) <= 0.001 &&
             !result.asteroidHit ? flight.orbit.confirmationSeconds + realDt : 0.0;
@@ -923,7 +967,7 @@ LaunchFlightStep updateSpaceFlight(
         result.orbitCaptured = true;
     }
 
-    const bool landingAuthorized = flight.orbit.captured || !launch.orbitRequired;
+    const bool landingAuthorized = (!body || (!body->siteId.empty() && !body->dock)) && (flight.orbit.captured || !launch.orbitRequired);
     const double approachBoundary = std::hypot(physicalFlightStartX,physicalFlightStartY)*0.4;
     if (flight.mode == FlightMode::Travel && radius <= approachBoundary && radialVelocity < 0.0) {
         flight.mode = FlightMode::Orbit;
@@ -1009,7 +1053,7 @@ LaunchFlightStep updateSpaceFlight(
     flight.peakMultiplier = std::max(flight.peakMultiplier, flight.currentMultiplier);
     flight.projectedFuelRequired = 0.0;
     flight.projectedFuelReserve = flight.fuelRemaining;
-    updatePhysicalTrajectoryPrediction(flight, landingAuthorized);
+    if (!launch.trajectoryPreview && !system) updatePhysicalTrajectoryPrediction(flight, landingAuthorized);
     (void)launch;
     return result;
 }
@@ -1033,14 +1077,18 @@ LaunchFlightStep updateLocalLandingFlight(FlightRunState& flight, const Prepared
     flight.selectedThrottle=thrust;
     flight.burnRatePerSecond=land.departureActive ? 0.0 : std::abs(thrust)*0.13;
     flight.fuelRemaining=std::max(0.0,flight.fuelRemaining-flight.burnRatePerSecond*dt);
-    if (launch.heatEnabled) {
+    if (land.departureActive) {
+        // Local ascent cannot build heat or carry a thermal-failure timer into orbit.
+        flight.heat = 0.0;
+        flight.heatFailureSeconds = 0.0;
+    } else if (launch.heatEnabled) {
         const double powered=std::abs(thrust)>0.001
             ? (tuning::launch::poweredHeatIdleInput+tuning::launch::poweredHeatThrottleInput*thrust*thrust)*launchPoweredHeatMultiplierForRank(launch.coolingRank) : 0.0;
         const double cooling=std::abs(thrust)>0.001 ? tuning::launch::poweredHeatCoolingBase : launchEngineOffCoolingForRank(launch.coolingRank);
         flight.heat=std::clamp(flight.heat+(powered-cooling)*dt,0.0,tuning::telemetry::heatMaximum);
         flight.heatFailureSeconds=flight.heat>=tuning::launch::pilotingCriticalThreshold
             ? flight.heatFailureSeconds+dt : std::max(0.0,flight.heatFailureSeconds-dt*1.5);
-        if (flight.heatFailureSeconds>=tuning::launch::pilotingHeatFailureSeconds) {
+        if (flight.heatFailureSeconds>=(tuning::launch::pilotingHeatFailureSeconds * launch.heatGraceMultiplier)) {
             flight.active=false; flight.phase=FlightPhase::Impact;
             flight.failureCause=LaunchFailureCause::ThermalRunaway;
             result.failed=true; result.failureCause=flight.failureCause; return result;
@@ -1110,13 +1158,16 @@ LaunchFlightStep updateLocalLandingFlight(FlightRunState& flight, const Prepared
                 result.failed=true; result.failureCause=flight.failureCause;
                 break;
             }
-            // Damage owns survival; posture owns sticking the landing. A
-            // survivable hard contact must not be rejected by rebound speed.
+            // Damage owns survival; posture owns sticking the landing. The
+            // first supported contact is touchdown even if the integration
+            // step reports a small upward drift. The launch-support latch is
+            // the only supported contact allowed to continue upward.
             const auto support=std::find_if(contacts.begin(),contacts.end(),
                 [](const auto& contact){return contact.suitable;});
-            if (!land.launchSupportActive && land.verticalVelocity<=0.0 &&
-                support!=contacts.end() && land.surfaceAngle<=flight_landing::stickTiltRadians+1e-9) {
+            if (!land.launchSupportActive && support!=contacts.end() &&
+                land.surfaceAngle<=flight_landing::stickTiltRadians+1e-9) {
                 land.touchdownGridX=support->gridX;land.touchdownGridY=support->gridY;
+                flight.touchdownImpactSpeed = speed;
                 land.hardLanding=flight.impact.valid && flight.impact.damage>0.0;
                 land.lateralVelocity=land.verticalVelocity=0.0;
                 flight.angularVelocity=0.0;
@@ -1213,12 +1264,13 @@ LaunchFlightStep updateLocalLandingFlight(FlightRunState& flight, const Prepared
 }
 
 LaunchFlightStep updatePhysicalFlight(FlightRunState& flight,const PreparedLaunch& launch,
-    const FlightInput& input,double dt,const MiningRunState* site)
+    const FlightInput& input,double dt,const MiningRunState* site, const SystemDefinition* system, const SystemLocation* location)
 {
     flight.handoff.elapsed=std::min(flight_landing::handoffSeconds,flight.handoff.elapsed+std::max(0.0,dt));
+    flight.courseNoticeSeconds=std::max(0.0,flight.courseNoticeSeconds-std::max(0.0,dt));
     flight.impactDisplaySeconds=std::max(0.0,flight.impactDisplaySeconds-std::max(0.0,dt));
     auto result=flight.mode==FlightMode::Landing ? updateLocalLandingFlight(flight,launch,input,dt,site)
-        : updateSpaceFlight(flight,launch,input,dt,site);
+        : updateSpaceFlight(flight,launch,input,dt,site,system,location);
     flight.hullDamageTaken=physicalFlightCampaignDamage(flight,launch.existingShipDamage);
     return result;
 }
@@ -1231,10 +1283,10 @@ LaunchFlightStep updateLaunchFlight(
     const Destination& destination,
     const FlightInput& input,
     double deltaSeconds,
-    const MiningRunState* landingSite)
+    const MiningRunState* landingSite, const SystemDefinition* system, const SystemLocation* location)
 {
     if (flight.physicalFlight) {
-        return updatePhysicalFlight(flight, launch, input, deltaSeconds, landingSite);
+        return updatePhysicalFlight(flight, launch, input, deltaSeconds, landingSite, system, location);
     }
     LaunchFlightStep result;
     if (!flight.active || flight.failureCause != LaunchFailureCause::None) {
@@ -1506,7 +1558,7 @@ LaunchFlightStep updateLaunchFlight(
     if (flight.failureCause == LaunchFailureCause::None && flight.hullRemaining <= 0.0) {
         flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::HullBreach);
     } else if (flight.failureCause == LaunchFailureCause::None &&
-        flight.heatFailureSeconds >= tuning::launch::pilotingHeatFailureSeconds) {
+        flight.heatFailureSeconds >= (tuning::launch::pilotingHeatFailureSeconds * launch.heatGraceMultiplier)) {
         flight.failureCause = terminalFailureCause(launch, LaunchFailureCause::ThermalRunaway);
     } else if (flight.failureCause == LaunchFailureCause::None &&
         flight.courseFailureSeconds >= tuning::launch::pilotingCourseFailureSeconds) {

@@ -590,7 +590,8 @@ void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& eve
         if (event.key == SDLK_SPACE || event.key == SDLK_RETURN) app.orbitalWorkInput(true);
         else if (event.key == SDLK_ESCAPE) app.resumeOrbitalFlight();
         else if (event.key == SDLK_R) app.returnHome();
-        else if (event.key == SDLK_C) app.cutEngines();
+        else if (event.key == SDLK_C) app.toggleCruiseControl();
+        else if (event.key == SDLK_M) app.openNavigation();
         break;
     case InputContext::SurfaceArrival:
         if (event.key == SDLK_SPACE || event.key == SDLK_RETURN) {

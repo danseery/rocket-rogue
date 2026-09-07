@@ -1,4 +1,5 @@
 #pragma once
+#include "render/SurfaceCameraPresentation.h"
 
 #include "core/UiViewportLayout.h"
 
@@ -101,6 +102,9 @@ enum class TextureId : std::uint8_t {
     MiningTilesKhepriPrime,
     MiningTilesRiftBelt,
     MiningTilesPostSolarLibrary,
+    MissionControlFennec,
+    ServiceDock,
+    MissionControlFennecConcerned,
     Count
 };
 
@@ -467,6 +471,7 @@ struct SceneTransform {
 // Frame-lifetime view into SceneComposer-owned storage. A backend must consume
 // this packet synchronously before the next compose() call.
 struct ScenePacket {
+    SurfaceCameraPresentation surfaceCamera;
     std::span<const PackedSceneVertex> vertices;
     std::span<const PackedSceneVertex> miningTerrainVertices;
     std::span<const PackedSceneInstance> instances;

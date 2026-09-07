@@ -27,6 +27,7 @@ enum class ControllerHapticCue {
     Damage,
     Failure,
     Arrival,
+    Touchdown,
     LevelUp
 };
 
@@ -49,6 +50,7 @@ public:
     InputContext inputContext() const;
     std::string controllerDebugStatusJson() const;
     ControllerHapticCue consumePendingControllerHapticCue();
+    double touchdownFeedbackScale() const;
     std::vector<GameAudioEvent> consumePendingAudioEvents();
     std::uint64_t deterministicStateHash() const;
 
@@ -60,6 +62,10 @@ public:
     void acknowledgeStoryBriefing();
     void beginStraylightApproach();
     void cutEngines();
+    void toggleCruiseControl();
+    bool runExpeditionAction(const std::string& action);
+    void debugStartExpedition();
+    void debugStartMoonApproach(bool acknowledge = false);
     void next();
     void attemptFrontierTransfer();
     void openNavigation();
@@ -143,6 +149,7 @@ public:
         std::uint64_t seed) const;
     void debugShowTitle();
     void debugShowHangar();
+    void debugShowIncomingMessage();
     void debugShowJupiterOptions(int mode);
     void debugShowResults();
     void debugShowArrivalCelebration();
@@ -349,6 +356,7 @@ private:
         RecoveryMethod method,
         LaunchFailureCause failureCause = LaunchFailureCause::None);
     void prepareSurfaceArrivalIfNeeded(const Destination& destination, std::string_view zoneId = {});
+    void storeOrbitalSite();
     bool shipInsideOrbitalWorkZone() const;
     bool advanceOrbitalWork(double seconds, const Destination& destination);
     bool commitSurfaceTouchdown(const Destination& destination, bool hardTouchdown);
@@ -404,6 +412,10 @@ private:
     double liveBurnMultiplier() const;
     void applyRealtimeInputs();
     void releaseRealtimeInputs(bool releaseKeyboard);
+    bool messageMoveReleaseRequired_ = false;
+    bool messageDrillReleaseRequired_ = false;
+    bool messageFireReleaseRequired_ = false;
+    bool messageControllerNeutralRequired_ = false;
     void dispatchControllerInput(InputContext context, const RoutedGameInput& input);
     void dispatchControllerAction(InputContext context, GameInputAction action);
     void previewSyntheticControllerInput(const ControllerFrame& frame, double realTimeSeconds);

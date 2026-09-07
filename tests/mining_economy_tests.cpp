@@ -47,8 +47,8 @@ struct ExpeditionExperienceSnapshot {
 ExpeditionExperienceSnapshot snapshotExpeditionExperience(const GameState& state)
 {
     return {
-        state.run.planetaryExpedition.expeditionLevel,
-        state.run.planetaryExpedition.expeditionExperience
+        state.run.expedition.progression.expeditionLevel,
+        state.run.expedition.progression.expeditionExperience
     };
 }
 
@@ -57,8 +57,8 @@ double expeditionExperienceEarnedSince(
     const GameState& state)
 {
     const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-    double earned = expedition.expeditionExperience - before.progress;
-    for (int level = before.level; level < expedition.expeditionLevel; ++level) {
+    double earned = state.run.expedition.progression.expeditionExperience - before.progress;
+    for (int level = before.level; level < state.run.expedition.progression.expeditionLevel; ++level) {
         earned += expeditionExperienceThreshold(level);
     }
     return earned;
@@ -329,11 +329,44 @@ void lunarContractActivatesScannerLedEvaArtifactInSameRun()
     }
     require(suitOnlyCells >= 6 && !mining.artifact.revealed,
         "the lunar artifact should begin behind a persistent suit-only crevice");
-    pulseMiningScanner(state, catalog);
+    const MiningScannerResult discovery = pulseMiningScanner(state, catalog);
+    require(discovery.pulsed && discovery.discoveredObjectiveId == content::protectedObjective::lunarSignalArtifact,
+        "a successful scanner pulse should report its newly discovered protected objective");
+    require(!pulseMiningScanner(state, catalog).pulsed,
+        "a cooldown-rejected pulse must not report a discovery");
     require(mining.artifact.revealed,
         "one contextual scanner pulse should reveal the lunar artifact bearing");
 
+    // Input routing must obey the same EVA restriction as the visible action.
+    mining.droneX = mining.artifact.x + 2.0;
+    mining.droneY = mining.artifact.y;
+    require(resolveMiningTetherTarget(mining).blocker == MiningTetherBlocker::SuitRequired,
+        "the lunar crevice should require EVA recovery");
+    toggleMiningTether(state);
+    require(!mining.artifact.tethered && state.statusLine.find("EXIT RIG") != std::string::npos,
+        "keyboard tether must explain EVA recovery instead of bypassing its restriction");
+
+    require(toggleMiningOperator(state), "the rig beside the crevice should permit EVA exit");
+    mining.operatorX = mining.artifact.x;
+    mining.operatorY = mining.artifact.y - 3.0;
+    toggleMiningTether(state);
+    require(mining.artifact.tethered, "EVA should be able to tether the exposed lunar anomaly");
+    const int passageX = static_cast<int>(mining.gate.anchorX);
+    const int passageTop = std::max(2, static_cast<int>(mining.gate.anchorY) - 6);
+    MiningCell* seal = miningCellAt(mining.terrain, passageX, passageTop + 1);
+    require(seal != nullptr, "the authored passage should have a hand-drill seal");
+    seal->material = MiningCellMaterial::Empty;
+    for (int tick = 0; tick < 400 && mining.artifact.y > passageTop + 0.5; ++tick) {
+        mining.operatorX = mining.artifact.x;
+        mining.operatorY = mining.artifact.y - 3.0;
+        updateMiningRun(state, catalog, 0.02);
+    }
+    require(mining.artifact.y <= passageTop + 0.5 && mining.artifact.tethered,
+        "a tethered anomaly must physically fit back through the excavated EVA passage");
+
     mining.depthZone = mining.entryDepthZone;
+    mining.operatorX = mining.returnZoneX;
+    mining.operatorY = mining.returnZoneY;
     mining.artifact.state = MiningArtifactState::Loose;
     mining.artifact.tethered = true;
     mining.artifact.x = mining.returnZoneX;
@@ -642,7 +675,7 @@ void oxygenCapacityHasAHardCeiling()
     const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 606);
     const MiningDrillStats baseline = miningDrillStats(state, catalog);
-    state.run.planetaryExpedition.runRigUpgradeRanks.push_back(
+    state.run.expedition.progression.runRigUpgradeRanks.push_back(
         {content::surfaceUpgrade::emergencyWinch, 3});
     const MiningDrillStats winch = miningDrillStats(state, catalog);
     require(
@@ -655,7 +688,7 @@ void oxygenCapacityHasAHardCeiling()
     state.meta.droneBaySlots = 6;
     state.meta.ownedDroneIds.assign(6, content::drone::resourceDrone);
     state.meta.equippedDroneIds.assign(6, content::drone::resourceDrone);
-    state.run.planetaryExpedition.runDroneRanks.push_back(
+    state.run.expedition.progression.runDroneRanks.push_back(
         {content::drone::resourceDrone, 3});
     const MiningDrillStats stats = miningDrillStats(state, catalog);
     require(stats.oxygenSeconds <= tuning::mining::maximumOxygenSeconds,

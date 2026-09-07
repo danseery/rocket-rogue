@@ -3106,7 +3106,7 @@ constexpr int kMaximumRunUpgradeRank = 3;
 constexpr double kBaseExpeditionExperienceThreshold = 10.0;
 constexpr double kExpeditionExperienceGrowth = 1.55;
 
-void clearRunUpgradeOffers(PlanetaryExpeditionState& expedition)
+void clearRunUpgradeOffers(ExpeditionProgressionState& expedition)
 {
     expedition.runUpgradeOffers = {};
     expedition.runUpgradeOfferCount = 0;
@@ -3208,26 +3208,6 @@ bool synergyRequirementsMet(
         [&](MiniDroneRole role) { return equippedRoleAvailable(state, catalog, role); });
 }
 
-void copyRunProgression(
-    const PlanetaryExpeditionState& source,
-    PlanetaryExpeditionState& destination)
-{
-    destination.expeditionLevel = std::max(1, source.expeditionLevel);
-    destination.expeditionExperience = std::max(0.0, source.expeditionExperience);
-    destination.pendingRunUpgradeChoices = std::max(0, source.pendingRunUpgradeChoices);
-    destination.runUpgradeOffers = source.runUpgradeOffers;
-    destination.runUpgradeOfferCount = std::clamp(
-        source.runUpgradeOfferCount,
-        0,
-        static_cast<int>(destination.runUpgradeOffers.size()));
-    destination.runUpgradeOfferPending = source.runUpgradeOfferPending && destination.runUpgradeOfferCount > 0;
-    destination.runUpgradeReturnScreen = source.runUpgradeReturnScreen;
-    destination.runRigUpgradeRanks = source.runRigUpgradeRanks;
-    destination.runDroneRanks = source.runDroneRanks;
-    destination.selectedSynergyIds = source.selectedSynergyIds;
-    destination.droneModuleAssignments = source.droneModuleAssignments;
-}
-
 struct WeightedRunUpgradeCandidate {
     RunUpgradeOffer offer;
     Rarity rarity = Rarity::Common;
@@ -3238,10 +3218,10 @@ struct WeightedRunUpgradeCandidate {
 int runRigUpgradeRank(const GameState& state, std::string_view upgradeId)
 {
     const auto found = std::find_if(
-        state.run.planetaryExpedition.runRigUpgradeRanks.begin(),
-        state.run.planetaryExpedition.runRigUpgradeRanks.end(),
+        state.run.expedition.progression.runRigUpgradeRanks.begin(),
+        state.run.expedition.progression.runRigUpgradeRanks.end(),
         [&](const RunRigUpgradeRank& record) { return record.upgradeId == upgradeId; });
-    return found == state.run.planetaryExpedition.runRigUpgradeRanks.end()
+    return found == state.run.expedition.progression.runRigUpgradeRanks.end()
         ? 0
         : std::clamp(found->rank, 0, kMaximumRunUpgradeRank);
 }
@@ -3249,10 +3229,10 @@ int runRigUpgradeRank(const GameState& state, std::string_view upgradeId)
 int expeditionDroneRank(const GameState& state, std::string_view droneId)
 {
     const auto found = std::find_if(
-        state.run.planetaryExpedition.runDroneRanks.begin(),
-        state.run.planetaryExpedition.runDroneRanks.end(),
+        state.run.expedition.progression.runDroneRanks.begin(),
+        state.run.expedition.progression.runDroneRanks.end(),
         [&](const RunDroneRank& record) { return record.droneId == droneId; });
-    return found == state.run.planetaryExpedition.runDroneRanks.end()
+    return found == state.run.expedition.progression.runDroneRanks.end()
         ? 1
         : std::clamp(found->rank, 1, kMaximumRunUpgradeRank);
 }
@@ -3265,24 +3245,11 @@ double expeditionExperienceThreshold(int level)
         static_cast<double>(safeLevel - 1)));
 }
 
-void resetExpeditionProgression(PlanetaryExpeditionState& expedition)
-{
-    expedition.expeditionLevel = 1;
-    expedition.expeditionExperience = 0.0;
-    expedition.pendingRunUpgradeChoices = 0;
-    clearRunUpgradeOffers(expedition);
-    expedition.runUpgradeReturnScreen = Screen::Mining;
-    expedition.runRigUpgradeRanks.clear();
-    expedition.runDroneRanks.clear();
-    expedition.selectedSynergyIds.clear();
-    expedition.droneModuleAssignments.clear();
-    expedition.droneModuleRuntime.clear();
-
-}
-
 void resetExpeditionProgression(GameState& state)
 {
-    resetExpeditionProgression(state.run.planetaryExpedition);
+    state.run.expedition.progression = {};
+    state.run.expedition.progression.droneModuleAssignments.clear();
+    state.run.expedition.progression.droneModuleRuntime.clear();
 }
 
 ExpeditionExperienceAward awardExpeditionExperience(
@@ -3290,36 +3257,35 @@ ExpeditionExperienceAward awardExpeditionExperience(
     double amount,
     Screen returnScreen)
 {
-    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     ExpeditionExperienceAward award;
-    award.resultingLevel = std::max(1, expedition.expeditionLevel);
-    award.resultingExperience = std::max(0.0, expedition.expeditionExperience);
-    award.pendingChoices = std::max(0, expedition.pendingRunUpgradeChoices);
+    award.resultingLevel = std::max(1, state.run.expedition.progression.expeditionLevel);
+    award.resultingExperience = std::max(0.0, state.run.expedition.progression.expeditionExperience);
+    award.pendingChoices = std::max(0, state.run.expedition.progression.pendingRunUpgradeChoices);
     if (!state.run.active || !std::isfinite(amount) || amount <= 0.0) {
         return award;
     }
 
-    const bool hadPendingChoice = expedition.pendingRunUpgradeChoices > 0 || expedition.runUpgradeOfferPending;
+    const bool hadPendingChoice = state.run.expedition.progression.pendingRunUpgradeChoices > 0 || state.run.expedition.progression.runUpgradeOfferPending;
     const double applied = std::min(amount, 1.0e12);
-    expedition.expeditionLevel = std::max(1, expedition.expeditionLevel);
-    expedition.expeditionExperience = std::max(0.0, expedition.expeditionExperience) + applied;
+    state.run.expedition.progression.expeditionLevel = std::max(1, state.run.expedition.progression.expeditionLevel);
+    state.run.expedition.progression.expeditionExperience = std::max(0.0, state.run.expedition.progression.expeditionExperience) + applied;
     award.appliedExperience = applied;
     for (int guard = 0; guard < 256; ++guard) {
-        const double threshold = expeditionExperienceThreshold(expedition.expeditionLevel);
-        if (expedition.expeditionExperience + 0.000001 < threshold) {
+        const double threshold = expeditionExperienceThreshold(state.run.expedition.progression.expeditionLevel);
+        if (state.run.expedition.progression.expeditionExperience + 0.000001 < threshold) {
             break;
         }
-        expedition.expeditionExperience = std::max(0.0, expedition.expeditionExperience - threshold);
-        expedition.expeditionLevel += 1;
-        expedition.pendingRunUpgradeChoices += 1;
+        state.run.expedition.progression.expeditionExperience = std::max(0.0, state.run.expedition.progression.expeditionExperience - threshold);
+        state.run.expedition.progression.expeditionLevel += 1;
+        state.run.expedition.progression.pendingRunUpgradeChoices += 1;
         award.levelsGained += 1;
     }
     if (award.levelsGained > 0 && !hadPendingChoice) {
-        expedition.runUpgradeReturnScreen = returnScreen;
+        state.run.expedition.progression.runUpgradeReturnScreen = returnScreen;
     }
-    award.resultingLevel = expedition.expeditionLevel;
-    award.resultingExperience = expedition.expeditionExperience;
-    award.pendingChoices = expedition.pendingRunUpgradeChoices;
+    award.resultingLevel = state.run.expedition.progression.expeditionLevel;
+    award.resultingExperience = state.run.expedition.progression.expeditionExperience;
+    award.pendingChoices = state.run.expedition.progression.pendingRunUpgradeChoices;
     return award;
 }
 
@@ -3390,26 +3356,25 @@ std::string runUpgradeRankLabel(int rank)
 
 bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, Random& rng)
 {
-    PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-    if (expedition.runUpgradeOfferPending) {
+    if (state.run.expedition.progression.runUpgradeOfferPending) {
         const bool containsLockedCombatOffer = !state.meta.hasEncounteredEnemy && std::any_of(
-            expedition.runUpgradeOffers.begin(),
-            expedition.runUpgradeOffers.begin() + std::clamp(
-                expedition.runUpgradeOfferCount,
+            state.run.expedition.progression.runUpgradeOffers.begin(),
+            state.run.expedition.progression.runUpgradeOffers.begin() + std::clamp(
+                state.run.expedition.progression.runUpgradeOfferCount,
                 0,
-                static_cast<int>(expedition.runUpgradeOffers.size())),
+                static_cast<int>(state.run.expedition.progression.runUpgradeOffers.size())),
             [&](const RunUpgradeOffer& offer) {
                 return runUpgradeRequiresEnemyEncounter(catalog, offer);
             });
         if (!containsLockedCombatOffer) {
-            return expedition.runUpgradeOfferCount > 0;
+            return state.run.expedition.progression.runUpgradeOfferCount > 0;
         }
         // Existing saves can hold a card rolled before the discovery gate was
         // introduced. Replace only that draft; the earned pick remains intact.
-        clearRunUpgradeOffers(expedition);
+        clearRunUpgradeOffers(state.run.expedition.progression);
     }
-    clearRunUpgradeOffers(expedition);
-    if (expedition.pendingRunUpgradeChoices <= 0) {
+    clearRunUpgradeOffers(state.run.expedition.progression);
+    if (state.run.expedition.progression.pendingRunUpgradeChoices <= 0) {
         return false;
     }
 
@@ -3449,8 +3414,8 @@ bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, R
         }
         for (std::size_t slot = 0; slot < state.meta.equippedDroneIds.size(); ++slot) {
             const bool occupied = std::any_of(
-                expedition.droneModuleAssignments.begin(),
-                expedition.droneModuleAssignments.end(),
+                state.run.expedition.progression.droneModuleAssignments.begin(),
+                state.run.expedition.progression.droneModuleAssignments.end(),
                 [&](const DroneFrameModuleAssignment& assignment) {
                     return assignment.equippedFrame == static_cast<int>(slot);
                 });
@@ -3469,7 +3434,7 @@ bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, R
     }
 
     for (const DroneSynergyDefinition& synergy : catalog.droneSynergies) {
-        if (!containsId(expedition.selectedSynergyIds, synergy.id) &&
+        if (!containsId(state.run.expedition.progression.selectedSynergyIds, synergy.id) &&
             synergyRequirementsMet(state, catalog, synergy) &&
             (state.meta.hasEncounteredEnemy ||
                 !runUpgradeRequiresEnemyEncounter(catalog, {RunUpgradeKind::Synergy, synergy.id, 0, -1}))) {
@@ -3481,7 +3446,7 @@ bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, R
     if (candidates.empty()) {
         // A level is never rolled back. If every finite upgrade is exhausted,
         // consume exactly one pending choice so the App can loop deterministically.
-        expedition.pendingRunUpgradeChoices = std::max(0, expedition.pendingRunUpgradeChoices - 1);
+        state.run.expedition.progression.pendingRunUpgradeChoices = std::max(0, state.run.expedition.progression.pendingRunUpgradeChoices - 1);
         return false;
     }
 
@@ -3499,23 +3464,23 @@ bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, R
                 break;
             }
         }
-        expedition.runUpgradeOffers[static_cast<std::size_t>(slot)] = candidates[picked].offer;
+        state.run.expedition.progression.runUpgradeOffers[static_cast<std::size_t>(slot)] = candidates[picked].offer;
         candidates.erase(candidates.begin() + static_cast<std::ptrdiff_t>(picked));
     }
-    expedition.runUpgradeOfferCount = offerCount;
-    expedition.runUpgradeOfferPending = offerCount > 0;
-    return expedition.runUpgradeOfferPending;
+    state.run.expedition.progression.runUpgradeOfferCount = offerCount;
+    state.run.expedition.progression.runUpgradeOfferPending = offerCount > 0;
+    return state.run.expedition.progression.runUpgradeOfferPending;
 }
 
 bool chooseRunUpgrade(GameState& state, const ContentCatalog& catalog, int index)
 {
     PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-    if (!expedition.runUpgradeOfferPending || expedition.pendingRunUpgradeChoices <= 0 ||
-        index < 0 || index >= expedition.runUpgradeOfferCount ||
-        index >= static_cast<int>(expedition.runUpgradeOffers.size())) {
+    if (!state.run.expedition.progression.runUpgradeOfferPending || state.run.expedition.progression.pendingRunUpgradeChoices <= 0 ||
+        index < 0 || index >= state.run.expedition.progression.runUpgradeOfferCount ||
+        index >= static_cast<int>(state.run.expedition.progression.runUpgradeOffers.size())) {
         return false;
     }
-    const RunUpgradeOffer offer = expedition.runUpgradeOffers[static_cast<std::size_t>(index)];
+    const RunUpgradeOffer offer = state.run.expedition.progression.runUpgradeOffers[static_cast<std::size_t>(index)];
     std::string installedName;
     switch (offer.kind) {
     case RunUpgradeKind::Rig: {
@@ -3525,11 +3490,11 @@ bool chooseRunUpgrade(GameState& state, const ContentCatalog& catalog, int index
             return false;
         }
         auto found = std::find_if(
-            expedition.runRigUpgradeRanks.begin(),
-            expedition.runRigUpgradeRanks.end(),
+            state.run.expedition.progression.runRigUpgradeRanks.begin(),
+            state.run.expedition.progression.runRigUpgradeRanks.end(),
             [&](const RunRigUpgradeRank& record) { return record.upgradeId == offer.definitionId; });
-        if (found == expedition.runRigUpgradeRanks.end()) {
-            expedition.runRigUpgradeRanks.push_back({offer.definitionId, expectedRank});
+        if (found == state.run.expedition.progression.runRigUpgradeRanks.end()) {
+            state.run.expedition.progression.runRigUpgradeRanks.push_back({offer.definitionId, expectedRank});
         } else {
             found->rank = expectedRank;
         }
@@ -3545,11 +3510,11 @@ bool chooseRunUpgrade(GameState& state, const ContentCatalog& catalog, int index
             return false;
         }
         auto found = std::find_if(
-            expedition.runDroneRanks.begin(),
-            expedition.runDroneRanks.end(),
+            state.run.expedition.progression.runDroneRanks.begin(),
+            state.run.expedition.progression.runDroneRanks.end(),
             [&](const RunDroneRank& record) { return record.droneId == offer.definitionId; });
-        if (found == expedition.runDroneRanks.end()) {
-            expedition.runDroneRanks.push_back({offer.definitionId, expectedRank});
+        if (found == state.run.expedition.progression.runDroneRanks.end()) {
+            state.run.expedition.progression.runDroneRanks.push_back({offer.definitionId, expectedRank});
         } else {
             found->rank = expectedRank;
         }
@@ -3563,8 +3528,8 @@ bool chooseRunUpgrade(GameState& state, const ContentCatalog& catalog, int index
             return false;
         }
         const bool occupied = std::any_of(
-            expedition.droneModuleAssignments.begin(),
-            expedition.droneModuleAssignments.end(),
+            state.run.expedition.progression.droneModuleAssignments.begin(),
+            state.run.expedition.progression.droneModuleAssignments.end(),
             [&](const DroneFrameModuleAssignment& assignment) {
                 return assignment.equippedFrame == offer.slotIndex;
             });
@@ -3573,24 +3538,24 @@ bool chooseRunUpgrade(GameState& state, const ContentCatalog& catalog, int index
         if (occupied || drone == nullptr || drone->role != module->hostRole) {
             return false;
         }
-        expedition.droneModuleAssignments.push_back({offer.slotIndex, droneId, module->kind});
+        state.run.expedition.progression.droneModuleAssignments.push_back({offer.slotIndex, droneId, module->kind});
         installedName = module->name + " on slot " + std::to_string(offer.slotIndex + 1);
         break;
     }
     case RunUpgradeKind::Synergy: {
         const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(offer.definitionId);
-        if (synergy == nullptr || containsId(expedition.selectedSynergyIds, synergy->id) ||
+        if (synergy == nullptr || containsId(state.run.expedition.progression.selectedSynergyIds, synergy->id) ||
             !synergyRequirementsMet(state, catalog, *synergy)) {
             return false;
         }
-        expedition.selectedSynergyIds.push_back(synergy->id);
+        state.run.expedition.progression.selectedSynergyIds.push_back(synergy->id);
         installedName = synergy->name;
         break;
     }
     }
 
-    expedition.pendingRunUpgradeChoices = std::max(0, expedition.pendingRunUpgradeChoices - 1);
-    clearRunUpgradeOffers(expedition);
+    state.run.expedition.progression.pendingRunUpgradeChoices = std::max(0, state.run.expedition.progression.pendingRunUpgradeChoices - 1);
+    clearRunUpgradeOffers(state.run.expedition.progression);
     appendSurfaceLog(expedition, "Run upgrade installed: " + installedName + ".");
     state.statusLine = "Run upgrade installed: " + installedName + ".";
     return true;
@@ -3605,6 +3570,7 @@ SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const Conten
             continue;
         }
         const double scale = static_cast<double>(rank);
+        effects.oreAttractionRadius += upgrade.stats.oreAttractionRadius * scale;
         effects.drillPower += upgrade.stats.drillPower * scale;
         effects.drillCooling += upgrade.stats.drillCooling * scale;
         effects.drillDurability += upgrade.stats.drillDurability * scale;
@@ -3901,7 +3867,7 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
     (void)hazardDrones;
     (void)attackDrones;
     (void)defenseDrones;
-    for (const std::string& synergyId : state.run.planetaryExpedition.selectedSynergyIds) {
+    for (const std::string& synergyId : state.run.expedition.progression.selectedSynergyIds) {
         const DroneSynergyDefinition* synergy = catalog.findDroneSynergy(synergyId);
         if (synergy == nullptr || !synergyRequirementsMet(state, catalog, *synergy)) {
             continue;
@@ -4066,14 +4032,11 @@ void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Ran
     const Destination* destination = currentResearchDestination(state, catalog);
     if (destination == nullptr || !destinationSupportsSurface(*destination)) {
         PlanetaryExpeditionState preserved;
-        copyRunProgression(state.run.planetaryExpedition, preserved);
         state.run.planetaryExpedition = std::move(preserved);
         return;
     }
 
-    const PlanetaryExpeditionState previousExpedition = state.run.planetaryExpedition;
     PlanetaryExpeditionState expedition;
-    copyRunProgression(previousExpedition, expedition);
     expedition.active = true;
     expedition.destinationId = destination->id;
     expedition.siteProfile = generatedSurfaceSiteProfile(state, *destination, rng);
@@ -5296,7 +5259,8 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
              0});
     }
     writeLegacyCampaignSaveProjection(state, catalog);
-    addMaterials(state.meta.materials, outcome.materialDelta);
+    if (state.run.expedition.travelInitialized) addMaterials(state.run.expedition.cargo.materials, outcome.materialDelta);
+    else addMaterials(state.meta.materials, outcome.materialDelta);
     const bool recoveredNewAuthoredArtifact = std::any_of(
         expedition.temporaryArtifacts.begin(),
         expedition.temporaryArtifacts.end(),
@@ -5371,7 +5335,8 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
             ledger.allocations.front().label + ".";
     }
     if (outcome.materialDelta.common > 0) {
-        outcome.message += " " + std::to_string(outcome.materialDelta.common) + " added to Materials.";
+        outcome.message += " " + std::to_string(outcome.materialDelta.common) +
+            (state.run.expedition.travelInitialized ? " carried aboard. Dock home to bank." : " added to Materials.");
     }
 
     if (!expedition.pendingMiningSiteDefinitionId.empty()) {
@@ -5399,7 +5364,6 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
         expedition.pendingScenarioStepId.clear();
     } else {
         PlanetaryExpeditionState preservedProgression;
-        copyRunProgression(expedition, preservedProgression);
         expedition = std::move(preservedProgression);
     }
     return outcome;

@@ -1,4 +1,5 @@
 #include "render/GlRmlRenderHost.h"
+#include "render/RmlImageLoader.h"
 
 #include "platform/AppServices.h"
 #include "render/OpenGlApi.h"
@@ -332,9 +333,7 @@ void main() {
 
     Rml::TextureHandle LoadTexture(Rml::Vector2i& textureDimensions, const Rml::String& source) override
     {
-        (void)textureDimensions;
-        Rml::Log::Message(Rml::Log::LT_WARNING, "RmlUi texture file loading is not used by Rocket Rogue: %s", source.c_str());
-        return 0;
+        return loadRmlImage(*this, textureDimensions, source);
     }
 
     Rml::TextureHandle GenerateTexture(Rml::Span<const Rml::byte> sourceData, Rml::Vector2i sourceDimensions) override

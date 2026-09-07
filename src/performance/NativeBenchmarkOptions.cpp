@@ -73,6 +73,10 @@ std::optional<NativeBenchmarkScenario> parseScenario(std::string_view text)
     if (text == "hangar") return NativeBenchmarkScenario::Hangar;
     if (text == "launch") return NativeBenchmarkScenario::Launch;
     if (text == "mining") return NativeBenchmarkScenario::Mining;
+    if (text == "message") return NativeBenchmarkScenario::Message;
+    if (text == "expedition-dock") return NativeBenchmarkScenario::ExpeditionDock;
+    if (text == "expedition-map") return NativeBenchmarkScenario::ExpeditionMap;
+    if (text == "expedition-flight") return NativeBenchmarkScenario::ExpeditionFlight;
     return std::nullopt;
 }
 
@@ -418,7 +422,7 @@ std::string nativeBenchmarkHelpText(std::string_view executableName)
         << "  " << executableName << " [benchmark options]\n"
         << "  " << executableName << " --help\n\n"
         << "Required benchmark options:\n"
-        << "  --benchmark-scenario <title|hangar|launch|mining>\n"
+        << "  --benchmark-scenario <title|hangar|launch|mining|message|expedition-dock|expedition-map|expedition-flight>\n"
         << "  --benchmark-json <path>             Machine-readable report destination.\n"
         << "  --benchmark-profile-dir <path>      Dedicated save/preferences directory.\n\n"
         << "Capture options:\n"
@@ -444,6 +448,10 @@ std::string_view nativeBenchmarkScenarioName(NativeBenchmarkScenario scenario)
     case NativeBenchmarkScenario::Hangar: return "hangar";
     case NativeBenchmarkScenario::Launch: return "launch";
     case NativeBenchmarkScenario::Mining: return "mining";
+    case NativeBenchmarkScenario::Message: return "message";
+    case NativeBenchmarkScenario::ExpeditionDock: return "expedition-dock";
+    case NativeBenchmarkScenario::ExpeditionMap: return "expedition-map";
+    case NativeBenchmarkScenario::ExpeditionFlight: return "expedition-flight";
     }
     return "mining";
 }

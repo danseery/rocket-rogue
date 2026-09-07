@@ -59,6 +59,7 @@ struct SurfaceSiteProfileEffects {
 };
 
 struct SurfaceUpgradeEffects {
+    double oreAttractionRadius = 0.0;
     double drillPower = 0.0;
     double drillCooling = 0.0;
     double drillDurability = 0.0;
@@ -322,7 +323,6 @@ MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const Co
 int expeditionDroneRank(const GameState& state, std::string_view droneId);
 int runRigUpgradeRank(const GameState& state, std::string_view upgradeId);
 double expeditionExperienceThreshold(int level);
-void resetExpeditionProgression(PlanetaryExpeditionState& expedition);
 void resetExpeditionProgression(GameState& state);
 ExpeditionExperienceAward awardExpeditionExperience(GameState& state, double amount, Screen returnScreen);
 int miningMaterialExperience(const MaterialInventory& materials);

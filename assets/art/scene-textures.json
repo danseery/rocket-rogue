@@ -81,6 +81,9 @@
     { "textureId": "MiningTilesNeptune", "key": "mining_tiles_neptune", "source": "assets/art/mining/mining-tiles-neptune.png", "columns": 1, "rows": 1 },
     { "textureId": "MiningTilesKhepriPrime", "key": "mining_tiles_khepri_prime", "source": "assets/art/mining/mining-tiles-khepri-prime.png", "columns": 1, "rows": 1 },
     { "textureId": "MiningTilesRiftBelt", "key": "mining_tiles_rift_belt", "source": "assets/art/mining/mining-tiles-rift-belt.png", "columns": 1, "rows": 1 },
-    { "textureId": "MiningTilesPostSolarLibrary", "key": "mining_tiles_post_solar_library", "source": "assets/art/mining/mining-tiles-post-solar.png", "columns": 1, "rows": 1 }
+    { "textureId": "MiningTilesPostSolarLibrary", "key": "mining_tiles_post_solar_library", "source": "assets/art/mining/mining-tiles-post-solar.png", "columns": 1, "rows": 1 },
+    { "textureId": "MissionControlFennec", "key": "mission_control_fennec", "source": "assets/ui/portraits/mission-control-fennec.png", "columns": 1, "rows": 1 },
+    { "textureId": "ServiceDock", "key": "service_dock", "source": "assets/art/service-dock.png", "columns": 1, "rows": 1 },
+    { "textureId": "MissionControlFennecConcerned", "key": "mission_control_fennec_concerned", "source": "assets/ui/portraits/mission-control-fennec-concerned.png", "columns": 1, "rows": 1 }
   ]
 }

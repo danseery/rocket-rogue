@@ -8,6 +8,8 @@
 #include "core/LaunchSimulation.h"
 #include "core/PanelPresentation.h"
 #include "core/Tuning.h"
+#include "core/SystemContent.h"
+#include "core/ExpeditionSystem.h"
 
 #include <algorithm>
 #include <cmath>
@@ -170,7 +172,7 @@ inline std::string launchStatusMessage(
     }
     if (launch.heatEnabled && flight.heatFailureSeconds > 0.0) {
         return "TEMPERATURE CRITICAL \xE2\x80\x94 Engines Off \xE2\x80\x94 " + display::fixed(
-            std::max(0.0, tuning::launch::pilotingHeatFailureSeconds - flight.heatFailureSeconds),
+            std::max(0.0, (tuning::launch::pilotingHeatFailureSeconds * launch.heatGraceMultiplier) - flight.heatFailureSeconds),
             1) + "s";
     }
     if (launch.manualControlsEnabled && flight.courseFailureSeconds > 0.0) {
@@ -371,6 +373,18 @@ inline LaunchPanelPresentation launchPanelPresentation(
     }
     if (!flight.physicalFlight) {
         presentation.systemActions = systemFlightActions(flightModel, actions);
+    }
+    if (state.run.expedition.travelInitialized) {
+        const auto* body = systemBody(solarSystemDefinition(), state.run.expedition.location.bodyId);
+        presentation.destinationName = body ? body->name : "Solar space";
+        if (!body || body->dock || body->siteId.empty()) {
+            const auto guidance = expeditionGuidance(state);
+            presentation.objectiveTitle = earthLaunchReady(state.run.expedition) ? "LAUNCH FROM EARTH" :
+                state.run.expedition.undockReady ? "READY TO UNDOCK" : "APPROACH " + guidance.targetName;
+            presentation.objectiveCopy = guidance.nextAction;
+            std::erase_if(presentation.metrics, [](const auto& metric) { return metric.label == "Orbit"; });
+            presentation.telemetryMessage = flight.fuelRemaining <= 0 ? "SHIP FUEL EMPTY / Coast to safety or abandon for recovery." : presentation.objectiveCopy;
+        }
     }
     return presentation;
 }

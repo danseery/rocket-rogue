@@ -62,7 +62,8 @@ test("realtime input cannot bypass explicit RmlUi actions", () => {
     /rr\.launchMove\(\(right \? 1 : 0\) - \(left \? 1 : 0\)/,
     "launch left/right keys must preserve the screen-space steering sign",
   );
-  assert.match(keyDown, /key === "c"[\s\S]*rr_cut_engines/);
+  assert.match(keyDown, /key === "c"[\s\S]*rr_toggle_cruise/);
+  assert.match(keyDown, /key === "m"[\s\S]*rr_open_navigation/);
   assert.doesNotMatch(keyDown, /rr_pressure_relief|rr_jettison|rr_eject/,
     "launch keyboard routing must not retain pressure, jettison, or manual-eject shortcuts");
   assert.match(keyDown, /if \(!isMiningActive\(\)\) return false/);

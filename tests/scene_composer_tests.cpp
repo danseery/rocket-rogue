@@ -1444,7 +1444,7 @@ void testPhysicalApproachZoomBeginsContinuouslyAtThreeQuarters()
     assert(std::abs(moonClose.centerX) < 0.01F);
     assert(std::abs(moonClose.centerY) < 0.01F);
     assert(spriteWidth(moonClose) > spriteWidth(moonThreshold) * 1.35F);
-    assert(spriteWidth(shipClose) > spriteWidth(shipThreshold) * 1.15F);
+    assert(std::abs(spriteWidth(shipClose) - spriteWidth(shipThreshold)) < 0.0001F);
     assert(distance(shipClose, moonClose) <= 0.47F);
     assert(!snapshot.launchLandingLocalFrame);
 }
@@ -3406,10 +3406,10 @@ void testMiningRigStaysVisibleAndTracksHeading()
     assert(std::hypot(first.axisYx, first.axisYy) > 0.01F);
     const float sceneAspect = static_cast<float>(firstPacket.logicalSceneClip.width)
         / static_cast<float>(std::max(1, firstPacket.logicalSceneClip.height));
-    const float cellW = sceneAspect * 2.0F / static_cast<float>(snapshot.miningWidth);
-    const float cellH = 1.82F / static_cast<float>(snapshot.miningHeight);
-    assert(std::abs(first.centerX - (-sceneAspect + static_cast<float>(snapshot.miningDroneX) * cellW)) < 0.0005F);
-    assert(std::abs(first.centerY - (0.82F - static_cast<float>(snapshot.miningDroneY) * cellH)) < 0.0005F);
+    const float cellW = firstPacket.surfaceCamera.cellWidth;
+    const float cellH = firstPacket.surfaceCamera.cellHeight;
+    assert(std::abs(first.centerX - (firstPacket.surfaceCamera.left + static_cast<float>(snapshot.miningDroneX) * cellW)) < 0.0005F);
+    assert(std::abs(first.centerY - (firstPacket.surfaceCamera.top - static_cast<float>(snapshot.miningDroneY) * cellH)) < 0.0005F);
     assert(first.axisYx < -0.01F);
     assert(std::abs(first.axisYy) < 0.001F);
     const float firstLength = std::hypot(first.axisYx, first.axisYy);
@@ -3561,12 +3561,12 @@ void testMiningSurveyPulseWaveReachesItsRealRadiusThenFades()
         float alpha = 0.0F;
     };
     const auto waveMetrics = [](const ScenePacket& packet) {
-        constexpr float cellH = 1.82F / 12.0F;
+        const float cellH = packet.surfaceCamera.cellHeight;
         const float sceneAspect = static_cast<float>(packet.logicalSceneClip.width)
             / static_cast<float>(std::max(1, packet.logicalSceneClip.height));
-        const float cellW = (sceneAspect * 2.0F) / 16.0F;
-        const float originX = -sceneAspect + 8.0F * cellW;
-        const float originY = 0.82F - 6.0F * cellH;
+        const float cellW = packet.surfaceCamera.cellWidth;
+        const float originX = packet.surfaceCamera.left + 8.0F * cellW;
+        const float originY = packet.surfaceCamera.top - 6.0F * cellH;
         WaveMetrics result;
         for (const PackedSceneInstance& packed : packet.instances) {
             const SceneInstance instance = rocket::unpackSceneInstance(packed);
@@ -3641,12 +3641,12 @@ void testMiningSurveyPulseProgressivelyRevealsNewTerrain()
     composer.compose(snapshot);
 
     const auto materialAlpha = [](const ScenePacket& packet, int cellX, int cellY) {
-        constexpr float cellH = 1.82F / 12.0F;
+        const float cellH = packet.surfaceCamera.cellHeight;
         const float sceneAspect = static_cast<float>(packet.logicalSceneClip.width)
             / static_cast<float>(std::max(1, packet.logicalSceneClip.height));
-        const float cellW = (sceneAspect * 2.0F) / 16.0F;
-        const float centerX = -sceneAspect + static_cast<float>(cellX) * cellW + cellW * 0.5F;
-        const float centerY = 0.82F - static_cast<float>(cellY) * cellH - cellH * 0.5F;
+        const float cellW = packet.surfaceCamera.cellWidth;
+        const float centerX = packet.surfaceCamera.left + static_cast<float>(cellX) * cellW + cellW * 0.5F;
+        const float centerY = packet.surfaceCamera.top - static_cast<float>(cellY) * cellH - cellH * 0.5F;
         float alpha = 0.0F;
         for (const PackedSceneInstance& packed : packet.miningTerrainInstances) {
                 const SceneInstance instance = rocket::unpackSceneInstance(packed);
@@ -3722,7 +3722,7 @@ void testMiningRigDrillStaysMountedThroughRecoilAndExtension()
     const ScenePoint recoiledCollar = miningDrillCollar(recoiledDrill);
     const float rigDeltaX = recoiledRig.centerX - restingRig.centerX;
     const float rigDeltaY = recoiledRig.centerY - restingRig.centerY;
-    assert(std::hypot(rigDeltaX, rigDeltaY) > 0.001F);
+    assert(std::hypot(rigDeltaX, rigDeltaY) < 0.001F); // Effects cannot displace the physical Rig.
     assert(std::abs((recoiledCollar.x - restingCollar.x) - rigDeltaX) < 0.0005F);
     assert(std::abs((recoiledCollar.y - restingCollar.y) - rigDeltaY) < 0.0005F);
     assertMiningDrillMounted(recoiledRig, recoiledDrill);
@@ -3743,8 +3743,8 @@ void testMiningRigDrillStaysMountedThroughRecoilAndExtension()
     const SceneInstance extendedRig = miningRigInstance(extendedPacket);
     const SceneInstance extendedDrill = miningDrillBitInstance(extendedPacket);
     const ScenePoint extendedCollar = miningDrillCollar(extendedDrill);
-    assert(std::hypot(extendedDrill.axisYx, extendedDrill.axisYy)
-        > std::hypot(shortDrill.axisYx, shortDrill.axisYy) + 0.001F);
+    assert(std::abs(std::hypot(extendedDrill.axisYx, extendedDrill.axisYy)
+        - std::hypot(shortDrill.axisYx, shortDrill.axisYy)) < 0.001F);
     assert(std::abs(extendedCollar.x - shortCollar.x) < 0.0005F);
     assert(std::abs(extendedCollar.y - shortCollar.y) < 0.0005F);
     assertMiningDrillMounted(shortRig, shortDrill);
@@ -4446,6 +4446,42 @@ void testArrivalCelebrationRestoresImpactAndRadialBursts()
         settledCenter.second - settledStableCenter.second) < 0.001F);
     const ScenePacket& settledCelebration = settled.compose(arrival);
     assert(settledCelebration.vertices.size() + settledCelebration.instances.size() > ordinaryGeometryCount);
+
+    RenderSnapshot touchdown;
+    touchdown.screen = rocket::Screen::Flight;
+    touchdown.launchTouchdownCelebration = true;
+    touchdown.launchTouchdownFeedbackScale = 1.0;
+    touchdown.launchTouchdownCelebrationProgress = 0.01;
+    touchdown.surfaceArrivalHardLanding = true;
+    SceneComposer touchdownShaken;
+    touchdownShaken.setViewport({1280, 800, 1280, 800, 1.0F});
+    const auto touchdownShakenCenter =
+        rocket::SceneComposerTestAccess::frameCenter(touchdownShaken, touchdown);
+    SceneComposer touchdownStable;
+    touchdownStable.setViewport({1280, 800, 1280, 800, 1.0F});
+    touchdownStable.setCameraShakeEnabled(false);
+    const auto touchdownStableCenter =
+        rocket::SceneComposerTestAccess::frameCenter(touchdownStable, touchdown);
+    const float touchdownOffset = std::hypot(
+        touchdownShakenCenter.first - touchdownStableCenter.first,
+        touchdownShakenCenter.second - touchdownStableCenter.second);
+    assert(touchdownOffset > 0.5F && touchdownOffset < 8.0F);
+
+    // Touchdown progress spans the two-second celebration, so 0.20 is 0.40
+    // seconds after contact and must be fully settled.
+    touchdown.launchTouchdownCelebrationProgress = 0.20;
+    SceneComposer touchdownSettled;
+    touchdownSettled.setViewport({1280, 800, 1280, 800, 1.0F});
+    const auto touchdownSettledCenter =
+        rocket::SceneComposerTestAccess::frameCenter(touchdownSettled, touchdown);
+    SceneComposer touchdownSettledStable;
+    touchdownSettledStable.setViewport({1280, 800, 1280, 800, 1.0F});
+    touchdownSettledStable.setCameraShakeEnabled(false);
+    const auto touchdownSettledStableCenter =
+        rocket::SceneComposerTestAccess::frameCenter(touchdownSettledStable, touchdown);
+    assert(std::hypot(
+        touchdownSettledCenter.first - touchdownSettledStableCenter.first,
+        touchdownSettledCenter.second - touchdownSettledStableCenter.second) < 0.001F);
 }
 
 void testFlightDestructionCinematicUsesExplosionFramesAndAccessibleShake()

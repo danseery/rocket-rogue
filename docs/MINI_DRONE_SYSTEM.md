@@ -1,10 +1,12 @@
 # Support Drone System
 
+The [OREBIT Game Design Document](Rocket_Rogue_Game_Design_Document.docx) is the definitive design. This document supplies implementation detail and must agree with it. Story and progression decisions marked TBD are collected in GDD Section 8.
+
 The filename and `MiniDrone*` C++ symbols are retained as legacy internal identifiers. Player-facing copy and current design terminology use Support Drone.
 
 Support Drone roles also act as forecastable keys for protected-objective sites; see [MINING_LOCK_AND_KEY_SITES.md](MINING_LOCK_AND_KEY_SITES.md) and [SCENARIO_FRAMEWORK.md](SCENARIO_FRAMEWORK.md). Capability checks communicate readiness but never rubber-band arena difficulty.
 
-This system follows [AGENT_DESIGN_CONTEXT.md](AGENT_DESIGN_CONTEXT.md). Treat USG Notes as the primary direction: Support Drones should enable exploration, excavation, logistics, endurance, engineering, and post-solar autonomous combat rather than feeling like generic stat pets. *Solar Jetman* is the mechanical touchstone for gravity, inertia, towing burden, and the difference between vehicle and pilot roles; OREBIT's transferable support swarm is a deliberate modernization beyond that reference.
+This system follows [AGENT_DESIGN_CONTEXT.md](AGENT_DESIGN_CONTEXT.md). Following the GDD, Support Drones should enable exploration, excavation, logistics, endurance, engineering, and post-solar autonomous combat rather than feeling like generic stat pets. *Solar Jetman* is the mechanical touchstone for gravity, inertia, towing burden, and the difference between vehicle and pilot roles; OREBIT's transferable support swarm is a deliberate modernization beyond that reference.
 
 ## Role In The Loop
 
@@ -37,7 +39,7 @@ Every fixed update resolves that binding through `resolveMiniDroneAnchor` into a
 - Cross-depth transfers recreate deterministic formation positions around the new anchor while preserving haul, shield state, cooldowns, and orbit phase.
 - A parked or destroyed rig is never selected as the return target for a `ControlledActor` Support Drone.
 
-Following and defense outrank finishing remote work. Mining, Resource, and Survey Support Drones make collision-aware bounded sorties, and a hard-leash or anchor-transfer event recalls them immediately. Hazard Support Drones instead cross terrain directly to valid revealed work and return directly to formation when no work remains. Shuttle unloading is a temporary task destination, never a parent transfer: a hauling Mining or Resource Support Drone detaches to unload only when the active actor is on the entry layer and near the shuttle. Otherwise it retains its haul and follows.
+Following and defense outrank finishing remote work. Mining, Resource, and Survey Support Drones make collision-aware bounded sorties, and a hard-leash or anchor-transfer event recalls them immediately. Hazard Support Drones instead cross terrain directly to valid revealed work and return directly to formation when no work remains. Shuttle unloading is a temporary task destination, never a parent transfer: hauling Mining and Resource Support Drones follow physical terrain-aware routes through cached layers to the parked ship. Unloading occurs on arrival, not on an elapsed transit timer; unopened seam lips cannot be crossed.
 
 Idle and returning Support Drones continuously orbit at `0.45` radians per second. Role rings are Mining `1.6` cells, Resource `2.05`, Hazard `1.9`, Defense `2.7`, Attack `3.35`, and Survey `3.4`. Each equipped frame retains a stable formation slot; alternating rings counter-rotate. Defense rings reorient toward the closest threat.
 
@@ -110,6 +112,6 @@ Io is the current deliberate exception and tutorial: its soil never pays, it gen
 
 ## Future Hooks
 
-Save version 18 is an intentional fresh-start boundary. It persists Support Drone ownership, assignments, runtime, physical payload ownership, and active Mining state. Every non-v18 or malformed campaign is rejected without partial restoration or migration and remains untouched until New Campaign is explicitly confirmed.
+Save version 21 is an intentional fresh-start boundary. It persists Support Drone ownership, assignments, runtime, physical payload ownership, and active Mining state. Every non-v21 or malformed campaign is rejected without partial restoration or migration and remains untouched until New Campaign is explicitly confirmed.
 
 Future passes can add branching per-unit upgrade trees, Support Drone repair, rarity-specific visual treatments, and more signature-specific effects. Keep enemy combat post-solar and swarm execution autonomous: the EVA sidearm protects the vulnerable operator, while buildcraft remains the source of sustained combat strength.

@@ -159,6 +159,11 @@ inline PoiGuidanceTarget miningPoiGuidanceTarget(
 // Immutable presentation input assembled from authoritative gameplay state.
 // Collection views remain valid only through the synchronous render call.
 struct RenderSnapshot {
+    bool systemTravel = false;
+    FlightGuidance flightGuidance;
+    SystemLocation systemLocation;
+    SystemDefinition system;
+    std::vector<WreckState> wrecks;
     Screen screen = Screen::Hangar;
     bool titleScreen = false;
     // A short, presentation-only departure after selecting New Game or
@@ -196,12 +201,12 @@ struct RenderSnapshot {
     // flight profile. Production Flight snapshots always provide this value.
     double launchApproachBlend = -1.0;
     double launchLandingBlend = -1.0;
+    double surfaceFramingProgress = 0.0;
     double launchOrbitTargetRadius = 0.44;
     double launchOrbitGoodBand = 0.075;
     double launchOrbitProgress = 0.0;
     double orbitalOverlay = 0.0;
     double orbitalSurveyProgress = 0.0;
-    double orbitalLaserHeat = 0.0;
     double orbitalLaserDepth = 0.0;
     int orbitalSurveyDepth = 0;
     bool orbitalLaserFiring = false;
@@ -212,6 +217,7 @@ struct RenderSnapshot {
     double orbitalShaftBearing = 0.0;
     bool orbitalInsideZone = false;
     bool orbitalZoneSurveyed = false;
+    std::string orbitalZoneLabel = "Orbit Here";
     bool launchOrbitCaptured = false;
     double launchLandingAltitude = 0.0;
     double launchLandingVerticalVelocity = 0.0;
@@ -236,6 +242,7 @@ struct RenderSnapshot {
     double manualAscentCameraProgress = 1.0;
     bool launchDescentGateArmed = true;
     bool launchTouchdownCelebration = false;
+    double launchTouchdownFeedbackScale = 0.0;
     double launchTouchdownCelebrationProgress = 0.0;
     // Session-only bridge between the authoritative Flight and Mining states.
     // Phase values mirror RocketGameApp's private arrival sequence but never
@@ -279,6 +286,7 @@ struct RenderSnapshot {
     // launch scene starts from the body the ship is physically leaving.
     int launchOriginTier = -1;
     int debugActOneCheckpoint = -1;
+    bool debugSessionActive = false;
     ArkCondition arkCondition = ArkCondition::NotFound;
     bool straylightStoryReveal = false;
     bool straylightApproach = false;
@@ -304,6 +312,9 @@ struct RenderSnapshot {
     // of the 32 body-owned rows in the post-solar mining library.
     int miningPostSolarGeologyRow = -1;
     std::uint64_t miningGeologySeed = 0;
+    int rigContactX = -1, rigContactY = -1;
+    double rigContactNormalX = 0, rigContactNormalY = 0;
+    bool rigContactPassage = false;
     double miningDroneX = 0.0;
     double miningDroneY = 0.0;
     double miningTargetX = 0.0;
@@ -326,6 +337,7 @@ struct RenderSnapshot {
     // -1 means no active mining actor. Otherwise this rises from zero after a
     // manual Survey Pulse to one when the shared scanner is ready again.
     double miningScannerRechargeProgress = -1.0;
+    double miningOreAttractionRadius = 2.15;
     double miningScannerRadius = 5.5;
     double miningFailurePulse = 0.0;
     bool miningEvaDeathActive = false;
