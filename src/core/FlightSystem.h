@@ -39,7 +39,7 @@ inline constexpr double keyboardThrottleRiseSeconds = 0.40;
 
 namespace flight_landing {
 inline constexpr double entryAltitude = 60.0;
-inline constexpr double departureAltitude = 60.0;
+inline constexpr double departureAltitude = 46.0;
 inline constexpr double departureSpeed = 2.0;
 inline constexpr double velocityConversion = 12.0;
 inline constexpr double metersPerOrbitUnit = 250.0;

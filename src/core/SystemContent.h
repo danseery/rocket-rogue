@@ -50,6 +50,7 @@ const SystemBodyDefinition *bodyForEnvironment(const SystemDefinition &, std::st
 inline constexpr double earthLaunchSpeed = .60;
 SystemVector earthLaunchPosition();
 SystemVector systemDockPosition(const SystemBodyDefinition &);
+double systemFlightTimeScale(const SystemDefinition &, SystemVector position);
 double systemBodyGravityAcceleration(const SystemBodyDefinition &, double radius);
 struct PostSolarSystemRoster;
 SystemDefinition systemDefinitionForRoster(const PostSolarSystemRoster &);

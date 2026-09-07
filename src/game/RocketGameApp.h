@@ -449,6 +449,7 @@ private:
     SurfaceArrivalSequenceState surfaceArrival_;
     std::optional<LandingSiteView> landingSiteView_;
     double manualAscentCameraSeconds_ = 1.25;
+    bool departureThrustHeld_ = false;
     void refreshLandingSiteView(bool force = false);
     void beginManualSurfaceAscent();
     MiningEvaDeathPresentationState miningEvaDeathPresentation_;

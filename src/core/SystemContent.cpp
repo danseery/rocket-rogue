@@ -5,6 +5,20 @@
 
 namespace rocket
 {
+double systemFlightTimeScale(const SystemDefinition &system, SystemVector position)
+{
+    double scale = 1.0;
+    for (const auto &body : system.bodies) {
+        if (body.influenceRadius <= 0.0) continue;
+        const double radius = std::hypot(position.x-body.position.x, position.y-body.position.y);
+        const double start = body.id == "earth" ? .60 : 1.0;
+        const double t = std::clamp((radius/body.influenceRadius-start)/.50, 0.0, 1.0);
+        const double blend = t*t*t*(t*(t*6.0-15.0)+10.0);
+        scale = std::min(scale, std::lerp(.4, 1.0, blend));
+    }
+    return scale;
+}
+
 const SystemDefinition &solarSystemDefinition()
 {
     // Coordinates are authored in orbit units. Parentage is descriptive; the

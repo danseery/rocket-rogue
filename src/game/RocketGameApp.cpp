@@ -1142,8 +1142,14 @@ void RocketGameApp::beginManualSurfaceAscent()
     surfaceBaySequence_.reset();
     surfaceArrival_.reset();
     session_.orbitalWork={};
+    // Carry ignition into player control. Neutral input polling must not
+    // cancel this burn; the first deliberate throttle input takes ownership.
+    lastInputScreen_=Screen::Flight; // Inputs were already released above for this handoff.
+    departureThrustHeld_=true;
+    session_.throttleInput=1.0;
+    flight.selectedThrottle=1.0;
     refreshLandingSiteView(true);
-    state_.statusLine="PILOT ASCENT - Hold W to lift off.";
+    state_.statusLine="ASCENDING - W / S takes over thrust; release to coast.";
     save();
     panelDirty_=realtimeHudDirty_=true;
 }
@@ -1777,6 +1783,7 @@ bool RocketGameApp::realtimeControllerContext(InputContext context) const
 
 void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
 {
+    departureThrustHeld_ = false;
     session_.orbitalWork.held = false;
     session_.orbitalWork.releaseRequired = true;
     controllerRealtimeInput_ = {};
@@ -1808,8 +1815,9 @@ void RocketGameApp::applyRealtimeInputs()
     case Screen::Flight:
         if (session_.orbitalWork.active() && (std::abs(moveX) > 0.001 || std::abs(moveY) > 0.001))
             resumeOrbitalFlight();
+        if (std::abs(moveY) > 0.01) departureThrustHeld_ = false;
         session_.steerInput = moveX;
-        session_.throttleInput = moveY;
+        session_.throttleInput = departureThrustHeld_ ? 1.0 : moveY;
         break;
     case Screen::Flyby:
         setFlybyMove(state_, moveX, moveY);
@@ -2476,9 +2484,22 @@ void RocketGameApp::tick(double deltaSeconds)
         const auto previousBody = state_.run.expedition.location.bodyId;
         const bool liveExpedition = state_.run.expedition.travelInitialized;
         if (liveExpedition) session_.preparedLaunch = expeditionFlightModel(state_, catalog_);
+        // Departure assistance only lifts the ship out of the local surface.
+        // Regulate ascent speed instead of carrying a full-throttle latch into travel.
+        if (departureThrustHeld_ && session_.flight.mode != FlightMode::Landing) {
+            departureThrustHeld_ = false;
+            session_.throttleInput = 0.0;
+        }
+        double pilotingThrottle = session_.throttleInput;
+        if (departureThrustHeld_) {
+            constexpr double assistedClimbSpeed = 8.0;
+            const double desiredAcceleration = flight_landing::gravityAcceleration +
+                (assistedClimbSpeed-session_.flight.landing.verticalVelocity)*1.5;
+            pilotingThrottle = std::clamp(desiredAcceleration/flight_landing::forwardAcceleration,0.0,1.0);
+        }
         const FlightInput flightInput {
-            session_.steerInput, session_.throttleInput, session_.controls.actions.cutEnginesActive,
-            activeInputSource_ == InputSource::Controller};
+            session_.steerInput, pilotingThrottle, session_.controls.actions.cutEnginesActive,
+            departureThrustHeld_ || activeInputSource_ == InputSource::Controller};
         const LaunchFlightStep step = liveExpedition ? advanceExpeditionFlight(
             state_.run.expedition, session_.flight, session_.preparedLaunch, destination,
             solarSystemDefinition(), flightInput, clampedDelta,
@@ -2488,9 +2509,9 @@ void RocketGameApp::tick(double deltaSeconds)
             destination,
             {
                 session_.steerInput,
-                session_.throttleInput,
+                pilotingThrottle,
                 session_.controls.actions.cutEnginesActive,
-                activeInputSource_ == InputSource::Controller,
+                departureThrustHeld_ || activeInputSource_ == InputSource::Controller,
             },
             clampedDelta,
             landingSiteView_ ? &landingSiteView_->world : nullptr);
@@ -3025,6 +3046,8 @@ void RocketGameApp::cutEngines()
         return;
     }
 
+    departureThrustHeld_ = false;
+    session_.throttleInput = 0.0;
     session_.controls.actions.cutEnginesActive = !session_.controls.actions.cutEnginesActive;
     state_.statusLine = session_.controls.actions.cutEnginesActive
         ? std::string(text::status::engineCutConfirmed)

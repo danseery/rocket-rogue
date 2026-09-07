@@ -10819,3 +10819,16 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 .surface-flight-actions { padding: 8px 12px; display: flex; flex-direction: row; flex-wrap: wrap; align-content: flex-start; }
 .surface-flight-actions p { width: 100%; margin: 2px 0px; font-size: 12px; }
 .surface-flight-actions button { display: inline-block; width: 230px; margin-right: 10px; }
+
+/* Orbit preparation: primary actions lead, with one compact status line. */
+#rr-panel .orbit-action-panel { margin-top: 12px; }
+#rr-panel .orbit-action-panel button {
+    display: block;
+    width: 100%;
+    min-height: 60px;
+    height: 60px;
+    margin: 0 0 10px 0;
+    padding: 12px;
+    font-size: 20px;
+}
+#rr-panel .orbit-action-panel .phase-copy { margin: 0 0 12px 0; }

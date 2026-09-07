@@ -276,6 +276,8 @@ ContentCatalog createDefaultContent()
              {"eva", "There it is - an anomalous signal. Your suit can fit through that crevice. Clear the seal with your hand drill, then tether the artifact and bring it back to the ship.", {MessageHint::Drill, MessageHint::Tether}}}}
     };
     for (auto& message : catalog.incomingMessages) message.context = MessageDeliveryContext::Mining;
+    catalog.incomingMessages.push_back({"prospector_unlocked", "mission_control_fennec", "Meet your Prospector", "Understood", true,
+        {{"default", "First artifact recovered! You've earned a Prospector Support Drone and your first drone slot. I've assigned it to your Rig. The little helper mines revealed ore pockets while you keep exploring. Manage it in Drone Ops.", {}}}});
     catalog.incomingMessages.push_back({"lunar_approach", "mission_control_fennec", "Earth launch clearance", "Ready to launch", true,
         {{"default", "You're cleared for launch. The Moon is above and to your right. Use thrust to climb away, then steer toward its orbit bands. Your trajectory shows where you will coast; adjust it to establish orbit before surveying a landing site.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
 
@@ -395,7 +397,7 @@ ContentCatalog createDefaultContent()
     };
 
     catalog.miniDrones = {
-        miniDrone(content::drone::miningDrone, "Prospector Support Drone", "Peels revealed ore pockets while the Mining Rig keeps tunneling under pressure.", Rarity::Common, MiniDroneRole::Mining, {.passiveMiningRate = 0.12}, content::unlock::droneBay, {"excavation", "resource"}),
+        miniDrone(content::drone::miningDrone, "Prospector Support Drone", "Peels revealed ore pockets while the Mining Rig keeps tunneling under pressure.", Rarity::Common, MiniDroneRole::Mining, {.passiveMiningRate = tuning::mining::miningDroneBaseHarvestRatePerSecond}, content::unlock::droneBay, {"excavation", "resource"}),
         miniDrone(content::drone::resourceDrone, "Resource Drone", "Carries backup oxygen and return consumables so the rig can stay longer before the swarm wins.", Rarity::Common, MiniDroneRole::Resource, {.oxygenSeconds = 28.0}, content::unlock::droneSupportSuite, {"logistics", "endurance"}),
         miniDrone(content::drone::surveyDrone, "Survey Drone", "Widens scanner pulses and outlines ore, artifacts, and hostile silhouettes through fog.", Rarity::Uncommon, MiniDroneRole::Survey, {.scannerRadius = 2.0}, content::unlock::droneSupportSuite, {"exploration", "navigation"}),
         miniDrone(content::drone::hazardDrone, "Hazard Drone", "Treats revealed thermal, cryo, toxic, and radiation pockets before the rig gets too close.", Rarity::Uncommon, MiniDroneRole::Hazard, {}, content::unlock::ioHazardDrone, {"engineering", "remediation"}),
@@ -569,6 +571,7 @@ ContentCatalog createDefaultContent()
     lunarAnomalyCrevice.arena = {MiningAct::ActOne, 1, 0, true, MiningGateType::FragileExcavation};
     lunarAnomalyCrevice.gateType = MiningGateType::FragileExcavation;
     lunarAnomalyCrevice.objectivePlacement = MiningSiteObjectivePlacement::EntryCentered;
+    lunarAnomalyCrevice.objectiveHorizontalOffset = 6;
     lunarAnomalyCrevice.objectivePassage = MiningPassageClass::SuitOnly;
     lunarAnomalyCrevice.activationMessage = "20 ORE DELIVERED — lunar anomaly detected. Pulse scanner; exit Rig for EVA recovery.";
     lunarAnomalyCrevice.completeOnShipCapture = true;
@@ -620,26 +623,26 @@ ContentCatalog createDefaultContent()
                     std::string("Most regolith is inert. Recover ") +
                         std::to_string(tuning::research::prospectorCommonOreGoal) +
                         " gray-seamed Common Ore deposits and return them safely.",
-                    "REWARD // PROSPECTOR MK I + SLOT 1", "Accept Contract", {},
+                    "DELIVER ORE, THEN RECOVER THE ARTIFACT TO EARN YOUR PROSPECTOR", "Accept Contract", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"delivery", {"briefing"}, "MOON", "Lunar Prospector Contract",
                     "Return 20 Common Ore to the ship. The contract allocation does not use permanent hold space.",
-                    "PROSPECTOR MK I SECURED", "Pulse Scanner", {},
+                    "ORE DELIVERED // INVESTIGATE THE ANOMALY", "Pulse Scanner", {},
                     ScenarioEventKind::SafeMaterialDelivered, content::destination::moon, "common",
                     tuning::research::prospectorCommonOreGoal, 0, false, false, false,
                     ScenarioActionKind::None, {},
-                    {{ScenarioRewardKind::UnlockKey, content::unlock::droneBay, 0, false},
-                     {ScenarioRewardKind::DroneBaySlots, {}, 1, false},
-                     {ScenarioRewardKind::SupportDrone, content::drone::miningDrone, 0, true},
-                     {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}},
+                    {{ScenarioRewardKind::FrontierReadiness, {}, 0, false}}},
                 {"anomaly", {"delivery"}, "MOON", "Anomalous Return",
                     "Mission Control is picking up a second signal. Pulse the scanner and recover its source.",
-                    "REWARD // MARS ROUTE", "Confirm Recovery", {},
+                    "REWARD // PROSPECTOR MK I + SLOT 1 + MARS ROUTE", "Confirm Recovery", {},
                     ScenarioEventKind::ProtectedObjectiveExtracted, {}, content::miningSite::lunarAnomalyCrevice,
                     1, 0, false, true, false,
                     ScenarioActionKind::ClaimReward, content::miningSite::lunarAnomalyCrevice,
-                    {{ScenarioRewardKind::UnlockKey, content::unlock::routeMars, 0, false}}}
+                    {{ScenarioRewardKind::UnlockKey, content::unlock::routeMars, 0, false},
+                     {ScenarioRewardKind::UnlockKey, content::unlock::droneBay, 0, false},
+                     {ScenarioRewardKind::DroneBaySlots, {}, 1, false},
+                     {ScenarioRewardKind::SupportDrone, content::drone::miningDrone, 0, true}}}
             }
         },
         {

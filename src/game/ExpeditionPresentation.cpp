@@ -162,6 +162,22 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         " / Target: " + esc(target ? target->name : "None") + " / " + (e.cruise.active ? "CRUISE ACTIVE" : "MANUAL") + "</p><p>" + esc(objective.available ? objective.goal : "Explore, mine, and return to Earth") + "</p>" +
         action(e.cruise.active ? "Cruise off [C / L3]" : "Cruise [C / L3]", "cruise", flight.active && flight.mode != FlightMode::Landing && !e.undockReady) +
         action("Dock", "dock", canDockExpedition(e, flight, system));
+        if (flight.active && flight.mode != FlightMode::Landing) {
+            auto position = e.location;
+            captureSystemLocation(position, flight);
+            position = convertSystemFrame(position, CoordinateFrame::System, "", system);
+            for (const auto& body : system.bodies) {
+                if (!body.dock) continue;
+                const auto dock = systemDockPosition(body);
+                const double range = std::hypot(position.position.x-dock.x,position.position.y-dock.y);
+                if (range > .65) continue;
+                panel.contentMarkup += canDockExpedition(e,flight,system)
+                    ? "<p>In range — press Dock.</p>"
+                    : (range > .16 ? "<p>Approach the DOCK marker, not Earth's surface.</p>"
+                                   : "<p>Slow down to enable Dock.</p>");
+                break;
+            }
+        }
         for (const auto& wreck : e.wrecks) {
             if (!canSalvageWreck(e, flight, system, wreck.id, false)) continue;
             const bool ready = canSalvageWreck(e, flight, system, wreck.id);

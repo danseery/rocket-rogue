@@ -647,8 +647,10 @@ FlightCameraView physicalFlightCamera(
         const auto& g = snapshot.flightGuidance;
         const auto* frameBody = snapshot.systemLocation.frame == CoordinateFrame::Body
             ? systemBody(solarSystemDefinition(),snapshot.systemLocation.bodyId) : nullptr;
-        const bool local = frameBody && !frameBody->dock;
-        const SystemVector focus = local ? SystemVector{} : g.targetPosition;
+        // Keep the travel view in the same physical frame on either side of
+        // encounter entry/exit; local framing fades in by distance below.
+        const SystemVector frameOffset = frameBody ? frameBody->position : SystemVector{};
+        const SystemVector focus = g.targetPosition;
         const double dx = snapshot.launchPositionX-focus.x, dy = snapshot.launchPositionY-focus.y;
         const double range = std::hypot(dx,dy);
         const double fitRange = std::min(range,5.0);
@@ -680,10 +682,26 @@ FlightCameraView physicalFlightCamera(
             launchCamera.anchor = {-(left+right)*.5F*fit, -(bottom+top)*.5F*fit};
             result.transfer = blendCamera(result.transfer, launchCamera, launchBlend);
         }
-        const Camera2D bodyCamera {{static_cast<float>(focus.x),static_cast<float>(focus.y)},
-            {0,.20F},outerOrbitScreenRadius/static_cast<float>(outerOrbitRadius),departureRotation};
-        const float blend = local ? smootherstep(static_cast<float>(std::clamp((1.42-range)/.90,0.0,1.0))) : 0;
-        result.camera = blendCamera(result.transfer,bodyCamera,blend);
+        result.camera = result.transfer;
+        // Start framing an approaching body before its encounter boundary.
+        // Evaluate every body in system coordinates, never by frame ownership.
+        float strongestBlend = 0.0F;
+        for (const auto& body : snapshot.system.bodies) {
+            if (body.kind == SystemBodyKind::Star || body.kind == SystemBodyKind::Station) continue;
+            // The Earth-to-Moon opening already has its authored launch framing.
+            if (body.id == "earth" && g.targetId == "moon") continue;
+            const double bodyX = body.position.x-frameOffset.x;
+            const double bodyY = body.position.y-frameOffset.y;
+            const double distance = std::hypot(snapshot.launchPositionX-bodyX,snapshot.launchPositionY-bodyY);
+            const double nearRadius = std::max(.52,body.radius*2.0);
+            const double farRadius = std::max(nearRadius+.9,body.influenceRadius*1.5);
+            const float blend = smootherstep(static_cast<float>((farRadius-distance)/(farRadius-nearRadius)));
+            if (blend <= strongestBlend) continue;
+            strongestBlend = blend;
+            const Camera2D bodyCamera {{static_cast<float>(bodyX),static_cast<float>(bodyY)},
+                {0,.20F},outerOrbitScreenRadius/static_cast<float>(nearRadius),departureRotation};
+            result.camera = blendCamera(result.transfer,bodyCamera,blend);
+        }
     }
 
     double landingBlend = snapshot.launchLandingBlend;
@@ -7941,7 +7959,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
 {
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
     drawSolarBackground(snapshot, 0.70F, snapshot.screen != Screen::Flight);
-    if (snapshot.systemTravel && snapshot.screen == Screen::Flight && !snapshot.launchLandingLocalFrame && snapshot.orbitalOverlay <= .001) {
+    if (snapshot.systemTravel && snapshot.screen == Screen::Flight && !snapshot.launchLandingLocalFrame && snapshot.launchLandingBlend <= .001 && snapshot.orbitalOverlay <= .001) {
         const auto* frame = snapshot.systemLocation.frame == CoordinateFrame::Body ? systemBody(snapshot.system, snapshot.systemLocation.bodyId) : nullptr;
         const SystemVector offset = frame ? frame->position : SystemVector{};
         const auto view = physicalFlightCamera(snapshot, 0);
@@ -8040,6 +8058,10 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             destinationSize = baseRadius * 2.55F;
         }
         destinationSize *= cameraZoom;
+        if (snapshot.systemTravel) {
+            const auto* body = systemBody(snapshot.system,snapshot.systemLocation.bodyId);
+            if (body) destinationSize = static_cast<float>(body->radius)*2.5F*view.camera.scale;
+        }
         if (snapshot.surfaceArrivalPrepared) {
             // Let the actual body fill and leave the frame as its real local
             // site becomes readable. This is a visual scale match, not a new
@@ -8122,7 +8144,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             const float profileOpacity = drawOpacity_;
             drawOpacity_ *= alpha;
             drawPoiLabel(c.x, c.y + radius + 0.08F, 0.0038F,
-                "ZONE " + std::to_string(zone.sectorIndex + 1) + " · LANDING-SITE DEPTH PROFILE", PoiGuidanceKind::Ship);
+                "ZONE " + std::to_string(zone.sectorIndex + 1), PoiGuidanceKind::Ship);
             drawOpacity_ = profileOpacity;
             for (const auto& layer : snapshot.orbitalSurveyLayers) {
                 const float visibility = std::clamp(reveal - layer.depth, 0.0F, 1.0F) * alpha;

@@ -625,6 +625,7 @@ struct MiningSiteDefinition {
     MiningSiteBiome biome = MiningSiteBiome::Default;
     MiningGateType gateType = MiningGateType::None;
     MiningSiteObjectivePlacement objectivePlacement = MiningSiteObjectivePlacement::DeepRoute;
+    int objectiveHorizontalOffset = 0;
     MiningPassageClass objectivePassage = MiningPassageClass::AllActors;
     std::string activationMessage;
     bool completeOnShipCapture = false;

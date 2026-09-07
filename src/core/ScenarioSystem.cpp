@@ -3,6 +3,7 @@
 #include "core/Content.h"
 #include "core/GameState.h"
 #include "core/ResearchSystem.h"
+#include "core/IncomingMessages.h"
 
 #include <algorithm>
 #include <charconv>
@@ -480,14 +481,19 @@ void applyReward(
         state.meta.droneBaySlots = std::max(state.meta.droneBaySlots, std::max(0, reward.amount));
         ensureDroneBayState(state, catalog);
         break;
-    case ScenarioRewardKind::SupportDrone:
+    case ScenarioRewardKind::SupportDrone: {
+        const bool alreadyOwned = containsId(state.meta.ownedDroneIds, reward.id);
         appendUniqueId(state.meta.ownedDroneIds, reward.id);
         ensureDroneBayState(state, catalog);
-        if (reward.equipIfSlotAvailable &&
+        if (!alreadyOwned && reward.equipIfSlotAvailable &&
             state.meta.equippedDroneIds.size() < static_cast<std::size_t>(state.meta.droneBaySlots)) {
             state.meta.equippedDroneIds.emplace_back(reward.id);
         }
+        if (reward.id == content::drone::miningDrone && !alreadyOwned)
+            enqueueIncomingMessage(state.incomingMessages, catalog,
+                {"campaign.prospector_unlocked", "prospector_unlocked", "default"});
         break;
+    }
     case ScenarioRewardKind::FrontierReadiness:
         state.run.frontierReadiness = frontierReadinessCap(state, catalog);
         break;

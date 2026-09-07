@@ -119,6 +119,7 @@ inline PoiGuidanceTarget miningPoiGuidanceTarget(
     const auto recoverable = [](const MiningArtifactObject& artifact) {
         return artifact.present &&
             artifact.revealed &&
+            !artifact.tethered &&
             (artifact.state == MiningArtifactState::Embedded ||
                 artifact.state == MiningArtifactState::Loose);
     };
@@ -128,7 +129,8 @@ inline PoiGuidanceTarget miningPoiGuidanceTarget(
     int artifactDepth = mining.depthZone;
     if (artifact == nullptr) {
         for (const MiningDepthLayerState& layer : mining.depthLayers) {
-            if (recoverable(layer.artifact)) {
+            // The active layer's live artifact is authoritative, not its cached copy.
+            if (layer.depthZone != mining.depthZone && recoverable(layer.artifact)) {
                 artifact = &layer.artifact;
                 artifactDepth = layer.depthZone;
                 break;

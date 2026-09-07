@@ -49,21 +49,21 @@ bool orbitalWorkVisible(const PanelRenderContext& c)
 std::string orbitalWorkLabel(const PanelRenderContext& c)
 {
     const auto& w = *c.orbitalWork;
-    if (w.phase == OrbitalWorkPhase::Surveying) return "SURVEYING";
-    if (!w.surveyComplete) return "PULSE SURVEY";
+    if (w.phase == OrbitalWorkPhase::Surveying) return "SCANNING...";
+    if (!w.surveyComplete) return "SCAN";
     if (!c.orbitalInsideZone) return w.active() ? "RESUME FLIGHT" : "RETURN TO SELECTED WEDGE";
     if (c.orbitalLaserBlocked) return "SURFACE TOOLS REQUIRED";
     if (c.orbitalLaserComplete) return "SHAFT READY";
-    return "ORBITAL LASER DIG";
+    return "DRILL";
 }
 
 std::string orbitalLaserHint(const PanelRenderContext& c)
 {
-    const std::string limit = "Bore reach +" + std::to_string(
+    const std::string limit = "Depth " + std::to_string(
         surfaceDepthRating(c.state, SurfaceDepthUpgradeKind::BoreSystem));
-    if (c.orbitalLaserBlocked) return limit + " · Obstruction reached. Continue with surface tools.";
-    if (c.orbitalLaserComplete) return limit + " · Depth limit reached. Ready to land.";
-    return limit + " · Hold to drill; release to stop.";
+    if (c.orbitalLaserBlocked) return limit + " · Surface tools needed";
+    if (c.orbitalLaserComplete) return limit + " · Ready to land";
+    return limit + " · Hold to drill";
 }
 
 bool surfaceDescentForContext(const PanelRenderContext& context)
@@ -1093,7 +1093,7 @@ std::string prospectorCompletionModal(const GameState& state)
         << "<div class=\"activity-introduction-payoff\"><span>Prospector Mk I</span><strong>"
         << "Install your first Support Drone and bring Support Drone Slot 1 online."
         << "</strong></div><div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
-        << button("Install Prospector Mk I", ui::actions::claimLunarProspector, "ok", true)
+        << button("Confirm Ore Delivery", ui::actions::claimLunarProspector, "ok", true)
         << "</div></section>";
     return autoModalTemplate(
         ui::modals::prospectorCompletion,
@@ -1700,11 +1700,11 @@ CampaignObjectivePresentation campaignObjectivePresentation(
         presentation.location = "MOON";
         presentation.title = "Lunar Prospector Contract";
         if (status.state == CampaignObjectiveState::Complete) {
-            presentation.detail = "PROSPECTOR MK I INSTALLED // SLOT 1 ONLINE.";
+            presentation.detail = "ORE DELIVERED // RECOVER THE LUNAR ARTIFACT.";
         } else if (status.state == CampaignObjectiveState::ReadyToClaim) {
             presentation.detail = std::to_string(status.required) + "/"
                 + std::to_string(status.required)
-                + " DELIVERED // INSTALL PROSPECTOR MK I.";
+                + " DELIVERED // INVESTIGATE THE ANOMALY.";
         } else {
             const int commonAboard = moonCampaignCommonAboard(state);
             presentation.detail = commonAboard > 0
@@ -1714,7 +1714,7 @@ CampaignObjectivePresentation campaignObjectivePresentation(
                     + " GRAY COMMON, RETURN TO THE SHUTTLE, THEN EXTRACT SAFELY. "
                       "PLAIN REGOLITH YIELDS NOTHING.";
         }
-        presentation.reward = "REWARD // PROSPECTOR MK I + SLOT 1";
+        presentation.reward = "ARTIFACT RECOVERY REWARD // PROSPECTOR MK I + SLOT 1";
         if (status.state == CampaignObjectiveState::ReadyToClaim) {
             presentation.action = panelActionButton(
                 "Install Prospector Mk I",
@@ -3921,6 +3921,7 @@ std::string buildGamePanelMarkup(
         out << "<section class=\"live-hud-header\"><div><h2>" << htmlEscape(launchPanel.sectionTitle)
             << "</h2></div></section>";
         const bool physicalFlight = context.launchFlight != nullptr && context.launchFlight->physicalFlight;
+        if (!orbitalWorkVisible(context))
         out << "<section class=\"objective-strip rr-objective-strip\"><span>"
             << (physicalFlight ? "FLIGHT" : "Lesson") << "</span><strong>"
             << htmlEscape(launchPanel.objectiveTitle) << "</strong><p>"
@@ -3944,10 +3945,12 @@ std::string buildGamePanelMarkup(
                 << "</div>";
         }
 
+        if (!orbitalWorkVisible(context))
         out << "<p id=\"rr-hud-launch-status\" class=\"" << launchStatusSeverity(context) << "\">"
             << htmlEscape(state.run.expedition.travelInitialized ? expeditionGuidance(state,context.orbitalWork && context.orbitalWork->surveyComplete,context.orbitalLaserComplete).nextAction : launchPanel.telemetryMessage) << "</p>";
         const bool hasAdvancedFlightControls = !launchPanel.systemActions.empty();
         if (orbitalWorkVisible(context)) {
+            out << "<section class=\"orbit-action-panel\">";
             const auto& w = *context.orbitalWork;
             if (w.phase == OrbitalWorkPhase::LandingAlignment) {
                 out << "<p class=\"phase-copy\">ALIGNING FOR DESCENT</p>";
@@ -3955,22 +3958,22 @@ std::string buildGamePanelMarkup(
             const bool ready = w.active() || (context.launchFlight->orbit.loopQualifies &&
                 std::abs(context.launchFlight->selectedThrottle) <= 0.001);
             const bool outside = w.surveyComplete && !context.orbitalInsideZone;
-            out << "<div data-orbital-work=\"1\" class=\"actions primary-actions\">"
+            out << "<div data-orbital-work=\"1\" class=\"orbit-primary-action\">"
                 << (outside && !w.active() ? panelButton(disabledPanelButton("RETURN TO SELECTED WEDGE"))
                     : ready ? button(orbitalWorkLabel(context), ui::actions::orbitalWork, "ok", true)
                     : panelButton(disabledPanelButton("ESTABLISH A SAFE LOOP")))
                 << "</div><p id=\"rr-orbital-status\" class=\"phase-copy\">"
                 << (w.surveyComplete ? orbitalLaserHint(context)
-                    : "Survey reach +" + std::to_string(surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray)))
+                    : "Scan depth " + std::to_string(surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray)))
                 << "</p>";
             if (w.active() && w.surveyComplete && !outside)
                 out << button("LAND", ui::actions::landFromOrbit, "ok");
             if (w.active() && !outside) out << button("RESUME FLIGHT", ui::actions::resumeOrbitalFlight, "ghost");
-            out << "<p class=\"phase-copy\">" << (context.controllerFlightControls ? "South" : "Space / Enter")
-                << " · Optional preparation. Steering or thrust resumes flight.</p>";
             }
+            out << "</section>";
         }
 
+        if (!orbitalWorkVisible(context)) {
         out << "<section class=\"cockpit-hud flight-hud\"><div class=\"cockpit-label\"><span>"
             << htmlEscape(text::panel::sections::flightControls) << "</span><strong>"
             << htmlEscape(context.flightArmed
@@ -4011,6 +4014,7 @@ std::string buildGamePanelMarkup(
             }
         }
         out << "</section>";
+        }
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
         return out.str();
@@ -6122,6 +6126,15 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
         const auto& e = state.run.expedition;
         key << e.location.bodyId << ':' << e.cruise.active << ':' << e.course.targetBodyId << ':' << e.decision.pendingId << ':' << e.decision.awaitingAscent << ':'
             << canDockExpedition(e, state.run.flight, solarSystemDefinition()) << '|';
+        auto dockPosition = e.location;
+        captureSystemLocation(dockPosition, context.launchFlight ? *context.launchFlight : state.run.flight);
+        dockPosition = convertSystemFrame(dockPosition, CoordinateFrame::System, "", solarSystemDefinition());
+        for (const auto& body : solarSystemDefinition().bodies) {
+            if (!body.dock) continue;
+            const auto dock = systemDockPosition(body);
+            const double range = std::hypot(dockPosition.position.x-dock.x,dockPosition.position.y-dock.y);
+            key << (range<=.65) << ':' << (range<=.16) << '|';
+        }
         for (const auto& w : e.wrecks) key << w.id << ':' << canSalvageWreck(e, state.run.flight, solarSystemDefinition(), w.id)
             << ':' << canSalvageWreck(e, state.run.flight, solarSystemDefinition(), w.id, false) << '|';
     }

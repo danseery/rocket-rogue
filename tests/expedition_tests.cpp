@@ -1,4 +1,5 @@
 #include "core/Content.h"
+#include "core/ScenarioSystem.h"
 #include "core/ExpeditionPersistence.h"
 #include "core/ExpeditionSystem.h"
 #include "core/LaunchSimulation.h"
@@ -24,6 +25,24 @@ void check(bool condition, const char *message)
 void persistentExpeditionTests()
 {
     using namespace rocket;
+    {
+        const auto catalog = createDefaultContent();
+        auto state = createNewGame(catalog, 776);
+        performScenarioAction(state,catalog,content::scenario::lunarProspector,"briefing",ScenarioActionKind::AcknowledgeBriefing);
+        recordScenarioEvent(state,catalog,{ScenarioEventKind::SafeMaterialDelivered,
+            content::scenario::lunarProspector,"delivery","moon","common",20,0});
+        check(state.meta.ownedDroneIds.empty(), "Ore delivery must not grant the Prospector");
+        recordScenarioEvent(state,catalog,{ScenarioEventKind::ProtectedObjectiveExtracted,
+            content::scenario::lunarProspector,"anomaly","moon",content::miningSite::lunarAnomalyCrevice,1,0});
+        performScenarioAction(state,catalog,content::scenario::lunarProspector,"anomaly",ScenarioActionKind::ClaimReward);
+        check(state.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
+            "First artifact recovery must grant and equip the Prospector");
+        check(!state.incomingMessages.pending.empty() && state.incomingMessages.pending.back().messageId=="prospector_unlocked",
+            "Prospector reward must introduce the helper with an incoming message");
+        performScenarioAction(state,catalog,content::scenario::lunarProspector,"anomaly",ScenarioActionKind::ClaimReward);
+        check(state.meta.equippedDroneIds.size()==1,"Repeated recovery must not duplicate the Prospector");
+    }
+
     {
         const auto catalog = createDefaultContent();
         auto fixture = [&]() {
@@ -498,7 +517,7 @@ void persistentExpeditionTests()
                 const double range = std::hypot(dx,dy), speed = std::hypot(p.velocity.x,p.velocity.y);
                 if (range < .08 && speed < .08) return true;
                 const auto gravity = integrateSystemCoast({p.position.x,p.position.y,0,0}, .001, solar);
-                const double clock = expedition.location.frame == CoordinateFrame::System ? 1.0 : flightScaleProfile(ship).timeScale;
+                const double clock = systemFlightTimeScale(solar, p.position);
                 // Bound transfer speed so the fixture can turn and brake before
                 // crossing a local gravity fade. This is test piloting only.
                 const double desiredSpeed = std::min(.15, range*.25);
@@ -512,7 +531,7 @@ void persistentExpeditionTests()
                 if (advanceExpeditionFlight(expedition,ship,model,expeditionEnvironment(journey,catalog),solar,manual,.05).failed)
                     throw std::runtime_error("Pilot toward " + std::to_string(destination.x) + "," + std::to_string(destination.y) + " failed cause " + std::to_string(static_cast<int>(ship.failureCause)) + " fuel " + std::to_string(ship.fuelRemaining) + " at " + std::to_string(p.position.x) + "," + std::to_string(p.position.y) + " heading " + std::to_string(ship.heading) + " demand " + std::to_string(manual.throttle));
             }
-            throw std::runtime_error("Pilot timed out at " + std::to_string(ship.positionX) + "," + std::to_string(ship.positionY) + " fuel " + std::to_string(ship.fuelRemaining));
+            throw std::runtime_error("Pilot toward " + std::to_string(destination.x) + "," + std::to_string(destination.y) + " timed out at " + std::to_string(ship.positionX) + "," + std::to_string(ship.positionY) + " fuel " + std::to_string(ship.fuelRemaining));
         };
         check(pilotTo(target), "Starter ship must physically reach lunar approach using ordinary controls");
         check(expedition.location.bodyId == "moon", "Actual lunar encounter must change frame");

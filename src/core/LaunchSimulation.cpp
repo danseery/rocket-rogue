@@ -754,17 +754,12 @@ LaunchFlightStep updateSpaceFlight(
         0.0,
         1.0);
     FlightScaleProfile scaleProfile = systemFrame ? FlightScaleProfile{} : flightScaleProfile(flight);
-    if (system && location && (systemFrame || (body && body->id == "earth"))) {
-        if (const auto* earth = systemBody(*system, "earth")) {
-            const double x = flight.positionX + (body ? body->position.x : 0.0);
-            const double y = flight.positionY + (body ? body->position.y : 0.0);
-            const double radius = std::hypot(x-earth->position.x, y-earth->position.y);
-            // Reach normal travel timing before leaving Earth's encounter frame.
-            // Position-based easing also gives forecasts and return flights the same clock.
-            const double t = std::clamp((radius / earth->influenceRadius - .60) / .50, 0.0, 1.0);
-            const double blend = t*t*t*(t*(t*6.0-15.0)+10.0);
-            scaleProfile.timeScale = std::lerp(.4, 1.0, blend);
-        }
+    if (system && location) {
+        const double x = flight.positionX + (body ? body->position.x : 0.0);
+        const double y = flight.positionY + (body ? body->position.y : 0.0);
+        // A shared distance-based clock remains continuous across every
+        // body/system frame boundary, including outward Moon departure.
+        scaleProfile.timeScale = systemFlightTimeScale(*system, {x, y});
     }
     (void)currentTravelProgress;
     const double worldDt = realDt * scaleProfile.timeScale;

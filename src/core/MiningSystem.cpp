@@ -3952,13 +3952,14 @@ void setupMiningGate(
     const bool entryCentered = siteDefinition != nullptr &&
         siteDefinition->objectivePlacement == MiningSiteObjectivePlacement::EntryCentered;
     const bool centeredArtifactGate = entryCentered || !definition.endurancePlacement;
+    const int objectiveOffsetX = siteDefinition == nullptr ? 0 : siteDefinition->objectiveHorizontalOffset;
     const int anchorX = progressionPlacement != nullptr
         ? std::clamp(
-            mining.terrain.width / 2 + progressionPlacement->horizontalOffset,
+            mining.terrain.width / 2 + progressionPlacement->horizontalOffset + objectiveOffsetX,
             4,
             mining.terrain.width - 5)
         : centeredArtifactGate
-        ? std::clamp(mining.terrain.width / 2, 4, mining.terrain.width - 5)
+        ? std::clamp(mining.terrain.width / 2 + objectiveOffsetX, 4, mining.terrain.width - 5)
         : std::clamp(mining.terrain.width * 4 / 5, 8, mining.terrain.width - 6);
     const int anchorY = progressionPlacement != nullptr
         ? std::clamp(
