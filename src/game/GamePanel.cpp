@@ -20,7 +20,6 @@
 #include "core/ResearchSystem.h"
 #include "core/ScenarioSystem.h"
 #include "core/ShipPresentation.h"
-#include "core/SurfaceScanPresentation.h"
 #include "core/Tuning.h"
 #include "core/GameUi.h"
 
@@ -109,12 +108,8 @@ FlightInstrumentPresentation flightInstrumentsForContext(const PanelRenderContex
     if (context.state.screen == Screen::Flight && context.flightArmed && context.launchFlight != nullptr) {
         return launchFlightInstruments(context.flightModel, *context.launchFlight);
     }
-    if (context.state.screen == Screen::Flyby) {
-        return flybyFlightInstruments(context.state.run.approach.flyby);
-    }
-    if (context.state.screen == Screen::Orbit) {
-        return orbitFlightInstruments(context.state.run.approach.orbit);
-    }
+
+
     return {};
 }
 
@@ -282,20 +277,12 @@ std::string phaseTitle(Screen screen)
         return "Arrival";
     case Screen::ArrivalOps:
         return "Approach";
-    case Screen::Flyby:
-        return "Flyby";
-    case Screen::Orbit:
-        return "Orbit";
     case Screen::Research:
         return "Research (Debug)";
     case Screen::SurfaceExpedition:
         return "Surface Ops";
     case Screen::SurfaceUpgrade:
         return "Level Up";
-    case Screen::SurfaceScan:
-        return "Planet Scan";
-    case Screen::SurfacePush:
-        return std::string(text::buttons::pushDeeper);
     case Screen::Mining:
         return "Mining";
     case Screen::DroneOps:
@@ -381,7 +368,8 @@ bool scenarioClaimQueuesRoute(
     const ContentCatalog& catalog,
     const ScenarioObjectivePresentation& objective)
 {
-    if (!objective.available || objective.action != ScenarioActionKind::ClaimReward) {
+    if (!objective.available || (objective.action != ScenarioActionKind::ClaimReward &&
+        objective.action != ScenarioActionKind::AcknowledgeBriefing)) {
         return false;
     }
     const ScenarioDefinition* definition = scenarioDefinitionForRuntimeId(
@@ -489,7 +477,7 @@ void collectSharedUtilityModals()
         "<div><strong>Menus</strong><span>Left stick or D-pad navigates. South selects. East goes back. Right stick scrolls.</span></div>"
         "<div><strong>Shortcuts</strong><span>Menu opens this pause menu. View opens Map. North opens Inventory outside real-time play.</span></div>"
         "<div><strong>Launch</strong><span>Left stick steers and changes throttle. South turns around. West turns engines off or on.</span></div>"
-        "<div><strong>Flight</strong><span>Left stick steers. Hold East to abort Flyby or Orbit. During Scan or Push, tap East to log or bank; hold East to abort.</span></div>"
+        "<div><strong>Flight</strong><span>Left stick steers. Apply thrust to change course; coast to conserve fuel.</span></div>"
         "<div><strong>Mining rig</strong><span>Left stick moves. Right trigger drills. West scans. North tethers. Tap South to stow cargo or leave; hold South for 0.6 seconds to exit.</span></div>"
         "<div><strong>Jetpack EVA</strong><span>Left stick thrusts. Right stick aims. Right trigger fires. Left trigger drills. West scans. North tethers. Hold South for 0.6 seconds to enter.</span></div>"
         "</div>";
@@ -701,22 +689,22 @@ std::string miningSupportTileValue(const MiningRunState& mining)
             const double duration = tuning::mining::miningDroneWorkSeconds(drone.upgradeLevel, material);
             return std::string(drone.finishTargetBeforeReturn ? "FINISHING ORE • RETURN PENDING " : "MINING ") +
                 display::percent(std::clamp(drone.taskProgressSeconds / std::max(0.01, duration), 0.0, 1.0)) +
-                " â¢ ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
+                " • ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
         }
         if (drone.behavior == MiningMiniDroneBehavior::DeliveringToShip) {
-            return "RETURNING TO SHIP â¢ ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
+            return "RETURNING TO SHIP • ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
         }
         if (drone.behavior == MiningMiniDroneBehavior::ReturningFromShip) {
-            return "RETURNING TO RIG â¢ ORE 0/" + std::to_string(capacity);
+            return "RETURNING TO RIG • ORE 0/" + std::to_string(capacity);
         }
         if (drone.behavior == MiningMiniDroneBehavior::RecoveringToRig) {
-            return "SAFE RECALLING TO RIG â¢ ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
+            return "SAFE RECALLING TO RIG • ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
         }
         if (drone.behavior == MiningMiniDroneBehavior::Returning) {
-            return "RETURNING TO RIG â¢ ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
+            return "RETURNING TO RIG • ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
         }
         if (ore > 0 && drone.targetCellX < 0) {
-            return "NO REACHABLE ORE â¢ ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
+            return "NO REACHABLE ORE • ORE " + std::to_string(ore) + "/" + std::to_string(capacity);
         }
     }
     std::vector<std::pair<int, int>> activeTargets;
@@ -1072,316 +1060,6 @@ std::string activityIntroductionModal(
 // Superseded campaign-only presentation. ScenarioObjectivePresentation below
 // is the sole live presentation path; retain this source block temporarily so
 // old save migration diagnostics can be compared while v9 lands.
-#if 0
-bool prospectorCompletionPending(const GameState& state)
-{
-    return canClaimLunarProspector(state);
-}
-
-std::string prospectorCompletionModal(const GameState& state)
-{
-    if (!prospectorCompletionPending(state)) {
-        return {};
-    }
-
-    std::ostringstream body;
-    body << "<section class=\"activity-introduction modal-body\">"
-        << "<span class=\"activity-introduction-kicker\">READY TO CLAIM // MOON</span>"
-        << "<p class=\"activity-introduction-setup\">"
-        << tuning::research::prospectorCommonOreGoal
-        << " gray-seamed Common Ore samples are delivered and reserved for fabrication.</p>"
-        << "<div class=\"activity-introduction-payoff\"><span>Prospector Mk I</span><strong>"
-        << "Install your first Support Drone and bring Support Drone Slot 1 online."
-        << "</strong></div><div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
-        << button("Confirm Ore Delivery", ui::actions::claimLunarProspector, "ok", true)
-        << "</div></section>";
-    return autoModalTemplate(
-        ui::modals::prospectorCompletion,
-        "LUNAR CONTRACT COMPLETE",
-        body.str(),
-        false);
-}
-
-std::string marsBayCompletionModal(const GameState& state)
-{
-    if (!canClaimMarsBayExpansion(state)) {
-        return {};
-    }
-
-    std::ostringstream body;
-    body << "<section class=\"activity-introduction modal-body\">"
-        << "<span class=\"activity-introduction-kicker\">READY TO CLAIM // MARS</span>"
-        << "<p class=\"activity-introduction-setup\">"
-        << tuning::research::marsBayCommonOreGoal
-        << " local Common Ore samples are delivered and reserved for the bay frame.</p>"
-        << "<div class=\"activity-introduction-payoff\"><span>Support Drone Slot 2</span><strong>"
-        << "Fabricate one empty specialist slot. No duplicate drone will be assigned."
-        << "</strong></div><div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
-        << button("Fabricate Drone Bay Slot 2", ui::actions::claimMarsBayExpansion, "ok", true)
-        << "</div></section>";
-    return autoModalTemplate(
-        ui::modals::marsBayCompletion,
-        "MARS EXPANSION READY",
-        body.str(),
-        false);
-}
-
-std::string lunarMiningBriefingModal(const GameState& state)
-{
-    const CampaignObjectiveStatus status = campaignObjectiveStatus(state, CampaignObjectiveId::LunarProspector);
-    if (status.state == CampaignObjectiveState::Complete || status.briefingAcknowledged) {
-        return {};
-    }
-
-    std::ostringstream body;
-    body << "<section class=\"activity-introduction modal-body campaign-briefing\">"
-        << "<span class=\"activity-introduction-kicker\">MANDATORY DIRECTIVE // MOON</span>"
-        << "<p class=\"activity-introduction-setup\">Most lunar regolith is inert. Recover "
-        << tuning::research::prospectorCommonOreGoal
-        << " gray-seamed Common Ore deposits and return them safely.</p>"
-        << "<div class=\"activity-introduction-payoff\"><span>Visual identification</span><strong>"
-        << "Plain dirt yields nothing. Common Ore uses a silver seam, gray shimmer, and hex marker."
-        << "</strong></div><div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
-        << button("Accept Contract", ui::actions::acknowledgeLunarMiningBriefing, "ok", true)
-        << "</div></section>";
-    return autoModalTemplate(
-        ui::modals::lunarMiningBriefing,
-        "LUNAR PROSPECTOR CONTRACT",
-        body.str(),
-        false);
-}
-
-std::string marsMiningBriefingModal(const GameState& state)
-{
-    const CampaignObjectiveStatus status = campaignObjectiveStatus(state, CampaignObjectiveId::MarsBayExpansion);
-    if (status.state == CampaignObjectiveState::Complete || status.briefingAcknowledged) {
-        return {};
-    }
-
-    std::ostringstream body;
-    body << "<section class=\"activity-introduction modal-body campaign-briefing\">"
-        << "<span class=\"activity-introduction-kicker\">MANDATORY DIRECTIVE // MARS</span>"
-        << "<p class=\"activity-introduction-setup\">Local material can support a second specialist bay. Recover "
-        << tuning::research::marsBayCommonOreGoal
-        << " Martian Common Ore and extract it safely.</p>"
-        << "<div class=\"activity-introduction-payoff\"><span>Support Drone Slot 2</span><strong>"
-        << "Oxygen, drill heat, integrity, repairs, and the return decision are now live. The completed bay starts empty so you can choose the next specialist."
-        << "</strong></div><div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
-        << button("Accept Contract", ui::actions::acknowledgeMarsMiningBriefing, "ok", true)
-        << "</div></section>";
-    return autoModalTemplate(
-        ui::modals::marsMiningBriefing,
-        "MARS BAY EXPANSION",
-        body.str(),
-        false);
-}
-
-std::string ioVolcanicBriefingModal(const GameState& state)
-{
-    const CampaignObjectiveStatus status = campaignObjectiveStatus(state, CampaignObjectiveId::IoVolcanicDescent);
-    if (status.state == CampaignObjectiveState::Complete || state.meta.ioHazardDroneCommissioned) {
-        return {};
-    }
-
-    std::ostringstream body;
-    body << "<section class=\"activity-introduction modal-body campaign-briefing\">"
-        << "<span class=\"activity-introduction-kicker\">MANDATORY DIRECTIVE // IO, JUPITER SYSTEM</span>"
-        << "<p class=\"activity-introduction-setup\">Io's regolith is barren. Ore survives only inside lava seams, and untreated lava cannot be drilled safely.</p>"
-        << "<div class=\"activity-introduction-payoff\"><span>Hazard Drone Mk I</span><strong>"
-        << "Commission this permanent Support Drone to cool each lava seal into gray Common Ore."
-        << "</strong></div><div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
-        << button("Commission Hazard Drone", ui::actions::commissionIoHazardDrone, "ok", true)
-        << "</div></section>";
-    return autoModalTemplate(
-        ui::modals::ioVolcanicBriefing,
-        "IO VOLCANIC DESCENT",
-        body.str(),
-        false);
-}
-
-std::string saturnSlingshotBriefingModal(const GameState& state)
-{
-    const CampaignObjectiveStatus status = campaignObjectiveStatus(state, CampaignObjectiveId::SaturnSlingshot);
-    if (status.state == CampaignObjectiveState::Complete
-        || status.briefingAcknowledged
-        || !state.meta.ioArtifactRecovered) {
-        return {};
-    }
-
-    std::ostringstream body;
-    body << "<section class=\"activity-introduction modal-body campaign-briefing\">"
-        << "<span class=\"activity-introduction-kicker\">MANDATORY DIRECTIVE // JUPITER DEPARTURE</span>"
-        << "<p class=\"activity-introduction-setup\">Saturn is beyond normal transfer range. Only a Perfect pass through the gold corridor opens the route.</p>"
-        << "<div class=\"activity-introduction-payoff\"><span>Point of no return</span><strong>"
-        << "Locking Saturn commits the expedition outward. The inner system will no longer be reachable."
-        << "</strong></div><div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
-        << button("Begin Slingshot Run", ui::actions::beginSaturnSlingshot, "warn", true)
-        << "</div></section>";
-    return autoModalTemplate(
-        ui::modals::saturnSlingshotBriefing,
-        "SATURN SLINGSHOT REQUIRED",
-        body.str(),
-        false);
-}
-
-std::string saturnSlingshotFailureModal(const GameState& state)
-{
-    const bool completedFailure = state.screen == Screen::Flyby
-        && state.run.approach.flyby.purpose == FlybyPurpose::SaturnSlingshot
-        && state.run.approach.flyby.completed
-        && state.run.approach.flyby.result != FlybyGrade::Perfect;
-    const bool savedFailure = state.screen == Screen::Hangar
-        && state.meta.saturnSlingshotFailed
-        && !state.meta.saturnSlingshotPerfect;
-    if ((!completedFailure && !savedFailure)
-        || state.meta.saturnSlingshotFailureAcknowledged) {
-        return {};
-    }
-
-    std::ostringstream body;
-    body << "<section class=\"activity-introduction modal-body campaign-briefing\">"
-        << "<span class=\"activity-introduction-kicker\">SATURN ROUTE // LOCKED</span>"
-        << "<p class=\"activity-introduction-setup\">INSUFFICIENT SLINGSHOT — Saturn remains locked. Hold the gold corridor for a Perfect pass.</p>"
-        << "<div class=\"activity-introduction-payoff\"><span>Why the transfer failed</span><strong>"
-        << "Only a Perfect pass supplies enough exit energy. Hold the gold corridor from entry through the finish gate."
-        << "</strong></div><div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
-        << button("Retry Perfect Corridor", ui::actions::retrySaturnSlingshot, "warn", true)
-        << button("Return to Hangar", ui::actions::acknowledgeSaturnSlingshotFailure, "ghost")
-        << "</div></section>";
-    return autoModalTemplate(
-        ui::modals::saturnSlingshotFailure,
-        "INSUFFICIENT SLINGSHOT",
-        body.str(),
-        false);
-}
-
-#endif
-
-bool jupiterWindowAvailable(const GameState& state, const ContentCatalog& catalog)
-{
-    if (state.run.expedition.travelInitialized) return false;
-    const TransferAssistDefinition* definition = catalog.findTransferAssist(content::transferAssist::marsJupiter);
-    const Destination* next = nextDestination(state, catalog);
-    return definition != nullptr && next != nullptr &&
-        currentDestination(state, catalog).id == definition->sourceDestinationId &&
-        next->id == definition->targetDestinationId &&
-        scenarioRouteRequirementStatus(state, catalog, *next).satisfied &&
-        (definition->allowedLaunchStages.empty() ||
-         std::find(
-             definition->allowedLaunchStages.begin(),
-             definition->allowedLaunchStages.end(),
-             state.meta.launchLessons.stage) != definition->allowedLaunchStages.end());
-}
-
-std::string jupiterWindowModal(const GameState& state, const ContentCatalog& catalog)
-{
-    if (!jupiterWindowAvailable(state, catalog)) {
-        return {};
-    }
-
-    const bool reviewed = jupiterWindowReviewed(state, catalog);
-    const double tank = launchFuelCapacity(state);
-    const double routeBurn = launchCruiseFuelCostForTier(3);
-    const double tankMargin = tank - routeBurn;
-    const TransferAssistDefinition* definition = catalog.findTransferAssist(content::transferAssist::marsJupiter);
-    const double assistSavings = definition == nullptr ? tuning::flyby::jupiterSlingshotFuelSavings : definition->fuelSavings;
-    const double slingshotBurn = std::max(0.0, routeBurn - assistSavings);
-    const double combinedMargin = tank - slingshotBurn;
-    const PendingTransferAssist* activeAssist = pendingTransferAssistForDestination(state, content::destination::jupiter);
-    const double instabilityPenalty = activeAssist == nullptr ? 0.0 : activeAssist->instabilityPenalty;
-    const bool tanksThreeInstalled =
-        launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3;
-    const ShipModule* fuelTanksThree = catalog.findModule(content::module::fuelTanks3);
-    const int tankCost = fuelTanksThree == nullptr ? 92 : moduleOfferCost(*fuelTanksThree);
-
-    std::ostringstream body;
-    body << "<section class=\"jupiter-window modal-body campaign-briefing\">"
-        << "<span class=\"activity-introduction-kicker\">JUPITER TRANSFER // OPEN OPTIONS</span>"
-        << "<p class=\"activity-introduction-setup\">Create five fuel of transfer margin. Build it into the ship, take it from Mars's gravity, or stack both.</p>"
-        << "<div class=\"jupiter-option-grid controller-choice-row\">"
-        << "<article class=\"jupiter-option-card\"><span>PERMANENT ENGINEERING</span><h3>FUEL TANKS III</h3>"
-        << "<p>" << (tanksThreeInstalled
-            ? "Transfer Tank capacity is 25. The permanent engineering margin is installed; the Jupiter burn remains "
-            : "Increase the Transfer Tank from 20 to 25. The Jupiter burn remains ")
-        << display::fixed(routeBurn, 0) << ".</p>"
-        << "<strong>" << (tanksThreeInstalled
-            ? "INSTALLED // +5 permanent capacity // No flight risk"
-            : std::to_string(tankCost) + " credits // +5 permanent capacity // No flight risk")
-        << "</strong></article>"
-        << "<article class=\"jupiter-option-card\"><span>PRESS YOUR LUCK</span><h3>MARS SLINGSHOT</h3>"
-        << "<p>A Good pass supplies enough momentum. Perfect keeps the Jupiter transfer stable; Good adds +35% flight instability for that attempt.</p>"
-        << "<strong>" << (activeAssist != nullptr
-            ? "ACTIVE // " + display::fixed(slingshotBurn, 0) + " powered burn // +" +
-                display::percent(activeAssist->speedBoost) + " velocity from finish // " +
-                (instabilityPenalty > 0.0
-                    ? "+" + display::percent(instabilityPenalty) + " instability"
-                    : "Perfect: stable")
-            : "Good required // " + display::fixed(slingshotBurn, 0) +
-                " powered burn // +0–40% velocity from finish speed // Perfect: stable")
-        << "</strong></article>"
-        << "</div><div class=\"jupiter-combined-preview\"><span>STACK BOTH</span><strong>25 tank // 15 burn // 10 margin // +slingshot velocity</strong>"
-        << "<p>Good is enough to depart but adds +35% flight instability. Perfect preserves the same transfer benefit without the penalty.</p>"
-        << "<p>Neither option closes the other. Current hardware margin: "
-        << display::signedFixed(tankMargin, 0) << ". Current combined margin: "
-        << display::signedFixed(combinedMargin, 0) << ".</p></div>"
-        << "<div class=\"modal-actions action-row rr-action-footer jupiter-window-actions\">"
-        << button("Open Refit", ui::actions::openJupiterRefit, "ok", true)
-        << (activeAssist != nullptr
-            ? button("Continue to Jupiter", ui::actions::continueTransferAssist, "warn")
-            : (!reviewed
-                  ? button("Review Options", ui::actions::acknowledgeJupiterWindow, "warn")
-                  : (canStartJupiterSlingshot(state, catalog)
-                        ? button("Begin Mars Slingshot", ui::actions::beginTransferAssist(content::transferAssist::marsJupiter), "warn")
-                        : disabledButton("Mars Slingshot Unavailable"))))
-        << button("Return to Hangar", ui::actions::acknowledgeJupiterWindow, "ghost")
-        << "</div></section>";
-    return reviewed
-        ? modalTemplate(ui::modals::jupiterWindow, "THE JUPITER WINDOW", body.str())
-        : autoModalTemplate(ui::modals::jupiterWindow, "THE JUPITER WINDOW", body.str(), false);
-}
-
-std::string jupiterSlingshotActiveModal(const GameState& state, const ContentCatalog& catalog)
-{
-    const PendingTransferAssist& pending = state.run.pendingTransferAssist;
-    const TransferAssistDefinition* definition = catalog.findTransferAssist(pending.definitionId);
-    const Destination* source = definition == nullptr ? nullptr : catalog.findDestination(definition->sourceDestinationId);
-    const Destination* target = definition == nullptr ? nullptr : catalog.findDestination(definition->targetDestinationId);
-    if (state.screen != Screen::Hangar || definition == nullptr || !pending.active() || source == nullptr ||
-        target == nullptr || currentDestination(state, catalog).id != definition->sourceDestinationId) {
-        return {};
-    }
-    const PendingTransferAssist* activeAssist = &pending;
-    const double tank = launchFuelCapacity(state);
-    const double routeBurn = launchCruiseFuelCostForTier(target->tier);
-    const double poweredBurn = std::max(0.0, routeBurn - activeAssist->fuelSavings);
-    const double margin = tank - poweredBurn;
-    const double instabilityPenalty = activeAssist->instabilityPenalty;
-    std::ostringstream body;
-    body << "<section class=\"activity-introduction modal-body campaign-briefing jupiter-slingshot-active\">"
-        << "<span class=\"activity-introduction-kicker\">SLINGSHOT ACTIVE"
-        << (instabilityPenalty > 0.0 ? " // WILD RIDE" : " // STABLE") << "</span>"
-        << "<p class=\"activity-introduction-setup\">"
-        << (instabilityPenalty > 0.0
-            ? "The Good pass supplied enough " + source->name + " momentum. Its recorded finish lane and outward drift carry into the " + target->name + " flight, and Good adds extra control instability."
-            : "The Perfect pass carries its recorded finish lane and actual " + source->name + " exit velocity into launch without adding grade instability.")
-        << "</p>"
-        << "<div class=\"activity-introduction-payoff\"><span>Transfer underway</span><strong>"
-        << display::fixed(tank, 0) << " tank // " << display::fixed(poweredBurn, 0)
-        << " powered burn // " << display::fixed(margin, 0) << " margin // +"
-        << display::percent(activeAssist->speedBoost) << " velocity from finish // "
-        << (instabilityPenalty > 0.0
-            ? "+" + display::percent(instabilityPenalty) + " flight instability"
-            : "stable flight")
-        << "</strong></div>"
-        << "<div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
-        << button("Continue to " + target->name, ui::actions::continueTransferAssist, "ok", true)
-        << "</div></section>";
-    return autoModalTemplate(
-        ui::modals::jupiterSlingshotActive,
-        "SLINGSHOT ACTIVE",
-        body.str(),
-        false);
-}
 
 std::string scenarioObjectiveStateLabel(ScenarioStepState state)
 {
@@ -1611,236 +1289,6 @@ int scenarioCommonAboard(const GameState& state, std::string_view destinationId)
 // The live objective renderer is content-driven. Keep the former
 // CampaignObjectiveId implementation out of the build while migration tests
 // are being converted; it is not an alternate runtime path.
-#if 0
-struct CampaignObjectivePresentation {
-    CampaignObjectiveId id = CampaignObjectiveId::LunarProspector;
-    CampaignObjectiveState state = CampaignObjectiveState::Locked;
-    std::string location;
-    std::string title;
-    std::string detail;
-    std::string reward;
-    int current = 0;
-    int required = 0;
-    PanelButtonPresentation action;
-};
-
-int campaignCommonAboard(const GameState& state, std::string_view destinationId)
-{
-    const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
-    if (!expedition.active
-        || expedition.destinationId != destinationId
-        || !expedition.bankedMiningArenaValid
-        || !expedition.bankedMiningProgressionEligible) {
-        return 0;
-    }
-    return std::max(
-        0,
-        std::min(
-            expedition.bankedMiningMaterials.common,
-            expedition.temporaryMaterials.common));
-}
-
-int moonCampaignCommonAboard(const GameState& state)
-{
-    return state.meta.lunarProspectorClaimed
-        ? 0
-        : campaignCommonAboard(state, content::destination::moon);
-}
-
-int marsCampaignCommonAboard(const GameState& state)
-{
-    return state.meta.marsBayExpansionClaimed
-        ? 0
-        : campaignCommonAboard(state, content::destination::mars);
-}
-
-std::string campaignObjectiveStateLabel(CampaignObjectiveState state)
-{
-    switch (state) {
-    case CampaignObjectiveState::Active:
-        return "ACTIVE";
-    case CampaignObjectiveState::ReadyToClaim:
-        return "READY TO CLAIM";
-    case CampaignObjectiveState::Complete:
-        return "COMPLETE";
-    case CampaignObjectiveState::Locked:
-    default:
-        return "LOCKED";
-    }
-}
-
-std::string campaignObjectiveStateClass(CampaignObjectiveState state)
-{
-    switch (state) {
-    case CampaignObjectiveState::Active:
-        return "state-active active";
-    case CampaignObjectiveState::ReadyToClaim:
-        return "state-ready ready-to-claim";
-    case CampaignObjectiveState::Complete:
-        return "state-complete complete";
-    case CampaignObjectiveState::Locked:
-    default:
-        return "state-locked locked";
-    }
-}
-
-CampaignObjectivePresentation campaignObjectivePresentation(
-    const GameState& state,
-    CampaignObjectiveId objective)
-{
-    const CampaignObjectiveStatus status = campaignObjectiveStatus(state, objective);
-    CampaignObjectivePresentation presentation;
-    presentation.id = objective;
-    presentation.state = status.state;
-    presentation.current = status.current;
-    presentation.required = status.required;
-
-    switch (objective) {
-    case CampaignObjectiveId::LunarProspector:
-        presentation.location = "MOON";
-        presentation.title = "Lunar Prospector Contract";
-        if (status.state == CampaignObjectiveState::Complete) {
-            presentation.detail = "ORE DELIVERED // RECOVER THE LUNAR ARTIFACT.";
-        } else if (status.state == CampaignObjectiveState::ReadyToClaim) {
-            presentation.detail = std::to_string(status.required) + "/"
-                + std::to_string(status.required)
-                + " DELIVERED // INVESTIGATE THE ANOMALY.";
-        } else {
-            const int commonAboard = moonCampaignCommonAboard(state);
-            presentation.detail = commonAboard > 0
-                ? std::to_string(commonAboard)
-                    + " COMMON ABOARD // RETURN TO EARTH, THEN EXTRACT SAFELY."
-                : "MINE " + std::to_string(status.required)
-                    + " GRAY COMMON, RETURN TO THE SHUTTLE, THEN EXTRACT SAFELY. "
-                      "PLAIN REGOLITH YIELDS NOTHING.";
-        }
-        presentation.reward = "ARTIFACT RECOVERY REWARD // PROSPECTOR MK I + SLOT 1";
-        if (status.state == CampaignObjectiveState::ReadyToClaim) {
-            presentation.action = panelActionButton(
-                "Install Prospector Mk I",
-                ui::actions::claimLunarProspector,
-                "ok");
-        }
-        break;
-    case CampaignObjectiveId::MarsBayExpansion:
-        presentation.location = "MARS";
-        presentation.title = "Bay Expansion";
-        if (status.state == CampaignObjectiveState::Complete) {
-            presentation.detail =
-                "SLOT 2 OPEN // NO SECOND SUPPORT DRONE REQUIRED. THE IO HAZARD DRONE CAN USE IT LATER.";
-        } else if (status.state == CampaignObjectiveState::ReadyToClaim) {
-            presentation.detail = std::to_string(status.required) + "/"
-                + std::to_string(status.required)
-                + " DELIVERED // FABRICATE THE EMPTY SLOT. NO SECOND SUPPORT DRONE IS REQUIRED.";
-        } else {
-            const int commonAboard = marsCampaignCommonAboard(state);
-            presentation.detail = commonAboard > 0
-                ? std::to_string(commonAboard)
-                    + " COMMON ABOARD // RETURN TO SURFACE OPS, THEN EXTRACT SAFELY. "
-                      "NO SECOND SUPPORT DRONE REQUIRED."
-                : "MINE " + std::to_string(status.required)
-                    + " GRAY COMMON, RETURN TO THE SHUTTLE, THEN EXTRACT SAFELY. "
-                      "NO SECOND SUPPORT DRONE REQUIRED.";
-        }
-        presentation.reward = "REWARD // EMPTY SUPPORT DRONE SLOT 2";
-        if (status.state == CampaignObjectiveState::ReadyToClaim) {
-            presentation.action = panelActionButton(
-                "Fabricate Slot 2",
-                ui::actions::claimMarsBayExpansion,
-                "ok");
-        }
-        break;
-    case CampaignObjectiveId::IoVolcanicDescent: {
-        const bool hazardEquipped = std::find(
-            state.meta.equippedDroneIds.begin(),
-            state.meta.equippedDroneIds.end(),
-            content::drone::hazardDrone) != state.meta.equippedDroneIds.end();
-        presentation.location = "IO // JUPITER SYSTEM";
-        presentation.title = "Volcanic Artifact Recovery";
-        presentation.detail = !state.meta.ioHazardDroneCommissioned
-            ? "Commission the Hazard Drone. Io ore exists only inside lava seams."
-            : (!hazardEquipped
-                  ? "ASSIGN HAZARD DRONE: free one slot, then equip it for the Io descent."
-                  : "Cool and drill both lava seals, tow the artifact, then extract safely.");
-        presentation.reward = "REWARD // 75 EXPEDITION XP + OUTER TRANSFER DATA";
-        if (!state.meta.ioHazardDroneCommissioned) {
-            presentation.action = panelActionButton(
-                "Commission Hazard Drone",
-                ui::actions::commissionIoHazardDrone,
-                "warn");
-        }
-        break;
-    }
-    case CampaignObjectiveId::SaturnSlingshot:
-        presentation.location = "JUPITER DEPARTURE";
-        presentation.title = "Perfect Slingshot to Saturn";
-        presentation.detail = state.meta.saturnSlingshotPerfect
-            ? "Perfect corridor recorded. Lock the one-way outer course."
-            : "Hold the gold corridor through the finish. Good is not enough.";
-        presentation.reward = "REWARD // SATURN ROUTE";
-        if (status.state == CampaignObjectiveState::Active && state.meta.ioArtifactRecovered) {
-            presentation.action = panelActionButton(
-                "Begin Slingshot Run",
-                ui::actions::beginSaturnSlingshot,
-                "warn");
-        } else if (status.state == CampaignObjectiveState::ReadyToClaim) {
-            presentation.action = panelActionButton(
-                "Lock Saturn Course",
-                ui::actions::claimSaturnCourse,
-                "ok");
-        }
-        break;
-    }
-    return presentation;
-}
-
-std::string campaignObjectiveMarkup(
-    const CampaignObjectivePresentation& objective,
-    bool showAction = true,
-    bool usePhaseLane = true)
-{
-    std::ostringstream out;
-    out << "<section class=\"objective-strip rr-objective-strip campaign-objective "
-        << (usePhaseLane ? "phase-lane " : "")
-        << campaignObjectiveStateClass(objective.state)
-        << "\" data-campaign-objective=\"" << static_cast<int>(objective.id)
-        << "\" data-objective-state=\"" << campaignObjectiveStateLabel(objective.state) << "\">"
-        << "<div class=\"campaign-objective-head\"><span>" << htmlEscape(objective.location)
-        << "</span><em>" << htmlEscape(campaignObjectiveStateLabel(objective.state)) << "</em></div>"
-        << "<strong>" << htmlEscape(objective.title) << "</strong>";
-    if (objective.required > 0) {
-        out << "<div class=\"campaign-progress\" aria-label=\""
-            << htmlEscape(std::to_string(objective.current) + " of " + std::to_string(objective.required))
-            << "\">";
-        for (int index = 0; index < objective.required; ++index) {
-            out << "<i class=\"" << (index < objective.current ? "is-filled" : "") << "\"></i>";
-        }
-        out << "<b>" << std::clamp(objective.current, 0, objective.required) << "/"
-            << objective.required << "</b></div>";
-    }
-    out << "<p>" << htmlEscape(objective.detail) << "</p>"
-        << "<div class=\"campaign-objective-foot\"><small>" << htmlEscape(objective.reward) << "</small>";
-    if (showAction && !objective.action.actionId.empty()) {
-        out << panelButton(objective.action);
-    }
-    out << "</div></section>";
-    return out.str();
-}
-
-CampaignObjectiveId objectiveForFrontier(const GameState& state, const ContentCatalog& catalog)
-{
-    const std::string& destinationId = currentDestination(state, catalog).id;
-    if (destinationId == content::destination::mars) {
-        return CampaignObjectiveId::MarsBayExpansion;
-    }
-    if (destinationId == content::destination::jupiter) {
-        return state.meta.ioArtifactRecovered
-            ? CampaignObjectiveId::SaturnSlingshot
-            : CampaignObjectiveId::IoVolcanicDescent;
-    }
-    return CampaignObjectiveId::LunarProspector;
-}
-#endif
 
 std::string scenarioProgressTargetLabel(const ScenarioObjectivePresentation& presentation)
 {
@@ -1982,88 +1430,6 @@ MiningCocoonHudLayout miningCocoonHudLayout(const MiningGateRuntime& gate)
     return {.routeTop = std::max(60, displayHeight + 12)};
 }
 
-std::string flybyZoneLabel(int zone)
-{
-    if (zone >= 2) {
-        return "PERFECT";
-    }
-    if (zone == 1) {
-        return "GOOD";
-    }
-    return "MISS";
-}
-
-std::string flybyGradeLabel(FlybyGrade grade)
-{
-    switch (grade) {
-    case FlybyGrade::Perfect:
-        return "PERFECT SLINGSHOT";
-    case FlybyGrade::Good:
-        return "CLEAN FLYBY";
-    case FlybyGrade::Miss:
-        return "MISSED WINDOW";
-    case FlybyGrade::Active:
-    default:
-        return "FLYBY ACTIVE";
-    }
-}
-
-std::string orbitZoneLabel(int zone)
-{
-    if (zone >= 2) {
-        return "PERFECT";
-    }
-    if (zone == 1) {
-        return "GOOD";
-    }
-    return "MISS";
-}
-
-std::string orbitGradeLabel(OrbitGrade grade)
-{
-    switch (grade) {
-    case OrbitGrade::Perfect:
-        return "PERFECT ORBIT";
-    case OrbitGrade::Good:
-        return "STABLE ORBIT";
-    case OrbitGrade::Miss:
-        return "MISSED ORBIT";
-    case OrbitGrade::Active:
-    default:
-        return "ORBIT ACTIVE";
-    }
-}
-
-std::string orbitResultBody(OrbitGrade grade)
-{
-    switch (grade) {
-    case OrbitGrade::Perfect:
-        return "Deliberate trim held the Perfect band. Orbit is captured; Pass Through is closed.";
-    case OrbitGrade::Good:
-        return "The stable capture solution held. Orbit is captured; Pass Through is closed.";
-    case OrbitGrade::Miss:
-        return "The capture did not complete. No Research Data was validated and the approach remains uncommitted.";
-    case OrbitGrade::Active:
-    default:
-        return "Complete one full loop before the insertion timer expires.";
-    }
-}
-
-std::string flybyResultBody(FlybyGrade grade)
-{
-    switch (grade) {
-    case FlybyGrade::Perfect:
-        return "Planet skipped. Research Data and a next-launch fuel and speed solution were secured.";
-    case FlybyGrade::Good:
-        return "Planet skipped. Research Data was secured and this visit is over.";
-    case FlybyGrade::Miss:
-        return "No Research Data was validated. The approach remains uncommitted.";
-    case FlybyGrade::Active:
-    default:
-        return "Hold the corridor until the timer expires.";
-    }
-}
-
 std::string researchDataMilestoneLabel(int progress)
 {
     for (const tuning::unlocks::BlueprintUnlock& milestone : tuning::unlocks::blueprintUnlocks) {
@@ -2117,37 +1483,6 @@ const tuning::unlocks::BlueprintUnlock* pendingResearchBreakthrough(const GameSt
         }
     }
     return nullptr;
-}
-
-double flybySlingshotScale(const FlybyRunState& flyby)
-{
-    const double speed = std::hypot(flyby.velocityX, flyby.velocityY);
-    const double baselineSpeed = std::hypot(tuning::flyby::startVelocityX, tuning::flyby::startVelocityY);
-    const double range = std::max(0.001, tuning::flyby::maxSpeed - baselineSpeed);
-    const double fastShare = std::clamp((speed - baselineSpeed) / range, 0.0, 1.0);
-    return 1.0 + fastShare * (tuning::flyby::slingshotMaxSpeedScale - 1.0);
-}
-
-double flybySlingshotSpeedBoost(
-    const FlybyRunState& flyby,
-    double maximumBaseBoost)
-{
-    const double speed = std::hypot(flyby.velocityX, flyby.velocityY);
-    const double range = std::max(
-        0.001,
-        tuning::flyby::maxSpeed - tuning::flyby::minSpeed);
-    const double speedShare = std::clamp(
-        (speed - tuning::flyby::minSpeed) / range,
-        0.0,
-        1.0);
-    return std::max(0.0, maximumBaseBoost) *
-        tuning::flyby::slingshotMaxSpeedScale * speedShare;
-}
-
-std::string flybySpeedLabel(const FlybyRunState& flyby)
-{
-    const double speed = std::hypot(flyby.velocityX, flyby.velocityY);
-    return display::fixed(speed * 100.0, 0) + " m/s";
 }
 
 std::string rarityCardClass(std::string_view rarity)
@@ -2363,42 +1698,6 @@ std::vector<PanelMetricPresentation> materialRewardChips(const MaterialInventory
     return chips;
 }
 
-std::string surfaceMiniGamePanel(
-    std::string_view cssClass,
-    std::string_view title,
-    std::string_view subtitle,
-    const std::vector<PanelMetricPresentation>& metrics,
-    const std::vector<PanelMetricPresentation>& rewards,
-    std::string_view statusTitle,
-    std::string_view statusDetail,
-    const std::vector<PanelButtonPresentation>& actions)
-{
-    std::ostringstream out;
-    out << "<section class=\"surface-minigame " << htmlEscape(cssClass) << "\">";
-    out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(title)
-        << "</h2><p>" << htmlEscape(subtitle) << "</p></div>"
-        << "<div class=\"utility-row compact-tools utility-actions\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
-        << "</div></div>";
-    out << "<div class=\"minigame-readout\"><div class=\"minigame-metrics\">";
-    for (std::size_t index = 0; index < metrics.size(); index += 2) {
-        out << "<div class=\"minigame-metric-row\">";
-        out << metric(metrics[index].label, metrics[index].value);
-        if (index + 1 < metrics.size()) {
-            out << metric(metrics[index + 1].label, metrics[index + 1].value);
-        }
-        out << "</div>";
-    }
-    out << "</div><div class=\"stat-grid minigame-rewards\">" << resourceChipGrid(rewards) << "</div></div>";
-    out << "<article class=\"resource-bank minigame-callout\"><div><h2>" << htmlEscape(statusTitle)
-        << "</h2><p>" << htmlEscape(statusDetail) << "</p></div></article>";
-    out << "<div class=\"actions action-row minigame-actions\">";
-    for (const PanelButtonPresentation& action : actions) {
-        out << panelButton(action);
-    }
-    out << "</div></section>";
-    return out.str();
-}
-
 std::string arrivalOperationCard(
     std::string_view title,
     std::string_view detail,
@@ -2554,11 +1853,7 @@ std::string phaseBoardOpen(
     }
     out += " class=\"phase-board " + htmlEscape(cssClass) + "\"";
     if (fullPanel) {
-        const bool activeSurfaceMinigame = cssClass.find("phase-board-scan") != std::string_view::npos
-            || cssClass.find("phase-board-push") != std::string_view::npos;
-        out += activeSurfaceMinigame
-            ? " data-panel-mode=\"phase-board\""
-            : " data-panel-mode=\"workspace\"";
+        out += " data-panel-mode=\"workspace\"";
     }
     out += ">";
     return out;
@@ -2763,28 +2058,11 @@ std::pair<std::string, std::string> launchLessonHangarObjective(
         if (!hasUnlock(state.meta, content::unlock::routeJupiter)) {
             return {"Complete Mars Bay Expansion", "Finish the Mars contract to reveal the Jupiter route."};
         }
-        if (!jupiterTransferMarginReady(state)) {
-            return {
-                "Create 5 fuel of Jupiter transfer margin",
-                "Install Fuel Tanks III, fly a Good-or-better Mars slingshot, or stack both. Perfect avoids the slingshot's instability penalty."};
-        }
-        return {
-            "Reach Jupiter",
-            pendingTransferAssistForDestination(state, content::destination::jupiter) != nullptr
-                ? "Mars gravity is carrying the ship outward. Continue through the asteroid gaps."
-                : "Fuel Tanks III supplies permanent margin. The optional Mars slingshot still stacks."};
+        return jupiterTransferMarginReady(state)
+            ? std::pair<std::string, std::string>{"Reach Jupiter", "Fuel Tanks III is ready."}
+            : std::pair<std::string, std::string>{"Prepare for Jupiter", "Install Fuel Tanks III."};
     case LaunchTrainingStage::JupiterTransfer:
-        return launchMissionReady(state)
-            ? std::pair<std::string, std::string>{
-                  "Reach Jupiter",
-                  pendingTransferAssistForDestination(state, content::destination::jupiter) != nullptr
-                      ? (pendingLaunchInstabilityPenalty(state) > 0.0
-                            ? "Good Mars slingshot active: +35% flight instability. Fuel Tanks III remains optional and stacks."
-                            : "Perfect Mars slingshot active: stable flight. Fuel Tanks III remains optional and stacks.")
-                      : "Fuel Tanks III is ready. A Good-or-better Mars slingshot remains optional and stacks."}
-            : std::pair<std::string, std::string>{
-                  "Create 5 fuel of Jupiter transfer margin",
-                  "Install Fuel Tanks III, fly a Good-or-better Mars slingshot, or stack both."};
+        return {"Reach Jupiter", "Use the flight controls to approach Jupiter."};
     case LaunchTrainingStage::Complete:
         return {"Prepare the next flight", "Current destination: " + target.name};
     }
@@ -2822,9 +2100,7 @@ std::string compactHeaderObjective(
     case Screen::Navigation:
         return "Choose the next destination";
     case Screen::ArrivalOps:
-        return state.run.approach.rewards.orbitAwarded
-            ? "ORBIT CAPTURED // CHOOSE NEXT ACTION"
-            : "APPROACH UNCOMMITTED // CHOOSE ONE PATH";
+        return "Resume physical flight";
     default:
         return state.statusLine;
     }
@@ -3095,34 +2371,6 @@ std::string solarMapBody(const PanelRenderContext& context)
         : " data-scenario-id=\"" + htmlEscape(nextRoute.scenarioId)
             + "\" data-scenario-step-id=\"" + htmlEscape(nextRoute.stepId)
             + "\" data-objective-state=\"LOCKED\"";
-#if 0 // Superseded fixed campaign checklist; scenarioCampaignTrack is content-driven.
-    const std::string saturnConnector = state.meta.saturnRouteUnlocked
-        ? "ROUTE OPEN"
-        : (state.meta.saturnSlingshotPerfect
-              ? "SLINGSHOT READY"
-              : "LOCKED — PERFECT IO FLYBY");
-    std::string ioChecklist;
-    if (state.meta.ioArtifactRecovered) {
-        ioChecklist = "[DONE] HAZARD / 4+4 SEALS / SAFE EXTRACTION";
-    } else if (!state.meta.ioHazardDroneCommissioned) {
-        ioChecklist = "[ ] COMMISSION HAZARD DRONE";
-    } else if (state.screen == Screen::Mining
-        && state.run.mining.destinationId == content::destination::jupiter) {
-        const MiningGateRuntime& gate = state.run.mining.gate;
-        const int outerCleared = std::clamp(
-            gate.outerShellTilesTotal - gate.outerShellTilesRemaining,
-            0,
-            4);
-        const int innerCleared = std::clamp(
-            gate.innerShellTilesTotal - gate.innerShellTilesRemaining,
-            0,
-            4);
-        ioChecklist = "[DONE] HAZARD / OUTER " + std::to_string(outerCleared) +
-            "/4 / INNER " + std::to_string(innerCleared) + "/4 / [ ] EXTRACT";
-    } else {
-        ioChecklist = "[DONE] HAZARD / [ ] OUTER 0/4 / [LOCKED] INNER / [ ] EXTRACT";
-    }
-#endif
     const int exploredWorlds = 1
         + (moonExplored ? 1 : 0)
         + (marsExplored ? 1 : 0)
@@ -3147,16 +2395,6 @@ std::string solarMapBody(const PanelRenderContext& context)
         << htmlEscape(nextRoute.detail) << "</strong></div></div>"
         << "<div class=\"solar-map-campaign-track\">"
         << scenarioCampaignTrack(state, catalog)
-#if 0 // Superseded fixed campaign checklist; scenarioCampaignTrack is content-driven.
-        << "<div class=\"" << (state.meta.lunarProspectorClaimed ? "is-complete" : "is-active")
-        << "\"><span>MOON</span><strong>" << (state.meta.lunarProspectorClaimed ? "✓ SLOT 1" : "○ ORE → SLOT 1") << "</strong></div>"
-        << "<div class=\"" << (state.meta.marsBayExpansionClaimed ? "is-complete" : (state.meta.lunarProspectorClaimed ? "is-active" : "is-locked"))
-        << "\"><span>MARS</span><strong>" << (state.meta.marsBayExpansionClaimed ? "✓ SLOT 2" : "○ ORE → SLOT 2") << "</strong></div>"
-        << "<div class=\"" << (state.meta.ioArtifactRecovered ? "is-complete" : (state.meta.marsBayExpansionClaimed ? "is-active" : "is-locked"))
-        << "\"><span>IO // JUPITER SYSTEM</span><strong>" << htmlEscape(ioChecklist) << "</strong></div>"
-        << "<div class=\"" << (state.meta.saturnRouteUnlocked ? "is-complete" : (state.meta.ioArtifactRecovered ? "is-active" : "is-locked"))
-        << "\"><span>SATURN</span><strong>" << (state.meta.saturnRouteUnlocked ? "✓ ROUTE OPEN" : "○ PERFECT FLYBY") << "</strong></div>"
-#endif
         << "</div>"
         << "<div class=\"solar-map-section solar-map-system\"><div class=\"solar-map-section-head\"><h3>System bodies</h3><span>Inner system to heliopause</span></div>"
         << "<div class=\"solar-system-track\">"
@@ -3307,7 +2545,7 @@ std::string buildGamePanelMarkup(
         << "<option value=\"0.25\">25%</option><option value=\"0.30\">30%</option><option value=\"0.35\">35%</option>"
         << "</select></label></section>";
     settingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Invert flight Y") << "</h3>"
-        << "<p>" << htmlEscape("Reverse vertical stick input during flyby and orbit flight.") << "</p></div>"
+        << "<p>" << htmlEscape("Reverse vertical stick input during flight.") << "</p></div>"
         << "<button class=\"settings-toggle rr-text-button\" data-controller-invert-toggle=\"1\" data-ui-focus-id=\"setting:controller_invert\"><span class=\"rr-button-label\">Enable inverted Y</span></button></section>";
     settingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Confirm / cancel") << "</h3>"
         << "<p>" << htmlEscape("Swap the positional South and East buttons for menu confirm and cancel.") << "</p></div>"
@@ -3461,7 +2699,7 @@ std::string buildGamePanelMarkup(
         << "\"><div class=\"panel-title\"><span class=\"game-mark\">" << htmlEscape(text::panel::title)
         << "</span><h1>" << htmlEscape(phaseTitle(state.screen)) << "</h1></div>"
         << "<div class=\"panel-head-actions\">";
-    if (state.screen != Screen::ArrivalOps && state.screen != Screen::Mining &&
+    if (state.screen != Screen::Mining &&
         !context.surfaceArrivalActive && !surfaceDescentForContext(context)) {
         out << modalButton("Map", ui::modals::map, "ghost")
             << modalButton("Inventory", ui::modals::inventory, "ghost");
@@ -3539,311 +2777,6 @@ std::string buildGamePanelMarkup(
         return out.str();
     }
 
-    if (layoutMode == PanelLayoutMode::ControlPanel && state.screen == Screen::Flyby) {
-        const FlybyRunState& flyby = state.run.approach.flyby;
-        const Destination* flybyDestination = catalog.findDestination(flyby.destinationId);
-        const std::string destinationName = flybyDestination == nullptr ? currentFrontier.name : flybyDestination->name;
-        const double remaining = std::max(0.0, flyby.durationSeconds - flyby.elapsedSeconds);
-        const FlybyGrade grade = flyby.completed ? flyby.result : FlybyGrade::Active;
-        const TransferAssistDefinition* transferAssist = catalog.findTransferAssist(flyby.transferAssistId);
-        const bool transferAssistRun = transferAssist != nullptr;
-        const bool scenarioChallenge = flyby.purpose == FlybyPurpose::ScenarioChallenge &&
-            !flyby.scenarioId.empty() && !flyby.scenarioStepId.empty();
-        const ScenarioObjectivePresentation challengeObjective = scenarioChallenge
-            ? scenarioObjectivePresentation(state, catalog, flyby.scenarioId, flyby.scenarioStepId)
-            : ScenarioObjectivePresentation {};
-        const ScenarioObjectivePresentation skippedObjective = !scenarioChallenge && flybyDestination != nullptr
-            ? scenarioObjectiveForDestination(state, catalog, flybyDestination->id)
-            : ScenarioObjectivePresentation {};
-        const bool clearsGenericRoute = !scenarioChallenge && flybyClearsGenericNextRoute(state, catalog);
-
-        if (flyby.completed && transferAssistRun) {
-            const double speedBoost = flyby.slingshotAwarded
-                ? flyby.slingshotSpeedBoost
-                : flybySlingshotSpeedBoost(flyby, transferAssist->speedBoostBase);
-            const double tank = launchFuelCapacity(state);
-            const Destination* target = catalog.findDestination(transferAssist->targetDestinationId);
-            const Destination* source = catalog.findDestination(transferAssist->sourceDestinationId);
-            const std::string sourceName = source == nullptr ? destinationName : source->name;
-            const std::string targetName = target == nullptr ? "the target" : target->name;
-            const double poweredBurn = launchCruiseFuelCostForTier(target == nullptr ? 3 : target->tier) -
-                transferAssist->fuelSavings;
-            const double margin = tank - poweredBurn;
-            const bool perfect = grade == FlybyGrade::Perfect;
-            const bool good = grade == FlybyGrade::Good;
-            const bool departing = good || perfect;
-            const double instabilityPenalty = good
-                ? transferAssist->goodInstabilityPenalty
-                : 0.0;
-            const std::string title = perfect
-                ? "SLINGSHOT ACTIVE — STABLE"
-                : (good
-                      ? "SLINGSHOT ACTIVE — WILD RIDE"
-                      : (flyby.collidedWithBody ? sourceName + " IMPACT" : "SLINGSHOT LOST"));
-            const std::string body = perfect
-                ? sourceName + "'s gravity has already sent the ship toward " + targetName + ". The Perfect pass supplies propellant-free velocity without changing normal flight stability. Its finish lane and outward drift carry into launch."
-                : (good
-                      ? sourceName + "'s gravity supplies the same " + display::fixed(transferAssist->fuelSavings, 0) + "-fuel saving and achieved velocity. The finish lane carries into launch, and the Good exit adds " + display::signedPercent(transferAssist->goodInstabilityPenalty) + " flight instability: more drift, oversteer, and throttle kick."
-                      : (flyby.collidedWithBody
-                            ? "The ship clipped " + sourceName + ". Hull damage applies, " + targetName + " departure did not occur, and the assist remains retryable."
-                            : "The pass missed the departure corridor. Retry the Flyby or build more permanent margin."));
-            out << "<div data-panel-mode=\"mission-stamp\" data-flyby-run=\"1\" data-flyby-completed=\"1\" data-flyby-purpose=\"transfer-assist\" hidden></div>";
-            out << missionStamp(
-                sourceName + " departure",
-                title,
-                body,
-                departing ? display::fixed(tank, 0) + " tank" : "NO DEPARTURE",
-                departing ? display::fixed(poweredBurn, 0) + " powered burn" : "GOOD REQUIRED",
-                departing
-                    ? flybySpeedLabel(flyby) + " finish // +" +
-                        display::percent(speedBoost) + " launch velocity"
-                    : (flyby.collidedWithBody
-                          ? "Hull +" + std::to_string(flyby.impactHullDamage) + "%"
-                          : "RETRY OR REFIT"),
-                departing ? ui::actions::continueTransferAssist : ui::actions::flybyContinue,
-                departing ? std::string_view("Continue to " + targetName) : std::string_view("Return to Hangar"));
-            out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
-            out << inventoryTemplate(state, catalog);
-            return out.str();
-        }
-
-        if (flyby.completed) {
-            const bool successfulRecon = !scenarioChallenge && !flyby.collidedWithBody &&
-                (grade == FlybyGrade::Good || grade == FlybyGrade::Perfect);
-            const RouteTransitState& incomingRoute = state.run.approach.incomingRoute;
-            const Destination* recoveryDestination = incomingRoute.active()
-                ? catalog.findDestination(incomingRoute.originDestinationId)
-                : nullptr;
-            const RouteLinkDefinition* recoveryLink = recoveryDestination == nullptr
-                ? nullptr
-                : catalog.findRouteLink(recoveryDestination->id, flyby.destinationId);
-            const bool recoveryRequired = successfulRecon && !clearsGenericRoute &&
-                recoveryDestination != nullptr && recoveryLink != nullptr && recoveryLink->recoveryAvailable;
-            const std::string recoveryRouteLabel = recoveryRequired
-                ? destinationName + " \xE2\x86\x92 " + recoveryDestination->name
-                : std::string();
-            const std::string resultTitle = scenarioChallenge
-                ? (grade == FlybyGrade::Perfect
-                      ? challengeObjective.title + " READY"
-                      : (grade == FlybyGrade::Good
-                            ? "CLEAN FLYBY — INSUFFICIENT"
-                            : "CHALLENGE INCOMPLETE"))
-                : (flyby.collidedWithBody
-                      ? "IMPACT RECORDED"
-                      : (grade == FlybyGrade::Good || grade == FlybyGrade::Perfect
-                            ? (recoveryRequired ? "RECOVERY ROUTE REQUIRED" : "PLANET SKIPPED")
-                            : flybyGradeLabel(grade)));
-            const double flybySpeedScale = flyby.slingshotAwarded ? flyby.slingshotSpeedScale : flybySlingshotScale(flyby);
-            const double flybyFuelSavings = flyby.slingshotAwarded ? flyby.slingshotFuelSavings : tuning::flyby::slingshotFuelBoost * flybySpeedScale;
-            const double flybySpeedBoost = flyby.slingshotAwarded
-                ? flyby.slingshotSpeedBoost
-                : flybySlingshotSpeedBoost(flyby, tuning::flyby::slingshotSpeedBoost);
-            const std::string resultBody = scenarioChallenge
-                ? (grade == FlybyGrade::Perfect
-                      ? "Required flight grade reached. Claim the configured reward explicitly."
-                      : (!challengeObjective.failureExplanation.empty()
-                            ? challengeObjective.failureExplanation
-                            : challengeObjective.detail))
-                : (flyby.collidedWithBody
-                ? "The ship clipped the destination body. Hull damage added and no Research Data was recovered."
-                : ((recoveryRequired
-                    ? "Planet skipped. " +
-                        (skippedObjective.available
-                            ? "“" + skippedObjective.title + "” remains active; "
-                            : std::string()) +
-                        "the onward route stays locked. Fly " + recoveryRouteLabel +
-                        " to recover, then reapproach."
-                    : flybyResultBody(grade))
-                    + ((grade == FlybyGrade::Good || grade == FlybyGrade::Perfect) && skippedObjective.available
-                          ? (recoveryRequired ? "" : " “" + skippedObjective.title + "” remains active; the next story route is still blocked.")
-                          : ((grade == FlybyGrade::Good || grade == FlybyGrade::Perfect) && clearsGenericRoute
-                                ? " The generic onward route is cleared by sacrificing this world's surface resources for speed."
-                                : ""))));
-            const std::string tagOne = scenarioChallenge
-                ? (grade == FlybyGrade::Perfect ? "READY TO CLAIM" : "ROUTE REMAINS LOCKED")
-                : (flyby.collidedWithBody
-                ? "Hull +" + std::to_string(flyby.impactHullDamage) + "%"
-                : (grade == FlybyGrade::Miss ? "No Research Data" : "+" + std::to_string(flyby.blueprintGain) + " Research Data"));
-            const std::string tagTwo = scenarioChallenge
-                ? "PERFECT REQUIRED"
-                : (flyby.collidedWithBody
-                ? "No recon recovered"
-                : (grade == FlybyGrade::Perfect
-                    ? "Reward x" + display::fixed(flyby.rewardBonusScale, 1)
-                    : (grade == FlybyGrade::Good ? "+" + display::money(flyby.rewardCredits) + " credits" : "NO COMMITMENT")));
-            const std::string tagThree = scenarioChallenge
-                ? (grade == FlybyGrade::Perfect ? challengeObjective.rewardPreview : "RETRY AVAILABLE")
-                : (flyby.collidedWithBody
-                ? "Hull damage logged"
-                : (grade == FlybyGrade::Perfect
-                    ? display::fixed(flybyFuelSavings, 1) + " fuel saved, +" + display::percent(flybySpeedBoost) + " velocity"
-                    : (grade == FlybyGrade::Good
-                          ? (recoveryRequired
-                              ? recoveryRouteLabel + " RECOVERY"
-                              : (skippedObjective.available ? "STORY ROUTE BLOCKED" : (clearsGenericRoute ? "GENERIC ROUTE CLEARED" : "NEXT LAUNCH: NO BOOST")))
-                          : "APPROACH UNCOMMITTED")));
-            const bool perfectChallengeReadyToClaim = scenarioChallenge &&
-                grade == FlybyGrade::Perfect;
-            const std::string perfectChallengeClaimLabel =
-                challengeObjective.action == ScenarioActionKind::ClaimReward
-                    ? challengeObjective.actionLabel
-                    : "Lock Saturn Course";
-            out << "<div data-panel-mode=\"mission-stamp\" data-flyby-run=\"1\" data-flyby-completed=\"1\" data-flyby-purpose=\""
-                << (scenarioChallenge ? "scenario-challenge" : "recon") << "\" hidden></div>";
-            out << missionStamp(
-                scenarioChallenge ? "Scenario flyby" : "Flyby stamp",
-                resultTitle,
-                resultBody,
-                tagOne,
-                tagTwo,
-                tagThree,
-                perfectChallengeReadyToClaim
-                    ? ui::actions::scenarioAction(
-                          challengeObjective.scenarioId,
-                          challengeObjective.stepId,
-                          static_cast<int>(ScenarioActionKind::ClaimReward))
-                    : std::string(ui::actions::flybyContinue),
-                perfectChallengeReadyToClaim
-                    ? std::string_view(perfectChallengeClaimLabel)
-                    : (scenarioChallenge
-                          ? std::string_view("Return to Hangar")
-                          : (recoveryRequired
-                                ? std::string_view("Begin Recovery: " + recoveryRouteLabel)
-                                : std::string_view("Continue"))),
-                nullptr);
-            out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
-            out << inventoryTemplate(state, catalog);
-            return out.str();
-        }
-
-        out << "<div data-flyby-run=\"1\" data-flyby-completed=\"0\" data-flyby-purpose=\""
-            << (transferAssistRun ? "transfer-assist" : (scenarioChallenge ? "scenario-challenge" : "recon"))
-            << "\" hidden></div>";
-        out << "<section class=\"live-hud-header\"><div class=\"live-hud-title-row\"><h2>"
-            << htmlEscape(transferAssistRun
-                ? transferAssist->displayName
-                : (scenarioChallenge ? challengeObjective.title : "Manual Flyby")) << "</h2>"
-            << modalButton("DETAILS", "flight_details", "ghost") << "</div>"
-            << "<p class=\"phase-copy\">" << htmlEscape(transferAssistRun
-                ? "GOOD DEPARTS — Hold the gold corridor for Perfect stability. A Good pass reaches " +
-                    (catalog.findDestination(transferAssist->targetDestinationId) == nullptr
-                        ? std::string("the target")
-                        : catalog.findDestination(transferAssist->targetDestinationId)->name) + " with " +
-                    display::signedPercent(transferAssist->goodInstabilityPenalty) + " flight instability."
-                : (scenarioChallenge
-                      ? "PERFECT REQUIRED — " + challengeObjective.detail
-                      : "Hold the approach corridor until the timer closes."))
-            << "</p></section>";
-        if (scenarioChallenge) {
-            out << scenarioObjectiveMarkup(challengeObjective, false, false);
-        }
-        const std::string zoneValue = flyby.collidedWithBody
-            ? "Impact"
-            : flybyZoneLabel(flyby.worstZone);
-
-        out << "<div class=\"flight-status-list\">"
-            << flightStatusRow("rr-hud-flyby-timer", "Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
-            << flightStatusRow("rr-hud-flyby-grade", "Grade forecast", zoneValue)
-            << "</div>";
-
-        out << "<div class=\"actions action-row rr-action-footer live-hud-actions\">"
-            << panelButton(panelActionButton("ABORT FLYBY", ui::actions::flybyAbort, "danger")) << "</div>";
-
-        const std::vector<DetailPresentationRow> flybyDetails {
-            detailPresentationRow("Destination", scenarioChallenge ? challengeObjective.location : destinationName),
-            detailPresentationRow("Reward multiplier", "x" + display::fixed(flyby.rewardBonusScale, 1)),
-            detailPresentationRow(
-                "Perfect window",
-                scenarioChallenge
-                    ? std::string_view(challengeObjective.rewardPreview)
-                    : std::string_view("Creates next-launch fuel and speed margin")),
-            detailPresentationRow("Controls", std::string_view("Turn and adjust speed; Abort records a Miss"))
-        };
-        out << modalTemplate("flight_details", "Flyby Details", detailStack(flybyDetails));
-        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
-        out << inventoryTemplate(state, catalog);
-        return out.str();
-    }
-
-    if (layoutMode == PanelLayoutMode::ControlPanel && state.screen == Screen::Orbit) {
-        const OrbitRunState& orbit = state.run.approach.orbit;
-        const Destination* orbitDestination = catalog.findDestination(orbit.destinationId);
-        const std::string destinationName = orbitDestination == nullptr ? currentFrontier.name : orbitDestination->name;
-        const double remaining = std::max(0.0, orbit.durationSeconds - orbit.elapsedSeconds);
-        const OrbitGrade grade = orbit.completed ? orbit.result : OrbitGrade::Active;
-        const double progress = std::clamp(orbit.orbitProgress, 0.0, 1.0);
-        const double baseOrbitReward = orbitDestination == nullptr
-            ? tuning::orbit::goodRewardFloor
-            : std::max(tuning::orbit::goodRewardFloor, orbitDestination->baseReward * tuning::orbit::goodRewardFactor);
-        const double rewardCredits = grade == OrbitGrade::Perfect
-            ? baseOrbitReward * tuning::orbit::perfectRewardMultiplier
-            : (grade == OrbitGrade::Good ? baseOrbitReward : 0.0);
-        const int blueprintGain = grade == OrbitGrade::Perfect
-            ? tuning::orbit::perfectBlueprintGain + (orbitDestination != nullptr && destinationSupportsResearch(*orbitDestination) ? 1 : 0)
-            : (grade == OrbitGrade::Good ? tuning::orbit::goodBlueprintGain + (orbitDestination != nullptr && destinationSupportsResearch(*orbitDestination) ? 1 : 0) : 0);
-
-        if (orbit.completed) {
-            const std::string resultTitle = grade == OrbitGrade::Good || grade == OrbitGrade::Perfect
-                ? "ORBIT CAPTURED"
-                : orbitGradeLabel(grade);
-            const std::string resultBody = orbitResultBody(grade);
-            const std::string tagOne = grade == OrbitGrade::Miss ? "APPROACH UNCOMMITTED" : "+" + std::to_string(blueprintGain) + " Research Data";
-            const std::string tagTwo = grade == OrbitGrade::Miss ? "No Research Data" : "+" + display::money(rewardCredits) + " credits";
-            const std::string tagThree = grade == OrbitGrade::Miss ? "RETRY OR CHOOSE ANOTHER PATH" : "LAND OR DEPART";
-            out << "<div data-panel-mode=\"mission-stamp\" data-orbit-run=\"1\" data-orbit-completed=\"1\" hidden></div>";
-            out << missionStamp("Orbit stamp", resultTitle, resultBody, tagOne, tagTwo, tagThree, ui::actions::orbitContinue);
-            out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
-            out << inventoryTemplate(state, catalog);
-            return out.str();
-        }
-
-        out << "<div data-orbit-run=\"1\" data-orbit-completed=\"0\" hidden></div>";
-        out << "<section class=\"live-hud-header\"><div class=\"live-hud-title-row\"><h2>"
-            << htmlEscape("Orbit Capture") << "</h2>" << modalButton("DETAILS", "flight_details", "ghost")
-            << "</div><p class=\"phase-copy\">"
-            << htmlEscape("The insertion holds Good without input. Finish in Perfect without entering red for the bonus.")
-            << "</p></section>";
-        const std::string zoneValue = orbitZoneLabel(orbit.currentZone);
-
-        out << "<div class=\"flight-status-list\">"
-            << flightStatusRow("rr-hud-orbit-timer", "Timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s")
-            << flightStatusRow("rr-hud-orbit-zone", "Zone", zoneValue)
-            << flightStatusRow("rr-hud-orbit-loop", "Loop", display::percent(progress))
-            << "</div>";
-
-        out << "<div class=\"actions action-row rr-action-footer live-hud-actions\">"
-            << panelButton(panelActionButton("ABORT ORBIT", ui::actions::orbitAbort, "danger")) << "</div>";
-
-        const std::vector<DetailPresentationRow> orbitDetails {
-            detailPresentationRow("Destination", destinationName),
-            detailPresentationRow("Projected reward", grade == OrbitGrade::Active ? "Pending" : display::money(rewardCredits)),
-            detailPresentationRow("Research Data", grade == OrbitGrade::Active ? "Pending" : "+" + std::to_string(blueprintGain)),
-            detailPresentationRow("Controls", std::string_view("Up/Down adjust orbital speed; Left/Right adjust altitude")),
-            detailPresentationRow(
-                "Orbit assists",
-                "Fuel +" + display::fixed(
-                    static_cast<double>(launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks)) *
-                        tuning::orbit::fuelDurationAssistPerRank,
-                    1) +
-                    "s | Controls +" +
-                    display::fixed(
-                        static_cast<double>(launchUpgradeRank(state, LaunchUpgradeKind::FlightControls)) *
-                            tuning::orbit::flightControlsThrustAssistPerRank * 100.0 +
-                            static_cast<double>(launchUpgradeRank(state, LaunchUpgradeKind::Cooling)) *
-                                tuning::orbit::coolingThrustAssistPerRank * 100.0,
-                        0) +
-                    "% trim | Hull reduces low-orbit collision risk " +
-                    display::percent(
-                        std::clamp(
-                            1.0 - orbit.collisionPadding / tuning::orbit::collisionPadding,
-                            0.0,
-                            1.0)))
-        };
-        out << modalTemplate("flight_details", "Orbit Details", detailStack(orbitDetails));
-        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
-        out << inventoryTemplate(state, catalog);
-        return out.str();
-    }
 
     if (layoutMode == PanelLayoutMode::ControlPanel && state.screen == Screen::Flight) {
         if (surfaceHudForContext(context)) {
@@ -4064,30 +2997,6 @@ std::string buildGamePanelMarkup(
             summaryBody << "<p class=\"phase-copy\">" << htmlEscape(flightImpactReadout(state.lastOutcome.impact)) << "</p>";
             report << boardNote(flightImpactReadout(state.lastOutcome.impact));
         }
-        if (successfulReturn &&
-            state.lastOutcome.destinationId == content::destination::jupiter &&
-            state.lastOutcome.recoveryMethod == RecoveryMethod::TransferArrival) {
-            const bool usedSlingshot = state.lastOutcome.slingshotFuelSavings + 0.000001 >=
-                tuning::flyby::jupiterSlingshotFuelSavings;
-            const bool usedTanks = state.lastOutcome.transferFuelCapacity + 0.000001 >= 25.0;
-            const bool wildRide = state.lastOutcome.slingshotInstabilityPenalty > 0.0;
-            const std::string arrivalMethod = usedSlingshot && usedTanks
-                ? (wildRide ? "MAXIMUM PREPARATION — WILD RIDE" : "MAXIMUM PREPARATION")
-                : (usedSlingshot
-                      ? (wildRide ? "BORROWED MOMENTUM — WILD RIDE" : "BORROWED MOMENTUM")
-                      : "PERMANENT ENGINEERING MARGIN");
-            const std::string arrivalCopy = usedSlingshot && usedTanks
-                ? (wildRide
-                      ? "Fuel Tanks III supplied permanent reserve while a Good Mars pass cut the burn and made flight control wilder. Hardware and risk stacked."
-                      : "Fuel Tanks III supplied permanent reserve while a Perfect Mars pass cut the powered burn. Preparation and execution stacked.")
-                : (usedSlingshot
-                    ? (wildRide
-                          ? "Mars supplied the missing movement. The Good exit reached Jupiter after a visibly less stable flight."
-                          : "Mars supplied the missing movement. The Perfect exit preserved normal flight stability.")
-                    : "Fuel Tanks III carried five permanent fuel beyond the calibrated burn. No flyby risk was required.");
-            summaryBody << "<div class=\"jupiter-arrival-method\"><span>JUPITER ARRIVAL</span><strong>"
-                << htmlEscape(arrivalMethod) << "</strong><p>" << htmlEscape(arrivalCopy) << "</p></div>";
-        }
         summaryBody << "<div class=\"ui-outcome-rows\">"
             << "<div><span>OUTCOME</span><strong>" << htmlEscape(presentation.label) << "</strong></div>"
             << "<div><span>CREW</span><strong>" << htmlEscape(
@@ -4119,220 +3028,12 @@ std::string buildGamePanelMarkup(
     }
 
     if (state.screen == Screen::ArrivalOps) {
-        const Destination* arrivalDestination = catalog.findDestination(state.run.approach.destinationId);
-        const bool orbitCaptured = state.run.approach.rewards.orbitAwarded;
-        const bool flybyAvailable = canRunArrivalFlyby(state, catalog);
-        const bool orbitAvailable = canEnterArrivalOrbit(state, catalog);
-        const bool firstLandingSequence = requiresArrivalOrbitBeforeLanding(state, catalog);
-        const bool landingAvailable = canAttemptArrivalLanding(state, catalog);
-        const bool canDepartOrbit = canDepartCapturedArrivalOrbit(state, catalog);
-        const std::string_view flybyIntroduction = !context.firstTimeIntroductionsEnabled
-                || !flybyAvailable
-                || ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::flyby)
-            ? std::string_view {}
-            : ui::modals::flybyIntroduction;
-        const std::string_view orbitIntroduction = !context.firstTimeIntroductionsEnabled
-                || ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::orbit)
-            ? std::string_view {}
-            : ui::modals::orbitIntroduction;
-        const std::string_view landingIntroduction = !context.firstTimeIntroductionsEnabled
-                || !landingAvailable
-                || ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::landing)
-            ? std::string_view {}
-            : ui::modals::landingIntroduction;
-        const bool showApproachIntroduction = arrivalDestination != nullptr
-            && arrivalDestination->requiresArrivalSurveySequence
-            && context.firstTimeIntroductionsEnabled
-            && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::approach);
-        const ScenarioObjectivePresentation arrivalScenario = arrivalDestination == nullptr
-            ? ScenarioObjectivePresentation {}
-            : scenarioObjectiveForDestination(state, catalog, arrivalDestination->id);
-        const ScenarioObjectivePresentation departureScenario = arrivalDestination == nullptr
-            ? ScenarioObjectivePresentation {}
-            : scenarioDepartureChallengeForDestination(state, catalog, arrivalDestination->id);
-        const bool arrivalDepartureChallenge = departureScenario.available;
-        const ScenarioObjectivePresentation displayedArrivalObjective = arrivalDepartureChallenge
-            ? departureScenario
-            : arrivalScenario;
-        const Destination* routeDestination = nextDestination(state, catalog);
-        const bool authoredRoute = routeDestination != nullptr && !routeDestination->routeRequirementKeys.empty();
-        const bool flightDataRoute = routeDestination != nullptr &&
-            scenarioRouteUsesFlightData(state, catalog, *routeDestination);
-        const std::string routeStatus = routeDestination == nullptr
-            ? "No onward route"
-            : (authoredRoute && !flightDataRoute
-                  ? "Objective remains active; " + routeDestination->name + " route stays locked"
-                  : "Clears all Flight Data required for " + routeDestination->name);
-        const std::string commitmentLabel = orbitCaptured ? "ORBIT CAPTURED" : "APPROACH UNCOMMITTED";
-        const std::string landingTarget = arrivalScenario.available && !arrivalScenario.location.empty()
-            ? arrivalScenario.location
-            : (arrivalDestination == nullptr ? "surface" : arrivalDestination->name);
-
-        std::string flybyRewardDetail = "Research Data +1. ";
-        std::string orbitRewardDetail;
-        if (arrivalDestination != nullptr) {
-            flybyRewardDetail += "Good "
-                + display::money(flybyCreditRewardMinimum(*arrivalDestination, FlybyGrade::Good)) + "–"
-                + display::money(flybyCreditRewardMaximum(*arrivalDestination, FlybyGrade::Good))
-                + "; Perfect "
-                + display::money(flybyCreditRewardMinimum(*arrivalDestination, FlybyGrade::Perfect)) + "–"
-                + display::money(flybyCreditRewardMaximum(*arrivalDestination, FlybyGrade::Perfect))
-                + ". " + routeStatus
-                + ". Perfect also stores +1.5–3.0 fuel and +0.00–0.40 speed from the actual finish velocity for the next launch. Closes Orbit and Landing.";
-            orbitRewardDetail = "Good +" + std::to_string(orbitResearchDataReward(*arrivalDestination, OrbitGrade::Good))
-                + " Research Data and " + display::money(orbitCreditReward(*arrivalDestination, OrbitGrade::Good))
-                + " credits; Perfect +" + std::to_string(orbitResearchDataReward(*arrivalDestination, OrbitGrade::Perfect))
-                + " and " + display::money(orbitCreditReward(*arrivalDestination, OrbitGrade::Perfect))
-                + ". Maps the wider descent corridor. Closes Pass Through; then Land or Depart.";
-            if (firstLandingSequence) {
-                orbitRewardDetail += " The first landing must use this orbital map.";
-            }
-        }
-
-        out << phaseBoardOpen("phase-board-arrival", "");
-        out << "<p class=\"status panel-objective arrival-objective\">"
-            << htmlEscape(compactHeaderObjective(state, catalog)) << "</p>";
-        out << "<div class=\"phase-titlebar\"><div><h2>" << htmlEscape(text::panel::sections::arrivalOps)
-            << "</h2><p>" << htmlEscape(commitmentLabel + " — choose one arrival path for this visit.") << "</p></div></div>";
-        const double landingPackFuel = arkDiscovered(state)
-            ? std::min(
-                  tuning::research::expeditionRigPackFuel,
-                  static_cast<double>(std::max(0, state.meta.ark.fuelReserve)))
-            : tuning::research::expeditionRigPackFuel;
-        const ArrivalResearchUnlockPresentation researchUnlock =
-            arrivalResearchUnlockPresentation(state.meta.blueprintProgress);
-        const std::vector<PanelMetricPresentation> arrivalFuelMetrics {
-            panelMetric("Transfer", display::fixed(state.run.approach.transferFuelRemaining, 1)),
-            panelMetric("Rig fuel", display::fixed(landingPackFuel + state.run.approach.transferFuelRemaining, 1)),
-            panelMetric(researchUnlock.label, researchUnlock.value),
-            panelMetric("Descent", orbitCaptured ? "MAPPED" : "DIRECT · NARROW")
-        };
-        out << "<div class=\"stat-grid chip-strip phase-lane\">"
-            << resourceChipGrid(arrivalFuelMetrics) << "</div>";
-        if (arrivalDestination != nullptr) {
-            out << scenarioObjectiveMarkup(
-                displayedArrivalObjective,
-                arrivalDepartureChallenge);
-            if (!orbitCaptured && !arrivalDepartureChallenge && !arrivalDestination->approachBriefTitle.empty()) {
-                out << phaseAdvisory({
-                    arrivalDestination->approachBriefTitle,
-                    arrivalDestination->approachBriefDetail,
-                    arrivalDestination->requiresArrivalSurveySequence ? "info" : "warning"});
-            }
-        }
-        if (!arrivalDepartureChallenge) {
-            out << "<h2>" << htmlEscape(
-                orbitCaptured ? "Resolve captured orbit" : (firstLandingSequence ? "Map first landing" : "Commit approach")) << "</h2>";
-            out << "<div class=\"ops-grid\">";
-        if (orbitCaptured) {
-            out << arrivalOperationCard(
-                "LAND",
-                "Descend to " + landingTarget + " through the mapped corridor and begin the surface expedition.",
-                "Wider corridor",
-                "",
-                landingAvailable
-                    ? panelActionButton("LAND", ui::actions::arrivalLanding, "ok")
-                    : disabledPanelButton(text::buttons::unavailable),
-                landingIntroduction,
-                true);
-            if (canDepartOrbit) {
-                out << arrivalOperationCard(
-                    "DEPART WITH SCIENCE",
-                    "Bank the Orbit reward and end this visit without landing.",
-                    "End visit",
-                    "Research Data banked",
-                    panelActionButton("DEPART", ui::actions::arrivalOrbitDepart, "warn"));
-            }
-        } else {
-            if (flybyAvailable) {
-                out << arrivalOperationCard(
-                    "FLYBY — PASS THROUGH",
-                    flybyRewardDetail,
-                    "Terminal path",
-                    "Research Data + credits",
-                    panelActionButton("PASS THROUGH", ui::actions::arrivalFlyby, "ok"),
-                    flybyIntroduction);
-            }
-            out << arrivalOperationCard(
-                "ORBIT — CAPTURE",
-                orbitRewardDetail,
-                "Branching path",
-                "Map descent or depart",
-                orbitAvailable
-                    ? panelActionButton("ORBIT", ui::actions::arrivalOrbit, "warn")
-                    : disabledPanelButton(text::buttons::unavailable),
-                orbitIntroduction);
-            if (!firstLandingSequence) {
-                out << arrivalOperationCard(
-                    "DIRECT DESCENT",
-                    "Immediately descend to " + landingTarget + " through the narrower, more turbulent corridor. Closes Pass Through and Orbit.",
-                    "Terminal approach",
-                    "",
-                    landingAvailable
-                        ? panelActionButton("LAND", ui::actions::arrivalLanding, "danger")
-                        : disabledPanelButton(text::buttons::unavailable),
-                    landingIntroduction);
-            }
-        }
-            out << "</div>";
-        }
-        out << phaseBoardClose();
-        if (showApproachIntroduction) {
-            const std::string approachLocation = arrivalScenario.available && !arrivalScenario.location.empty()
-                ? arrivalScenario.location
-                : arrivalDestination->name;
-            out << activityIntroductionModal(
-                ui::modals::approachIntroduction,
-                approachLocation + " APPROACH",
-                firstLandingSequence
-                    ? "First landing protocol requires Capture Orbit, then Land with the orbital map."
-                    : "Choose one committed path: Pass Through ends the visit, Capture Orbit opens a mapped descent or science departure, and Direct Descent uses the harder physical corridor.",
-                firstLandingSequence
-                    ? "Flyby is introduced later at the Jupiter transfer window. The Lunar contract and Mars route still require surface recovery."
-                    : "At the Moon, skipping the planet does not complete the active capture objective or open the Mars route.",
-                "Review",
-                ui::actions::acknowledgeApproachIntroduction,
-                "ok",
-                true);
-        }
-        if (!flybyIntroduction.empty()) {
-            out << activityIntroductionModal(
-                ui::modals::flybyIntroduction,
-                "FLYBY — PASS THROUGH",
-                "A Good or Perfect pass banks Research Data and credits, closes Orbit and Landing, and ends this visit.",
-                "At authored objectives the route stays blocked. Later generic routes can be cleared quickly by sacrificing surface resources. Perfect also stores powered-fuel savings and extra velocity for the next launch.",
-                "Begin flyby",
-                ui::actions::arrivalFlyby,
-                "ok");
-        }
-        if (!orbitIntroduction.empty()) {
-            out << activityIntroductionModal(
-                ui::modals::orbitIntroduction,
-                "ORBIT — CAPTURE",
-                "The insertion begins on the Perfect orbit. Hold the gold band through one complete loop for the larger Research Data and credit award.",
-                "Capture closes Pass Through and maps the wider descent corridor. Then choose landing or depart with science.",
-                "Enter orbit",
-                ui::actions::arrivalOrbit,
-                "warn");
-        }
-        if (!landingIntroduction.empty()) {
-            out << activityIntroductionModal(
-                ui::modals::landingIntroduction,
-                orbitCaptured ? "MAPPED DESCENT" : "DIRECT DESCENT",
-                orbitCaptured
-                    ? "The orbital map opens the wider descent corridor for this visit."
-                    : "Direct Descent uses the narrower, more turbulent corridor and closes both flight paths.",
-                "Landing begins the continuous surface expedition.",
-                "Begin landing",
-                ui::actions::arrivalLanding,
-                "danger");
-        }
-        if (arrivalDestination != nullptr && arrivalScenario.available &&
-            arrivalScenario.scenarioId == content::scenario::uranusDeparture) {
-            out << scenarioObjectiveModalForDestination(state, catalog, arrivalDestination->id);
-        }
-        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
+        out << "<section class=\"phase-board\"><h2>Resume flight</h2>"
+            << "<p>Establish orbit to scan, drill, and land.</p><div class=\"actions action-row controller-action-row\">"
+            << button("RESUME FLIGHT", ui::actions::arrivalLanding, "ok", true)
+            << "</div></section>";
         out << inventoryTemplate(state, catalog);
+        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         return out.str();
     }
 
@@ -4680,149 +3381,6 @@ std::string buildGamePanelMarkup(
         return out.str();
     }
 
-    if (state.screen == Screen::SurfaceScan) {
-        const SurfaceExpeditionPresentation surfacePanel = planetaryExpeditionPresentation(state, catalog);
-        const SurfaceScanRailPresentation scanPanel = surfaceScanRailPresentation(state);
-        const MiningSwarmPreview swarmPreview = miningSwarmPreview(
-            state,
-            catalog,
-            upcomingMiningArenaRules(state, catalog),
-            0,
-            !state.run.planetaryExpedition.pendingMiningSiteDefinitionId.empty());
-        out << phaseBoardOpen("phase-board-surface phase-board-surface-minigame phase-board-scan", state.statusLine);
-        out << "<section class=\"surface-scan-rail scan-minigame\">";
-        out << "<header class=\"ui-screen-header rr-screen-header scan-header\"><div class=\"scan-heading\"><span class=\"ui-kicker\">"
-            << htmlEscape(scanPanel.kicker) << "</span><h2>" << htmlEscape(scanPanel.title) << "</h2></div>"
-            << "<div class=\"utility-row scan-utility-actions\">"
-            << modalButton("INV", ui::modals::inventory, "ghost")
-            << modalButton("MENU", ui::modals::settings, "ghost") << "</div></header>";
-        out << "<p class=\"scan-objective\">" << htmlEscape(scanPanel.objective) << "</p>";
-        out << "<section class=\"ui-kpi-strip rr-metric-strip scan-kpis\">";
-        for (const PanelMetricPresentation& item : scanPanel.metrics) {
-            out << "<article class=\"ui-kpi\"><span>" << htmlEscape(item.label) << "</span><strong>"
-                << htmlEscape(item.value) << "</strong></article>";
-        }
-        out << "</section>";
-        out << "<section class=\"scan-signal-card\"><div class=\"scan-signal-copy\"><span>SIGNAL</span><strong>"
-            << htmlEscape(scanPanel.signal) << "</strong></div><div class=\"scan-signal-track\"><i class=\"scan-signal-fill scan-signal-"
-            << std::clamp(((scanPanel.signalPercent + 5) / 10) * 10, 0, 100)
-            << "\"></i><b class=\"scan-signal-risk-marker\"></b></div></section>";
-        out << "<article class=\"scan-layer-readout " << htmlEscape(scanPanel.layerCssClass) << "\"><strong>"
-            << htmlEscape(scanPanel.layerReadout) << "</strong></article>";
-        if (swarmPreview.available) {
-            out << phaseAdvisory({
-                "DANGER: SWARM NEST",
-                "Melee, ranged, and armored contacts detected at Depth +" +
-                    std::to_string(swarmPreview.depthZone) + ".\n\nSwarm cache \xE2\x80\xA2 Bonus artifact chance: " +
-                    display::percent(swarmPreview.artifactChance),
-                "danger"
-            });
-        }
-        out << "<div class=\"scan-actions ui-action-bar rr-action-footer\">";
-        for (const PanelButtonPresentation& action : scanPanel.actions) {
-            out << panelButton(action);
-        }
-        out << "</div>";
-        out << "<div class=\"surface-scan-scene-marker\" data-scan-signal=\"" << htmlEscape(scanPanel.signal)
-            << "\"><strong>" << htmlEscape(scanPanel.signal) << "</strong></div>";
-        out << "</section>";
-        out << phaseBoardClose();
-        out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(surfacePanel.details));
-        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
-        out << inventoryTemplate(state, catalog);
-        return out.str();
-    }
-
-    if (state.screen == Screen::SurfacePush) {
-        const SurfaceExpeditionPresentation surfacePanel = planetaryExpeditionPresentation(state, catalog);
-        const SurfacePushRunState& push = state.run.surfacePush;
-        const MiningSwarmPreview swarmPreview = miningSwarmPreview(
-            state,
-            catalog,
-            upcomingMiningArenaRules(state, catalog),
-            0,
-            !state.run.planetaryExpedition.pendingMiningSiteDefinitionId.empty());
-        out << phaseBoardOpen("phase-board-surface phase-board-surface-minigame phase-board-push", state.statusLine);
-        const int nextDepthOffset = push.steps + 1;
-        const SurfaceDepthCapability nextDepthCapability = surfaceDepthCapability(
-            state,
-            catalog,
-            state.run.planetaryExpedition.depth + nextDepthOffset);
-        const std::vector<PanelMetricPresentation> pushMetrics {
-            panelMetric("Steps", std::to_string(push.steps) + "/" + std::to_string(std::max(1, push.maxSteps))),
-            panelMetric("Start depth", "+" + std::to_string(state.run.planetaryExpedition.depth + push.depthGain)),
-            panelMetric(
-                "Next push risk",
-                push.busted
-                    ? "ROUTE COLLAPSED"
-                    : push.completed
-                    ? surfaceDepthBlockerLabel(nextDepthCapability)
-                    : push.steps == 0
-                    ? "SAFE FIRST LAYER"
-                    : display::percent(push.collapseRisk) + " / surveyed")
-        };
-        const int selectedDepth =
-            state.run.planetaryExpedition.depth + push.depthGain;
-        const int possibleNextDepth =
-            state.run.planetaryExpedition.depth + std::max(push.depthGain, push.steps + 1);
-        SurfaceReturnSafetyPresentation returnSafety =
-            surfaceReturnSafetyPresentation(state, catalog, selectedDepth);
-        if (returnSafety.severity == SurfaceReturnSafetySeverity::Safe &&
-            !push.completed && !push.busted) {
-            SurfaceReturnSafetyPresentation nextSafety =
-                surfaceReturnSafetyPresentation(state, catalog, possibleNextDepth);
-            if (nextSafety.severity != SurfaceReturnSafetySeverity::Safe) {
-                const SurfaceReturnSafetySeverity nextSeverity = nextSafety.severity;
-                returnSafety = std::move(nextSafety);
-                returnSafety.title = nextSeverity == SurfaceReturnSafetySeverity::Critical
-                    ? "NEXT DIG: RETURN RANGE CRITICAL"
-                    : "NEXT DIG: RETURN MARGIN LOW";
-                returnSafety.detail +=
-                    "\n\nRETURN NOW to set the shallower start depth.";
-            }
-        }
-        std::vector<PanelButtonPresentation> actions;
-        if (push.busted) {
-            actions.push_back(panelActionButton("Return", ui::actions::surfacePushBank, "ok"));
-        } else {
-            actions.push_back(push.completed
-                ? disabledPanelButton("Route limit reached")
-                : panelActionButton(text::buttons::pushDeeper, ui::actions::surfacePushStep, "warn"));
-            actions.push_back(push.depthGain > 0
-                ? panelActionButton("Set Start Depth", ui::actions::surfacePushBank, "ok")
-                : disabledPanelButton("Dig one layer first"));
-        }
-        out << surfaceMiniGamePanel(
-            "push-minigame",
-            text::buttons::pushDeeper,
-            "Tunnel through surveyed levels within Bore rating and safe return range. The first step is stable; later steps risk collapse.",
-            pushMetrics,
-            materialRewardChips(push.temporaryMaterials, static_cast<int>(push.temporaryArtifacts.size()), push.cargo),
-            push.busted ? "Route Collapse" : (push.completed ? "Deep Route Locked" : "Descent Window"),
-            push.message.empty() ? "Dig the first surveyed level, then set that start depth or risk a deeper surveyed tunnel." : push.message,
-            actions);
-        if (returnSafety.severity != SurfaceReturnSafetySeverity::Safe) {
-            out << phaseAdvisory({
-                returnSafety.title,
-                returnSafety.detail,
-                returnSafety.cssClass
-            });
-        }
-        if (swarmPreview.available) {
-            out << phaseAdvisory({
-                "DANGER BELOW: SWARM NEST",
-                "This tunnel opens beside a hostile nest at Depth +" +
-                    std::to_string(swarmPreview.depthZone) + ". Mining there is optional; ascend to disengage.\n\nBonus artifact chance: " +
-                    display::percent(swarmPreview.artifactChance),
-                "danger"
-            });
-        }
-        out << phaseBoardClose();
-        out << modalTemplate(ui::modals::surface, text::panel::modals::surfaceDetails, detailStack(surfacePanel.details));
-        out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
-        out << inventoryTemplate(state, catalog);
-        return out.str();
-    }
 
     if (state.screen == Screen::SurfaceExpedition) {
         const SurfaceExpeditionPresentation surfacePanel = planetaryExpeditionPresentation(state, catalog);
@@ -4849,19 +3407,7 @@ std::string buildGamePanelMarkup(
         const bool showMiniDroneIntroduction = context.firstTimeIntroductionsEnabled
             && surfacePanel.droneOpsAction.enabled
             && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::miniDrones);
-        const bool showSurveyIntroduction = expedition.active
-            && !surfaceOpsTutorialSurveyComplete(state)
-            && !ui::briefings::acknowledged(
-                state.meta.acknowledgedActivityBriefingIds,
-                ui::briefings::surfaceSurveyIntroduction);
-        const bool showDigIntroduction = expedition.active
-            && surfaceOpsTutorialDigUnlocked(state)
-            && !surfaceOpsTutorialDigComplete(state)
-            && !ui::briefings::acknowledged(
-                state.meta.acknowledgedActivityBriefingIds,
-                ui::briefings::surfaceDigIntroduction);
         const bool showMiningIntroduction = expedition.active
-            && surfaceOpsTutorialMiningUnlocked(state)
             && !expedition.miningRunUsed
             && expedition.rigFuel >= 1.0
             && !ui::briefings::acknowledged(state.meta.acknowledgedActivityBriefingIds, ui::briefings::mining);
@@ -4913,14 +3459,8 @@ std::string buildGamePanelMarkup(
         out << "<section class=\"board-primary surface-actions phase-lane primary-actions rr-fixed-action-lane rr-action-footer\">";
         out << "<div class=\"surface-choice-list controller-action-row surface-controller-action-row rr-card-grid\">";
         for (const SurfaceActionPreviewPresentation& action : surfacePanel.actions) {
-            const std::string_view introductionModal =
-                showSurveyIntroduction && action.action.actionId == ui::actions::surveySurface
-                    ? ui::modals::surfaceSurveyIntroduction
-                    : (showDigIntroduction && action.action.actionId == ui::actions::pushSurface
-                           ? ui::modals::surfaceDigIntroduction
-                           : (showMiningIntroduction && isSurfaceMiningAction(action)
-                                  ? ui::modals::miningIntroduction
-                                  : std::string_view {}));
+            const std::string_view introductionModal = showMiningIntroduction && isSurfaceMiningAction(action)
+                ? ui::modals::miningIntroduction : std::string_view {};
             out << surfaceActionCard(action, introductionModal);
         }
         out << "</div></section>";
@@ -4934,26 +3474,6 @@ std::string buildGamePanelMarkup(
                 "Assign owned frames, or build paid copies into open slots, to carry, survey, mine, and protect the expedition.",
                 "Open Drone Bay",
                 ui::actions::droneOps,
-                "warn");
-        }
-        if (showSurveyIntroduction) {
-            out << activityIntroductionModal(
-                ui::modals::surfaceSurveyIntroduction,
-                "SURVEY THE SITE",
-                "Survey scans each reachable level for resources and artifacts before you commit to digging.",
-                "Map the current level and level +1, then log the survey. Dig unlocks only after the first deeper level is successfully recorded.",
-                "Begin Survey",
-                ui::actions::surveySurface,
-                "ok");
-        }
-        if (showDigIntroduction) {
-            out << activityIntroductionModal(
-                ui::modals::surfaceDigIntroduction,
-                "DIG THE TUNNEL",
-                "Dig opens a tunnel to the depth you choose. Your Mining Rig begins at the deepest start depth you set.",
-                "Every step must be surveyed, within the permanent Bore System rating, and inside a non-critical return range. The first step is stable; later steps can collapse.",
-                "Begin Dig",
-                ui::actions::pushSurface,
                 "warn");
         }
         if (showMiningIntroduction) {
@@ -5180,52 +3700,7 @@ std::string buildGamePanelMarkup(
     const FrontierGateStatus nextFrontierGate = next == nullptr
         ? FrontierGateStatus {}
         : frontierGateStatus(state, catalog);
-    const bool showJupiterOptions = jupiterWindowAvailable(state, catalog);
-    if (showJupiterOptions) {
-        const double tank = launchFuelCapacity(state);
-        const double routeBurn = launchCruiseFuelCostForTier(3);
-        const PendingTransferAssist* activeAssist = pendingTransferAssistForDestination(state, content::destination::jupiter);
-        const double savings = activeAssist != nullptr
-            ? activeAssist->fuelSavings
-            : 0.0;
-        const double instabilityPenalty = activeAssist != nullptr
-            ? activeAssist->instabilityPenalty
-            : 0.0;
-        const double poweredBurn = std::max(0.0, routeBurn - savings);
-        const double margin = tank - poweredBurn;
-        const bool tanksThree = launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3;
-        const int filledSegments = std::clamp(
-            static_cast<int>(std::floor(std::max(0.0, margin) + 0.000001)),
-            0,
-            10);
-        out << "<section class=\"hangar-frontier-readiness phase-lane\" data-jupiter-options=\"1\" aria-label=\"Jupiter transfer margin "
-            << htmlEscape(display::fixed(margin, 0) + " fuel; 5 required") << "\">"
-            << "<div class=\"hangar-frontier-head\"><div><span>NEXT FRONTIER</span><strong>JUPITER OPTIONS</strong></div>"
-            << "<div><b>" << htmlEscape(display::signedFixed(margin, 0))
-            << " MARGIN</b><small>5 REQUIRED</small></div></div>"
-            << "<div class=\"hangar-frontier-contributors\">"
-            << "<div><span>FUEL TANKS III</span><strong>" << display::fixed(tank, 0)
-            << " tank</strong><small>" << (tanksThree ? "+5 permanent capacity // INSTALLED" : "+5 permanent capacity // 92 credits")
-            << "</small></div>"
-            << "<div><span>MARS SLINGSHOT</span><strong>";
-        if (activeAssist != nullptr) {
-            out << display::fixed(poweredBurn, 0) << " powered burn</strong><small>ACTIVE // +"
-                << display::percent(activeAssist->speedBoost) << " velocity from finish // "
-                << (instabilityPenalty > 0.0
-                    ? "+" + display::percent(instabilityPenalty) + " instability"
-                    : "Perfect: stable");
-        } else {
-            out << "Good-or-better Flyby</strong><small>-5 powered fuel // +0–40% from finish speed // Good: +35% instability";
-        }
-        out << "</small></div></div><div class=\"hangar-frontier-meter\" aria-hidden=\"true\">";
-        for (int segment = 0; segment < 10; ++segment) {
-            out << "<i class=\"" << (segment < filledSegments ? "is-filled " : "")
-                << (segment == 4 ? "is-required-edge" : "") << "\"></i>";
-        }
-        out << "</div><div class=\"hangar-frontier-foot\"><p>Either option creates the required margin. Both stack to 10 margin and slingshot velocity.</p>"
-            << modalButton("Review options", ui::modals::jupiterWindow, "ghost")
-            << "</div></section>";
-    } else if (state.run.routeTransit.active()) {
+    if (state.run.routeTransit.active()) {
         const Destination* routeOrigin = catalog.findDestination(state.run.routeTransit.originDestinationId);
         const Destination* routeTarget = catalog.findDestination(state.run.routeTransit.targetDestinationId);
         const std::string routeLabel = std::string(routeOrigin == nullptr ? "Staging" : routeOrigin->name) +
@@ -5267,7 +3742,7 @@ std::string buildGamePanelMarkup(
             state.meta.acknowledgedActivityBriefingIds,
             ui::briefings::flightControlsCalibration);
     const ScenarioObjectivePresentation departureChallenge =
-        scenarioDepartureChallengeForDestination(state, catalog, currentFrontier.id);
+        scenarioDepartureCourseForDestination(state, catalog, currentFrontier.id);
     const CampaignNextStep nextStep = campaignNextStep(state, catalog);
     const ScenarioObjectivePresentation launchScenario = nextStep.objective;
     const bool scenarioRouteClaimReady =
@@ -5306,9 +3781,7 @@ std::string buildGamePanelMarkup(
             launchScenario,
             "ok hangar-launch-prep",
             true);
-    } else if (pendingTransferAssistForDestination(state, launchTarget.id) != nullptr) {
-        out << button("Continue to Jupiter", ui::actions::continueTransferAssist, "ok", true);
-    } else {
+} else {
         out << (prepareLaunchBlocked
             ? modalButton(prepareLaunchLabel, ui::modals::launchBlocked, "ok hangar-launch-prep", true)
             : (showLaunchIntroduction
@@ -5317,15 +3790,7 @@ std::string buildGamePanelMarkup(
                     ? modalButton(prepareLaunchLabel, ui::modals::flightControlsIntroduction, "ok hangar-launch-prep", true)
                     : button(prepareLaunchLabel, ui::actions::prepareLaunch, "ok hangar-launch-prep", true))));
     }
-    if (showJupiterOptions && pendingTransferAssistForDestination(state, content::destination::jupiter) == nullptr) {
-        out << (canStartJupiterSlingshot(state, catalog)
-            ? button("Begin Mars Slingshot", ui::actions::beginTransferAssist(content::transferAssist::marsJupiter), "warn")
-            : disabledButton("Mars Slingshot Unavailable"));
-        if (jupiterTransferMarginReady(state)) {
-            out << button("Transfer: Jupiter", ui::actions::attemptFrontier, "danger");
-        }
-    } else if (next != nullptr && !navigationAvailable(state) && !currentFrontier.hiddenFromProgression &&
-               pendingTransferAssistForDestination(state, next == nullptr ? std::string_view{} : next->id) == nullptr) {
+    if (next != nullptr && !navigationAvailable(state) && !currentFrontier.hiddenFromProgression) {
         if (!nextFrontierGate.satisfied) {
             out << disabledButton(next->name + ": " + std::string(text::buttons::unavailable));
         } else if (state.meta.launchLessons.stage != LaunchTrainingStage::Complete) {
@@ -5393,8 +3858,6 @@ std::string buildGamePanelMarkup(
     if (!currentFrontier.hiddenFromProgression) {
         out << scenarioObjectiveModalForDestination(state, catalog, currentFrontier.id);
     }
-    out << jupiterWindowModal(state, catalog);
-    out << jupiterSlingshotActiveModal(state, catalog);
     out << modalTemplate(ui::modals::legacy, text::panel::modals::legacy, legacyBody);
     out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
     out << inventoryTemplate(state, catalog);
@@ -5413,13 +3876,6 @@ PanelTemplateKind templateKindForContext(const PanelRenderContext& context)
     switch (context.state.screen) {
     case Screen::Hangar:
         return PanelTemplateKind::Workspace;
-    case Screen::Flyby:
-        return context.state.run.approach.flyby.completed
-            ? PanelTemplateKind::LegacyRaw
-            : PanelTemplateKind::ControlPanel;
-    case Screen::SurfaceScan:
-    case Screen::SurfacePush:
-        return PanelTemplateKind::SurfaceMinigame;
     case Screen::Mining:
         return PanelTemplateKind::Mining;
     case Screen::StoryBriefing:
@@ -5435,14 +3891,10 @@ bool legacyContentOwnsLaneGeometry(const PanelRenderContext& context)
 {
     switch (context.state.screen) {
     case Screen::Hangar:
-    case Screen::SurfaceScan:
-    case Screen::SurfacePush:
     case Screen::Mining:
     case Screen::StoryBriefing:
     case Screen::Results:
         return true;
-    case Screen::Flyby:
-        return !context.state.run.approach.flyby.completed;
     default:
         return false;
     }
@@ -5455,10 +3907,6 @@ PanelSurfaceKind surfaceKindForScreen(Screen screen)
         return PanelSurfaceKind::SurfaceOps;
     case Screen::SurfaceUpgrade:
         return PanelSurfaceKind::SurfaceUpgrade;
-    case Screen::SurfaceScan:
-        return PanelSurfaceKind::SurfaceScan;
-    case Screen::SurfacePush:
-        return PanelSurfaceKind::SurfacePush;
     case Screen::Mining:
         return PanelSurfaceKind::Mining;
     case Screen::DroneOps:
@@ -5475,22 +3923,6 @@ PanelInteractionMode interactionModeForContext(const PanelRenderContext& context
     case Screen::Flight:
     case Screen::Mining:
         return PanelInteractionMode::Realtime;
-    case Screen::SurfaceScan:
-        return state.run.surfaceScan.active
-                && !state.run.surfaceScan.completed
-                && !state.run.surfaceScan.busted
-            ? PanelInteractionMode::Realtime
-            : PanelInteractionMode::Standard;
-    case Screen::SurfacePush:
-        return state.run.surfacePush.active
-                && !state.run.surfacePush.completed
-                && !state.run.surfacePush.busted
-            ? PanelInteractionMode::Realtime
-            : PanelInteractionMode::Standard;
-    case Screen::Flyby:
-        return state.run.approach.flyby.completed ? PanelInteractionMode::Takeover : PanelInteractionMode::Realtime;
-    case Screen::Orbit:
-        return state.run.approach.orbit.completed ? PanelInteractionMode::Takeover : PanelInteractionMode::Realtime;
     case Screen::StoryBriefing:
     case Screen::Results:
     case Screen::ArrivalFanfare:
@@ -5514,16 +3946,11 @@ PanelOverlayKind overlayKindForContext(const PanelRenderContext& context)
             ? PanelOverlayKind::FlightInstruments
             : PanelOverlayKind::PreflightLaunch;
     }
-    if ((context.state.screen == Screen::Flyby || context.state.screen == Screen::Orbit) &&
-        flightInstrumentsForContext(context).visible) {
-        return PanelOverlayKind::FlightInstruments;
-    }
+
     if (context.state.screen == Screen::Results) {
         return PanelOverlayKind::TelemetryLegend;
     }
-    if (context.state.screen == Screen::SurfaceScan) {
-        return PanelOverlayKind::SurfaceScanReadout;
-    }
+
     if (context.state.screen == Screen::Mining) {
         return PanelOverlayKind::MiningExperience;
     }
@@ -5548,20 +3975,12 @@ std::string variantForContext(const PanelRenderContext& context)
         return "arrival-fanfare";
     case Screen::ArrivalOps:
         return "arrival-ops";
-    case Screen::Flyby:
-        return state.run.approach.flyby.completed ? "flyby-result" : "flyby-active";
-    case Screen::Orbit:
-        return state.run.approach.orbit.completed ? "orbit-result" : "orbit-active";
     case Screen::Research:
         return "research";
     case Screen::SurfaceExpedition:
         return "surface-ops";
     case Screen::SurfaceUpgrade:
         return "surface-upgrade";
-    case Screen::SurfaceScan:
-        return "surface-scan";
-    case Screen::SurfacePush:
-        return "surface-push";
     case Screen::Mining:
         return miningOperatorIsEva(state.run.mining) ? "mining-eva" : "mining-rig";
     case Screen::Upgrade:
@@ -5588,10 +4007,6 @@ bool usesResponsiveViewport(const PanelRenderContext& context)
 {
     switch (context.state.screen) {
     case Screen::Flight:
-    case Screen::Flyby:
-    case Screen::Orbit:
-    case Screen::SurfaceScan:
-    case Screen::SurfacePush:
         return true;
     default:
         return false;
@@ -5603,12 +4018,8 @@ bool usesGameplayInputHelper(const PanelRenderContext& context)
     if (context.state.screen == Screen::Mining) {
         return true;
     }
-    if (context.state.screen == Screen::Flyby) {
-        return !context.state.run.approach.flyby.completed;
-    }
-    if (context.state.screen == Screen::Orbit) {
-        return !context.state.run.approach.orbit.completed;
-    }
+
+
     return false;
 }
 
@@ -5707,9 +4118,6 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
         result.runtime.miningTetherAvailable = hasAction(ui::actions::miningTether);
         result.runtime.miningStowAvailable = hasAction(ui::actions::miningStow);
         result.runtime.miningAbortAvailable = hasAction(ui::actions::miningAbort);
-    }
-    if (result.metadata.overlay == PanelOverlayKind::SurfaceScanReadout) {
-        result.runtime.overlayValue = display::percent(context.state.run.surfaceScan.signal);
     }
     if (result.metadata.overlay == PanelOverlayKind::FlightInstruments) {
         const FlightInstrumentPresentation instruments = flightInstrumentsForContext(context);
@@ -5821,10 +4229,6 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
         double warningTime = 0.0;
         if (state.screen == Screen::Flight && context.launchFlight != nullptr) {
             warningTime = context.launchFlight->elapsedSeconds;
-        } else if (state.screen == Screen::Flyby) {
-            warningTime = state.run.approach.flyby.elapsedSeconds;
-        } else if (state.screen == Screen::Orbit) {
-            warningTime = state.run.approach.orbit.elapsedSeconds;
         }
         std::string warningClass = "flight-nav-indicator";
         if (instruments.offCourse) {
@@ -5893,25 +4297,6 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
         }
     }
 
-    if (state.screen == Screen::Flyby && !state.run.approach.flyby.completed) {
-        const FlybyRunState& flyby = state.run.approach.flyby;
-        const double remaining = std::max(0.0, flyby.durationSeconds - flyby.elapsedSeconds);
-        appendHudText(result, "rr-hud-flyby-timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s");
-        appendHudText(
-            result,
-            "rr-hud-flyby-grade",
-            flyby.collidedWithBody ? "Impact" : flybyZoneLabel(flyby.worstZone));
-        return;
-    }
-
-    if (state.screen == Screen::Orbit && !state.run.approach.orbit.completed) {
-        const OrbitRunState& orbit = state.run.approach.orbit;
-        const double remaining = std::max(0.0, orbit.durationSeconds - orbit.elapsedSeconds);
-        appendHudText(result, "rr-hud-orbit-timer", std::to_string(static_cast<int>(std::ceil(remaining))) + "s");
-        appendHudText(result, "rr-hud-orbit-zone", orbitZoneLabel(orbit.currentZone));
-        appendHudText(result, "rr-hud-orbit-loop", display::percent(std::clamp(orbit.orbitProgress, 0.0, 1.0)));
-        return;
-    }
 
     if (state.screen == Screen::Flight) {
         if (context.surfaceArrivalActive) {
@@ -5958,11 +4343,6 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
         return;
     }
 
-    if (state.screen == Screen::SurfaceScan) {
-        const SurfaceScanRailPresentation scan = surfaceScanRailPresentation(state);
-        appendHudText(result, "rr-scan-scene-readout", scan.signal);
-        return;
-    }
 
     if (state.screen != Screen::Mining) {
         return;
@@ -6179,11 +4559,7 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
         for (const FlightActionButtonPresentation& action : panel.systemActions) {
             key << action.actionId << ':' << action.label << ':' << action.enabled << ':' << action.cssClass << ';';
         }
-    } else if (state.screen == Screen::Flyby) {
-        key << state.run.approach.flyby.completed << '|' << state.run.approach.flyby.collidedWithBody;
-    } else if (state.screen == Screen::Orbit) {
-        key << state.run.approach.orbit.completed;
-    } else if (state.screen == Screen::Mining) {
+    }   else if (state.screen == Screen::Mining) {
         const MiningRunPresentation panel = miningRunPresentation(state, context.catalog);
         key << context.miningExtractionActive << '|' << panel.failurePending << '|'
             << context.miningFailureModalReady << '|'

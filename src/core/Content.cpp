@@ -518,7 +518,7 @@ ContentCatalog createDefaultContent()
         if (destination.id == content::destination::moon) {
             destination.approachBriefTitle = "MOON APPROACH";
             destination.approachBriefDetail =
-                "First visit: Capture Orbit, then use the mapped descent. Flyby is introduced later.";
+                "Establish orbit, scan a site, and land.";
         } else if (destination.id == content::destination::mars) {
             destination.approachBriefTitle = "MARS APPROACH";
             destination.approachBriefDetail =
@@ -529,7 +529,7 @@ ContentCatalog createDefaultContent()
                 "Skipping Io leaves the active capture objective incomplete and the authored Saturn route blocked.";
             destination.calibratedTransferMarginRequired = 5.0;
             destination.transferMarginBlockerText =
-                "Create 5 fuel of Jupiter transfer margin with Fuel Tanks III, a Good-or-better Mars slingshot, or both.";
+                "Install Fuel Tanks III for the Jupiter transfer.";
         } else if (destination.id == content::destination::uranus) {
             destination.approachBriefTitle = "LAST CHARTED DEPARTURE";
             destination.approachBriefDetail =
@@ -703,17 +703,16 @@ ContentCatalog createDefaultContent()
             "outer_transfer_ready",
             content::destination::jupiter,
             {
-                {"briefing", {}, "JUPITER DEPARTURE", "Perfect Slingshot",
-                    "Saturn is beyond normal transfer range. Hold the gold corridor for a Perfect pass; departure commits the expedition outward.",
+                {"briefing", {}, "JUPITER DEPARTURE", "Outer System Departure",
+                    "Prepare for the Saturn transfer. Departure commits the expedition outward.",
                     "REWARD // SATURN ROUTE", "Review", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
-                {"flyby", {"briefing"}, "JUPITER DEPARTURE", "Perfect Slingshot",
-                    "Good is not enough. Hold the gold corridor through the finish.",
-                    "REWARD // SATURN ROUTE", "Launch",
-                    "INSUFFICIENT SLINGSHOT — Saturn remains locked. Hold the gold corridor for a Perfect pass.",
-                    ScenarioEventKind::FlybyFinished, content::scenario::outerTransfer, {}, 1, static_cast<int>(FlybyGrade::Perfect), false, true, true,
-                    ScenarioActionKind::BeginActivity, {},
+                {"flyby", {"briefing"}, "JUPITER DEPARTURE", "Outer System Departure",
+                    "Lock the Saturn course, then depart using the flight controls.",
+                    "REWARD // SATURN ROUTE", "Lock Saturn Course", {},
+                    ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
+                    ScenarioActionKind::AcknowledgeBriefing, {},
                     {{ScenarioRewardKind::RouteAccess, content::destination::saturn, 0, false},
                       {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}}
             }
@@ -795,9 +794,6 @@ ContentCatalog createDefaultContent()
             if (!step.miningSiteDefinitionId.empty() &&
                 step.action != ScenarioActionKind::ClaimReward) {
                 step.activity = ScenarioActivityKind::MiningSite;
-            } else if (step.completionEvent == ScenarioEventKind::FlybyFinished) {
-                step.activity = ScenarioActivityKind::Flyby;
-                step.retryPolicy = ScenarioRetryPolicy::PlayerConfirmed;
             }
             const bool awardsRoute = std::any_of(
                 step.rewards.begin(), step.rewards.end(), [](const ScenarioReward& reward) {
@@ -827,22 +823,6 @@ ContentCatalog createDefaultContent()
         neptune->steps[0].gateText = "A safe Neptune arrival is required.";
         neptune->steps[0].nextStepText = "Acknowledge the contact and begin the approach.";
     }
-    catalog.transferAssists = {
-        {
-            content::transferAssist::marsJupiter,
-            content::destination::mars,
-            content::destination::jupiter,
-            content::scenario::marsBayExpansion,
-            "funding",
-            {LaunchTrainingStage::HullIntegrity, LaunchTrainingStage::JupiterTransfer},
-            FlybyGrade::Good,
-            tuning::flyby::jupiterSlingshotFuelSavings,
-            tuning::flyby::slingshotSpeedBoost,
-            tuning::flyby::jupiterSlingshotGoodInstabilityPenalty,
-            tuning::flyby::impactHullDamage,
-            "Mars Slingshot"
-        }
-    };
     catalog.scenarioFactories = {
         {"generated_mining", 1, content::scenario::generatedTemplate, 0x5343454E4152494FULL}
     };

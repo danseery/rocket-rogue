@@ -28,7 +28,6 @@
 #include "core/SaveData.h"
 #include "core/SaveSchema.h"
 #include "core/ShipPresentation.h"
-#include "core/SurfaceScanPresentation.h"
 #include "core/Tuning.h"
 #include "core/GameUi.h"
 #include "game/GamePanel.h"
@@ -625,553 +624,6 @@ void moduleOffersAreOneChoiceRefits()
     }
 }
 
-void fuelRefitsTeachMarsAndFundJupiter()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    const ShipModule* fuelTanksTwo = catalog.findModule(content::module::fuelTanks2);
-    const ShipModule* fuelTanksThree = catalog.findModule(content::module::fuelTanks3);
-    require(fuelTanksTwo != nullptr && fuelTanksThree != nullptr,
-        "fuel progression requires both permanent tank refits");
-    require(moduleOfferCost(*fuelTanksTwo) == 22 &&
-            fuelTanksThree->rarity == Rarity::Prototype &&
-            moduleOfferCost(*fuelTanksThree) == 92,
-        "Fuel Tanks II must remain the taught Common purchase and Fuel Tanks III must use Prototype pricing");
-
-    GameState marsRefit = createNewGame(catalog, 0xF002);
-    marsRefit.run.destinationIndex = 1;
-    marsRefit.meta.furthestTier = 1;
-    marsRefit.meta.launchLessons.stage = LaunchTrainingStage::ThermalManagement;
-    marsRefit.meta.launchUpgrades.fuelTanks = 1;
-    marsRefit.meta.launchUpgrades.flightControls = 1;
-    marsRefit.meta.unlockKeys.push_back(content::unlock::routeMars);
-    marsRefit.run.refitEntitled = true;
-    marsRefit.run.credits = 22.0;
-    syncLaunchConfig(marsRefit, catalog);
-
-    Random taughtRng(0xF002);
-    generateModuleOffers(marsRefit, catalog, taughtRng);
-    require(marsRefit.run.offerModuleIds[0] == content::module::fuelTanks2 &&
-            marsRefit.run.offerModuleIds[1].empty() &&
-            marsRefit.run.offerModuleIds[2].empty(),
-        "the post-Prospector refit must teach Fuel Tanks II as a single offer");
-    const RefitWindowPresentation taughtWindow = refitWindowPresentation(marsRefit, catalog);
-    require(taughtWindow.offers.size() == 1 && taughtWindow.offers.front().cost == 22 &&
-            taughtWindow.offers.front().affordable && !taughtWindow.showSkip,
-        "an affordable taught tank refit must require the purchase before continuing");
-    require(buyOffer(marsRefit, catalog, 0) &&
-            marsRefit.meta.launchUpgrades.fuelTanks == 2 &&
-            nearlyEqual(marsRefit.run.credits, 0.0) &&
-            nearlyEqual(launchFuelCapacity(marsRefit), 20.0) &&
-            launchMissionReady(marsRefit, catalog),
-        "buying Fuel Tanks II must spend 22 credits and make the 20-fuel Mars transfer available");
-
-    GameState underfundedLegacy = marsRefit;
-    underfundedLegacy.meta.launchUpgrades.fuelTanks = 1;
-    underfundedLegacy.meta.ownedModuleIds.erase(
-        std::remove(
-            underfundedLegacy.meta.ownedModuleIds.begin(),
-            underfundedLegacy.meta.ownedModuleIds.end(),
-            std::string(content::module::fuelTanks2)),
-        underfundedLegacy.meta.ownedModuleIds.end());
-    underfundedLegacy.run.refitEntitled = true;
-    underfundedLegacy.run.credits = 20.0;
-    syncLaunchConfig(underfundedLegacy, catalog);
-    Random legacyRng(0xF003);
-    generateModuleOffers(underfundedLegacy, catalog, legacyRng);
-    const RefitWindowPresentation legacyWindow = refitWindowPresentation(underfundedLegacy, catalog);
-    require(nearlyEqual(underfundedLegacy.run.credits, 20.0) && legacyWindow.showSkip,
-        "an underfunded legacy save must keep its earned credits and be able to replay Moon instead of receiving a grant or soft lock");
-
-    GameState jupiterRefit = createNewGame(catalog, 0xF004);
-    jupiterRefit.run.destinationIndex = 2;
-    jupiterRefit.meta.furthestTier = 2;
-    jupiterRefit.meta.launchLessons.stage = LaunchTrainingStage::HullIntegrity;
-    jupiterRefit.meta.launchUpgrades.fuelTanks = 2;
-    jupiterRefit.meta.launchUpgrades.flightControls = 1;
-    jupiterRefit.meta.unlockKeys.push_back(content::unlock::routeMars);
-    jupiterRefit.meta.unlockKeys.push_back(content::unlock::routeJupiter);
-    jupiterRefit.run.refitEntitled = true;
-    jupiterRefit.run.credits = 83.0;
-    if (ScenarioInstance* marsBay = findScenarioInstance(
-            jupiterRefit.meta, content::scenario::marsBayExpansion)) {
-        if (ScenarioStepProgress* delivery = findScenarioStepProgress(*marsBay, "delivery")) {
-            delivery->briefingAcknowledged = true;
-            delivery->completed = true;
-            delivery->claimed = true;
-        }
-    }
-    require(performScenarioAction(
-                jupiterRefit,
-                catalog,
-                content::scenario::marsBayExpansion,
-                "funding",
-                ScenarioActionKind::AcknowledgeBriefing)
-                .applied,
-        "the Mars transfer-assist fixture must review the authored funding beat");
-    syncLaunchConfig(jupiterRefit, catalog);
-
-    const FrontierGateStatus blockedJupiter = frontierGateStatus(jupiterRefit, catalog);
-    require(!blockedJupiter.satisfied && blockedJupiter.kind == FrontierGateKind::FlightData &&
-            currentDestinationLaunchReady(jupiterRefit, catalog),
-        "insufficient Jupiter fuel must block only the next route while leaving Mars replay available");
-    const GameState neither = jupiterRefit;
-
-    GameState slingshotOnly = jupiterRefit;
-    const double slingshotCreditsBefore = slingshotOnly.run.credits;
-    const int slingshotResearchBefore = slingshotOnly.meta.blueprintProgress;
-    require(startJupiterSlingshotRun(slingshotOnly, catalog) &&
-            slingshotOnly.screen == Screen::Flyby &&
-            slingshotOnly.run.approach.flyby.purpose == FlybyPurpose::JupiterSlingshot,
-        "the Mars departure slingshot must remain available without Fuel Tanks III");
-    {
-        const std::optional<SaveData> inProgressSave = deserializeSaveData(
-            serializeSaveData(captureSaveData(slingshotOnly)));
-        require(inProgressSave.has_value(),
-            "an in-progress Mars departure Flyby must save safely");
-        GameState restoredInProgress = createNewGame(catalog, 0xF0041);
-        restoreSaveData(restoredInProgress, catalog, *inProgressSave);
-        require(restoredInProgress.screen == Screen::Hangar &&
-                !restoredInProgress.run.approach.flyby.active &&
-                canStartJupiterSlingshot(restoredInProgress, catalog),
-            "loading during the realtime Flyby must return to a retryable Hangar without granting momentum");
-    }
-    slingshotOnly.run.approach.flyby.completed = true;
-    slingshotOnly.run.approach.flyby.result = FlybyGrade::Perfect;
-    slingshotOnly.run.approach.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
-    slingshotOnly.run.approach.flyby.pathProgress = 1.0;
-    const double exitTangentXRaw =
-        tuning::flyby::endX - tuning::flyby::control2X;
-    const double exitTangentYRaw =
-        tuning::flyby::endY - tuning::flyby::control2Y;
-    const double exitTangentLength = std::hypot(exitTangentXRaw, exitTangentYRaw);
-    const double exitTangentX = exitTangentXRaw / exitTangentLength;
-    const double exitTangentY = exitTangentYRaw / exitTangentLength;
-    const double exitRightX = exitTangentY;
-    const double exitRightY = -exitTangentX;
-    const double flybyExitOffset =
-        -slingshotOnly.run.approach.flyby.perfectBand * 0.50;
-    slingshotOnly.run.approach.flyby.shipX =
-        tuning::flyby::endX + exitRightX * flybyExitOffset;
-    slingshotOnly.run.approach.flyby.shipY =
-        tuning::flyby::endY + exitRightY * flybyExitOffset;
-    slingshotOnly.run.approach.flyby.velocityX =
-        exitTangentX * tuning::flyby::maxSpeed;
-    slingshotOnly.run.approach.flyby.velocityY =
-        exitTangentY * tuning::flyby::maxSpeed;
-    require(armJupiterSlingshot(slingshotOnly),
-        "a Perfect Mars pass must physically arm the one-attempt Jupiter slingshot");
-    const double achievedSpeedBoost = slingshotOnly.run.pendingTransferAssist.speedBoost;
-    const double expectedLaunchCourseOffset =
-        -tuning::launch::pilotingCourseSafe * 0.50;
-    require(nearlyEqual(
-                slingshotOnly.run.pendingTransferAssist.exitCourseOffset,
-                expectedLaunchCourseOffset),
-        "the transfer assist must preserve the Flyby exit side and its exact position within the gold band");
-    completeFlybyRun(slingshotOnly, catalog);
-    require(slingshotOnly.run.pendingTransferAssist.active() &&
-            nearlyEqual(launchFuelCapacity(slingshotOnly), 20.0) &&
-            nearlyEqual(pendingLaunchFuelSavingsForDestination(slingshotOnly, content::destination::jupiter), 5.0) &&
-            nearlyEqual(pendingLaunchInstabilityPenaltyForDestination(slingshotOnly, content::destination::jupiter), 0.0) &&
-            nearlyEqual(calibratedTransferFuelMargin(
-                slingshotOnly,
-                *catalog.findDestination(content::destination::jupiter)), 5.0) &&
-            jupiterTransferMarginReady(slingshotOnly),
-        "a Perfect Mars slingshot alone must open Jupiter with 20 tank, 15 burn, 5 margin, and normal stability");
-    require(nearlyEqual(slingshotOnly.run.credits, slingshotCreditsBefore) &&
-            slingshotOnly.meta.blueprintProgress == slingshotResearchBefore,
-        "the dedicated departure slingshot must award no credits or Research Data");
-    require(nearlyEqual(
-                achievedSpeedBoost,
-                tuning::flyby::slingshotSpeedBoost *
-                    tuning::flyby::slingshotMaxSpeedScale),
-        "a maximum-speed slingshot must retain the full 40 percent travel-rate bonus");
-
-    GameState slowGoldSlingshot = jupiterRefit;
-    require(startJupiterSlingshotRun(slowGoldSlingshot, catalog),
-        "the slow-Gold anti-cheese fixture must start a Mars slingshot");
-    slowGoldSlingshot.run.approach.flyby.completed = true;
-    slowGoldSlingshot.run.approach.flyby.result = FlybyGrade::Perfect;
-    slowGoldSlingshot.run.approach.flyby.pathProgress = 1.0;
-    slowGoldSlingshot.run.approach.flyby.shipX = tuning::flyby::endX;
-    slowGoldSlingshot.run.approach.flyby.shipY = tuning::flyby::endY;
-    slowGoldSlingshot.run.approach.flyby.velocityX =
-        exitTangentX * tuning::flyby::minSpeed;
-    slowGoldSlingshot.run.approach.flyby.velocityY =
-        exitTangentY * tuning::flyby::minSpeed;
-    require(armJupiterSlingshot(slowGoldSlingshot) &&
-            nearlyEqual(
-                slowGoldSlingshot.run.pendingTransferAssist.speedBoost,
-                0.0),
-        "slowing to minimum speed in Gold must grant zero bonus velocity");
-
-    GameState fastGreenSlingshot = jupiterRefit;
-    require(startJupiterSlingshotRun(fastGreenSlingshot, catalog),
-        "the fast-Green fixture must start a Mars slingshot");
-    fastGreenSlingshot.run.approach.flyby.completed = true;
-    fastGreenSlingshot.run.approach.flyby.result = FlybyGrade::Good;
-    fastGreenSlingshot.run.approach.flyby.pathProgress = 1.0;
-    const double greenBandShare = 0.75;
-    const double fastGreenExitOffset =
-        fastGreenSlingshot.run.approach.flyby.perfectBand +
-        (fastGreenSlingshot.run.approach.flyby.goodBand -
-            fastGreenSlingshot.run.approach.flyby.perfectBand) * greenBandShare;
-    fastGreenSlingshot.run.approach.flyby.shipX =
-        tuning::flyby::endX + exitRightX * fastGreenExitOffset;
-    fastGreenSlingshot.run.approach.flyby.shipY =
-        tuning::flyby::endY + exitRightY * fastGreenExitOffset;
-    fastGreenSlingshot.run.approach.flyby.velocityX =
-        exitTangentX * tuning::flyby::maxSpeed;
-    fastGreenSlingshot.run.approach.flyby.velocityY =
-        exitTangentY * tuning::flyby::maxSpeed;
-    require(armJupiterSlingshot(fastGreenSlingshot) &&
-            fastGreenSlingshot.run.pendingTransferAssist.grade == FlybyGrade::Good &&
-            nearlyEqual(
-                fastGreenSlingshot.run.pendingTransferAssist.speedBoost,
-                tuning::flyby::slingshotSpeedBoost *
-                    tuning::flyby::slingshotMaxSpeedScale) &&
-            nearlyEqual(
-                fastGreenSlingshot.run.pendingTransferAssist.exitCourseOffset,
-                tuning::launch::pilotingCourseSafe +
-                    (tuning::launch::pilotingCourseCaution -
-                        tuning::launch::pilotingCourseSafe) * greenBandShare),
-        "a breakneck Green exit must keep its full speed while preserving its farther-off-center launch position");
-
-    const double calibratedBurn = launchPoweredFuelCost(
-        20.0,
-        tuning::launch::calibratedThrottle,
-        tuning::flyby::jupiterSlingshotFuelSavings);
-    require(nearlyEqual(calibratedBurn, 15.0) &&
-            launchPoweredFuelCost(20.0, tuning::launch::pilotingMinimumPoweredThrottle, 5.0) < calibratedBurn &&
-            launchPoweredFuelCost(20.0, 1.0, 5.0) > 20.0,
-        "slingshot savings must apply after throttle scaling so cautious, calibrated, and reckless burns retain distinct risk");
-
-    GameState goodSlingshot = jupiterRefit;
-    require(startJupiterSlingshotRun(goodSlingshot, catalog),
-        "the dedicated Mars slingshot should start from the reviewed Jupiter window");
-    goodSlingshot.run.approach.flyby.completed = true;
-    goodSlingshot.run.approach.flyby.result = FlybyGrade::Good;
-    goodSlingshot.run.approach.flyby.elapsedSeconds = tuning::flyby::durationSeconds - 1.0;
-    Random goodResultRng(0xF0044);
-    const PreparedLaunch goodResultLaunch = prepareLaunch(goodSlingshot, catalog, goodResultRng);
-    const std::string goodResultHtml = buildGamePanelHtml(
-        {goodSlingshot, catalog, goodResultLaunch, goodResultLaunch});
-    require(goodResultHtml.find("SLINGSHOT ACTIVE — WILD RIDE") != std::string::npos &&
-            goodResultHtml.find("+35% flight instability") != std::string::npos &&
-            goodResultHtml.find("finish // +") != std::string::npos &&
-            goodResultHtml.find("launch velocity") != std::string::npos &&
-            goodResultHtml.find("Continue to Jupiter") != std::string::npos,
-        "a Good Mars result must show its actual finish-derived velocity and the wilder flight-control cost");
-    completeFlybyRun(goodSlingshot, catalog);
-    require(goodSlingshot.run.pendingTransferAssist.active() &&
-            nearlyEqual(pendingLaunchFuelSavingsForDestination(goodSlingshot, content::destination::jupiter), 5.0) &&
-            nearlyEqual(
-                pendingLaunchInstabilityPenaltyForDestination(goodSlingshot, content::destination::jupiter),
-                tuning::flyby::jupiterSlingshotGoodInstabilityPenalty) &&
-            jupiterTransferMarginReady(goodSlingshot) &&
-            nearlyEqual(goodSlingshot.run.credits, slingshotCreditsBefore) &&
-            goodSlingshot.meta.blueprintProgress == slingshotResearchBefore,
-        "a Good Mars pass must open Jupiter with full momentum, +35% flight instability, and no economy reward");
-    Random goodLaunchRng(0xF0042);
-    const PreparedLaunch goodLaunch = prepareLaunch(goodSlingshot, catalog, goodLaunchRng);
-    require(nearlyEqual(
-                goodLaunch.controlChaos,
-                launchControlChaosForRank(goodSlingshot.meta.launchUpgrades.flightControls) +
-                    tuning::flyby::jupiterSlingshotGoodInstabilityPenalty) &&
-            nearlyEqual(
-                goodLaunch.slingshotInstabilityPenalty,
-                tuning::flyby::jupiterSlingshotGoodInstabilityPenalty),
-        "the Good slingshot must add its one-attempt penalty to the existing Flight Controls instability");
-
-    GameState cappedGood = goodSlingshot;
-    cappedGood.meta.launchUpgrades.flightControls = 0;
-    Random cappedGoodRng(0xF0043);
-    require(nearlyEqual(prepareLaunch(cappedGood, catalog, cappedGoodRng).controlChaos, 1.0),
-        "Good slingshot instability must cap at the existing 100% maximum");
-
-    GameState impactRetry = jupiterRefit;
-    require(startJupiterSlingshotRun(impactRetry, catalog),
-        "the dedicated impact fixture must start the Mars slingshot");
-    impactRetry.run.approach.flyby.shipX = tuning::flyby::destinationX;
-    impactRetry.run.approach.flyby.shipY = tuning::flyby::destinationY;
-    const int expectedImpactDamage = impactRetry.run.approach.flyby.impactHullDamage;
-    updateFlybyRun(impactRetry, 0.001);
-    require(impactRetry.run.approach.flyby.completed &&
-            impactRetry.run.approach.flyby.collidedWithBody &&
-            impactRetry.run.shipDamage == expectedImpactDamage &&
-            expectedImpactDamage == tuning::flyby::impactHullDamage,
-        "a Mars slingshot impact must retain the existing 18 hull damage");
-    completeFlybyRun(impactRetry, catalog);
-    require(canStartJupiterSlingshot(impactRetry, catalog),
-        "an impact must spend hull integrity but leave the departure pass retryable");
-
-    SaveData slingshotSave = captureSaveData(slingshotOnly);
-    const std::optional<SaveData> restoredSlingshotSave =
-        deserializeSaveData(serializeSaveData(slingshotSave));
-    require(restoredSlingshotSave.has_value(),
-        "an active Mars slingshot must serialize");
-    GameState restoredSlingshot = createNewGame(catalog, 0xF005);
-    restoreSaveData(restoredSlingshot, catalog, *restoredSlingshotSave);
-    require(restoredSlingshot.run.pendingTransferAssist.active() &&
-            restoredSlingshot.run.pendingTransferAssist.definitionId == content::transferAssist::marsJupiter &&
-            nearlyEqual(restoredSlingshot.run.pendingTransferAssist.fuelSavings, 5.0) &&
-            nearlyEqual(restoredSlingshot.run.pendingTransferAssist.instabilityPenalty, 0.0) &&
-            nearlyEqual(
-                restoredSlingshot.run.pendingTransferAssist.exitCourseOffset,
-                expectedLaunchCourseOffset),
-        "an active Mars slingshot must survive save/load until the Jupiter attempt begins");
-
-    const std::optional<SaveData> restoredGoodSave = deserializeSaveData(
-        serializeSaveData(captureSaveData(goodSlingshot)));
-    require(restoredGoodSave.has_value(), "a Good Mars slingshot must serialize");
-    GameState restoredGood = createNewGame(catalog, 0xF006);
-    restoreSaveData(restoredGood, catalog, *restoredGoodSave);
-    require(restoredGood.run.pendingTransferAssist.active() &&
-            nearlyEqual(
-                pendingLaunchInstabilityPenaltyForDestination(restoredGood, content::destination::jupiter),
-                tuning::flyby::jupiterSlingshotGoodInstabilityPenalty),
-        "a Good Mars slingshot must preserve its visible instability penalty across save/load");
-
-    // A second content-only transfer assist proves the runtime is not coupled
-    // to Mars or Jupiter: it starts, awards, presents, gates its target, and
-    // never leaks to a different prepared launch.
-    ContentCatalog reusableCatalog = catalog;
-    TransferAssistDefinition& reusableAssist = reusableCatalog.transferAssists.emplace_back(
-        TransferAssistDefinition {
-            "test_jupiter_saturn_assist",
-            content::destination::jupiter,
-            content::destination::saturn,
-            content::scenario::marsBayExpansion,
-            "funding",
-            {},
-            FlybyGrade::Good,
-            9.0,
-            0.25,
-            0.30,
-            tuning::flyby::impactHullDamage,
-            "Jupiter Test Assist"});
-    Destination* reusableTarget = const_cast<Destination*>(
-        reusableCatalog.findDestination(content::destination::saturn));
-    require(reusableTarget != nullptr, "the reusable transfer-assist fixture requires Saturn content");
-    reusableTarget->calibratedTransferMarginRequired = 4.0;
-    GameState reusableAssistState = jupiterRefit;
-    reusableAssistState.run.destinationIndex = static_cast<int>(std::distance(
-        reusableCatalog.destinations.begin(),
-        std::find_if(
-            reusableCatalog.destinations.begin(), reusableCatalog.destinations.end(),
-            [](const Destination& destination) {
-                return destination.id == content::destination::jupiter;
-            })));
-    reusableAssistState.meta.unlockKeys.push_back(content::unlock::routeSaturn);
-    reusableAssistState.meta.launchLessons.stage = LaunchTrainingStage::Complete;
-    reusableAssistState.launchConfig.destinationId = content::destination::saturn;
-    reusableAssistState.launchConfig.frontierTransfer = true;
-    require(startTransferAssistRun(reusableAssistState, reusableCatalog, reusableAssist.id) &&
-            reusableAssistState.run.approach.flyby.transferAssistId == reusableAssist.id,
-        "a content-defined Jupiter-to-Saturn assist must start without a planet-specific runtime branch");
-    reusableAssistState.run.approach.flyby.completed = true;
-    reusableAssistState.run.approach.flyby.result = FlybyGrade::Good;
-    reusableAssistState.run.approach.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
-    reusableAssistState.run.approach.flyby.velocityX = tuning::flyby::maxSpeed;
-    require(armTransferAssist(reusableAssistState, reusableCatalog),
-        "a content-defined transfer assist must award through the generic API");
-    completeFlybyRun(reusableAssistState, reusableCatalog);
-    Random reusableRng(0xF0046);
-    const PreparedLaunch reusableLaunch = prepareLaunch(reusableAssistState, reusableCatalog, reusableRng);
-    const std::string reusableHtml = buildGamePanelHtml(
-        {reusableAssistState, reusableCatalog, reusableLaunch, reusableLaunch});
-    require(reusableLaunch.transferAssistId == reusableAssist.id &&
-            nearlyEqual(reusableLaunch.slingshotFuelSavings, 9.0) &&
-            destinationTransferMarginReady(reusableAssistState, reusableCatalog, *reusableTarget) &&
-            reusableHtml.find("Continue to Saturn") != std::string::npos,
-        "a second assist must display and satisfy only its own target's calibrated margin");
-    reusableAssistState.launchConfig.destinationId = content::destination::mars;
-    const PreparedLaunch unrelatedLaunch = prepareLaunch(reusableAssistState, reusableCatalog, reusableRng);
-    require(unrelatedLaunch.transferAssistId.empty() &&
-            nearlyEqual(unrelatedLaunch.slingshotFuelSavings, 0.0),
-        "a pending transfer assist must not spill into a non-target launch");
-
-    Random jupiterRng(0xF004);
-    generateModuleOffers(jupiterRefit, catalog, jupiterRng);
-    require(jupiterRefit.run.offerModuleIds[0] == content::module::fuelTanks3,
-        "Fuel Tanks III must be pinned into the first eligible post-Mars refit slot");
-    const RefitWindowPresentation jupiterWindow = refitWindowPresentation(jupiterRefit, catalog);
-    require(jupiterWindow.offers.size() >= 2 &&
-            jupiterWindow.offers.front().cost == 92 &&
-            !jupiterWindow.offers.front().affordable &&
-            jupiterWindow.showSkip && jupiterWindow.showReroll,
-        "the Jupiter refit must remain a normal choice board when the Prototype tank is not yet affordable");
-    require(rerollOffers(jupiterRefit, catalog, jupiterRng) &&
-            jupiterRefit.run.offerModuleIds[0] == content::module::fuelTanks3,
-        "rerolling the post-Mars board must preserve the Fuel Tanks III opportunity");
-
-    const Destination* mars = catalog.findDestination(content::destination::mars);
-    require(mars != nullptr, "the fuel economy fixture requires Mars content");
-    const double conservativeFirstMarsCredits = 30.0 + tuning::launchProgression::lessonReward;
-    const double repeatMarsTransferCredits = mars->baseReward * mars->targetMultiplier *
-        tuning::rewards::transferArrivalPayoutFactor;
-    require(conservativeFirstMarsCredits < static_cast<double>(moduleOfferCost(*fuelTanksThree)) &&
-            conservativeFirstMarsCredits + repeatMarsTransferCredits >=
-                static_cast<double>(moduleOfferCost(*fuelTanksThree)),
-        "the conservative economy must put Fuel Tanks III out of reach after first Mars but fund it with one successful repeat transfer");
-
-    jupiterRefit.run.credits = 92.0;
-    require(buyOffer(jupiterRefit, catalog, 0) &&
-            jupiterRefit.meta.launchUpgrades.fuelTanks == 3 &&
-            nearlyEqual(jupiterRefit.run.credits, 0.0) &&
-            nearlyEqual(launchFuelCapacity(jupiterRefit), 25.0) &&
-            launchMissionReady(jupiterRefit, catalog),
-        "buying the pinned Prototype must spend 92 credits and make the 25-fuel Jupiter transfer available");
-    require(canStartJupiterSlingshot(jupiterRefit, catalog),
-        "installing Fuel Tanks III must never hide or disable the Mars slingshot");
-
-    GameState both = jupiterRefit;
-    both.run.pendingTransferAssist = PendingTransferAssist {
-        content::transferAssist::marsJupiter,
-        content::destination::mars,
-        content::destination::jupiter,
-        FlybyGrade::Perfect,
-        tuning::flyby::jupiterSlingshotFuelSavings,
-        achievedSpeedBoost,
-        0.0};
-    const Destination* jupiter = catalog.findDestination(content::destination::jupiter);
-    require(jupiter != nullptr &&
-            nearlyEqual(launchFuelCapacity(both), 25.0) &&
-            nearlyEqual(launchPoweredFuelCost(
-                launchCruiseFuelCostForTier(jupiter->tier),
-                tuning::launch::calibratedThrottle,
-                pendingLaunchFuelSavingsForDestination(both, jupiter->id)), 15.0) &&
-            nearlyEqual(calibratedTransferFuelMargin(both, *jupiter), 10.0) &&
-            jupiterTransferMarginReady(both),
-        "Fuel Tanks III and the Mars slingshot must stack to 25 tank, 15 burn, and 10 margin");
-
-    Random inheritedLaunchRng(0xF0047);
-    const PreparedLaunch inheritedLaunch = prepareLaunch(
-        slingshotOnly,
-        catalog,
-        inheritedLaunchRng);
-    const FlightRunState inheritedFlight = beginLaunchFlight(
-        inheritedLaunch,
-        *jupiter);
-    const double expectedInheritedVelocity = 0.26 + achievedSpeedBoost * 0.025;
-    require(nearlyEqual(
-                inheritedLaunch.slingshotCourseOffset,
-                expectedLaunchCourseOffset) &&
-            nearlyEqual(inheritedFlight.positionY, 1.10 + expectedLaunchCourseOffset),
-        "the post-slingshot launch must begin at the saved physical approach offset");
-    require(nearlyEqual(
-                inheritedFlight.velocityX,
-                expectedInheritedVelocity) &&
-            inheritedFlight.velocityX > 0.0,
-        "the post-slingshot launch must start with the earned physical velocity instead of accelerating from rest");
-
-    PreparedLaunch centeredAssistLaunch = inheritedLaunch;
-    centeredAssistLaunch.controlChaos = 0.0;
-    centeredAssistLaunch.slingshotCourseOffset = 0.0;
-    const FlightRunState centeredAssistFlight = beginLaunchFlight(
-        centeredAssistLaunch,
-        *jupiter);
-    PreparedLaunch greenAssistLaunch = centeredAssistLaunch;
-    greenAssistLaunch.slingshotCourseOffset =
-        tuning::launch::pilotingCourseCaution * 0.90;
-    const FlightRunState greenAssistFlight = beginLaunchFlight(
-        greenAssistLaunch,
-        *jupiter);
-    require(nearlyEqual(centeredAssistFlight.velocityY, 0.0) &&
-            greenAssistFlight.velocityY > centeredAssistFlight.velocityY &&
-            nearlyEqual(
-                greenAssistFlight.velocityY - centeredAssistFlight.velocityY,
-                greenAssistLaunch.slingshotCourseOffset /
-                    launchCourseLimit(greenAssistLaunch) *
-                    tuning::launch::slingshotExitCourseDrift),
-        "farther off-center transfer exits must seed proportionally wilder physical velocity");
-
-    PreparedLaunch heatBaseline;
-    heatBaseline.config.destinationId = jupiter->id;
-    heatBaseline.config.frontierTransfer = true;
-    heatBaseline.fuelCapacity = 25.0;
-    heatBaseline.cruiseFuelCost = 20.0;
-    heatBaseline.heatEnabled = true;
-    PreparedLaunch heatSlingshot = heatBaseline;
-    heatSlingshot.slingshotFuelSavings = 5.0;
-    heatSlingshot.slingshotSpeedBoost = achievedSpeedBoost;
-    FlightRunState baselineFlight = beginLaunchFlight(heatBaseline, *jupiter);
-    FlightRunState slingshotFlight = beginLaunchFlight(heatSlingshot, *jupiter);
-    baselineFlight.selectedThrottle = tuning::launch::calibratedThrottle;
-    slingshotFlight.selectedThrottle = tuning::launch::calibratedThrottle;
-    (void)updateLaunchFlight(baselineFlight, heatBaseline, *jupiter, {}, 0.04);
-    (void)updateLaunchFlight(slingshotFlight, heatSlingshot, *jupiter, {}, 0.04);
-    require(nearlyEqual(baselineFlight.heat, slingshotFlight.heat),
-        "gravity-provided slingshot velocity must add no powered heat input");
-
-    const auto hangarHtml = [&](GameState rendered, std::uint64_t seed) {
-        rendered.screen = Screen::Hangar;
-        syncLaunchConfig(rendered, catalog);
-        Random panelRng(seed);
-        const PreparedLaunch panelLaunch = prepareLaunch(rendered, catalog, panelRng);
-        return buildGamePanelHtml({rendered, catalog, panelLaunch, panelLaunch});
-    };
-    const std::string neitherHtml = hangarHtml(neither, 0xF010);
-    const std::string tanksHtml = hangarHtml(jupiterRefit, 0xF011);
-    const std::string slingshotHtml = hangarHtml(slingshotOnly, 0xF012);
-    const std::string bothHtml = hangarHtml(both, 0xF013);
-    require(neitherHtml.find("THE JUPITER WINDOW") != std::string::npos &&
-            neitherHtml.find("Create five fuel of transfer margin") != std::string::npos &&
-            neitherHtml.find("25 tank // 15 burn // 10 margin // +slingshot velocity") != std::string::npos,
-        "the Jupiter story beat must expose both independent choices and the combined preview");
-    require(neitherHtml.find("20 tank") != std::string::npos &&
-            neitherHtml.find("0 MARGIN") != std::string::npos &&
-            neitherHtml.find("hangar-frontier-meter\" aria-hidden=\"true\"><i") != std::string::npos,
-        "the Hangar readiness strip must show the locked neither-path state without text inside its segmented bar");
-    require(neitherHtml.find("Good-or-better Flyby") != std::string::npos &&
-            neitherHtml.find("Good: +35% instability") != std::string::npos,
-        "the locked Hangar must explain that Good departs with a visible instability cost");
-    require(tanksHtml.find("25 tank") != std::string::npos &&
-            tanksHtml.find("+5 MARGIN") != std::string::npos &&
-            tanksHtml.find("Transfer: Jupiter") != std::string::npos &&
-            tanksHtml.find("Begin Mars Slingshot") != std::string::npos,
-        "Fuel Tanks III must open Jupiter while preserving the independent slingshot action");
-    require(slingshotHtml.find("20 tank") != std::string::npos &&
-            slingshotHtml.find("15 powered burn") != std::string::npos &&
-            slingshotHtml.find("+5 MARGIN") != std::string::npos &&
-            slingshotHtml.find("SLINGSHOT ACTIVE") != std::string::npos &&
-            slingshotHtml.find("stable flight") != std::string::npos,
-        "the slingshot-only Hangar must show its exact physical transfer math");
-    const std::string goodHtml = hangarHtml(goodSlingshot, 0xF014);
-    require(goodHtml.find("SLINGSHOT ACTIVE // WILD RIDE") != std::string::npos &&
-            goodHtml.find("+35% flight instability") != std::string::npos,
-        "the Good slingshot Hangar must make the wilder Jupiter flight explicit");
-    require(bothHtml.find("25 tank") != std::string::npos &&
-            bothHtml.find("15 powered burn") != std::string::npos &&
-            bothHtml.find("+10 MARGIN") != std::string::npos,
-        "the both-path Hangar must visibly stack permanent tank capacity and flyby savings");
-    require(tanksHtml.find("Launch: Mars") != std::string::npos &&
-            tanksHtml.find("Begin Mars Slingshot") != std::string::npos &&
-            tanksHtml.find("Transfer: Jupiter") != std::string::npos,
-        "Mars replay, slingshot, and Jupiter transfer must remain separate peer actions");
-
-    const auto jupiterArrivalHtml = [&](double tank, double savings, double instability, std::uint64_t seed) {
-        GameState result = both;
-        result.screen = Screen::Results;
-        result.lastOutcome = {};
-        result.lastOutcome.type = LaunchResultType::MissionComplete;
-        result.lastOutcome.failureCause = LaunchFailureCause::None;
-        result.lastOutcome.recoveryMethod = RecoveryMethod::TransferArrival;
-        result.lastOutcome.destinationId = content::destination::jupiter;
-        result.lastOutcome.transferFuelCapacity = tank;
-        result.lastOutcome.slingshotFuelSavings = savings;
-        result.lastOutcome.slingshotInstabilityPenalty = instability;
-        Random panelRng(seed);
-        const PreparedLaunch panelLaunch = prepareLaunch(result, catalog, panelRng);
-        return buildGamePanelHtml({result, catalog, panelLaunch, panelLaunch});
-    };
-    require(jupiterArrivalHtml(25.0, 0.0, 0.0, 0xF020).find("PERMANENT ENGINEERING MARGIN") != std::string::npos &&
-            jupiterArrivalHtml(20.0, 5.0, 0.0, 0xF021).find("BORROWED MOMENTUM") != std::string::npos &&
-            jupiterArrivalHtml(25.0, 5.0, 0.0, 0xF022).find("MAXIMUM PREPARATION") != std::string::npos &&
-            jupiterArrivalHtml(20.0, 5.0, tuning::flyby::jupiterSlingshotGoodInstabilityPenalty, 0xF023)
-                    .find("BORROWED MOMENTUM — WILD RIDE") != std::string::npos,
-        "Jupiter arrival must acknowledge tanks-only, slingshot-only, and stacked methods distinctly");
-}
-
 void refitRerollsSpendAndEscalate()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -1384,102 +836,6 @@ void introduceArrivalFlybyForTest(GameState& state)
     require(funding != nullptr, "the Mars transfer-assist briefing should exist in test state");
     funding->briefingAcknowledged = true;
 }
-
-void solarRouteLegsKeepCampaignProgressSeparateFromShipPosition()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    std::string routeAuditError;
-    require(validateRouteCatalog(catalog, &routeAuditError),
-        "the authored solar route catalog should pass its source, target, fuel, and recovery-policy audit");
-    require(validateCampaignProgressionCatalog(catalog, &routeAuditError),
-        "the authored scenario catalog should expose reachable keys, executable transitions, and a next step at every campaign beat");
-    const std::array<std::string_view, 6> routeIds {{
-        content::routeLink::earthMoon,
-        content::routeLink::moonMars,
-        content::routeLink::marsJupiter,
-        content::routeLink::jupiterSaturn,
-        content::routeLink::saturnUranus,
-        content::routeLink::uranusNeptune,
-    }};
-    for (const std::string_view id : routeIds) {
-        const RouteLinkDefinition* route = catalog.findRouteLink(id);
-        require(route != nullptr && catalog.findDestination(route->sourceDestinationId) != nullptr &&
-                catalog.findDestination(route->targetDestinationId) != nullptr,
-            "every solar route must name valid authored source and target destinations");
-        require(route->cruiseFuelCost > 0.0,
-            "every solar route must provide a calibrated flight profile");
-    }
-    const RouteLinkDefinition* marsJupiter = catalog.findRouteLink(content::routeLink::marsJupiter);
-    const RouteLinkDefinition* jupiterSaturn = catalog.findRouteLink(content::routeLink::jupiterSaturn);
-    require(marsJupiter != nullptr && marsJupiter->recoveryAvailable,
-        "Mars to Jupiter must permit its authored return recovery flight");
-    require(jupiterSaturn != nullptr && jupiterSaturn->oneWayExpedition && !jupiterSaturn->recoveryAvailable,
-        "the Saturn expedition must retain its authored one-way policy");
-
-    GameState state = createNewGame(catalog, 0x71A9);
-    state.run.destinationIndex = 3;
-    state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
-    LaunchOutcome jupiterArrival;
-    jupiterArrival.type = LaunchResultType::MissionComplete;
-    jupiterArrival.recoveryMethod = RecoveryMethod::TransferArrival;
-    jupiterArrival.frontierTransfer = true;
-    jupiterArrival.destinationId = content::destination::jupiter;
-    jupiterArrival.routeTransit = makeRouteTransit(
-        catalog,
-        content::destination::mars,
-        content::destination::jupiter,
-        RouteTransitIntent::Outbound);
-    startArrivalOps(state, jupiterArrival);
-    require(state.run.approach.incomingRoute.active() &&
-            state.run.approach.incomingRoute.originDestinationId == content::destination::mars,
-        "arrival operations must retain the physical origin of their incoming leg");
-
-    introduceArrivalFlybyForTest(state);
-    startArrivalFlybyRun(state, catalog);
-    state.run.approach.flyby.completed = true;
-    state.run.approach.flyby.result = FlybyGrade::Good;
-    state.run.approach.flyby.elapsedSeconds = tuning::flyby::minimumFinishSeconds;
-    completeFlybyRun(state, catalog);
-    require(!flybyClearsGenericNextRoute(state, catalog),
-        "a normal Jupiter flyby must preserve Io's authored onward gate");
-
-    require(queueBlockedArrivalFlybyRecovery(state, catalog),
-        "blocked authored flybys must queue their route-defined recovery leg");
-    require(state.screen == Screen::Hangar && state.run.routeTransit.intent == RouteTransitIntent::Recovery &&
-            state.run.routeTransit.originDestinationId == content::destination::jupiter &&
-            state.run.routeTransit.targetDestinationId == content::destination::mars,
-        "the recovery leg must travel from Jupiter back to Mars");
-    syncLaunchConfig(state, catalog);
-    Random recoveryRng(0x71AA);
-    const PreparedLaunch recoveryLaunch = prepareLaunch(state, catalog, recoveryRng);
-    require(recoveryLaunch.config.destinationId == content::destination::mars &&
-            recoveryLaunch.routeProfileDestinationId == content::destination::jupiter &&
-            std::abs(recoveryLaunch.cruiseFuelCost - marsJupiter->cruiseFuelCost) < 0.001,
-        "recovery must arrive at Mars while reusing the authored Mars-Jupiter leg profile");
-
-    const std::optional<SaveData> saved = deserializeSaveData(serializeSaveData(captureSaveData(state)));
-    require(saved.has_value(), "pending recovery route should serialize in the version-14 save");
-    GameState restored = createNewGame(catalog, 0x71AB);
-    restoreSaveData(restored, catalog, *saved);
-    require(restored.run.routeTransit.intent == RouteTransitIntent::Recovery &&
-            restored.run.routeTransit.originDestinationId == content::destination::jupiter &&
-            restored.run.routeTransit.targetDestinationId == content::destination::mars,
-        "saved recovery routes must restore their exact origin and target");
-
-    LaunchOutcome recovered;
-    recovered.type = LaunchResultType::MissionComplete;
-    recovered.recoveryMethod = RecoveryMethod::TransferArrival;
-    recovered.frontierTransfer = true;
-    recovered.destinationId = content::destination::mars;
-    recovered.routeTransit = restored.run.routeTransit;
-    applyLaunchOutcome(restored, catalog, recovered);
-    require(restored.run.destinationIndex == 3 &&
-            restored.run.routeTransit.intent == RouteTransitIntent::Reapproach &&
-            restored.run.routeTransit.originDestinationId == content::destination::mars &&
-            restored.run.routeTransit.targetDestinationId == content::destination::jupiter,
-        "successful recovery must retain Jupiter campaign frontier and queue an explicit Mars-to-Jupiter reapproach");
-}
-
 
 void researchProjectsGenerateAndCompleteFromSharedRules()
 {
@@ -1726,149 +1082,7 @@ void sharedFlightInstrumentPresentationMatchesEachMode()
             && launchInstruments.offCourse && !launchInstruments.courseCritical,
         "Launch instruments should use authoritative speed, heat, fuel, and course state");
 
-    FlybyRunState flyby;
-    flyby.active = true;
-    flyby.durationSeconds = 20.0;
-    flyby.elapsedSeconds = 5.0;
-    flyby.velocityX = tuning::flyby::maxSpeed;
-    flyby.velocityY = 0.0;
-    flyby.selectedThrottle = 1.0;
-    flyby.currentZone = 0;
-    const FlightInstrumentPresentation flybyInstruments = flybyFlightInstruments(flyby);
-    require(flybyInstruments.visible && nearlyEqual(flybyInstruments.speed, 1.0)
-            && nearlyEqual(flybyInstruments.fuel, 0.75)
-            && nearlyEqual(flybyInstruments.throttle, 1.0)
-            && flybyInstruments.temperature > 0.8 && flybyInstruments.temperatureCritical
-            && flybyInstruments.offCourse,
-        "Flyby instruments should derive display-only heat and fuel from thrust and endurance");
 
-    flyby.inputY = 0.0;
-    flyby.selectedThrottle = 0.46;
-    const FlightInstrumentPresentation flybyHeldInstruments = flybyFlightInstruments(flyby);
-    require(nearlyEqual(flybyHeldInstruments.throttle, 0.46)
-            && flybyHeldInstruments.throttleValue == "Throttle 46%",
-        "Flyby instruments should display the retained throttle level when no adjustment key is held");
-
-    OrbitRunState orbit;
-    orbit.active = true;
-    orbit.durationSeconds = 16.0;
-    orbit.elapsedSeconds = 8.0;
-    orbit.velocityX = tuning::orbit::minSpeed;
-    orbit.velocityY = 0.0;
-    orbit.inputX = 1.0;
-    orbit.selectedThrottle = 0.50;
-    orbit.currentZone = 0;
-    const FlightInstrumentPresentation orbitInstruments = orbitFlightInstruments(orbit);
-    require(orbitInstruments.visible && nearlyEqual(orbitInstruments.speed, 0.0)
-            && nearlyEqual(orbitInstruments.fuel, 0.5)
-            && nearlyEqual(orbitInstruments.throttle, 0.5)
-            && orbitInstruments.temperature > 0.5 && orbitInstruments.offCourse,
-        "Orbit instruments should derive display-only heat and fuel without changing mechanics");
-
-    flyby.completed = true;
-    orbit.completed = true;
-    require(!flybyFlightInstruments(flyby).visible && !orbitFlightInstruments(orbit).visible,
-        "completed flight minigames should unmount the instrument cluster");
-}
-
-void activeFlightPanelsUseTheClusterAndCompactStatusRows()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState launchState = createNewGame(catalog, 6611);
-    launchState.screen = Screen::Flight;
-    Random rng(6611);
-    PreparedLaunch launch = prepareLaunch(launchState, catalog, rng);
-    launch.asteroidsEnabled = true;
-    FlightRunState flight = beginLaunchFlight(launch, currentDestination(launchState, catalog));
-    PanelRenderContext launchContext {launchState, catalog, launch, launch};
-    launchContext.currentMultiplier = flight.currentMultiplier;
-    launchContext.flightArmed = true;
-    launchContext.launchFlight = &flight;
-    const PanelDocumentPresentation launchPanel = buildGamePanelPresentation(launchContext);
-    require(launchPanel.metadata.overlay == PanelOverlayKind::FlightInstruments
-            && launchPanel.contentMarkup.find("rr-hud-launch-metric-") == std::string::npos
-            && launchPanel.contentMarkup.find("physical-flight-status") != std::string::npos
-            && launchPanel.contentMarkup.find(">Hull<") != std::string::npos,
-        "active Launch should move instrumentation into the scene and retain compact hull status");
-    require(!launchPanel.runtime.instrumentSpeedValue.empty()
-            && !launchPanel.runtime.instrumentTemperatureValue.empty()
-            && !launchPanel.runtime.instrumentFuelValue.empty()
-            && !launchPanel.runtime.instrumentThrottleValue.empty(),
-        "the scene overlay should receive initial deterministic Launch readouts including throttle");
-    PanelRenderContext fadedLaunchContext = launchContext;
-    fadedLaunchContext.sceneFadeToBlack = 0.5;
-    require(realtimePanelStructureKey(fadedLaunchContext) !=
-            realtimePanelStructureKey(launchContext),
-        "ending a scene blackout should rebuild the Flight HUD before realtime patches resume");
-    RealtimeHudState fadedLaunchHud;
-    buildRealtimeHudState(fadedLaunchContext, fadedLaunchHud);
-    require(fadedLaunchHud.patches.empty(),
-        "a scene blackout should not patch HUD nodes while its panel document is unmounted");
-    RealtimeHudState launchHud;
-    buildRealtimeHudState(launchContext, launchHud);
-    const auto hasLaunchPatch = [&](std::string_view id) {
-        return std::any_of(launchHud.patches.begin(), launchHud.patches.end(), [id](const RealtimeHudPatch& patch) {
-            return patch.elementId == id;
-        });
-    };
-    require(hasLaunchPatch("rr-flight-speed-value")
-            && hasLaunchPatch("rr-flight-temperature-value")
-            && hasLaunchPatch("rr-flight-fuel-value")
-            && !hasLaunchPatch("rr-flight-throttle-value")
-            && hasLaunchPatch("rr-flight-throttle-accessibility")
-            && hasLaunchPatch("rr-flight-nav-indicator")
-            && hasLaunchPatch("rr-flight-temperature-label")
-            && hasLaunchPatch("rr-flight-temperature-readout")
-            && hasLaunchPatch("rr-hud-flight-metric-3"),
-        "realtime Launch patches should update every visible readout, the hidden throttle value, navigation lamp, and hull row");
-
-    GameState flybyState = createNewGame(catalog, 6612);
-    flybyState.screen = Screen::Flyby;
-    flybyState.run.approach.flyby.active = true;
-    flybyState.run.approach.flyby.durationSeconds = 18.0;
-    const PanelDocumentPresentation flybyPanel = buildGamePanelPresentation(
-        {flybyState, catalog, launch, launch});
-    require(flybyPanel.metadata.overlay == PanelOverlayKind::FlightInstruments
-            && flybyPanel.contentMarkup.find("rr-hud-flyby-speed") == std::string::npos
-            && flybyPanel.contentMarkup.find("rr-hud-flyby-timer") != std::string::npos
-            && flybyPanel.contentMarkup.find("rr-hud-flyby-grade") != std::string::npos,
-        "active Flyby should use the cluster plus compact timer and grade rows");
-
-    GameState orbitState = createNewGame(catalog, 6613);
-    orbitState.screen = Screen::Orbit;
-    orbitState.run.approach.orbit.active = true;
-    orbitState.run.approach.orbit.durationSeconds = 15.0;
-    const PanelDocumentPresentation orbitPanel = buildGamePanelPresentation(
-        {orbitState, catalog, launch, launch});
-    require(orbitPanel.metadata.overlay == PanelOverlayKind::FlightInstruments
-            && orbitPanel.contentMarkup.find("flight-readout") == std::string::npos
-            && orbitPanel.contentMarkup.find("rr-hud-orbit-timer") != std::string::npos
-            && orbitPanel.contentMarkup.find("rr-hud-orbit-zone") != std::string::npos
-            && orbitPanel.contentMarkup.find("rr-hud-orbit-loop") != std::string::npos,
-        "active Orbit should use the cluster plus compact mission rows");
-
-    GameState departingState = createNewGame(catalog, 6614);
-    departingState.run.destinationIndex = 2;
-    startSurfaceExpedition(departingState, catalog);
-    departingState.run.planetaryExpedition.miningSitePrepared = true;
-    require(startMiningRun(departingState, catalog).applied,
-        "the departure HUD fixture should enter Mining");
-    PanelRenderContext departingContext {departingState, catalog, launch, launch};
-    departingContext.miningExtractionActive = true;
-    RealtimeHudState departingHud;
-    buildRealtimeHudState(departingContext, departingHud);
-    const auto departingText = [&](std::string_view id) {
-        const auto patch = std::find_if(
-            departingHud.patches.begin(),
-            departingHud.patches.end(),
-            [id](const RealtimeHudPatch& candidate) {
-                return candidate.elementId == id && candidate.updateText;
-            });
-        return patch == departingHud.patches.end() ? std::string {} : patch->text;
-    };
-    require(departingText("rr-hud-mining-title") == "DEPARTING"
-            && departingText("rr-hud-mining-objective-title") == "BAY SECURED \xC2\xB7 IGNITION SEQUENCE",
-        "realtime Mining patches must preserve the departure ritual label instead of restoring the ordinary HUD");
 }
 
 void exhaustedRunUpgradePoolConsumesQueuedChoices()
@@ -2444,233 +1658,6 @@ void saturnArtifactQueuesPhysicalUranusRoute()
 
 }
 
-void uranusFlightDataQueuesPhysicalNeptuneRoute()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    const Destination* neptune = catalog.findDestination(content::destination::neptune);
-    require(neptune != nullptr &&
-            neptune->routeRequirementKeys == std::vector<std::string> {content::unlock::routeNeptune},
-        "Neptune should be protected by its authored route key");
-
-    GameState state = createNewGame(catalog, 0x6E7074);
-    state.meta.launchLessons.stage = LaunchTrainingStage::Complete;
-    state.meta.unlockKeys.push_back(content::unlock::routeUranus);
-    state.run.destinationIndex = 5;
-    state.meta.furthestTier = 5;
-    state.screen = Screen::ArrivalOps;
-    state.run.approach.active = true;
-    state.run.approach.destinationId = content::destination::uranus;
-    syncLaunchConfig(state, catalog);
-
-    ScenarioObjectivePresentation objective = scenarioObjectiveForDestination(
-        state,
-        catalog,
-        content::destination::uranus);
-    require(objective.available && objective.scenarioId == content::scenario::uranusDeparture &&
-            objective.stepId == "briefing" && objective.mandatoryBriefing &&
-            objective.title == "Signal Beyond Neptune" && objective.actionLabel == "Track Signal",
-        "Uranus arrival should explain the carrier signal and its Neptune-vector objective");
-    FrontierGateStatus gate = frontierGateStatusForDestination(
-        state,
-        catalog,
-        content::destination::neptune);
-    require(gate.kind == FrontierGateKind::ScenarioRequirement && !gate.satisfied &&
-            gate.current == 0 && gate.required == 2,
-        "Neptune should begin behind the visible 0/2 Flight Data gate");
-
-    Random panelRng(0x6E7075);
-    const PreparedLaunch panelLaunch = prepareLaunch(state, catalog, panelRng);
-    const std::string arrivalPanel = buildGamePanelHtml({state, catalog, panelLaunch, panelLaunch});
-    require(arrivalPanel.find("Signal Beyond Neptune") != std::string::npos &&
-            arrivalPanel.find("OBJECTIVE // 2 FLIGHT DATA") != std::string::npos &&
-            arrivalPanel.find("Track Signal") != std::string::npos,
-        "Arrival Ops should render the mandatory Uranus story briefing and action");
-
-    require(performScenarioAction(
-                state,
-                catalog,
-                content::scenario::uranusDeparture,
-                "briefing",
-                ScenarioActionKind::AcknowledgeBriefing).applied,
-        "the Uranus signal briefing should acknowledge through the scenario action");
-    objective = scenarioObjectiveForDestination(state, catalog, content::destination::uranus);
-    require(objective.stepId == "artifact" && objective.current == 0 && objective.required == 1 &&
-            objective.state == ScenarioStepState::Active,
-        "acknowledging the signal should expose the one-time Uranus artifact objective");
-
-    require(!bankArrivalLandingFlightData(state, catalog),
-        "repeated Uranus landings must not grind Flight Data");
-    state.run.planetaryExpedition.active = true;
-    state.run.planetaryExpedition.destinationId = content::destination::uranus;
-    state.run.planetaryExpedition.temporaryArtifacts.push_back(
-        {"uranus_route_artifact", content::destination::uranus, false});
-    const SurfaceActionOutcome extracted = extractSurfacePayload(state, catalog);
-    require(extracted.applied && extracted.artifactFound &&
-            state.meta.artifacts.size() == 1,
-        "safe Uranus extraction should permanently recover its authored artifact");
-    objective = scenarioObjectiveForDestination(state, catalog, content::destination::uranus);
-    require(objective.stepId == "vector" && objective.current == 1 &&
-            objective.required == 2 && objective.state == ScenarioStepState::Active,
-        "the first permanent Uranus artifact should supply exactly one Flight Data key");
-    require(!bankFlybyRouteClearance(state, catalog),
-        "Pass Through must not substitute for the authored Uranus Orbit key");
-
-    state.screen = Screen::ArrivalOps;
-    state.run.approach.active = true;
-    state.run.approach.destinationId = content::destination::uranus;
-    state.run.approach.rewards.orbitAwarded = false;
-    startArrivalOrbitRun(state, catalog);
-    require(state.run.approach.orbit.active && state.run.approach.orbit.currentZone == 2 &&
-            nearlyEqual(std::hypot(state.run.approach.orbit.shipX, state.run.approach.orbit.shipY),
-                        state.run.approach.orbit.targetRadius),
-        "Orbit should begin directly on the gold Perfect solution");
-    state.run.approach.orbit.completed = true;
-    state.run.approach.orbit.result = OrbitGrade::Good;
-    completeOrbitRun(state, catalog);
-    objective = scenarioObjectiveForDestination(state, catalog, content::destination::uranus);
-    require(objective.current == 2 && objective.required == 2 &&
-            objective.state == ScenarioStepState::ReadyToClaim &&
-            objective.actionLabel == "Lock Neptune Course",
-        "the recovered artifact plus one stable Orbit should expose the Neptune course claim");
-
-    state.run.planetaryExpedition = {};
-    state.run.planetaryExpedition.active = true;
-    state.run.planetaryExpedition.destinationId = content::destination::uranus;
-    state.run.planetaryExpedition.rigFuel = 3.0;
-    state.run.planetaryExpedition.prospectArtifacts = 1;
-    const SurfaceActionOutcome repeatMining = startMiningRun(state, catalog);
-    require(repeatMining.applied && state.run.mining.active,
-        "the repeat Uranus mining fixture should start normally");
-    require(!state.run.mining.artifact.present,
-        "an authored Uranus artifact must not respawn as an incidental repeat after recovery");
-    state.run.mining = {};
-    state.run.planetaryExpedition = {};
-    state.screen = Screen::Hangar;
-
-    require(performScenarioAction(
-                state,
-                catalog,
-                content::scenario::uranusDeparture,
-                "vector",
-                ScenarioActionKind::ClaimReward).applied &&
-            commitClaimedScenarioRoute(
-                state,
-                catalog,
-                content::scenario::uranusDeparture,
-                "vector"),
-        "claiming the concise 2/2 Uranus departure should queue its authored physical route");
-    require(hasUnlock(state.meta, content::unlock::routeNeptune) &&
-            currentDestination(state, catalog).id == content::destination::uranus &&
-            state.run.routeTransit.intent == RouteTransitIntent::Outbound &&
-            state.run.routeTransit.originDestinationId == content::destination::uranus &&
-            state.run.routeTransit.targetDestinationId == content::destination::neptune,
-        "locking Neptune must leave the ship at Uranus and queue Uranus-to-Neptune");
-
-    LaunchOutcome arrived;
-    arrived.type = LaunchResultType::MissionComplete;
-    arrived.recoveryMethod = RecoveryMethod::TransferArrival;
-    arrived.frontierTransfer = true;
-    arrived.destinationId = content::destination::neptune;
-    arrived.routeTransit = state.run.routeTransit;
-    applyLaunchOutcome(state, catalog, arrived);
-    require(currentDestination(state, catalog).id == content::destination::neptune &&
-            !state.run.routeTransit.active() &&
-            state.storyBriefing.pending == StoryBriefingId::None,
-        "successful Neptune arrival should stop at Neptune until its explicit discovery claim");
-    const ScenarioObjectivePresentation neptuneDiscovery = scenarioObjectiveForDestination(
-        state, catalog, content::destination::neptune);
-    require(neptuneDiscovery.stepId == "arrival" &&
-            neptuneDiscovery.state == ScenarioStepState::ReadyToClaim &&
-            neptuneDiscovery.transition.kind == ScenarioTransitionKind::PresentStoryTakeover,
-        "Neptune arrival should expose the authored Straylight discovery claim");
-
-}
-
-void campaignStateRoundTripsAtCurrentVersion()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    GameState state = createNewGame(catalog, 0x7007);
-    state.run.destinationIndex = 1;
-    state.meta.furthestTier = 1;
-    require(acknowledgeCampaignObjectiveBriefing(state, CampaignObjectiveId::LunarProspector),
-        "the normalized campaign fixture should acknowledge the Lunar briefing");
-    state.meta.materials.common = tuning::research::prospectorCommonOreGoal;
-    require(creditCampaignCommonOre(
-                state,
-                content::destination::moon,
-                tuning::research::prospectorCommonOreGoal) == tuning::research::prospectorCommonOreGoal,
-        "the normalized campaign fixture should complete the lunar industrial delivery");
-    require(recordScenarioEvent(
-                state,
-                catalog,
-                {
-                    ScenarioEventKind::ProtectedObjectiveExtracted,
-                    content::scenario::lunarProspector,
-                    "anomaly",
-                    content::destination::moon,
-                    content::miningSite::lunarAnomalyCrevice,
-                    1,
-                    0
-                }) &&
-            performScenarioAction(
-                state,
-                catalog,
-                content::scenario::lunarProspector,
-                "anomaly",
-                ScenarioActionKind::ClaimReward).applied,
-        "the normalized campaign fixture should recover and explicitly claim the lunar anomaly");
-    state.run.destinationIndex = 2;
-    state.meta.furthestTier = 2;
-    require(acknowledgeCampaignObjectiveBriefing(state, CampaignObjectiveId::MarsBayExpansion),
-        "the normalized campaign fixture should acknowledge the Mars briefing");
-    state.meta.materials.common = tuning::research::marsBayCommonOreGoal;
-    require(creditCampaignCommonOre(
-                state,
-                content::destination::mars,
-                tuning::research::marsBayCommonOreGoal) == tuning::research::marsBayCommonOreGoal &&
-            claimMarsBayExpansion(state, catalog),
-        "the normalized campaign fixture should claim the Mars contract through scenario actions");
-    state.run.destinationIndex = 3;
-    state.meta.furthestTier = 3;
-    require(commissionIoHazardDrone(state, catalog),
-        "the normalized campaign fixture should commission its configured Hazard support");
-    ArtifactRecord recoveredObjective {
-        "io_minor_artifact",
-        content::destination::jupiter,
-        false,
-        ArtifactKind::Boost,
-        ArtifactRewardType::None,
-        1.0,
-        false,
-    };
-    require(creditRecoveredIoArtifact(state, recoveredObjective),
-        "the normalized campaign fixture should resolve its protected objective through the scenario dispatcher");
-    require(startSaturnSlingshotRun(state, catalog),
-        "the normalized campaign fixture should begin an active departure Flyby");
-    state.run.approach.flyby.completed = true;
-    state.run.approach.flyby.result = FlybyGrade::Good;
-    completeFlybyRun(state, catalog);
-    require(acknowledgeSaturnSlingshotFailure(state) && startSaturnSlingshotRun(state, catalog),
-        "the normalized campaign fixture should persist an acknowledged failed challenge before its retry");
-    const SaveData activeSave = captureSaveData(state);
-    require(activeSave.version == save_schema::currentVersion && activeSave.screen == Screen::Hangar,
-        "v18 should sanitize a retired scenario Flyby to a retryable Hangar boundary");
-    const std::optional<SaveData> parsed = deserializeSaveData(serializeSaveData(activeSave));
-    require(parsed.has_value(), "current campaign state should deserialize");
-    GameState restored = createNewGame(catalog, 1);
-    restoreSaveData(restored, catalog, *parsed);
-    require(restored.meta.lunarProspectorClaimed
-            && restored.meta.marsBayExpansionClaimed
-            && restored.meta.ioHazardDroneCommissioned
-            && restored.meta.ioArtifactRecovered
-            && restored.meta.saturnSlingshotFailureAcknowledged
-            && !restored.run.approach.active
-            && !restored.run.approach.flyby.active
-            && restored.screen == Screen::Hangar,
-        "campaign flags should survive while retired slingshot simulation state is discarded");
-
-}
-
 void scenarioUiActionsDoNotAwardExpeditionExperience()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -2957,225 +1944,6 @@ void scenarioAndCocoonStateRoundTrips()
         "cached-depth cocoon tags and visibility should round trip");
 
 }
-
-void proceduralScenarioTemplatesStayDormantUntilInstanced()
-{
-    ContentCatalog catalog = createDefaultContent();
-    Destination routeFixture;
-    routeFixture.id = "procedural_route_destination";
-    routeFixture.name = "Procedural Route Fixture";
-    routeFixture.tier = 2;
-    routeFixture.routeRequirementKeys = {"procedural_route_key"};
-    catalog.destinations.push_back(std::move(routeFixture));
-    std::string validationError;
-    require(
-        validateScenarioCatalog(catalog, &validationError),
-        "the default catalog should validate its non-default procedural template");
-    require(
-        makeProceduralScenarioInstance(
-            catalog,
-            "generated_mining",
-            0xBAD,
-            {"step.delivery.unsupported=1"}).id.empty(),
-        "a factory should reject malformed resolved parameters before they can enter a save");
-    require(
-        makeProceduralScenarioInstance(
-            catalog,
-            "generated_mining",
-            0xBAD + 1,
-            {"step.delivery.reward_count=1",
-             "step.delivery.reward.0.kind=inventory_resources"}).id.empty(),
-        "a factory should reject an inventory reward with no positive material grant");
-    require(
-        makeProceduralScenarioInstance(
-            catalog,
-            "generated_mining",
-            0xBAD + 2,
-            {"step.delivery.reward_count=1",
-             "step.delivery.reward.0.kind=route_access",
-             "step.delivery.reward.0.id=unknown_route"}).id.empty(),
-        "a factory should reject route access that does not resolve to catalog destination requirements");
-
-    GameState state = createNewGame(catalog, 0x515C);
-    require(
-        findScenarioInstance(state.meta, content::scenario::generatedTemplate) == nullptr,
-        "a factory template should not appear as a live starter scenario");
-
-    ScenarioDefinition* templateDefinition = nullptr;
-    for (ScenarioDefinition& definition : catalog.scenarios) {
-        if (definition.id == content::scenario::generatedTemplate) {
-            templateDefinition = &definition;
-            break;
-        }
-    }
-    require(templateDefinition != nullptr, "the procedural factory template should be authored in the catalog");
-
-    ScenarioInstance instance = makeProceduralScenarioInstance(
-        catalog,
-        "generated_mining",
-        0xDECAFBAD,
-        {
-            "destination=procedural_fixture_destination",
-            "step.delivery.required_progress=7",
-            "step.delivery.reward_count=2",
-            "step.delivery.reward.0.kind=inventory_resources",
-            "step.delivery.reward.0.materials.common=3",
-            "step.delivery.reward.0.materials.rare=1",
-            "step.delivery.reward.1.kind=route_access",
-            "step.delivery.reward.1.id=procedural_route_destination"
-        });
-    require(
-        !instance.id.empty() && instance.definitionId == content::scenario::generatedTemplate &&
-            instance.source == ScenarioSource::Procedural,
-        "a factory should create a concrete procedural scenario instance");
-    const std::string instanceId = instance.id;
-    state.meta.scenarios.push_back(std::move(instance));
-    ensureScenarioInstances(state, catalog);
-    require(
-        findScenarioInstance(state.meta, instanceId) != nullptr,
-        "scenario initialization must preserve a concrete procedural instance");
-    const ScenarioInstance* persisted = findScenarioInstance(state.meta, instanceId);
-    require(persisted != nullptr, "the procedural fixture should retain its resolved values");
-    const std::vector<std::string> persistedParameters = persisted->resolvedParameters;
-    const ScenarioDefinition resolvedDelivery = resolveScenarioDefinition(*templateDefinition, *persisted);
-    const ScenarioStepDefinition* resolvedDeliveryStep =
-        findScenarioStepDefinition(resolvedDelivery, "delivery");
-    require(
-            resolvedDelivery.destinationId == "procedural_fixture_destination" &&
-            resolvedDeliveryStep != nullptr && resolvedDeliveryStep->requiredProgress == 7 &&
-            resolvedDeliveryStep->rewards.size() == 2 &&
-            resolvedDeliveryStep->rewards[0].kind == ScenarioRewardKind::InventoryResources &&
-            resolvedDeliveryStep->rewards[0].materials.common == 3 &&
-            resolvedDeliveryStep->rewards[0].materials.rare == 1 &&
-            resolvedDeliveryStep->rewards[1].kind == ScenarioRewardKind::RouteAccess &&
-            resolvedDeliveryStep->rewards[1].id == "procedural_route_destination",
-        "a factory should persist and materialize typed procedural destination, material, and route reward parameters");
-    const ScenarioObjectivePresentation presentation = scenarioObjectiveForDestination(
-        state,
-        catalog,
-        "procedural_fixture_destination");
-    require(
-        presentation.available && presentation.scenarioId == instanceId && presentation.stepId == "delivery" &&
-            presentation.action == ScenarioActionKind::None,
-        "a procedural passive delivery objective should route by instance without exposing its claim action early");
-    require(
-        !performScenarioAction(
-             state,
-             catalog,
-             instanceId,
-             "delivery",
-             ScenarioActionKind::BeginActivity).applied,
-        "the generic dispatcher should reject starting a passive delivery objective as an activity");
-    const Destination* routeDestination = catalog.findDestination("procedural_route_destination");
-    require(routeDestination != nullptr, "the procedural route reward fixture should exist in the catalog");
-    const ScenarioRouteRequirementStatus routeBeforeClaim =
-        scenarioRouteRequirementStatus(state, catalog, *routeDestination);
-    require(
-        !routeBeforeClaim.satisfied && routeBeforeClaim.scenarioId == instanceId &&
-            routeBeforeClaim.stepId == "delivery",
-        "route evaluation should identify a generic RouteAccess reward before it is claimed");
-    ScenarioInstance unrelatedInstance = makeProceduralScenarioInstance(
-        catalog,
-        "generated_mining",
-        0xDECAFBAD + 1,
-        {"destination=procedural_fixture_destination"});
-    require(!unrelatedInstance.id.empty(), "a second factory result should be independently addressable");
-    const std::string unrelatedId = unrelatedInstance.id;
-    state.meta.scenarios.push_back(std::move(unrelatedInstance));
-    require(
-        recordScenarioEvent(
-            state,
-            catalog,
-            {ScenarioEventKind::SafeMaterialDelivered, instanceId, "delivery",
-             "procedural_fixture_destination", "common", 7, 0}) &&
-            scenarioStepState(state, catalog, instanceId, "delivery") == ScenarioStepState::ReadyToClaim,
-        "an arbitrary authored destination should use the same procedural safe-delivery event path");
-    require(
-        scenarioStepState(state, catalog, unrelatedId, "delivery") == ScenarioStepState::Active,
-        "an event addressed to one procedural runtime instance must not advance another instance of its template");
-    require(
-        performScenarioAction(
-            state,
-            catalog,
-            instanceId,
-            "delivery",
-            ScenarioActionKind::ClaimReward).applied &&
-            state.meta.materials.common == 3 && state.meta.materials.rare == 1 &&
-            hasUnlock(state.meta, "procedural_route_key") &&
-            scenarioRouteRequirementStatus(state, catalog, *routeDestination).satisfied,
-        "a procedurally resolved material and route reward should be claimed exactly through the shared scenario dispatcher");
-    const auto proceduralSave = deserializeSaveData(serializeSaveData(captureSaveData(state)));
-    require(proceduralSave.has_value(), "a procedural scenario instance should serialize");
-    GameState restoredProcedural = createNewGame(catalog, 0x515D);
-    restoreSaveData(restoredProcedural, catalog, *proceduralSave);
-    const ScenarioInstance* restoredInstance =
-        findScenarioInstance(restoredProcedural.meta, instanceId);
-    require(
-        restoredInstance != nullptr && restoredInstance->source == ScenarioSource::Procedural &&
-            restoredInstance->factoryId == "generated_mining" &&
-            restoredInstance->resolvedParameters == persistedParameters &&
-            resolveScenarioDefinition(*templateDefinition, *restoredInstance).destinationId ==
-                "procedural_fixture_destination",
-        "a procedural factory instance should reload its resolved values without rerolling");
-    state = std::move(restoredProcedural);
-
-    templateDefinition->steps.push_back({
-        "flyby",
-        {},
-        "PROCEDURAL FIXTURE",
-        "Perfect Pass",
-        "Complete a configured Flyby challenge.",
-        "REWARD // CONFIGURED BY FACTORY",
-        "Begin Challenge",
-        {},
-        ScenarioEventKind::FlybyFinished,
-        {},
-        {},
-        1,
-        static_cast<int>(FlybyGrade::Perfect),
-        false,
-        false,
-        true,
-        ScenarioActionKind::BeginActivity,
-        {},
-        {}
-    });
-    ScenarioInstance* procedural = findScenarioInstance(state.meta, instanceId);
-    require(procedural != nullptr, "the procedural Flyby fixture should retain its runtime instance");
-    procedural->steps.push_back({"flyby"});
-    procedural->resolvedParameters.push_back("destination=moon");
-    state.run.destinationIndex = 1;
-    state.meta.furthestTier = 1;
-    require(
-        startScenarioFlybyRun(state, catalog, instanceId, "flyby") &&
-            state.run.approach.flyby.purpose == FlybyPurpose::ScenarioChallenge &&
-            state.run.approach.flyby.scenarioId == instanceId && state.run.approach.flyby.scenarioStepId == "flyby",
-        "a generic Flyby challenge should start from a procedural runtime scenario ID");
-    state.run.approach.flyby.completed = true;
-    state.run.approach.flyby.result = FlybyGrade::Perfect;
-    completeFlybyRun(state, catalog);
-    require(
-        scenarioStepState(state, catalog, instanceId, "flyby") == ScenarioStepState::Complete,
-        "a completed procedural Flyby should record its result against the runtime scenario instance");
-
-    ScenarioInstance obsoleteTemplate;
-    obsoleteTemplate.id = content::scenario::generatedTemplate;
-    obsoleteTemplate.definitionId = content::scenario::generatedTemplate;
-    obsoleteTemplate.source = ScenarioSource::Authored;
-    state.meta.scenarios.push_back(std::move(obsoleteTemplate));
-    ensureScenarioInstances(state, catalog);
-    require(
-        findScenarioInstance(state.meta, content::scenario::generatedTemplate) == nullptr,
-        "initialization should remove the obsolete auto-instantiated template from development saves");
-
-    templateDefinition->instantiateByDefault = true;
-    validationError.clear();
-    require(
-        !validateScenarioCatalog(catalog, &validationError) && !validationError.empty(),
-        "a scenario factory must reject a template that would auto-instantiate as a live contract");
-}
-
-
 
 void activeFlightRoundTripsThroughSave()
 {
@@ -6431,99 +5199,6 @@ void miningShipRepairsUseBankedMaterialsProportionally()
     require(!repairMiningDrill(state), "unfunded ship repair should be rejected by game logic");
 }
 
-void transferFuelPersistsAndBecomesRigFuel()
-{
-    const ContentCatalog catalog = createDefaultContent();
-
-    GameState arrival = createNewGame(catalog, 0xF113);
-    arrival.run.destinationIndex = 1;
-    arrival.screen = Screen::ArrivalOps;
-    LaunchOutcome outcome;
-    outcome.destinationId = content::destination::moon;
-    outcome.recoveryMethod = RecoveryMethod::TransferArrival;
-    outcome.frontierTransfer = true;
-    outcome.transferFuelRemaining = 2.7;
-    outcome.transferFuelCapacity = 15.0;
-    startArrivalOps(arrival, outcome);
-
-    const auto savedArrival = deserializeSaveData(serializeSaveData(captureSaveData(arrival)));
-    require(savedArrival.has_value(), "Arrival Ops fuel save should parse");
-    GameState restoredArrival = createNewGame(catalog, 1);
-    restoreSaveData(restoredArrival, catalog, *savedArrival);
-    require(restoredArrival.screen == Screen::Hangar
-            && !restoredArrival.run.approach.active
-            && nearlyEqual(restoredArrival.run.approach.transferFuelRemaining, 0.0),
-        "v18 must discard retired Arrival Ops simulation state at save boundaries");
-
-    // The remainder exercises the still-shared fuel-allocation policy directly;
-    // it does not imply that the retired board is a resumable activity.
-    restoredArrival = arrival;
-
-    introduceArrivalFlybyForTest(restoredArrival);
-    startArrivalFlybyRun(restoredArrival, catalog);
-    require(restoredArrival.run.approach.flyby.active, "arrival flyby should start for fuel preservation coverage");
-    abortFlybyRun(restoredArrival, catalog);
-    require(nearlyEqual(restoredArrival.run.approach.transferFuelRemaining, 2.7) &&
-            nearlyEqual(restoredArrival.run.approach.transferFuelCapacity, 15.0),
-        "entering and leaving a flyby must not erase arrival transfer fuel");
-
-    introduceArrivalFlybyForTest(restoredArrival);
-    startArrivalFlybyRun(restoredArrival, catalog);
-    restoredArrival.run.approach.flyby.completed = true;
-    restoredArrival.run.approach.flyby.result = FlybyGrade::Good;
-    completeFlybyRun(restoredArrival, catalog);
-    require(nearlyEqual(restoredArrival.run.approach.transferFuelRemaining, 2.7),
-        "completing a flyby must preserve arrival transfer fuel");
-
-    startArrivalOrbitRun(restoredArrival, catalog);
-    require(restoredArrival.run.approach.orbit.active, "arrival orbit should start for fuel preservation coverage");
-    abortOrbitRun(restoredArrival);
-    require(nearlyEqual(restoredArrival.run.approach.transferFuelRemaining, 2.7) &&
-            nearlyEqual(restoredArrival.run.approach.transferFuelCapacity, 15.0),
-        "entering and leaving orbit must not erase arrival transfer fuel");
-
-    startSurfaceExpedition(restoredArrival, catalog);
-    require(nearlyEqual(restoredArrival.run.planetaryExpedition.expeditionPackFuel, 3.0) &&
-            nearlyEqual(restoredArrival.run.planetaryExpedition.transferFuelRecovered, 2.7) &&
-            nearlyEqual(restoredArrival.run.planetaryExpedition.rigFuel, 5.7),
-        "landing must combine the isolated three-unit rig pack with exact transfer fuel remaining");
-
-    for (const auto [remaining, expected] : {
-             std::pair {0.0, 3.0},
-             std::pair {2.0, 5.0},
-             std::pair {5.0, 8.0}}) {
-        GameState state = createNewGame(catalog, static_cast<std::uint64_t>(0xF200 + expected));
-        state.run.destinationIndex = 1;
-        state.run.approach = {true, content::destination::moon, remaining, 15.0};
-        startSurfaceExpedition(state, catalog);
-        require(nearlyEqual(state.run.planetaryExpedition.rigFuel, expected),
-            "surface rig fuel must equal the three-unit expedition pack plus transfer fuel remaining");
-    }
-
-    GameState upgraded = createNewGame(catalog, 0xF114);
-    upgraded.meta.launchUpgrades.fuelTanks = 2;
-    const double baseEndurance = nominalSurfaceRigFuelCapacity(arrival, catalog, content::destination::moon);
-    const double upgradedEndurance = nominalSurfaceRigFuelCapacity(upgraded, catalog, content::destination::moon);
-    require(upgradedEndurance > baseEndurance,
-        "larger transfer tanks must increase possible Mining Rig endurance through arrival surplus");
-
-    GameState ark = createNewGame(catalog, 0xF115);
-    ark.run.destinationIndex = 1;
-    ark.meta.ark.condition = ArkCondition::DerelictOperable;
-    ark.meta.ark.fuelReserve = 7;
-    ark.run.approach = {true, content::destination::moon, 2.0, 15.0};
-    startSurfaceExpedition(ark, catalog);
-    require(nearlyEqual(ark.run.planetaryExpedition.expeditionPackFuel, 3.0) &&
-            nearlyEqual(ark.run.planetaryExpedition.rigFuel, 5.0) &&
-            ark.meta.ark.fuelReserve == 7,
-        "each expedition must receive its fixed rig allotment without silently debiting an unrelated Ark reserve");
-
-    ark.run.planetaryExpedition.rigFuel = 0.0;
-    require(extractSurfacePayload(ark, catalog).applied,
-        "empty rig fuel must never block the protected return stage or surface extraction");
-}
-
-
 void miningShipBankingLeaveAndEmergencyRecallRules()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -8810,8 +7485,6 @@ void roughMiningOreCreditsTheSurvivingContractPayload()
 }
 
 
-
-
 void saveRoundTripPreservesProgress()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -9084,12 +7757,6 @@ void legacyRecordsTrackAchievementStats()
 }
 
 
-
-
-
-
-
-
 void unifiedPhysicalFlightCapturesOrbitAndResolvesTouchdown()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -9279,10 +7946,6 @@ void flightProgressHelpersShareTravelAndReturnMath()
     require(std::abs(flight_progress::returnDuration(startTravel, false) - baseDuration) < 0.000001, "return duration helper should use tuned base duration");
     require(std::abs(flight_progress::returnDuration(startTravel, true) - baseDuration * tuning::session::returnDriftDurationMultiplier) < 0.000001, "return duration helper should apply drift multiplier");
 }
-
-
-
-
 
 
 void arkDiscoveryAndScriptedJumpProgression()
@@ -9558,10 +8221,6 @@ void uiActionsUseStableSchemaIds()
     require(ui::actions::upgradeDroneSlot == "upgrade_drone_slot", "drone slot upgrade action should use a stable schema id");
     require(ui::actions::acceptCrewReplacement == "accept_crew_replacement", "crew replacement should use one deterministic semantic action");
     require(ui::actions::extractSurface == "extract_surface", "surface extraction action should use a stable schema id");
-    require(ui::actions::surfaceScanPulse == "surface_scan_pulse", "surface scan pulse action should use a stable schema id");
-    require(ui::actions::surfaceScanBank == "surface_scan_bank", "surface scan bank action should use a stable schema id");
-    require(ui::actions::surfacePushStep == "surface_push_step", "surface push step action should use a stable schema id");
-    require(ui::actions::surfacePushBank == "surface_push_bank", "surface push bank action should use a stable schema id");
     require(ui::actions::miningTether == "mining_tether", "mining tether action should use a stable schema id");
     require(ui::actions::miningRepairDrill == "mining_repair_drill", "mining drill repair action should use a stable schema id");
     require(ui::actions::miningRepairDrone == "mining_repair_drone", "mining drone repair action should use a stable schema id");
@@ -9574,243 +8233,6 @@ void uiActionsUseStableSchemaIds()
     const std::string buyOffer = ui::actions::buyOffer(2);
     require(buyOffer == "buy_offer:2", "indexed offer actions should encode the offer index in one reusable action family");
     require(buyOffer.find("rr.") == std::string::npos, "panel action ids should not embed JavaScript snippets");
-}
-
-void panelLayoutModeIsPortablePresentationData()
-{
-    require(panelLayoutMode(Screen::Flight) == PanelLayoutMode::ControlPanel, "launch should remain a compact action control panel");
-    require(panelLayoutMode(Screen::ArrivalFanfare) == PanelLayoutMode::ControlPanel, "arrival fanfare should keep the scene open for the celebration overlay");
-    require(panelLayoutMode(Screen::Orbit) == PanelLayoutMode::ControlPanel, "orbit should keep the scene open for the orbital minigame");
-    require(panelLayoutMode(Screen::Hangar) == PanelLayoutMode::Fullscreen, "hangar should use the full-screen management workspace");
-    require(panelLayoutMode(Screen::Results) == PanelLayoutMode::Fullscreen, "results should use the fullscreen scene with content-sized acknowledgement treatment");
-    require(!usesPhaseBoard(Screen::Results), "results should not be classified as a persistent phase-board rail");
-    require(panelLayoutMode(Screen::Research) == PanelLayoutMode::Fullscreen, "research should use the full-screen management workspace");
-    require(panelLayoutMode(Screen::SurfaceExpedition) == PanelLayoutMode::Fullscreen, "surface expedition should use the full-screen decision workspace");
-    require(panelLayoutMode(Screen::SurfaceUpgrade) == PanelLayoutMode::Fullscreen, "field upgrade draft should use the full-screen selection workspace");
-    require(panelLayoutMode(Screen::SurfaceScan) == PanelLayoutMode::PhaseBoard, "surface scan should use the phase board layout");
-    require(panelLayoutMode(Screen::SurfacePush) == PanelLayoutMode::PhaseBoard, "Push Deeper should use the phase board layout");
-    require(panelLayoutMode(Screen::DroneOps) == PanelLayoutMode::Fullscreen, "drone ops should use its non-gameplay full-screen workspace");
-    require(!usesPhaseBoard(Screen::DroneOps), "drone ops should not reserve the persistent gameplay rail");
-    require(panelLayoutMode(Screen::Navigation) == PanelLayoutMode::Fullscreen, "navigation should use the full-screen management workspace");
-    require(panelLayoutMode(Screen::Upgrade) == PanelLayoutMode::Fullscreen, "refit should use the full-screen selection workspace");
-    require(!usesPhaseBoard(Screen::Research), "non-gameplay management screens should not reserve the gameplay rail");
-    require(usesPhaseBoard(Screen::SurfaceScan), "active surface minigames should retain the protected phase-board geometry");
-}
-
-void structuredPanelPresentationSelectsFirstWaveTemplates()
-{
-    const ContentCatalog catalog = createDefaultContent();
-    const auto presentationFor = [&catalog](GameState& state, std::uint64_t seed) {
-        Random rng(seed);
-        const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
-        PanelRenderContext context {state, catalog, launch, launch};
-        context.firstTimeIntroductionsEnabled = false;
-        return buildGamePanelPresentation(context);
-    };
-
-    GameState arrival = createNewGame(catalog, 0xA111);
-    arrival.screen = Screen::ArrivalFanfare;
-    arrival.lastOutcome.destinationId = content::destination::moon;
-    const PanelDocumentPresentation arrivalPresentation = presentationFor(arrival, 0xA111);
-    require(
-        arrivalPresentation.contentMarkup.find("data-arrival-fanfare=\"1\"") != std::string::npos
-            && arrivalPresentation.contentMarkup.find("ARRIVAL CONFIRMED") != std::string::npos
-            && arrivalPresentation.contentMarkup.find("Moon") != std::string::npos,
-        "Arrival should present a concise cinematic celebration over the destination scene");
-    require(
-        arrivalPresentation.contentMarkup.find("data-rr-action=") == std::string::npos
-            && arrivalPresentation.contentMarkup.find("Continue") == std::string::npos,
-        "Arrival celebration should not add a button, confirmation, or blocking review step");
-
-    GameState hangar = createNewGame(catalog, 0xA110);
-    hangar.screen = Screen::Hangar;
-    hangar.meta.launchLessons.stage = LaunchTrainingStage::Complete;
-    const PanelDocumentPresentation hangarPresentation = presentationFor(hangar, 0xA110);
-    require(
-        hangarPresentation.templateKind == PanelTemplateKind::Workspace
-            && hangarPresentation.metadata.screen == Screen::Hangar,
-        "Hangar should select the shared Workspace template");
-    require(
-        hangarPresentation.contentMarkup.find("rr-screen-header") != std::string::npos
-            && hangarPresentation.contentMarkup.find("rr-card-grid") != std::string::npos
-            && hangarPresentation.contentMarkup.find("rr-fixed-lane-card") != std::string::npos
-            && hangarPresentation.contentMarkup.find("rr-action-footer") != std::string::npos,
-        "Hangar should consume the shared typed header, card-grid, card, and action-footer primitives");
-    require(
-        hangarPresentation.contentMarkup.find("hangar_details") == std::string::npos
-            && hangarPresentation.contentMarkup.find("hangar-detail-actions") == std::string::npos
-            && hangarPresentation.contentMarkup.find("hangar-launch-prep") != std::string::npos,
-        "Hangar should omit the redundant Details header shortcut and launch prep should own its compact control class");
-
-    GameState flyby = createNewGame(catalog, 0xA111);
-    LaunchOutcome moonArrival;
-    moonArrival.type = LaunchResultType::MissionComplete;
-    moonArrival.frontierTransfer = true;
-    moonArrival.destinationId = content::destination::moon;
-    introduceArrivalFlybyForTest(flyby);
-    startArrivalOps(flyby, moonArrival);
-    startArrivalFlybyRun(flyby, catalog);
-    require(flyby.screen == Screen::Flyby && !flyby.run.approach.flyby.completed,
-        "first-wave template test should create an active Flyby");
-    const PanelDocumentPresentation flybyPresentation = presentationFor(flyby, 0xA111);
-    require(
-        flybyPresentation.templateKind == PanelTemplateKind::ControlPanel
-            && flybyPresentation.metadata.interaction == PanelInteractionMode::Realtime,
-        "an active Flyby should select the shared Control Panel template");
-    require(
-        flybyPresentation.contentMarkup.find("flight-status-list") != std::string::npos
-            && flybyPresentation.contentMarkup.find("rr-metric-strip") == std::string::npos
-            && flybyPresentation.contentMarkup.find("rr-action-footer") != std::string::npos,
-        "active Flyby should consume compact status and shared action-footer primitives");
-
-    GameState scan = createNewGame(catalog, 0xA112);
-    scan.run.destinationIndex = 2;
-    startSurfaceExpedition(scan, catalog);
-    Random scanRng(0xA112);
-    require(startSurfaceScanRun(scan, scanRng).applied,
-        "first-wave template test should create an active Surface Scan");
-    const PanelDocumentPresentation scanPresentation = presentationFor(scan, 0xA112);
-    require(
-        scanPresentation.templateKind == PanelTemplateKind::SurfaceMinigame
-            && scanPresentation.metadata.surface == PanelSurfaceKind::SurfaceScan
-            && scanPresentation.metadata.interaction == PanelInteractionMode::Realtime,
-        "Surface Scan should select the shared Surface Minigame template");
-    require(
-        scanPresentation.contentMarkup.find("rr-screen-header") != std::string::npos
-            && scanPresentation.contentMarkup.find("rr-metric-strip") != std::string::npos
-            && scanPresentation.contentMarkup.find("rr-action-footer") != std::string::npos,
-        "Surface Scan should consume shared header, metric-strip, and action-footer primitives");
-    scan.run.surfaceScan.completed = true;
-    require(
-        presentationFor(scan, 0xA112).metadata.interaction == PanelInteractionMode::Standard,
-        "a completed Surface Scan should return Space and Enter to its explicit result actions");
-
-    GameState push = createNewGame(catalog, 0xA119);
-    push.run.destinationIndex = 2;
-    startSurfaceExpedition(push, catalog);
-    push.run.planetaryExpedition.depthProspects.push_back({1, 1});
-    Random pushRng(0xA119);
-    require(startSurfacePushRun(push, pushRng).applied,
-        "first-wave template test should create an active Surface Push");
-    const PanelDocumentPresentation pushPresentation = presentationFor(push, 0xA119);
-    require(
-        pushPresentation.templateKind == PanelTemplateKind::SurfaceMinigame
-            && pushPresentation.metadata.surface == PanelSurfaceKind::SurfacePush
-            && pushPresentation.metadata.interaction == PanelInteractionMode::Realtime,
-        "Surface Push should select the shared Surface Minigame template and own its realtime step shortcut");
-    push.run.surfacePush.busted = true;
-    require(
-        presentationFor(push, 0xA119).metadata.interaction == PanelInteractionMode::Standard,
-        "a busted Surface Push should return Space and Enter to its explicit result actions");
-
-    GameState surface = createNewGame(catalog, 0xA118);
-    surface.run.destinationIndex = 2;
-    startSurfaceExpedition(surface, catalog);
-    surface.screen = Screen::SurfaceExpedition;
-    const PanelDocumentPresentation surfacePresentation = presentationFor(surface, 0xA118);
-    require(
-        surfacePresentation.contentMarkup.find("rr-fixed-action-stack") != std::string::npos
-            && surfacePresentation.contentMarkup.find("rr-fixed-action-context") != std::string::npos
-            && surfacePresentation.contentMarkup.find("rr-fixed-action-lane") != std::string::npos
-            && surfacePresentation.contentMarkup.find("rr-card-grid") != std::string::npos,
-        "Surface Ops should consume the reusable fixed-action stack instead of screen-local positioning");
-
-    GameState mining = createNewGame(catalog, 0xA113);
-    mining.run.destinationIndex = 2;
-    startSurfaceExpedition(mining, catalog);
-    mining.run.planetaryExpedition.miningSitePrepared = true;
-    require(startMiningRun(mining, catalog, {MiningAct::ActOne, 4, 0xA113}, false).applied,
-        "first-wave template test should create an active Mining run");
-    mining.run.mining.rigFuel = {16.0, 18.0};
-    const MiningHudPresentation miningHud = miningHudPresentation(mining, catalog);
-    require(miningHud.vitals[1].value == "16.0",
-        "compact Mining HUD should show the one visible rig tank with useful fractional precision");
-    const PanelDocumentPresentation miningPresentation = presentationFor(mining, 0xA113);
-    require(
-        miningPresentation.templateKind == PanelTemplateKind::Mining
-            && miningPresentation.metadata.surface == PanelSurfaceKind::Mining
-            && miningPresentation.metadata.overlay == PanelOverlayKind::MiningExperience,
-        "Mining should select the shared Mining template");
-    require(
-        miningPresentation.contentMarkup.find("rr-screen-header") != std::string::npos
-            && miningPresentation.contentMarkup.find("rr-metric-strip") != std::string::npos
-            && miningPresentation.contentMarkup.find("rr-hud-mining-xp") == std::string::npos,
-        "Mining should consume shared header and metric-strip primitives");
-    require(
-        miningPresentation.contentMarkup.find("mining-utility-button") == std::string::npos
-            && miningPresentation.contentMarkup.find("\">DETAILS</button>") == std::string::npos
-            && miningPresentation.contentMarkup.find("\">INV</button>") == std::string::npos
-            && miningPresentation.contentMarkup.find("\">MENU</button>") == std::string::npos,
-        "Mining should omit permanent utility controls that distract from physical play");
-    require(
-        miningPresentation.runtime.expeditionExperienceRequired > 0
-            && miningPresentation.runtime.expeditionExperienceFilledSegments >= 0
-            && miningPresentation.runtime.expeditionExperienceFilledSegments <= 12,
-        "Mining XP should expose stable values for the scene overlay");
-
-    Random miningTitleRng(0xA113);
-    const PreparedLaunch miningTitleLaunch = prepareLaunch(mining, catalog, miningTitleRng);
-    PanelRenderContext miningTitleContext {
-        mining,
-        catalog,
-        miningTitleLaunch,
-        miningTitleLaunch,
-    };
-    miningTitleContext.titleScreenActive = true;
-    miningTitleContext.hasSavedGame = true;
-    miningTitleContext.firstTimeIntroductionsEnabled = false;
-    const PanelDocumentPresentation miningTitlePresentation =
-        buildGamePanelPresentation(miningTitleContext);
-    require(
-        miningTitlePresentation.metadata.overlay == PanelOverlayKind::None,
-        "Title screen should suppress a stale Mining XP overlay when the saved game is in Mining");
-
-    GameState briefing = createNewGame(catalog, 0xA114);
-    briefing.screen = Screen::StoryBriefing;
-    briefing.storyBriefing.pending = StoryBriefingId::CampaignIntroduction;
-    const PanelDocumentPresentation briefingPresentation = presentationFor(briefing, 0xA114);
-    require(
-        briefingPresentation.templateKind == PanelTemplateKind::Takeover
-            && briefingPresentation.metadata.interaction == PanelInteractionMode::Takeover,
-        "Story Briefing should select the shared Takeover template");
-    require(
-        briefingPresentation.contentMarkup.find("FIELD REFERENCE") == std::string::npos
-            && briefingPresentation.contentMarkup.find("opening-controls") == std::string::npos,
-        "Story Briefing should hook the player without dumping the full control manual over the scene");
-
-    GameState results = createNewGame(catalog, 0xA115);
-    results.screen = Screen::Results;
-    results.lastOutcome.type = LaunchResultType::SafeEject;
-    results.lastOutcome.recoveryMethod = RecoveryMethod::ReturnHome;
-    results.lastOutcome.ejectMultiplier = 1.1;
-    results.lastOutcome.crashMultiplier = 1.5;
-    const PanelDocumentPresentation resultsPresentation = presentationFor(results, 0xA115);
-    require(
-        resultsPresentation.templateKind == PanelTemplateKind::Results
-            && resultsPresentation.metadata.interaction == PanelInteractionMode::Takeover,
-        "Results should select the shared Results template");
-    require(
-        hangarPresentation.metadata.legacyContentOwnsLaneGeometry
-            && flybyPresentation.metadata.legacyContentOwnsLaneGeometry
-            && scanPresentation.metadata.legacyContentOwnsLaneGeometry
-            && pushPresentation.metadata.legacyContentOwnsLaneGeometry
-            && miningPresentation.metadata.legacyContentOwnsLaneGeometry
-            && briefingPresentation.metadata.legacyContentOwnsLaneGeometry
-            && resultsPresentation.metadata.legacyContentOwnsLaneGeometry,
-        "first-wave templates should explicitly preserve their migrated content-owned lane geometry");
-    require(
-        !PanelDocumentPresentation {}.metadata.legacyContentOwnsLaneGeometry,
-        "future template presentations should inherit shell lane geometry unless they explicitly opt into migration compatibility");
-    const auto resultsOutcome = std::find_if(
-        resultsPresentation.modals.begin(),
-        resultsPresentation.modals.end(),
-        [](const ModalPresentation& modal) {
-            return modal.id == ui::modals::launchOutcome;
-        });
-    require(
-        resultsOutcome != resultsPresentation.modals.end()
-            && resultsOutcome->bodyMarkup.find("rr-action-footer") != std::string::npos,
-        "Results should consume the shared action-footer primitive inside its typed acknowledgement modal");
 }
 
 void structuredPanelPresentationCarriesTypedModalPolicy()
@@ -10497,6 +8919,51 @@ void rigCompoundCollisionSweepsAndRecovery()
     require(!rig_geometry::contacts(terrain,6,6,1,0).empty(),"the solid drill must respect EVA-only passage cells");
 }
 
+void retiredActivitySavesResumePhysicalFlight()
+{
+    const auto catalog = createDefaultContent();
+    auto original = createNewGame(catalog, 0xA77A);
+    original.run.destinationIndex = static_cast<int>(std::distance(catalog.destinations.begin(),
+        std::find_if(catalog.destinations.begin(), catalog.destinations.end(), [](const auto& destination) {
+            return destination.id == content::destination::moon;
+        })));
+    original.run.credits = 37.0;
+    original.run.shipDamage = 12;
+    original.run.flight.fuelRemaining = 7.0;
+    original.run.flight.physicalFlight = false;
+    original.screen = Screen::Flight;
+    const auto serialized = serializeSaveData(captureSaveData(original));
+    for (int retiredScreen : {11, 12}) {
+        auto text = serialized;
+        const auto screen = text.find("screen=1\n");
+        require(screen != std::string::npos, "fixture must expose the v21 screen field");
+        text.replace(screen, 9, "screen=" + std::to_string(retiredScreen) + "\n");
+        const auto saved = deserializeSaveData(text);
+        require(saved.has_value(), "retired v21 activity IDs remain readable");
+        auto restored = createNewGame(catalog, 1);
+        restoreSaveData(restored, catalog, *saved);
+        require(restored.screen == Screen::Flight && restored.run.flight.physicalFlight,
+            "retired activities must resume the physical flight solver");
+        require(nearlyEqual(restored.run.flight.fuelRemaining, 7.0) &&
+                nearlyEqual(restored.run.credits, 37.0) && restored.run.shipDamage == 12,
+            "activity migration must preserve fuel, money, and hull damage");
+        require(!restored.run.flight.orbit.captured && !restored.run.flight.orbit.rewardAwarded,
+            "migration must not award orbit capture or a minigame reward");
+        restored.run.flight.positionX = 0.83;
+        restored.run.flight.velocityY = 0.21;
+        require(resumePhysicalApproach(restored, catalog), "physical approach should resume");
+        require(nearlyEqual(restored.run.flight.positionX, 0.83) &&
+                nearlyEqual(restored.run.flight.velocityY, 0.21),
+            "existing physical positions and momentum must not be relocated");
+    }
+    for (const auto& scenario : catalog.scenarios) {
+        for (const auto& step : scenario.steps) {
+            require(step.activity == ScenarioActivityKind::None || step.activity == ScenarioActivityKind::MiningSite,
+                "scenarios may not start a retired timing activity");
+        }
+    }
+}
+
 int main(int argc, char** argv)
 {
     if (argc > 1 && std::string_view(argv[1]) == "--expedition-only") {
@@ -10508,15 +8975,12 @@ int main(int argc, char** argv)
     try { persistentExpeditionTests(); }
     catch (const std::exception& error) { std::cerr << "Expedition: " << error.what() << '\n'; return 1; }
     incomingMessageTests();
-    proceduralScenarioTemplatesStayDormantUntilInstanced();
     launchThermalManagementIsPlayerDriven();
     launchAsteroidsAreDeterministicFairAndHullScaled();
     sharedFlightInstrumentPresentationMatchesEachMode();
-    activeFlightPanelsUseTheClusterAndCompactStatusRows();
     emergencyRecruitmentPreventsDeadRosterSoftLock();
     emergencyRecruitmentOffersAnimalCandidateChoice();
     moduleOffersAreOneChoiceRefits();
-    fuelRefitsTeachMarsAndFundJupiter();
     refitRerollsSpendAndEscalate();
     specialShipComponentsRequireRecoveredMaterials();
     preMiningRefitOffersAvoidMaterialCosts();
@@ -10524,7 +8988,6 @@ int main(int argc, char** argv)
     totaledShipCanAlwaysReachSalvageRepair();
     lowCreditRefitWindowIncludesAffordableOffer();
     researchPhasesUnlockOnlyAfterMarsArrival();
-    solarRouteLegsKeepCampaignProgressSeparateFromShipPosition();
     researchProjectsGenerateAndCompleteFromSharedRules();
     materialResearchUnlocksModuleFamilies();
     artifactInsightImprovesFutureResearch();
@@ -10543,11 +9006,8 @@ int main(int argc, char** argv)
     droneBayUnlocksSlotsLoadoutsAndMiningEffects();
     scenarioUiActionsDoNotAwardExpeditionExperience();
     saturnArtifactQueuesPhysicalUranusRoute();
-    uranusFlightDataQueuesPhysicalNeptuneRoute();
-    campaignStateRoundTripsAtCurrentVersion();
     scenarioAndCocoonStateRoundTrips();
     activeFlightRoundTripsThroughSave();
-    transferFuelPersistsAndBecomesRigFuel();
     surfaceMiningUsesRigFuelAndRunsOnce();
     physicalMiningArtifactsAreSingleAndDeliveryGated();
     miningArtifactTetherAndDestructionRules();
@@ -10610,6 +9070,7 @@ int main(int argc, char** argv)
     miningEvaAuditRegressionGuardsHold();
     roughSurfaceExtractionReportsLostPayload();
     roughMiningOreCreditsTheSurvivingContractPayload();
+    retiredActivitySavesResumePhysicalFlight();
     saveRoundTripPreservesProgress();
     progressedSavesSkipTheFirstLaunchIntroduction();
     saveSchemaConstantsMatchSerializedFields();
@@ -10621,8 +9082,6 @@ int main(int argc, char** argv)
     hostileNavigationSelectsShuttleSortie();
     arkCampaignStateRoundTripsThroughSave();
     uiActionsUseStableSchemaIds();
-    panelLayoutModeIsPortablePresentationData();
-    structuredPanelPresentationSelectsFirstWaveTemplates();
     structuredPanelPresentationCarriesTypedModalPolicy();
     contentIdsResolveAgainstDefaultCatalog();
     outerPlanetCampaignSequenceIsExplicitAndUnskippable();

@@ -26,20 +26,6 @@ int surfaceDepthUpgradeRank(const GameState& state, SurfaceDepthUpgradeKind kind
 int surfaceDepthRating(const GameState& state, SurfaceDepthUpgradeKind kind);
 int installedRigFuelLoopRank(const GameState& state);
 double launchFuelCapacity(const GameState& state);
-double pendingLaunchFuelSavings(const GameState& state);
-double pendingLaunchInstabilityPenalty(const GameState& state);
-const PendingTransferAssist* pendingTransferAssistForDestination(
-    const GameState& state,
-    std::string_view destinationId);
-double pendingLaunchFuelSavingsForDestination(
-    const GameState& state,
-    std::string_view destinationId);
-double pendingLaunchSpeedBoostForDestination(
-    const GameState& state,
-    std::string_view destinationId);
-double pendingLaunchInstabilityPenaltyForDestination(
-    const GameState& state,
-    std::string_view destinationId);
 const RouteLinkDefinition* routeLinkForTransit(
     const ContentCatalog& catalog,
     const RouteTransitState& transit);

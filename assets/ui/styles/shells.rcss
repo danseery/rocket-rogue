@@ -133,7 +133,6 @@
 }
 
 .rr-control-shell,
-.rr-surface-minigame-shell,
 .rr-mining-shell {
 	background-color: transparent;
 }

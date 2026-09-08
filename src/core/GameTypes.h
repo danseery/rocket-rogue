@@ -14,24 +14,20 @@
 namespace rocket {
 
 enum class Screen {
-    Hangar,
-    Flight,
-    Results,
-    ArrivalFanfare,
-    ArrivalOps,
-    Flyby,
-    Orbit,
-    Research,
-    SurfaceExpedition,
-    SurfaceUpgrade,
-    SurfaceScan,
-    SurfacePush,
-    Mining,
-    Upgrade,
-    Legacy,
-    DroneOps,
-    Navigation,
-    StoryBriefing
+    Hangar = 0,
+    Flight = 1,
+    Results = 2,
+    ArrivalFanfare = 3,
+    ArrivalOps = 4,
+    Research = 7,
+    SurfaceExpedition = 8,
+    SurfaceUpgrade = 9,
+    Mining = 12,
+    Upgrade = 13,
+    Legacy = 14,
+    DroneOps = 15,
+    Navigation = 16,
+    StoryBriefing = 17,
 };
 
 enum class StoryBriefingId {
@@ -754,16 +750,6 @@ enum class FlybyGrade {
     Perfect
 };
 
-enum class FlybyPurpose {
-    Recon,
-    ScenarioChallenge,
-    // Serialized compatibility name. New mechanics use ScenarioChallenge.
-    SaturnSlingshot = ScenarioChallenge,
-    // Compatibility ordinal for existing saves. New authored departures use
-    // TransferAssist and carry their content definition ID on the run.
-    JupiterSlingshot,
-    TransferAssist = JupiterSlingshot
-};
 
 // Transitional compatibility mirrors. Scenario instances remain the
 // progression authority; these projections are retained until the focused
@@ -1076,8 +1062,7 @@ enum class ScenarioEventKind {
     None,
     SafeMaterialDelivered,
     ProtectedObjectiveExtracted,
-    FlybyFinished,
-    ManualAction,
+    ManualAction = 4, // Ordinal 3 belonged to the retired flyby event.
     ActivityAborted,
     // Appended to preserve any persisted/content enum meanings above.
     // A site event is emitted only after its staged run extracts safely;
@@ -1122,8 +1107,7 @@ enum class ScenarioRewardKind {
 
 enum class ScenarioActivityKind {
     None,
-    MiningSite,
-    Flyby
+    MiningSite
 };
 
 enum class ScenarioTransitionKind {
@@ -1617,61 +1601,11 @@ struct StoryBriefingState {
     Screen continuation = Screen::Hangar;
 };
 
-struct FlybyTrailPoint {
+struct TrajectoryPoint {
     double x = 0.0;
     double y = 0.0;
 };
 
-struct FlybyRunState {
-    bool active = false;
-    std::string destinationId;
-    FlybyPurpose purpose = FlybyPurpose::Recon;
-    // Scenario challenges share reconnaissance flight behavior, while their
-    // authored completion contract remains attached to this active run.
-    std::string scenarioId;
-    std::string scenarioStepId;
-    // Empty for reconnaissance and ordinary scenario challenges. A populated
-    // ID turns the finished pass into the authored physical transfer assist.
-    std::string transferAssistId;
-    double elapsedSeconds = 0.0;
-    double durationSeconds = 18.0;
-    double shipX = -0.68;
-    double shipY = -0.24;
-    double velocityX = 0.26;
-    double velocityY = 0.13;
-    double inputX = 0.0;
-    // A signed input that adjusts the retained throttle setpoint. It is not
-    // itself engine power: releasing the key/stick leaves selectedThrottle
-    // where the player set it.
-    double inputY = 0.0;
-    double selectedThrottle = 0.0;
-    double gravityStrength = 0.0;
-    double goodBand = 0.145;
-    double perfectBand = 0.050;
-    double turnRateRadians = 1.45;
-    double thrustAcceleration = 0.66;
-    int impactHullDamage = 18;
-    double pathProgress = 0.0;
-    int worstZone = 2;
-    double planetColliderRadius = 0.15;
-    double missSeconds = 0.0;
-    double goodSeconds = 0.0;
-    double perfectSeconds = 0.0;
-    double currentMissStreak = 0.0;
-    double longestMissStreak = 0.0;
-    int currentZone = 0;
-    bool completed = false;
-    bool collidedWithBody = false;
-    FlybyGrade result = FlybyGrade::Active;
-    double rewardCredits = 0.0;
-    int blueprintGain = 0;
-    double rewardBonusScale = 1.0;
-    bool slingshotAwarded = false;
-    double slingshotFuelSavings = 0.0;
-    double slingshotSpeedBoost = 0.0;
-    double slingshotSpeedScale = 1.0;
-    std::vector<FlybyTrailPoint> trailPoints;
-};
 
 struct PendingTransferAssist {
     std::string definitionId;
@@ -1689,63 +1623,6 @@ struct PendingTransferAssist {
     bool active() const { return !definitionId.empty() && !targetDestinationId.empty(); }
 };
 
-struct OrbitRunState {
-    bool active = false;
-    std::string destinationId;
-    double elapsedSeconds = 0.0;
-    double durationSeconds = 15.0;
-    double planetRadius = 0.16;
-    double targetRadius = 0.44;
-    double goodBand = 0.070;
-    double perfectBand = 0.030;
-    double shipX = -0.44;
-    double shipY = 0.0;
-    double velocityX = 0.0;
-    double velocityY = 0.30;
-    double inputX = 0.0;
-    // Vertical input adjusts the retained prograde throttle setpoint. Releasing
-    // the key/stick holds selectedThrottle while radial steering stays direct.
-    double inputY = 0.0;
-    double selectedThrottle = 0.0;
-    bool trimApplied = false;
-    double gravityStrength = 0.040;
-    double thrustAcceleration = 0.075;
-    double collisionPadding = 0.018;
-    double orbitProgress = 0.0;
-    double angleRadians = 0.0;
-    int worstZone = 2;
-    int currentZone = 0;
-    double missSeconds = 0.0;
-    double goodSeconds = 0.0;
-    double perfectSeconds = 0.0;
-    bool completed = false;
-    OrbitGrade result = OrbitGrade::Active;
-    double rewardCredits = 0.0;
-    int blueprintGain = 0;
-    std::vector<FlybyTrailPoint> trailPoints;
-};
-
-enum class ApproachPhase {
-    Entry,
-    Flyby,
-    Orbit,
-    Descent,
-    Departing,
-    Complete
-};
-
-struct DescentRunState {
-    bool active = false;
-    double corridorWidth = 1.0;
-    double turbulence = 0.0;
-    bool directDescent = false;
-};
-
-struct ApproachRewardLedger {
-    bool flybyAwarded = false;
-    bool orbitAwarded = false;
-    bool landingRecorded = false;
-};
 
 struct ApproachRunState {
     bool active = false;
@@ -1753,11 +1630,6 @@ struct ApproachRunState {
     double transferFuelRemaining = 0.0;
     double transferFuelCapacity = 0.0;
     RouteTransitState incomingRoute;
-    ApproachPhase phase = ApproachPhase::Entry;
-    FlybyRunState flyby;
-    OrbitRunState orbit;
-    DescentRunState descent;
-    ApproachRewardLedger rewards;
 };
 
 struct ExpeditionProgressionState {
@@ -1814,56 +1686,6 @@ struct PlanetaryExpeditionState {
     double reclamationFuelRecovered = 0.0;
 };
 
-enum class SurfaceScanPulseGrade {
-    None,
-    Miss,
-    Good,
-    Perfect
-};
-
-struct SurfaceScanRunState {
-    bool active = false;
-    bool completed = false;
-    bool busted = false;
-    std::string destinationId;
-    int pulses = 0;
-    int maxPulses = 5;
-    double elapsedSeconds = 0.0;
-    SurfaceScanPulseGrade lastPulseGrade = SurfaceScanPulseGrade::None;
-    int lastPulseDepthOffset = 0;
-    double successFanfareSeconds = 0.0;
-    // Presentation-only sting after a missed pulse. It has no impact on
-    // survey rewards, risk, or saved progression.
-    double missFanfareSeconds = 0.0;
-    double signal = 0.0;
-    double interference = 0.0;
-    double bustRisk = 0.0;
-    double hazardDelta = 0.0;
-    int cargo = 0;
-    MaterialInventory temporaryMaterials;
-    std::vector<ArtifactRecord> temporaryArtifacts;
-    std::vector<SurfaceDepthProspect> depthProspects;
-    std::string message;
-};
-
-struct SurfacePushRunState {
-    bool active = false;
-    bool completed = false;
-    bool busted = false;
-    std::string destinationId;
-    int steps = 0;
-    int maxSteps = 4;
-    int depthGain = 0;
-    double pressure = 0.0;
-    double collapseRisk = 0.0;
-    double hazardDelta = 0.0;
-    int cargo = 0;
-    MaterialInventory temporaryMaterials;
-    std::vector<ArtifactRecord> temporaryArtifacts;
-    std::vector<MiningCellMaterial> rewardMarkers;
-    std::vector<int> rewardMarkerDepthOffsets;
-    std::string message;
-};
 
 struct MiningCell {
     MiningCellMaterial material = MiningCellMaterial::Empty;
@@ -2430,7 +2252,7 @@ struct FlightRunState {
     bool orbitCelebrationPending = false;
     bool touchdownCelebrationPending = false;
     double touchdownImpactSpeed = 0.0; // Session-only supported-contact feedback.
-    std::vector<FlybyTrailPoint> predictedTrajectory;
+    std::vector<TrajectoryPoint> predictedTrajectory;
     bool predictedImpact = false;
     double predictionAge = 1.0;
     double courseNoticeSeconds = 0.0;
@@ -2549,8 +2371,6 @@ struct RunState {
     std::array<std::string, 3> researchProjectIds {};
     ApproachRunState approach;
     PlanetaryExpeditionState planetaryExpedition;
-    SurfaceScanRunState surfaceScan;
-    SurfacePushRunState surfacePush;
     MiningRunState mining;
     FlightRunState flight;
     PersistentExpeditionState expedition;

@@ -215,7 +215,6 @@ inline constexpr double controlStartupDrift = 0.80;
 // A slingshot exit that is already off-center carries an outward lateral
 // vector into the next launch. Centered exits add none; edge exits begin with
 // a visibly wilder correction without changing their independent speed award.
-inline constexpr double slingshotExitCourseDrift = 0.65;
 inline constexpr double controlThrottleKick = 0.35;
 inline constexpr double controlThrottleKickThreshold = 0.05;
 inline constexpr double controlThrottleKickCooldown = 0.35;
@@ -327,115 +326,15 @@ inline constexpr double returnTelemetrySettleMaximum = 0.06;
 inline constexpr double returnTelemetryCrashMargin = 0.02;
 } // namespace session
 
-namespace flyby {
-inline constexpr double durationSeconds = 14.0;
-inline constexpr double startX = -0.70;
-inline constexpr double startY = -0.30;
-inline constexpr double startVelocityX = 0.38;
-inline constexpr double startVelocityY = 0.04;
-inline constexpr double control1X = -0.18;
-inline constexpr double control1Y = -0.38;
-inline constexpr double control2X = 0.30;
-inline constexpr double control2Y = 0.90;
-inline constexpr double endX = 0.92;
-inline constexpr double endY = 0.48;
-inline constexpr double destinationX = 0.50;
-inline constexpr double destinationY = 0.05;
-inline constexpr double idealRadius = 0.50;
-inline constexpr double perfectBand = 0.050;
-inline constexpr double goodBand = 0.145;
-inline constexpr double planetColliderBaseRadius = 0.13;
-inline constexpr double planetColliderTierRadius = 0.012;
-inline constexpr double planetColliderPadding = 0.012;
-inline constexpr double shipColliderHalfLength = 0.055;
-inline constexpr double shipColliderHalfWidth = 0.025;
-inline constexpr double thrustAcceleration = 0.66;
-// Flyby uses the same held throttle model as Launch: vertical input adjusts
-// this retained setpoint, while releasing the input keeps the current burn.
-inline constexpr double throttleChangePerSecond = 0.35;
-inline constexpr double turnRateRadians = 1.45;
-inline constexpr double sensorPerfectBandScale = 0.0025;
-inline constexpr double sensorGoodBandScale = 0.0060;
-inline constexpr double thrustControlScale = 0.018;
-inline constexpr double escapeControlScale = 0.006;
-inline constexpr double volatilityControlPenalty = 0.008;
-inline constexpr double hullImpactReliefScale = 1.25;
-inline constexpr double coolingImpactReliefScale = 0.55;
-inline constexpr double escapeImpactReliefScale = 0.35;
-inline constexpr int impactMaximumRelief = 12;
-inline constexpr double driftDrag = 0.16;
-inline constexpr double minSpeed = 0.16;
-inline constexpr double maxSpeed = 0.82;
-inline constexpr double boundaryPadding = 0.08;
-inline constexpr double finishProgress = 0.985;
-inline constexpr double minimumFinishSeconds = 4.0;
-inline constexpr double gravityEasy = 0.006;
-inline constexpr double gravityMedium = 0.014;
-inline constexpr double gravityLarge = 0.030;
-inline constexpr double gravityDeep = 0.046;
-inline constexpr double gravitySoftening = 0.12;
-inline constexpr double maxGravityAcceleration = 0.18;
-inline constexpr double perfectTimeShare = 0.55;
-inline constexpr double goodTimeShare = 0.45;
-inline constexpr double perfectMaxMissStreak = 2.20;
-inline constexpr double goodRewardFactor = 0.35;
-inline constexpr double goodRewardFloor = 12.0;
-inline constexpr double perfectRewardMultiplier = 1.25;
-inline constexpr double completionRewardMaxScale = 1.60;
-inline constexpr int goodBlueprintGain = 1;
-inline constexpr double slingshotFuelBoost = 1.5;
-inline constexpr double slingshotSpeedBoost = 0.20;
-inline constexpr double slingshotMaxSpeedScale = 2.0;
-inline constexpr double jupiterSlingshotFuelSavings = 5.0;
-inline constexpr double jupiterSlingshotGoodInstabilityPenalty = 0.35;
-inline constexpr int impactHullDamage = 18;
-} // namespace flyby
-
-namespace orbit {
-inline constexpr double durationSeconds = 15.0;
-inline constexpr double throttleChangePerSecond = 0.35;
-inline constexpr double planetBaseRadius = 0.145;
-inline constexpr double planetTierRadius = 0.016;
-inline constexpr double targetRadiusScale = 2.95;
-inline constexpr double goodBandScale = 0.55;
-inline constexpr double perfectBandScale = 0.24;
-inline constexpr double perfectHoldSeconds = 3.0;
-inline constexpr double goodBandMinimumTimeShare = 0.60;
-// Orbit insertion begins at the Flyby endpoint, measured from the destination
-// center with the standard atan2(y, x) mathematical angle. With the authored
-// path this is approximately 0.797 radians; calculating it here keeps both
-// activities aligned when that path is retuned.
-inline double flybyExitAngleRadians() noexcept
-{
-    return std::atan2(
-        flyby::endY - flyby::destinationY,
-        flyby::endX - flyby::destinationX);
-}
-
-// Negative math-space angular travel keeps the same clockwise screen-space
-// motion as the preceding pass.
-inline constexpr double direction = -1.0;
-inline constexpr double thrustAcceleration = 0.075;
-inline constexpr double gravitySoftening = 0.120;
-inline constexpr double gravityScale = 0.42;
-inline constexpr double driftDrag = 0.0;
-inline constexpr double minSpeed = 0.18;
-inline constexpr double maxSpeed = 0.48;
-inline constexpr double escapeRadiusScale = 2.40;
-inline constexpr double collisionPadding = 0.018;
-// Orbit support is intentionally tied to the visible launch-upgrade tracks,
-// not to hidden legacy module stats. Each track has one concrete benefit.
-inline constexpr double fuelDurationAssistPerRank = 0.60;
+// Rewards and control upgrades for continuous physical flight.
+namespace physicalFlight {
 inline constexpr double flightControlsThrustAssistPerRank = 0.10;
-inline constexpr double coolingThrustAssistPerRank = 0.05;
-inline constexpr double hullCollisionPaddingReliefPerRank = 0.0025;
-inline constexpr double minimumCollisionPadding = 0.006;
 inline constexpr int goodBlueprintGain = 1;
 inline constexpr int perfectBlueprintGain = 2;
 inline constexpr double goodRewardFactor = 0.55;
 inline constexpr double goodRewardFloor = 18.0;
 inline constexpr double perfectRewardMultiplier = 1.45;
-} // namespace orbit
+} // namespace physicalFlight
 
 namespace rewards {
 inline constexpr double provingPayoutPerExtraData = 0.20;
@@ -523,50 +422,6 @@ inline constexpr int analysisLabBlueprintBonus = 1;
 inline constexpr int artifactInsightBlueprintPerIdentified = 1;
 inline constexpr int artifactInsightBlueprintMaximum = 3;
 inline constexpr int surfaceLogEntryLimit = 5;
-// Absolute Survey Array and Bore System ratings now own the reachable depth
-// envelope. These legacy maxima remain only as render-array headroom.
-inline constexpr int pushMaxSteps = surfaceDepthProgression::maximumDepthRating;
-inline constexpr int scanMaxPulses = surfaceDepthProgression::maximumDepthRating + 1;
-inline constexpr double scanSweepRadiansPerSecond = 2.70;
-inline constexpr double scanWindowCenterRadians = 1.57079632679489661923;
-inline constexpr double scanGoodWindowHalfAngleRadians = 0.42;
-inline constexpr double scanPerfectWindowHalfAngleRadians = 0.13;
-// Each newly mapped layer tightens the next pulse window. A miss retries the
-// same layer, so it does not make the timing window any smaller.
-inline constexpr double scanWindowDepthScale = 0.84;
-inline constexpr double scanGoodWindowMinimumHalfAngleRadians = 0.16;
-inline constexpr double scanPerfectWindowMinimumHalfAngleRadians = 0.05;
-inline double surfaceScanGoodWindowHalfAngleForDepth(int depthOffset) noexcept
-{
-    const double scale = std::pow(scanWindowDepthScale, std::max(0, depthOffset));
-    return std::max(scanGoodWindowMinimumHalfAngleRadians, scanGoodWindowHalfAngleRadians * scale);
-}
-inline double surfaceScanPerfectWindowHalfAngleForDepth(int depthOffset) noexcept
-{
-    const double scale = std::pow(scanWindowDepthScale, std::max(0, depthOffset));
-    return std::max(scanPerfectWindowMinimumHalfAngleRadians, scanPerfectWindowHalfAngleRadians * scale);
-}
-inline constexpr int scanGoodInformationPercent = 80;
-inline constexpr int scanPerfectInformationPercent = 100;
-inline constexpr double scanGoodSuccessFanfareSeconds = 0.70;
-inline constexpr double scanPerfectSuccessFanfareSeconds = 1.05;
-inline constexpr double scanMissFanfareSeconds = 0.48;
-inline double surfaceScanSweepAngleRadians(double elapsedSeconds) noexcept
-{
-    constexpr double twoPi = 6.28318530717958647692;
-    return std::fmod(std::max(0.0, elapsedSeconds) * scanSweepRadiansPerSecond, twoPi);
-}
-inline constexpr double scanBaseBustRisk = 0.04;
-inline constexpr double scanBustRiskPerPulse = 0.055;
-inline constexpr double scanBustRiskHazardScale = 0.16;
-inline constexpr double scanSignalPerPulse = 0.18;
-inline constexpr double scanHazardPerPulse = 0.006;
-inline constexpr double scanBustHazardIncrease = 0.035;
-inline constexpr double pushBaseCollapseRisk = 0.07;
-inline constexpr double pushRiskPerStep = 0.085;
-inline constexpr double pushRiskHazardScale = 0.18;
-inline constexpr double pushHazardPerStep = 0.030;
-inline constexpr double pushCollapseHazardIncrease = 0.060;
 } // namespace research
 
 namespace mining {

@@ -18,7 +18,6 @@ enum class PanelVisualFamily {
     Management,
     Decision,
     LiveHud,
-    SurfaceMinigame,
     MiningHud,
     Selection,
     ResultsModal,
@@ -70,7 +69,7 @@ inline PanelLayoutMode panelLayoutMode(Screen screen)
     default:
         break;
     }
-    return screen == Screen::Flight || screen == Screen::ArrivalFanfare || screen == Screen::Flyby || screen == Screen::Orbit
+    return screen == Screen::Flight || screen == Screen::ArrivalFanfare
         ? PanelLayoutMode::ControlPanel
         : PanelLayoutMode::PhaseBoard;
 }
@@ -91,12 +90,7 @@ inline constexpr PanelVisualFamily panelVisualFamily(Screen screen) noexcept
     case Screen::SurfaceExpedition:
         return PanelVisualFamily::Decision;
     case Screen::Flight:
-    case Screen::Flyby:
-    case Screen::Orbit:
         return PanelVisualFamily::LiveHud;
-    case Screen::SurfaceScan:
-    case Screen::SurfacePush:
-        return PanelVisualFamily::SurfaceMinigame;
     case Screen::Mining:
         return PanelVisualFamily::MiningHud;
     case Screen::SurfaceUpgrade:
@@ -118,7 +112,6 @@ inline constexpr std::string_view panelVisualFamilyName(PanelVisualFamily family
     case PanelVisualFamily::Management: return "management";
     case PanelVisualFamily::Decision: return "decision";
     case PanelVisualFamily::LiveHud: return "live-hud";
-    case PanelVisualFamily::SurfaceMinigame: return "surface-minigame";
     case PanelVisualFamily::MiningHud: return "mining";
     case PanelVisualFamily::Selection: return "selection";
     case PanelVisualFamily::ResultsModal: return "results-modal";

@@ -446,8 +446,6 @@ int screenToInt(Screen screen)
     case Screen::Research:
         return 3;
     case Screen::SurfaceExpedition:
-    case Screen::SurfaceScan:
-    case Screen::SurfacePush:
         return 4;
     case Screen::SurfaceUpgrade:
         return 5;
@@ -461,10 +459,6 @@ int screenToInt(Screen screen)
         return 9;
     case Screen::Upgrade:
         return 10;
-    case Screen::Flyby:
-        return 11;
-    case Screen::Orbit:
-        return 12;
     default:
         return 0;
     }
@@ -493,10 +487,9 @@ Screen screenFromInt(int value)
         return Screen::StoryBriefing;
     case 10:
         return Screen::Upgrade;
-    case 11:
-        return Screen::Flyby;
-    case 12:
-        return Screen::Orbit;
+    case 11: // Retired flyby activity.
+    case 12: // Retired orbit activity.
+        return Screen::Flight;
     default:
         return Screen::Hangar;
     }
@@ -3399,6 +3392,13 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         }
     }
     syncLaunchConfig(state, catalog);
+    // v21 activity IDs 11/12 had no persistent physical pose. Resume at a
+    // safe approach without changing cargo, terrain, upgrades, or earned rewards.
+    if ((save.screen == Screen::Flight || state.screen == Screen::ArrivalOps)
+        && !state.run.flight.physicalFlight) {
+        (void)resumePhysicalApproach(state, catalog);
+    }
+
 }
 
 std::string serializeSaveData(const SaveData& save)

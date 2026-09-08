@@ -11,7 +11,6 @@ export const requiredTemplateNames = [
   "rr-document-shell",
   "rr-workspace-shell",
   "rr-control-shell",
-  "rr-surface-minigame-shell",
   "rr-mining-shell",
   "rr-takeover-shell",
   "rr-results-shell",

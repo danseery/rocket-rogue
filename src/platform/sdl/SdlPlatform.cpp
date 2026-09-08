@@ -623,8 +623,6 @@ void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& eve
 void SdlPlatform::releaseRealtimeInputs(RocketGameApp& app)
 {
     app.launchMove(0.0, 0.0);
-    app.flybyMove(0.0, 0.0);
-    app.orbitMove(0.0, 0.0);
     app.miningMove(0.0, 0.0);
     app.miningKeyboardDrill(false);
     app.miningFire(false);

@@ -65,13 +65,9 @@ private:
     void drawTitleBackdrop(const RenderSnapshot& snapshot);
     void drawSceneTransition(const RenderSnapshot& snapshot);
     void drawBackdrop(const RenderSnapshot& snapshot);
-    void drawFlyby(const RenderSnapshot& snapshot);
-    void drawOrbit(const RenderSnapshot& snapshot);
     void drawMining(const RenderSnapshot& snapshot, bool arrivalComposite = false);
     void drawSurfaceArrival(const RenderSnapshot& snapshot);
     void drawSurfaceExhaust(float nozzleX, float nozzleY, float shipSize, float strength, double animationTime);
-    void drawSurfaceScan(const RenderSnapshot& snapshot);
-    void drawSurfacePush(const RenderSnapshot& snapshot);
     void drawLevelUpFanfare(const RenderSnapshot& snapshot);
     void drawSolarBackground(const RenderSnapshot& snapshot, float alpha, bool animateFrames = true);
     void drawRoute(const RenderSnapshot& snapshot);
@@ -268,7 +264,6 @@ private:
     bool previousMiningOperatorActive_ = false;
     double miningOperatorTogglePulseStartedAt_ = -1.0;
     int previousSurfacePushSteps_ = -1;
-    double surfacePushStepEffectStartedAt_ = -1.0;
     float sceneCssWidth_ = 1280.0F;
     float sceneCssHeight_ = 720.0F;
     float scenePixelLeft_ = 0.0F;

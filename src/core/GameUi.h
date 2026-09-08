@@ -28,15 +28,8 @@ inline constexpr std::string_view openNavigation = "open_navigation";
 inline constexpr std::string_view arkJump = "ark_jump";
 inline constexpr std::string_view selectNavigationDestinationPrefix = "select_navigation:";
 inline constexpr std::string_view rerollOffers = "reroll_offers";
-inline constexpr std::string_view arrivalFlyby = "arrival_flyby";
 inline constexpr std::string_view acknowledgeApproachIntroduction = "acknowledge_approach_introduction";
-inline constexpr std::string_view flybyAbort = "flyby_abort";
-inline constexpr std::string_view flybyContinue = "flyby_continue";
-inline constexpr std::string_view arrivalOrbit = "arrival_orbit";
-inline constexpr std::string_view orbitAbort = "orbit_abort";
-inline constexpr std::string_view orbitContinue = "orbit_continue";
 inline constexpr std::string_view arrivalLanding = "arrival_landing";
-inline constexpr std::string_view arrivalOrbitDepart = "arrival_orbit_depart";
 inline constexpr std::string_view acknowledgeStoryBriefing = "acknowledge_story_briefing";
 inline constexpr std::string_view repairShip = "repair_ship";
 inline constexpr std::string_view acceptCrewReplacement = "accept_crew_replacement";
@@ -52,15 +45,8 @@ inline constexpr std::string_view equipDronePrefix = "equip_drone:";
 inline constexpr std::string_view unequipDroneSlotPrefix = "unequip_drone_slot:";
 inline constexpr std::string_view upgradeDroneSlot = "upgrade_drone_slot";
 inline constexpr std::string_view skipResearch = "skip_research";
-inline constexpr std::string_view surveySurface = "survey_surface";
 inline constexpr std::string_view mineSurface = "mine_surface";
-inline constexpr std::string_view pushSurface = "push_surface";
 inline constexpr std::string_view extractSurface = "extract_surface";
-inline constexpr std::string_view surfaceScanPulse = "surface_scan_pulse";
-inline constexpr std::string_view surfaceScanBank = "surface_scan_bank";
-inline constexpr std::string_view surfaceScanAbort = "surface_scan_abort";
-inline constexpr std::string_view surfacePushStep = "surface_push_step";
-inline constexpr std::string_view surfacePushBank = "surface_push_bank";
 inline constexpr std::string_view miningScanner = "mining_scanner";
 inline constexpr std::string_view miningTether = "mining_tether";
 inline constexpr std::string_view miningRepairDrill = "mining_repair_drill";
@@ -72,10 +58,6 @@ inline constexpr std::string_view miningAbort = "mining_abort";
 inline constexpr std::string_view miningFailureAck = "mining_failure_ack";
 inline constexpr std::string_view acknowledgeJupiterWindow = "acknowledge_jupiter_window";
 inline constexpr std::string_view openJupiterRefit = "open_jupiter_refit";
-inline constexpr std::string_view beginJupiterSlingshot = "begin_jupiter_slingshot";
-inline constexpr std::string_view continueJupiterSlingshot = "continue_jupiter_slingshot";
-inline constexpr std::string_view beginTransferAssistPrefix = "begin_transfer_assist:";
-inline constexpr std::string_view continueTransferAssist = "continue_transfer_assist";
 inline constexpr std::string_view scenarioActionPrefix = "scenario_action:";
 
 inline std::string buyOffer(int index)
@@ -111,11 +93,6 @@ inline std::string equipDrone(int index)
 inline std::string unequipDroneSlot(int slotIndex)
 {
     return std::string(unequipDroneSlotPrefix) + std::to_string(slotIndex);
-}
-
-inline std::string beginTransferAssist(std::string_view definitionId)
-{
-    return std::string(beginTransferAssistPrefix) + std::string(definitionId);
 }
 
 // Scenario IDs and step IDs are stable content identifiers. Keep the action

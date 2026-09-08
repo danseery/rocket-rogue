@@ -521,54 +521,6 @@ double launchFuelCapacity(const GameState& state)
             tuning::launchProgression::fuelPerTankRank;
 }
 
-double pendingLaunchFuelSavings(const GameState& state)
-{
-    return std::max(0.0, state.run.nextLaunchFuelBoost);
-}
-
-double pendingLaunchInstabilityPenalty(const GameState& state)
-{
-    return std::clamp(state.run.nextLaunchInstabilityPenalty, 0.0, 1.0);
-}
-
-const PendingTransferAssist* pendingTransferAssistForDestination(
-    const GameState& state,
-    std::string_view destinationId)
-{
-    const PendingTransferAssist& assist = state.run.pendingTransferAssist;
-    return assist.active() && assist.targetDestinationId == destinationId ? &assist : nullptr;
-}
-
-double pendingLaunchFuelSavingsForDestination(
-    const GameState& state,
-    std::string_view destinationId)
-{
-    const PendingTransferAssist* assist = pendingTransferAssistForDestination(state, destinationId);
-    return std::max(pendingLaunchFuelSavings(state), assist == nullptr ? 0.0 : assist->fuelSavings);
-}
-
-double pendingLaunchSpeedBoostForDestination(
-    const GameState& state,
-    std::string_view destinationId)
-{
-    const PendingTransferAssist* assist = pendingTransferAssistForDestination(state, destinationId);
-    return std::max(
-        std::max(0.0, state.run.nextLaunchSpeedBoost),
-        assist == nullptr ? 0.0 : assist->speedBoost);
-}
-
-double pendingLaunchInstabilityPenaltyForDestination(
-    const GameState& state,
-    std::string_view destinationId)
-{
-    const PendingTransferAssist* assist = pendingTransferAssistForDestination(state, destinationId);
-    return std::clamp(
-        pendingLaunchInstabilityPenalty(state) +
-            (assist == nullptr ? 0.0 : assist->instabilityPenalty),
-        0.0,
-        1.0);
-}
-
 const RouteLinkDefinition* routeLinkForTransit(
     const ContentCatalog& catalog,
     const RouteTransitState& transit)
@@ -631,15 +583,12 @@ double calibratedTransferFuelMargin(
             static_cast<double>(std::max(1, destination.tier)) *
                 tuning::launch::routeFuelPerTier);
     return launchFuelCapacity(state) -
-        std::max(0.0, routeBurn - pendingLaunchFuelSavingsForDestination(state, destination.id));
+        routeBurn;
 }
 
 bool jupiterTransferMarginReady(const GameState& state)
 {
-    return launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3 ||
-        (pendingTransferAssistForDestination(state, content::destination::jupiter) != nullptr &&
-         pendingLaunchFuelSavingsForDestination(state, content::destination::jupiter) + 0.000001 >=
-             tuning::flyby::jupiterSlingshotFuelSavings);
+    return launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) >= 3;
 }
 
 bool destinationTransferMarginReady(
@@ -1128,8 +1077,6 @@ void startNewExpedition(GameState& state, const ContentCatalog& catalog)
     state.run.equippedModuleIds = state.meta.defaultEquippedModuleIds;
     state.run.planetaryExpedition = {};
     state.run.expedition.progression = {};
-    state.run.surfaceScan = {};
-    state.run.surfacePush = {};
     state.run.mining = {};
     state.run.offerModuleIds = {};
     state.run.offerCrewUpgradeIds = {};
@@ -2319,8 +2266,6 @@ void applyLaunchOutcome(GameState& state, const ContentCatalog& catalog, const L
         state.run.credits = std::max(expeditionCreditFloor(state), state.run.credits - tuning::mission::destroyedCreditPenalty);
         state.run.planetaryExpedition = {};
     state.run.expedition.progression = {};
-        state.run.surfaceScan = {};
-        state.run.surfacePush = {};
         state.run.mining = {};
         state.run.active = false;
         if (cleanShallowRecoveryDestroyed) {

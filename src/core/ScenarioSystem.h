@@ -185,7 +185,7 @@ ScenarioObjectivePresentation scenarioObjectiveForDestination(
 // Returns an actionable authored departure Flyby independently of ordinary
 // objective ranking, so arrival screens cannot route players into a generic
 // pass-through while the required departure challenge is active.
-ScenarioObjectivePresentation scenarioDepartureChallengeForDestination(
+ScenarioObjectivePresentation scenarioDepartureCourseForDestination(
     const GameState& state,
     const ContentCatalog& catalog,
     std::string_view destinationId);

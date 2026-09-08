@@ -279,7 +279,6 @@ std::string normalizeBooleanAttributes(std::string html)
 {
     static constexpr std::string_view names[] = {
         "disabled", "checked", "selected", "data-preflight-launch", "data-arrival-fanfare",
-        "data-flyby-run", "data-orbit-run",
         "data-help-settings", "data-help-toggle", "data-camera-shake-settings", "data-camera-shake-toggle", "data-resolution-settings", "data-resolution-select",
         "data-desktop-fullscreen-settings", "data-desktop-fullscreen-toggle",
         "data-frame-limit-settings", "data-frame-limit-select",
@@ -683,8 +682,6 @@ RmlPanelMode panelModeForPresentation(const PanelDocumentPresentation& presentat
         return RmlPanelMode::Results;
     case PanelTemplateKind::Workspace:
         return RmlPanelMode::Workspace;
-    case PanelTemplateKind::SurfaceMinigame:
-        return RmlPanelMode::PhaseBoard;
     case PanelTemplateKind::ControlPanel:
         return RmlPanelMode::Control;
     case PanelTemplateKind::LegacyRaw:
@@ -697,10 +694,7 @@ RmlPanelMode panelModeForPresentation(const PanelDocumentPresentation& presentat
     if (presentation.metadata.screen == Screen::ArrivalFanfare) {
         return RmlPanelMode::ArrivalFanfare;
     }
-    if ((presentation.metadata.screen == Screen::Flyby || presentation.metadata.screen == Screen::Orbit)
-        && presentation.metadata.interaction == PanelInteractionMode::Takeover) {
-        return RmlPanelMode::MissionStamp;
-    }
+
     switch (presentation.metadata.layoutMode) {
     case PanelLayoutMode::Fullscreen:
         return RmlPanelMode::Workspace;
@@ -717,7 +711,6 @@ std::string_view panelTemplateName(PanelTemplateKind kind)
     switch (kind) {
     case PanelTemplateKind::Workspace: return "rr-workspace-shell";
     case PanelTemplateKind::ControlPanel: return "rr-control-shell";
-    case PanelTemplateKind::SurfaceMinigame: return "rr-surface-minigame-shell";
     case PanelTemplateKind::Mining: return "rr-mining-shell";
     case PanelTemplateKind::Takeover: return "rr-takeover-shell";
     case PanelTemplateKind::Results: return "rr-results-shell";
@@ -732,7 +725,6 @@ std::string_view panelTemplateContentId(PanelTemplateKind kind)
     switch (kind) {
     case PanelTemplateKind::Workspace: return "rr-workspace-content";
     case PanelTemplateKind::ControlPanel: return "rr-control-content";
-    case PanelTemplateKind::SurfaceMinigame: return "rr-surface-minigame-content";
     case PanelTemplateKind::Mining: return "rr-mining-content";
     case PanelTemplateKind::Takeover: return "rr-takeover-content";
     case PanelTemplateKind::Results: return "rr-results-content";
@@ -747,7 +739,6 @@ std::string_view panelTemplateShellClass(PanelTemplateKind kind)
     switch (kind) {
     case PanelTemplateKind::Workspace: return "rr-shell rr-workspace-shell";
     case PanelTemplateKind::ControlPanel: return "rr-shell rr-control-shell";
-    case PanelTemplateKind::SurfaceMinigame: return "rr-shell rr-surface-minigame-shell";
     case PanelTemplateKind::Mining: return "rr-shell rr-mining-shell";
     case PanelTemplateKind::Takeover: return "rr-shell rr-takeover-shell";
     case PanelTemplateKind::Results: return "rr-shell rr-results-shell";
@@ -763,7 +754,6 @@ std::string_view visualFamilyClass(PanelVisualFamily family)
     case PanelVisualFamily::Management: return "management-family-panel rr-family-management";
     case PanelVisualFamily::Decision: return "decision-family-panel rr-family-decision";
     case PanelVisualFamily::LiveHud: return "live-hud-family-panel rr-family-live-hud";
-    case PanelVisualFamily::SurfaceMinigame: return "rr-family-surface-minigame";
     case PanelVisualFamily::MiningHud: return "rr-family-mining";
     case PanelVisualFamily::Selection: return "selection-family-panel rr-family-selection";
     case PanelVisualFamily::ResultsModal: return "rr-family-results";
@@ -961,11 +951,6 @@ std::string nativeSceneOverlayMarkup(const PanelDocumentPresentation& presentati
 <div class="native-telemetry-legend-chip heat"><span class="swatch"></span><strong>Heat</strong></div>
 <div class="native-telemetry-legend-chip threshold"><span class="swatch"></span><strong>Caution line</strong></div>
 </div>)";
-    case PanelOverlayKind::SurfaceScanReadout:
-        return "<div id=\"rr-scan-scene-readout\"><strong>"
-            + Rml::StringUtilities::EncodeRml(
-                presentation.runtime.overlayValue.empty() ? "0%" : presentation.runtime.overlayValue)
-            + "</strong></div>";
     case PanelOverlayKind::MiningExperience: {
         const PanelRuntimeHints& runtime = presentation.runtime;
         const UiViewportLayout miningLayout = resolveUiViewportLayout(
@@ -1870,12 +1855,6 @@ std::string inputPromptBar(
     const char* cancel = swapConfirmCancel ? labels.south : labels.east;
     const Screen screen = presentation.metadata.screen;
     const bool mining = screen == Screen::Mining;
-    const bool flyby = screen == Screen::Flyby
-        && presentation.metadata.interaction == PanelInteractionMode::Realtime;
-    const bool orbit = screen == Screen::Orbit
-        && presentation.metadata.interaction == PanelInteractionMode::Realtime;
-    const bool surfaceActivity = (screen == Screen::SurfaceScan || screen == Screen::SurfacePush)
-        && presentation.metadata.interaction == PanelInteractionMode::Realtime;
     if ((mining || presentation.runtime.inlineFlightControls) && !modalOpen) {
         // Mining controls are introduced contextually. A permanent ribbon
         // competes with the physical scene and the service-zone actions.
@@ -1883,7 +1862,7 @@ std::string inputPromptBar(
         // do not add the legacy Turn Around / Steer-Throttle ribbon to it.
         return {};
     }
-    if (!controllerActive && (modalOpen || (!mining && !flyby && !orbit && !surfaceActivity))) {
+    if (!controllerActive && (modalOpen || !mining)) {
         return {};
     }
 
@@ -1928,17 +1907,6 @@ std::string inputPromptBar(
             if (presentation.runtime.miningAbortAvailable) {
                 prompt += describedItem("Recall", "Esc");
             }
-        } else if (flyby) {
-            prompt += describedItem("Accelerate / Slow", "W/S or Up/Down")
-                + describedItem("Turn", "A/D or Left/Right")
-                + describedItem("Abort", "Esc", "Records a Miss");
-        } else if (orbit) {
-            prompt += describedItem("Prograde / Retrograde", "W/S or Up/Down")
-                + describedItem("Tighten / Widen", "A/D or Left/Right")
-                + describedItem("Abort", "Esc", "Records a Miss");
-        } else if (surfaceActivity) {
-            prompt += describedItem(screen == Screen::SurfaceScan ? "Pulse scanner" : "Push deeper", "Space")
-                + describedItem(screen == Screen::SurfaceScan ? "Log survey" : "Set start depth", "B / Esc");
         }
         return prompt + "</div>";
     }
@@ -1979,21 +1947,7 @@ std::string inputPromptBar(
             prompt += describedItem("Recall", labels.east);
         }
         prompt += item(labels.menu, "Pause");
-    } else if (flyby) {
-        prompt += describedItem("Accelerate / Slow", "L-stick vertical")
-            + describedItem("Turn", "L-stick horizontal")
-            + describedItem("Abort", labels.east, "Hold to record a Miss")
-            + item(labels.menu, "Pause");
-    } else if (orbit) {
-        prompt += describedItem("Prograde / Retrograde", "L-stick vertical")
-            + describedItem("Tighten / Widen", "L-stick horizontal")
-            + describedItem("Abort", labels.east, "Hold to record a Miss")
-            + item(labels.menu, "Pause");
-    } else if (screen == Screen::SurfaceScan || screen == Screen::SurfacePush) {
-        prompt += item(labels.south, "Pulse / push")
-            + item(labels.east, screen == Screen::SurfaceScan ? "Tap: log survey" : "Tap: set start depth")
-            + item(labels.east, "Hold: abort") + item(labels.menu, "Pause");
-    } else if (screen == Screen::Flight
+    }  else if (screen == Screen::Flight
         && presentation.metadata.overlay != PanelOverlayKind::PreflightLaunch) {
         if (presentation.contentMarkup.find("data-launch-manual-controls=\"1\"") != std::string::npos) {
             prompt += describedItem("Steer / throttle", "L-stick");
@@ -2836,7 +2790,7 @@ bool GameRmlUi::initialize(ActionHandler actionHandler)
     g_context->SetDensityIndependentPixelRatio(static_cast<float>(rr_rml_density_ratio()));
 
     const std::filesystem::path uiRoot = std::filesystem::path(assetRoot_) / "assets" / "ui";
-    const std::array<std::filesystem::path, 16> requiredUiAssets {
+    const std::array requiredUiAssets {
         uiRoot / "panel.rml",
         uiRoot / "styles" / "all.rcss",
         uiRoot / "styles" / "tokens.rcss",
@@ -2848,7 +2802,6 @@ bool GameRmlUi::initialize(ActionHandler actionHandler)
         uiRoot / "templates" / "rr-document-shell.rml",
         uiRoot / "templates" / "rr-workspace-shell.rml",
         uiRoot / "templates" / "rr-control-shell.rml",
-        uiRoot / "templates" / "rr-surface-minigame-shell.rml",
         uiRoot / "templates" / "rr-mining-shell.rml",
         uiRoot / "templates" / "rr-takeover-shell.rml",
         uiRoot / "templates" / "rr-results-shell.rml",
@@ -2917,10 +2870,9 @@ bool GameRmlUi::initialize(ActionHandler actionHandler)
         std::string_view contentId;
         Rml::Element* host;
     };
-    const std::array<TemplateProbe, 7> templateProbes {{
+    const std::array<TemplateProbe, 6> templateProbes {{
         {"rr-workspace-shell", "rr-workspace-content", panelHost},
         {"rr-control-shell", "rr-control-content", panelHost},
-        {"rr-surface-minigame-shell", "rr-surface-minigame-content", panelHost},
         {"rr-mining-shell", "rr-mining-content", panelHost},
         {"rr-takeover-shell", "rr-takeover-content", panelHost},
         {"rr-results-shell", "rr-results-content", panelHost},
@@ -3064,7 +3016,7 @@ void GameRmlUi::setRealtimeHudState(const RealtimeHudState& state)
         Rml::Element* element = g_document->GetElementById(patch.elementId);
         if (!element) {
             if (!openModalId_.empty() &&
-                (patch.elementId == "rr-scan-scene-readout" ||
+                (patch.elementId.rfind("rr-hud-mining-xp", 0) == 0 ||
                     patch.elementId.rfind("rr-flight-", 0) == 0)) {
                 // Scene overlays are deliberately unmounted while a modal owns
                 // the viewport. The overlay is rebuilt on close and the next
@@ -3905,9 +3857,6 @@ bool GameRmlUi::applyDocumentPresentationState()
     switch (presentation_.metadata.surface) {
     case PanelSurfaceKind::SurfaceOps:
         panelClass += " surface-ops-panel";
-        break;
-    case PanelSurfaceKind::SurfaceScan:
-        panelClass += " surface-scan-panel";
         break;
     case PanelSurfaceKind::DroneOps:
         panelClass += " drone-ops-panel";

@@ -12,10 +12,6 @@
 	--rr-family-accent: var(--rr-color-signal);
 }
 
-.rr-family-surface-minigame {
-	--rr-family-accent: var(--rr-color-ready);
-}
-
 .rr-family-hangar {
 	--rr-family-accent: var(--rr-color-signal);
 }

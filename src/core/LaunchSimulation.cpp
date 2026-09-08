@@ -288,7 +288,7 @@ double poweredLaunchTargetVelocity(
         ? tuning::launchProgression::fuelSurveyProgressRateScale
         : 1.0;
     return tuning::launch::pilotingBaseProgressRate * poweredDrive / tierFactor *
-        std::max(0.25, 1.0 + launch.slingshotSpeedBoost) * lessonSpeedScale;
+        lessonSpeedScale;
 }
 
 } // namespace
@@ -322,13 +322,11 @@ double launchFuelUseMultiplier(double throttle)
 
 double launchPoweredFuelCost(
     double cruiseFuelCost,
-    double throttle,
-    double slingshotFuelSavings)
+    double throttle)
 {
     return std::max(
         0.0,
-        std::max(0.0, cruiseFuelCost) * launchFuelUseMultiplier(throttle) -
-            std::max(0.0, slingshotFuelSavings));
+        std::max(0.0, cruiseFuelCost) * launchFuelUseMultiplier(throttle));
 }
 
 double launchControlChaosForRank(int rank)
@@ -413,16 +411,6 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
         launch.cruiseFuelCost = link->cruiseFuelCost;
         launch.routeProfileDestinationId = link->targetDestinationId;
     }
-    launch.slingshotFuelSavings = pendingLaunchFuelSavingsForDestination(state, destination.id);
-    launch.slingshotSpeedBoost = pendingLaunchSpeedBoostForDestination(state, destination.id);
-    launch.slingshotInstabilityPenalty = pendingLaunchInstabilityPenaltyForDestination(state, destination.id);
-    if (const PendingTransferAssist* assist = pendingTransferAssistForDestination(state, destination.id)) {
-        launch.transferAssistId = assist->definitionId;
-        launch.slingshotCourseOffset = std::clamp(
-            assist->exitCourseOffset,
-            -tuning::launch::pilotingCourseLost,
-            tuning::launch::pilotingCourseLost);
-    }
     launch.config.frameId = state.run.frameId;
     launch.config.equippedModuleIds = state.run.equippedModuleIds;
 
@@ -451,9 +439,6 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
         // Autoguidance carries the ship to the Ark without consuming the
         // expedition's transfer fuel or exposing a hidden failure condition.
         launch.cruiseFuelCost = 0.0;
-        launch.slingshotFuelSavings = 0.0;
-        launch.slingshotSpeedBoost = 0.0;
-        launch.slingshotInstabilityPenalty = 0.0;
     }
     // Frontier transfers land as soon as the ship reaches the destination.
     // Fuel remains a range constraint, not a hidden landing-reserve check.
@@ -465,8 +450,7 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     launch.heatEnabled = missionUsesHeat(launch.config.missionKind, destination);
     launch.asteroidsEnabled = missionUsesAsteroids(launch.config.missionKind, destination);
     launch.controlChaos = std::clamp(
-        launchControlChaosForRank(launch.flightControlRank) +
-            launch.slingshotInstabilityPenalty,
+        launchControlChaosForRank(launch.flightControlRank),
         0.0,
         1.0);
     launch.controlSteeringResponseVariation = rng.range(
@@ -504,7 +488,7 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
     return launch;
 }
 
-FlightRunState beginLaunchFlight(const PreparedLaunch& launch, const Destination& destination)
+FlightRunState beginLaunchFlight(const PreparedLaunch& launch, const Destination&)
 {
     FlightRunState flight;
     flight.originId = launch.config.routeTransit.originDestinationId;
@@ -512,23 +496,6 @@ FlightRunState beginLaunchFlight(const PreparedLaunch& launch, const Destination
     flight.active = true;
     flight.selectedThrottle = tuning::launch::pilotingInitialThrottle;
     flight.throttleAtLastKick = flight.selectedThrottle;
-    flight.courseOffset = std::clamp(
-        launch.slingshotCourseOffset,
-        -launchCourseLimit(launch),
-        launchCourseLimit(launch));
-    if (!launch.transferAssistId.empty() || launch.slingshotSpeedBoost > 0.0) {
-        // The assist starts the next leg already moving at its earned boosted
-        // rate. Without this, the earned +0-40% award only changed the eventual
-        // target velocity while every transfer visibly launched from rest.
-        flight.travelVelocity = poweredLaunchTargetVelocity(
-            launch,
-            destination,
-            flight.selectedThrottle);
-        const double targetSpan = std::max(
-            tuning::session::minTravelDenominator,
-            destination.targetMultiplier - 1.0);
-        flight.burnRatePerSecond = flight.travelVelocity * targetSpan;
-    }
     if (launch.manualControlsEnabled && launch.controlChaos > 0.0 &&
         launch.controlKickCount > 0) {
         flight.courseVelocity =
@@ -536,12 +503,6 @@ FlightRunState beginLaunchFlight(const PreparedLaunch& launch, const Destination
             launch.controlChaos;
         flight.nextControlKickIndex = 1;
         flight.throttleKickCooldownSeconds = tuning::launch::controlThrottleKickCooldown;
-    }
-    if (!launch.transferAssistId.empty()) {
-        flight.courseVelocity +=
-            flight.courseOffset /
-                std::max(0.01, launchCourseLimit(launch)) *
-            tuning::launch::slingshotExitCourseDrift;
     }
     flight.fuelCapacity = launch.fuelCapacity;
     flight.fuelRemaining = launch.fuelCapacity;
@@ -555,8 +516,7 @@ FlightRunState beginLaunchFlight(const PreparedLaunch& launch, const Destination
     flight.projectedFuelRequired = launch.config.frontierTransfer
         ? launchPoweredFuelCost(
               launch.cruiseFuelCost,
-              flight.selectedThrottle,
-              launch.slingshotFuelSavings) +
+              flight.selectedThrottle) +
             launch.arrivalReserveFuel
         : 0.0;
     flight.projectedFuelReserve = flight.fuelRemaining - flight.projectedFuelRequired;
@@ -574,14 +534,9 @@ FlightRunState beginLaunchFlight(const PreparedLaunch& launch, const Destination
         // untouched physical course crosses the outer capture corridor and
         // continues into a flyby rather than auto-solving orbit or impact.
         flight.positionX = physicalFlightStartX;
-        flight.positionY = physicalFlightStartY +
-            std::clamp(launch.slingshotCourseOffset, -0.25, 0.25);
-        flight.velocityX = physicalFlightStartVelocityX +
-            std::max(0.0, launch.slingshotSpeedBoost) * 0.025;
-        flight.velocityY = physicalFlightStartVelocityY +
-            launch.slingshotCourseOffset /
-                std::max(0.01, launchCourseLimit(launch)) *
-                tuning::launch::slingshotExitCourseDrift;
+        flight.positionY = physicalFlightStartY;
+        flight.velocityX = physicalFlightStartVelocityX;
+        flight.velocityY = physicalFlightStartVelocityY;
         flight.heading = std::atan2(flight.velocityY, flight.velocityX);
         flight.angularVelocity = 0.0;
         flight.orbit = {};
@@ -793,7 +748,7 @@ LaunchFlightStep updateSpaceFlight(
         signedThrust = 0.0;
     }
     if (std::abs(signedThrust) > 0.001) {
-        const double thrustAssist = system ? 1.0 + launch.flightControlRank * tuning::orbit::flightControlsThrustAssistPerRank : 1.0;
+        const double thrustAssist = system ? 1.0 + launch.flightControlRank * tuning::physicalFlight::flightControlsThrustAssistPerRank : 1.0;
         flight.velocityX += std::cos(flight.heading) * signedThrust * thrustAcceleration * controlDt * thrustAssist;
         flight.velocityY += std::sin(flight.heading) * signedThrust * thrustAcceleration * controlDt * thrustAssist;
         flight.fuelRemaining = std::max(
@@ -1356,8 +1311,7 @@ LaunchFlightStep updateLaunchFlight(
                   ? launch.cruiseFuelCost * launchFuelUseMultiplier(flight.selectedThrottle)
                   : launchPoweredFuelCost(
                         launch.cruiseFuelCost,
-                        flight.selectedThrottle,
-                        launch.slingshotFuelSavings));
+                        flight.selectedThrottle));
         flight.fuelRemaining = std::max(
             0.0,
             flight.fuelRemaining - traveledDistance * fuelUsePerProgress);
@@ -1371,8 +1325,7 @@ LaunchFlightStep updateLaunchFlight(
         ? launch.cruiseFuelCost * launchFuelUseMultiplier(flight.selectedThrottle)
         : launchPoweredFuelCost(
               launch.cruiseFuelCost,
-              flight.selectedThrottle,
-              launch.slingshotFuelSavings);
+              flight.selectedThrottle);
     flight.projectedFuelRequired = std::max(0.0, projectedDistance) *
         projectedFuelPerProgress +
         (!flight.returningHome && launch.config.frontierTransfer
@@ -1630,10 +1583,6 @@ LaunchOutcome resolveLaunch(
     outcome.failureCause = resolution.failureCause;
     outcome.fuelSurveyReturnTiming = resolution.fuelSurveyReturnTiming;
     outcome.minimumSafetyMargin = resolution.minimumSafetyMargin;
-    outcome.slingshotFuelSavings = launch.slingshotFuelSavings;
-    outcome.slingshotSpeedBoost = launch.slingshotSpeedBoost;
-    outcome.slingshotInstabilityPenalty = launch.slingshotInstabilityPenalty;
-    outcome.transferAssistId = launch.transferAssistId;
 
     const Destination* destination = catalog.findDestination(launch.config.destinationId);
     if (destination == nullptr) {

@@ -1528,9 +1528,6 @@ inline PanelButtonPresentation fieldSurfaceActionButton(const GameState& state, 
 
 inline PanelButtonPresentation miningSurfaceActionButton(const GameState& state)
 {
-    if (!surfaceOpsTutorialMiningUnlocked(state)) {
-        return {"Dig First", {}, "risk", false};
-    }
     if (state.run.planetaryExpedition.miningRunUsed) {
         return disabledPanelButton(text::buttons::unavailable);
     }
@@ -1555,9 +1552,6 @@ inline std::string fieldSurfaceActionAvailability(const GameState& state, int co
 
 inline std::string miningSurfaceActionAvailability(const GameState& state)
 {
-    if (!surfaceOpsTutorialMiningUnlocked(state)) {
-        return "Set a start depth to unlock";
-    }
     if (state.run.planetaryExpedition.miningRunUsed) {
         return std::string(text::fuel::offline);
     }
@@ -1582,51 +1576,6 @@ inline std::string surfaceDepthBlockerLabel(const SurfaceDepthCapability& capabi
         break;
     }
     return std::string(text::buttons::unavailable);
-}
-
-inline PanelButtonPresentation pushSurfaceActionButton(
-    const GameState& state,
-    const ContentCatalog& catalog)
-{
-    if (!surfaceOpsTutorialDigUnlocked(state)) {
-        return {"Survey First", {}, "warn", false};
-    }
-    if (state.run.planetaryExpedition.miningRunUsed) {
-        return disabledPanelButton(text::buttons::unavailable);
-    }
-    const SurfaceDepthCapability capability = surfaceDepthCapability(
-        state,
-        catalog,
-        state.run.planetaryExpedition.depth + 1);
-    if (!capability.canDig) {
-        return disabledPanelButton(surfaceDepthBlockerLabel(capability));
-    }
-    return fieldSurfaceActionButton(
-        state,
-        text::buttons::pushDeeper,
-        ui::actions::pushSurface,
-        tuning::research::pushSupplyCost,
-        "warn");
-}
-
-inline std::string pushSurfaceActionAvailability(
-    const GameState& state,
-    const ContentCatalog& catalog)
-{
-    if (!surfaceOpsTutorialDigUnlocked(state)) {
-        return "Log a Survey to unlock";
-    }
-    if (state.run.planetaryExpedition.miningRunUsed) {
-        return std::string(text::panel::messages::surfaceFieldworkClosed);
-    }
-    const SurfaceDepthCapability capability = surfaceDepthCapability(
-        state,
-        catalog,
-        state.run.planetaryExpedition.depth + 1);
-    if (!capability.canDig) {
-        return surfaceDepthBlockerMessage(capability);
-    }
-    return fieldSurfaceActionAvailability(state, tuning::research::pushSupplyCost);
 }
 
 inline std::string surfaceHazardRisk(double hazard, double scale, double relief)
@@ -1671,15 +1620,6 @@ inline PlanetaryExpeditionState projectedSurveyExpedition(const PlanetaryExpedit
     return projected;
 }
 
-inline PlanetaryExpeditionState projectedPushExpedition(const PlanetaryExpeditionState& expedition)
-{
-    PlanetaryExpeditionState projected = expedition;
-    projected.supply = std::max(0, projected.supply - tuning::research::pushSupplyCost);
-    projected.depth += 1;
-    projected.hazard += tuning::research::hazardPerDepth;
-    return projected;
-}
-
 inline std::vector<PanelMetricPresentation> surveyPayoffChips(const GameState& state, const SurfaceToolEffects& tools, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
 {
     std::vector<PanelMetricPresentation> chips;
@@ -1690,22 +1630,6 @@ inline std::vector<PanelMetricPresentation> surveyPayoffChips(const GameState& s
             state,
             SurfaceDepthUpgradeKind::SurveyArray))));
     addPositiveChip(chips, text::labels::commonMaterials, tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus);
-    return chips;
-}
-
-inline std::vector<PanelMetricPresentation> pushPayoffChips(const GameState& state, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
-{
-    std::vector<PanelMetricPresentation> chips;
-    chips.push_back(panelMetric("Mining start", "Next layer"));
-    const bool nextLayerScanned = std::any_of(
-        state.run.planetaryExpedition.depthProspects.begin(),
-        state.run.planetaryExpedition.depthProspects.end(),
-        [&](const SurfaceDepthProspect& prospect) {
-            return prospect.absoluteDepth == state.run.planetaryExpedition.depth + 1;
-        });
-    chips.push_back(panelMetric("Next layer", nextLayerScanned ? "Surveyed" : "Unsurveyed"));
-    addPercentChip(chips, text::labels::artifacts, std::min(1.0, tuning::research::artifactChanceBase + crew.artifactChanceBonus + site.artifactChanceBonus));
-    chips.push_back(panelMetric(text::labels::hazard, display::signedPercent(tuning::research::hazardPerDepth)));
     return chips;
 }
 
@@ -2121,68 +2045,6 @@ inline SurfaceExpeditionPresentation planetaryExpeditionPresentation(const GameS
     const std::string surveyLimitLabel = boreLimitsSurvey
         ? "Bore limit +" + std::to_string(boreRating) + " reached"
         : "Survey limit +" + std::to_string(surveyRating) + " reached";
-    SurfaceActionPreviewPresentation surveyPreview = surfaceActionPreview(
-        text::buttons::surveySite,
-        std::string(text::panel::messages::surfaceSurveyDetail),
-        expedition.supply,
-        tuning::research::surveySupplyCost,
-        surveyHazardRisk,
-        std::string(text::labels::hazard),
-        surveyPayoffChips(state, tools, crew, site),
-        surveyLimitReached
-            ? disabledPanelButton(surveyLimitLabel)
-            : fieldSurfaceActionButton(
-                  state,
-                  text::buttons::surveySite,
-                  ui::actions::surveySurface,
-                  tuning::research::surveySupplyCost,
-                  "ok"),
-        surveyLimitReached
-            ? "All diggable layers mapped"
-            : "Maps current mining layer");
-    surveyPreview.payoffChips.push_back(panelMetric("Arena", std::string(miningActName(arenaRules.request.act)) + " L" + std::to_string(arenaRules.request.difficulty)));
-    if (swarmPreview.available) {
-        surveyPreview.risk = "SWARM NEST +" + std::to_string(swarmPreview.depthZone) + " • Artifact " + display::percent(swarmPreview.artifactChance);
-        surveyPreview.riskLabel = "DANGER";
-        surveyPreview.summary = surveyPreview.risk + " " + surveyPreview.riskLabel;
-        surveyPreview.payoffChips.push_back(panelMetric("Danger", "SWARM NEST +" + std::to_string(swarmPreview.depthZone)));
-        surveyPreview.payoffChips.push_back(panelMetric("Artifact", display::percent(swarmPreview.artifactChance)));
-    }
-    presentation.actions.push_back(std::move(surveyPreview));
-    presentation.actions.back().availability = surveyLimitReached
-        ? (boreLimitsSurvey
-              ? "Upgrade Bore System to survey and dig deeper"
-              : "Upgrade Survey Array to survey and dig deeper")
-        : fieldSurfaceActionAvailability(state, tuning::research::surveySupplyCost);
-
-    const std::string pushCollapseRisk = surfaceHazardRisk(
-        expedition.hazard,
-        tuning::research::pushHazardChanceScale,
-        tools.hazardRelief + crew.hazardRelief + upgrades.hazardRelief);
-    SurfaceActionPreviewPresentation pushPreview = surfaceActionPreview(
-        text::buttons::pushDeeper,
-        std::string(text::panel::messages::surfacePushDetail),
-        expedition.supply,
-        tuning::research::pushSupplyCost,
-        pushCollapseRisk,
-        std::string(text::labels::hazard),
-        pushPayoffChips(state, crew, site),
-        pushSurfaceActionButton(state, catalog),
-        "Surveyed layers only • " + pushCollapseRisk + " collapse chance");
-    pushPreview.availability = pushSurfaceActionAvailability(state, catalog);
-    pushPreview.payoffChips.push_back(panelMetric("Surveyed through", "+" + std::to_string(depthCapability.surveyedThroughDepth)));
-    pushPreview.payoffChips.push_back(panelMetric("Bore rating", "+" + std::to_string(depthCapability.boreRating)));
-    const MiningArenaRules deeperArenaRules = upcomingMiningArenaRules(state, catalog, 1);
-    pushPreview.payoffChips.push_back(panelMetric("Next arena", std::string(miningActName(deeperArenaRules.request.act)) + " L" + std::to_string(deeperArenaRules.request.difficulty)));
-    if (swarmPreview.available) {
-        pushPreview.risk = "SWARM NEST BELOW";
-        pushPreview.riskLabel = "DANGER";
-        pushPreview.summary = pushPreview.risk + " " + pushPreview.riskLabel;
-        pushPreview.payoffChips.push_back(panelMetric("Nest", "Depth +" + std::to_string(swarmPreview.depthZone)));
-        pushPreview.payoffChips.push_back(panelMetric("Artifact", display::percent(swarmPreview.artifactChance)));
-    }
-    presentation.actions.push_back(std::move(pushPreview));
-
     const std::string miningOxygen = std::to_string(
         static_cast<int>(std::round(miningDrillStats(state, catalog).oxygenSeconds))) + "s";
     SurfaceActionPreviewPresentation miningPreview = surfaceActionPreview(

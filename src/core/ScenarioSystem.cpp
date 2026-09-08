@@ -55,7 +55,6 @@ bool parseScenarioEventKind(std::string_view text, ScenarioEventKind& value)
     if (text == "none") value = ScenarioEventKind::None;
     else if (text == "safe_material_delivered") value = ScenarioEventKind::SafeMaterialDelivered;
     else if (text == "protected_objective_extracted") value = ScenarioEventKind::ProtectedObjectiveExtracted;
-    else if (text == "flyby_finished") value = ScenarioEventKind::FlybyFinished;
     else if (text == "manual_action") value = ScenarioEventKind::ManualAction;
     else if (text == "activity_aborted") value = ScenarioEventKind::ActivityAborted;
     else if (text == "mining_site_completed") value = ScenarioEventKind::MiningSiteCompleted;
@@ -73,7 +72,6 @@ bool awardsAuthoredObjectiveExperience(ScenarioEventKind kind)
     case ScenarioEventKind::SafeMaterialDelivered:
     case ScenarioEventKind::ProtectedObjectiveExtracted:
     case ScenarioEventKind::ArtifactRecovered:
-    case ScenarioEventKind::FlybyFinished:
     case ScenarioEventKind::MiningSiteCompleted:
     case ScenarioEventKind::DestinationReached:
         return true;
@@ -893,10 +891,6 @@ bool validateCampaignProgressionCatalog(const ContentCatalog& catalog, std::stri
             if (step.activity == ScenarioActivityKind::MiningSite && step.miningSiteDefinitionId.empty()) {
                 return fail("Scenario mining activity requires a mining-site definition.");
             }
-            if (step.activity == ScenarioActivityKind::Flyby &&
-                step.completionEvent != ScenarioEventKind::FlybyFinished) {
-                return fail("Scenario Flyby activity must complete from FlybyFinished.");
-            }
             if (step.activity != ScenarioActivityKind::None &&
                 step.action != ScenarioActionKind::BeginActivity &&
                 step.action != ScenarioActionKind::RetryActivity) {
@@ -1245,14 +1239,6 @@ bool recordScenarioEvent(GameState& state, const ContentCatalog& catalog, const 
                 }
                 continue;
             }
-            if (event.kind == ScenarioEventKind::FlybyFinished && event.grade < step.requiredGrade) {
-                if (step.firstFailureExplanation && !progress->failureSeen) {
-                    progress->failureSeen = true;
-                    changed = true;
-                }
-                continue;
-            }
-
             const int required = std::max(1, step.requiredProgress);
             if (event.kind == ScenarioEventKind::FlightDataBanked) {
                 // Flight Data is a canonical saved ledger. ensureScenarioInstances
@@ -1397,7 +1383,6 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
         return presentation;
     }
 
-    if (state.run.expedition.travelInitialized && step->activity == ScenarioActivityKind::Flyby) return presentation;
     presentation.available = true;
     presentation.scenarioId = instance->id;
     presentation.stepId = step->id;
@@ -1419,14 +1404,6 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
     if (presentation.returnPending) {
         presentation.detail = "ARTIFACT SECURED // RETURN TO EARTH TO FINALIZE.";
     }
-    const bool departureBlockedBySurfaceLoop =
-        step->completionEvent == ScenarioEventKind::FlybyFinished &&
-        (step->action == ScenarioActionKind::BeginActivity ||
-         step->action == ScenarioActionKind::RetryActivity) &&
-        state.run.planetaryExpedition.active;
-    if (departureBlockedBySurfaceLoop) {
-        presentation.detail = "RETURN TO EARTH TO BEGIN THE DEPARTURE SLINGSHOT.";
-    }
     presentation.mandatoryBriefing = step->mandatoryBriefing;
     presentation.briefingAcknowledged = progress->briefingAcknowledged;
     presentation.firstFailurePending = progress->failureSeen && !progress->failureAcknowledged;
@@ -1436,7 +1413,7 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
     presentation.retryPolicy = step->retryPolicy;
     presentation.presentationMode = step->presentationMode;
     presentation.miningSiteDefinitionId = step->miningSiteDefinitionId;
-    if (presentation.returnPending || departureBlockedBySurfaceLoop) {
+    if (presentation.returnPending) {
         presentation.action = ScenarioActionKind::None;
     } else if (presentation.firstFailurePending) {
         presentation.action = ScenarioActionKind::AcknowledgeFailure;
@@ -1488,8 +1465,7 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
                 }
                 // Surface-contract rewards authorize a destination directly;
                 // only a flight challenge is a distinct course-locking beat.
-                presentation.actionLabel = "Lock " + destination.name +
-                    (step->completionEvent == ScenarioEventKind::FlybyFinished ? " Course" : "");
+                presentation.actionLabel = "Lock " + destination.name;
                 break;
             }
         }
@@ -1543,66 +1519,30 @@ ScenarioObjectivePresentation scenarioObjectiveForDestination(
     return best;
 }
 
-ScenarioObjectivePresentation scenarioDepartureChallengeForDestination(
-    const GameState& state,
-    const ContentCatalog& catalog,
-    std::string_view destinationId)
+ScenarioObjectivePresentation scenarioDepartureCourseForDestination(
+    const GameState& state, const ContentCatalog& catalog, std::string_view destinationId)
 {
-    for (const ScenarioInstance& instance : state.meta.scenarios) {
-        const ScenarioDefinition* definition = definitionForInstance(catalog, instance);
-        if (definition == nullptr) {
-            continue;
-        }
-        const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, instance);
-        if (resolved.destinationId != destinationId) {
-            continue;
-        }
-        if (!hasUnlock(state.meta, resolved.availabilityUnlockKey)) {
-            // Do not synthesize an actionable departure card from a seeded,
-            // still-unavailable scenario. The core action correctly rejects
-            // it, which otherwise strands Arrival Ops behind a dead button.
-            continue;
-        }
-        for (const ScenarioStepDefinition& step : resolved.steps) {
-            if (step.completionEvent != ScenarioEventKind::FlybyFinished) {
-                continue;
-            }
-            ScenarioObjectivePresentation candidate =
-                scenarioObjectivePresentation(state, catalog, instance.id, step.id);
-            if (candidate.available && candidate.state == ScenarioStepState::Active &&
-                (candidate.action == ScenarioActionKind::BeginActivity ||
-                 candidate.action == ScenarioActionKind::RetryActivity)) {
-                return candidate;
-            }
-            if (!candidate.available || candidate.state != ScenarioStepState::Locked) {
-                continue;
-            }
-
-            // Arrival Ops is the explicit presentation of a departure
-            // briefing. If its only remaining prerequisites are acknowledgable
-            // briefings, expose the departure card now; starting the card uses
-            // the shared action path to acknowledge those briefings before it
-            // creates the Flyby run. This prevents a generic Jupiter arrival
-            // from appearing between artifact recovery and the required pass.
-            const bool prerequisitesCanAcknowledge = std::all_of(
-                step.prerequisites.begin(),
-                step.prerequisites.end(),
-                [&](std::string_view prerequisiteId) {
-                    const ScenarioObjectivePresentation prerequisite =
-                        scenarioObjectivePresentation(state, catalog, instance.id, prerequisiteId);
-                    return prerequisite.state == ScenarioStepState::Complete ||
-                        prerequisite.action == ScenarioActionKind::AcknowledgeBriefing;
-                });
-            if (prerequisitesCanAcknowledge) {
-                candidate.state = ScenarioStepState::Active;
-                candidate.action = ScenarioActionKind::BeginActivity;
-                candidate.actionLabel = step.actionLabel;
-                return candidate;
+    for (const auto& instance : state.meta.scenarios) {
+        const auto* definition = definitionForInstance(catalog, instance);
+        if (!definition) continue;
+        const auto resolved = resolveScenarioDefinition(*definition, instance);
+        if (resolved.destinationId != destinationId || !hasUnlock(state.meta, resolved.availabilityUnlockKey)) continue;
+        for (const auto& step : resolved.steps) {
+            if (step.action != ScenarioActionKind::AcknowledgeBriefing ||
+                !std::any_of(step.rewards.begin(), step.rewards.end(), [](const auto& reward) {
+                    return reward.kind == ScenarioRewardKind::RouteAccess;
+                })) continue;
+            auto candidate = scenarioObjectivePresentation(state, catalog, instance.id, step.id);
+            if (candidate.available && candidate.state == ScenarioStepState::Active) return candidate;
+            for (const auto& prerequisite : step.prerequisites) {
+                auto briefing = scenarioObjectivePresentation(state, catalog, instance.id, prerequisite);
+                if (briefing.available && briefing.action == ScenarioActionKind::AcknowledgeBriefing) return briefing;
             }
         }
     }
     return {};
 }
+
 
 ScenarioObjectivePresentation scenarioObjectiveForMining(
     const GameState& state,
@@ -1638,7 +1578,7 @@ CampaignNextStep campaignNextStep(const GameState& state, const ContentCatalog& 
     }
 
     const Destination& current = currentDestination(state, catalog);
-    ScenarioObjectivePresentation objective = scenarioDepartureChallengeForDestination(state, catalog, current.id);
+    ScenarioObjectivePresentation objective = scenarioDepartureCourseForDestination(state, catalog, current.id);
     if (!objective.available) {
         objective = scenarioObjectiveForDestination(state, catalog, current.id);
     }

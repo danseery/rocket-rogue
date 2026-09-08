@@ -282,7 +282,6 @@ body {
 }
 
 .rr-control-shell,
-.rr-surface-minigame-shell,
 .rr-mining-shell {
 	background-color: transparent;
 }
@@ -330,10 +329,6 @@ body {
 	--rr-family-accent: var(--rr-color-signal);
 }
 
-.rr-family-surface-minigame {
-	--rr-family-accent: var(--rr-color-ready);
-}
-
 .rr-family-hangar {
 	--rr-family-accent: var(--rr-color-signal);
 }
@@ -378,8 +373,7 @@ body {
 	padding-bottom: 24px;
 }
 
-.rr-control-shell .rr-control-lane,
-.rr-surface-minigame-shell .rr-surface-minigame-lane {
+.rr-control-shell .rr-control-lane {
 	padding-top: 8px;
 	padding-bottom: 8px;
 }
@@ -389,8 +383,7 @@ body {
    the template wrapper must not shift or clip that content vertically. */
 #rr-panel > .rr-takeover-shell .rr-shell-lane,
 #rr-panel > .rr-results-shell .rr-shell-lane,
-#rr-panel > .rr-control-shell .rr-control-lane,
-#rr-panel > .rr-surface-minigame-shell .rr-surface-minigame-lane {
+#rr-panel > .rr-control-shell .rr-control-lane {
 	padding-top: 0px;
 	padding-bottom: 0px;
 }
@@ -3362,81 +3355,6 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
     line-height: 1.15;
     margin-left: 0px;
 }
-.phase-board-surface-minigame .surface-minigame,
-.phase-board-surface-minigame .minigame-readout,
-.phase-board-surface-minigame .minigame-callout,
-.phase-board-surface-minigame .minigame-actions {
-    width: 704px;
-}
-.phase-board-surface-minigame .surface-minigame {
-    margin-top: 6px;
-}
-.phase-board-surface-minigame .phase-titlebar {
-    margin-bottom: 6px;
-}
-.phase-board-surface-minigame .minigame-readout {
-    display: flex;
-    flex-direction: row;
-    justify-content: flex-start;
-    margin-top: 2px;
-}
-.phase-board-surface-minigame .minigame-metrics {
-    width: 456px;
-    flex-shrink: 0;
-}
-.phase-board-surface-minigame .minigame-metric-row {
-    display: flex;
-    flex-direction: row;
-    width: 456px;
-}
-.phase-board-surface-minigame .minigame-metrics .metric {
-    width: 204px;
-    min-height: 52px;
-    margin-right: 8px;
-    margin-bottom: 8px;
-}
-.phase-board-surface-minigame .minigame-rewards {
-    width: 210px;
-    flex-shrink: 0;
-    margin-left: 16px;
-    justify-content: flex-end;
-    align-content: flex-start;
-}
-.phase-board-surface-minigame .minigame-rewards .stat-chip {
-    width: 132px;
-    height: 28px;
-    min-height: 28px;
-    margin-left: 6px;
-    margin-bottom: 6px;
-    line-height: 28px;
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-}
-.phase-board-surface-minigame .minigame-callout {
-    min-height: 78px;
-    border-color: #5a4e25;
-    background-color: #111c21;
-}
-.phase-board-surface-minigame .minigame-callout > div {
-    width: 650px;
-}
-.phase-board-surface-minigame .minigame-callout h2 {
-    color: #f2d15f;
-}
-.phase-board-surface-minigame .minigame-actions {
-    display: flex;
-    flex-direction: row;
-    justify-content: center;
-    margin-top: 10px;
-}
-.phase-board-surface-minigame .minigame-actions button {
-    width: 176px;
-    min-height: 38px;
-    height: auto;
-    line-height: 1.15;
-    margin-right: 8px;
-}
 .phase-board-surface-upgrade {
     width: 736px;
     padding-bottom: 24px;
@@ -4713,21 +4631,6 @@ body.controller-focus-visible .title-menu .title-continue.rr-controller-focus {
 .control-panel .metric-grid {
     width: 390px;
     justify-content: flex-start;
-}
-.control-panel .phase-board-surface-minigame .minigame-readout {
-    width: 704px;
-}
-.control-panel .phase-board-surface-minigame .minigame-metrics {
-    width: 456px;
-    flex-shrink: 0;
-}
-.control-panel .phase-board-surface-minigame .minigame-metric-row {
-    width: 456px;
-}
-.control-panel .phase-board-surface-minigame .minigame-rewards {
-    width: 210px;
-    flex-shrink: 0;
-    margin-left: 16px;
 }
 .control-panel .panel-kpis {
     width: 390px;
@@ -6127,50 +6030,10 @@ body.panel-input-helper-visible #rr-panel.control-panel {
 #rr-panel.control-panel .phase-advisory,
 #rr-panel.control-panel .telemetry-status,
 #rr-panel.control-panel .phase-copy,
-#rr-panel.control-panel .cockpit-hold-copy,
-#rr-panel.control-panel .minigame-readout,
-#rr-panel.control-panel .minigame-metrics,
-#rr-panel.control-panel .minigame-metric-row,
-#rr-panel.control-panel .minigame-rewards {
+#rr-panel.control-panel .cockpit-hold-copy {
     width: var(--rr-legacy-layout-133, 0px);
     margin-left: 0px;
     margin-right: 0px;
-}
-#rr-panel.phase-board-panel .phase-board-push .minigame-readout {
-    display: flex;
-    flex-direction: row;
-    width: var(--rr-legacy-layout-133, 0px);
-}
-#rr-panel.phase-board-panel .phase-board-push .minigame-metrics,
-#rr-panel.phase-board-panel .phase-board-push .minigame-metric-row {
-    width: var(--rr-legacy-layout-134, 0px);
-    margin-left: 0px;
-    margin-right: 0px;
-}
-#rr-panel.phase-board-panel .phase-board-push .minigame-metrics {
-    flex-shrink: 0;
-}
-#rr-panel.phase-board-panel .phase-board-push .minigame-metrics .metric {
-    box-sizing: border-box;
-    width: var(--rr-legacy-layout-135, 0px);
-    min-width: 0px;
-    padding: 6px;
-}
-#rr-panel.phase-board-panel .phase-board-push .minigame-metric-row:last-child .metric {
-    width: var(--rr-legacy-layout-134, 0px);
-}
-#rr-panel.phase-board-panel .phase-board-push .minigame-metrics .metric strong,
-#rr-panel.phase-board-panel .phase-board-push .minigame-metrics .metric span {
-    max-width: 100%;
-    white-space: normal;
-}
-#rr-panel.phase-board-panel .phase-board-push .minigame-metrics .metric strong {
-    font-size: 14px;
-}
-#rr-panel.phase-board-panel .phase-board-push .minigame-rewards {
-    width: var(--rr-legacy-layout-136, 0px);
-    min-width: 0px;
-    margin-left: 10px;
 }
 #rr-panel.phase-board-panel .panel-head,
 #rr-panel.phase-board-panel .phase-titlebar,
@@ -6402,17 +6265,6 @@ body.panel-input-helper-visible #rr-panel.control-panel {
     letter-spacing: 1px;
     text-transform: uppercase;
 }
-.phase-board-scan {
-    width: 100%;
-    height: 100%;
-    min-height: 0px;
-    margin: 0px;
-    padding: 0px;
-}
-#rr-panel.phase-board-panel.surface-scan-panel > .panel-head,
-#rr-panel.phase-board-panel.surface-scan-panel > .rr-shell .rr-shell-content > .panel-head {
-    display: none;
-}
 .surface-scan-rail {
     display: block;
     width: 100%;
@@ -6614,18 +6466,6 @@ body.panel-input-helper-visible #rr-panel.control-panel {
 }
 .surface-scan-scene-marker {
     display: none;
-}
-#rr-scan-scene-readout {
-    position: fixed;
-    left: var(--rr-legacy-layout-145, 0px);
-    top: var(--rr-legacy-layout-146, 0px);
-    width: 68px;
-    height: 24px;
-    color: #e9f7fb;
-    font-size: 12px;
-    font-weight: normal;
-    text-align: center;
-    pointer-events: none;
 }
 
 /* Mining keeps all permanent controls in the two reserved HUD rails. */
@@ -10277,14 +10117,6 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
 }
 #rr-panel.drone-workspace-panel .drone-loadout-slot .slot-role {
     font-size: 12px;
-}
-
-/* The compact Push Deeper lane has one longer action label. Let that label
-   wrap inside its own button instead of inheriting the global single-line
-   toolbar rule and escaping the border. */
-#rr-panel.phase-board-surface-minigame .minigame-actions button.rr-text-button,
-#rr-panel.phase-board-surface-minigame .minigame-actions button.rr-text-button .rr-button-label {
-    white-space: normal;
 }
 
 /* Flight controls are two deliberate action rows. A legacy narrow-screen

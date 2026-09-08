@@ -6,8 +6,7 @@
 	padding-bottom: 24px;
 }
 
-.rr-control-shell .rr-control-lane,
-.rr-surface-minigame-shell .rr-surface-minigame-lane {
+.rr-control-shell .rr-control-lane {
 	padding-top: 8px;
 	padding-bottom: 8px;
 }
@@ -17,8 +16,7 @@
    the template wrapper must not shift or clip that content vertically. */
 #rr-panel > .rr-takeover-shell .rr-shell-lane,
 #rr-panel > .rr-results-shell .rr-shell-lane,
-#rr-panel > .rr-control-shell .rr-control-lane,
-#rr-panel > .rr-surface-minigame-shell .rr-surface-minigame-lane {
+#rr-panel > .rr-control-shell .rr-control-lane {
 	padding-top: 0px;
 	padding-bottom: 0px;
 }

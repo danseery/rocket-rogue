@@ -14,7 +14,6 @@ enum class PanelTemplateKind {
     LegacyRaw,
     Workspace,
     ControlPanel,
-    SurfaceMinigame,
     Mining,
     Takeover,
     Results
@@ -24,8 +23,6 @@ enum class PanelSurfaceKind {
     None,
     SurfaceOps,
     SurfaceUpgrade,
-    SurfaceScan,
-    SurfacePush,
     Mining,
     DroneOps
 };
@@ -41,7 +38,6 @@ enum class PanelOverlayKind {
     PreflightLaunch,
     FlightInstruments,
     TelemetryLegend,
-    SurfaceScanReadout,
     MiningExperience
 };
 

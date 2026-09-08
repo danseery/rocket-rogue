@@ -1172,19 +1172,13 @@ void VulkanGraphicsBackend::render(const RenderSnapshot& snapshot)
     });
     composer_.setPresentationTime(host_.monotonicSeconds());
     const ScenePacket& packet = composer_.compose(snapshot);
-    const bool sceneSafetyGuarded = packet.surfacePushInputClamped
-        || packet.droppedFrameInstances > 0U;
+    const bool sceneSafetyGuarded = packet.droppedFrameInstances > 0U;
     if (sceneSafetyGuarded) {
         if (!sceneSafetyWarningActive_) {
             std::ostringstream message;
             message << "Scene renderer safety guard engaged";
-            if (packet.surfacePushInputClamped) {
-                message << ": Surface Push raw steps="
-                    << packet.surfacePushRawSteps
-                    << ", raw max steps=" << packet.surfacePushRawMaxSteps;
-            }
             if (packet.droppedFrameInstances > 0U) {
-                message << (packet.surfacePushInputClamped ? "," : ":")
+                message << ":"
                     << " dropped instances=" << packet.droppedFrameInstances;
             }
             host_.log(PlatformLogLevel::Warning, message.str());

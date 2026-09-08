@@ -103,8 +103,7 @@ PreparedLaunch prepareLaunch(const GameState& state, const ContentCatalog& catal
 double launchFuelCapacityForRank(int rank);
 double launchPoweredFuelCost(
     double cruiseFuelCost,
-    double throttle,
-    double slingshotFuelSavings = 0.0);
+    double throttle);
 double launchCruiseFuelCostForTier(int tier);
 double launchFuelUseMultiplier(double throttle);
 double launchControlChaosForRank(int rank);

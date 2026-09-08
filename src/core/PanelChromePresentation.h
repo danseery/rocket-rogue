@@ -28,30 +28,12 @@ inline const Destination& panelDisplayDestination(const GameState& state, const 
             return *activeDestination;
         }
     }
-    if (state.screen == Screen::ArrivalFanfare || state.screen == Screen::ArrivalOps || state.screen == Screen::Flyby || state.screen == Screen::Orbit || state.screen == Screen::SurfaceScan || state.screen == Screen::SurfacePush) {
+    if (state.screen == Screen::ArrivalFanfare || state.screen == Screen::ArrivalOps) {
         if (const Destination* arrivalDestination = catalog.findDestination(state.lastOutcome.destinationId)) {
             return *arrivalDestination;
         }
-        if (state.screen == Screen::Flyby && !state.run.approach.flyby.destinationId.empty()) {
-            if (const Destination* flybyDestination = catalog.findDestination(state.run.approach.flyby.destinationId)) {
-                return *flybyDestination;
-            }
-        }
-        if (state.screen == Screen::Orbit && !state.run.approach.orbit.destinationId.empty()) {
-            if (const Destination* orbitDestination = catalog.findDestination(state.run.approach.orbit.destinationId)) {
-                return *orbitDestination;
-            }
-        }
-        if (state.screen == Screen::SurfaceScan && !state.run.surfaceScan.destinationId.empty()) {
-            if (const Destination* scanDestination = catalog.findDestination(state.run.surfaceScan.destinationId)) {
-                return *scanDestination;
-            }
-        }
-        if (state.screen == Screen::SurfacePush && !state.run.surfacePush.destinationId.empty()) {
-            if (const Destination* pushDestination = catalog.findDestination(state.run.surfacePush.destinationId)) {
-                return *pushDestination;
-            }
-        }
+
+
     }
     const Destination& current = currentDestination(state, catalog);
     if (current.hiddenFromProgression) {

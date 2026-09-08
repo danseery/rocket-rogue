@@ -48,6 +48,8 @@ The initial ship hold carries 60 ore; excess stays with its carrier or in the si
 
 Earth's dock is a separate marker. Dock within 0.32 system units at no more than 0.20 relative speed, then press Dock. Approaching Earth is not an instruction to hit or land on its surface. Distance-based camera and simulation timing ease across body-frame transitions. Opening failures use Retry launch with cause-aware Mission Control messages rather than immediately opening the shipyard.
 
-## Legacy activity boundary
+## Retired activity migration
 
-Initialized physical expeditions bypass the old Flyby, Orbit, Surface Scan and Push Deeper activity screens. Some non-initialized scenario/debug fixtures and save compatibility paths still call those implementations. They are retained until those callers are migrated; they are not part of the live solar expedition loop. Unused instant-action survey/mining/depth APIs and their obsolete tests have been removed.
+The separate Flyby, Orbit, pulse-timing Scan and Push Deeper activities are removed from simulation, rendering, input, debug and scenario routing. Orbital work uses physical Flight; surface preparation leads directly to Rig/EVA mining without a survey or dig timing gate. The outer-system course is explicitly confirmed after its artifact prerequisite, with no Perfect slingshot challenge.
+
+Version-21 activity screen IDs 11 and 12 restore into physical Flight. Only records without a physical pose receive a safe approach position; existing position, velocity, fuel, hull, cargo, terrain and earned progress remain intact. Old transfer-assist fields remain readable but grant no fuel discount, velocity boost or instability penalty. Saved scenario step identifiers remain stable to preserve completed rewards.

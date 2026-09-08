@@ -486,11 +486,6 @@ struct ScenePacket {
     // Safety telemetry for malformed presentation inputs. Backends can surface
     // this once without allowing one damaged frame to allocate unbounded data.
     std::size_t droppedFrameInstances = 0;
-    int surfacePushRawStartDepth = 0;
-    int surfacePushRawSteps = 0;
-    int surfacePushRawMaxSteps = 1;
-    float surfacePushVisualProgress = 0.0F;
-    bool surfacePushInputClamped = false;
 };
 
 constexpr std::size_t textureIndex(TextureId id) noexcept

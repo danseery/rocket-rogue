@@ -11,6 +11,10 @@
 
 namespace rocket {
 
+// Migrate only nonphysical arrival records; existing physical poses are retained.
+bool resumePhysicalApproach(GameState& state, const ContentCatalog& catalog);
+
+
 enum class SurfaceEventType {
     None,
     EquipmentFailure,
@@ -213,33 +217,7 @@ bool creditRecoveredProtectedObjective(
     std::string_view miningSiteDefinitionId = {});
 bool creditRecoveredIoArtifact(GameState& state, ArtifactRecord& artifact);
 bool creditRecoveredIoArtifact(GameState& state, const ContentCatalog& catalog, ArtifactRecord& artifact);
-bool canStartSaturnSlingshot(const GameState& state, const ContentCatalog& catalog);
-bool startSaturnSlingshotRun(GameState& state, const ContentCatalog& catalog);
 bool jupiterWindowReviewed(const GameState& state, const ContentCatalog& catalog);
-const TransferAssistDefinition* availableTransferAssist(
-    const GameState& state,
-    const ContentCatalog& catalog,
-    std::string_view definitionId = {});
-bool canStartTransferAssist(
-    const GameState& state,
-    const ContentCatalog& catalog,
-    std::string_view definitionId);
-bool startTransferAssistRun(
-    GameState& state,
-    const ContentCatalog& catalog,
-    std::string_view definitionId);
-bool armTransferAssist(GameState& state, const ContentCatalog& catalog);
-bool transferAssistCanContinue(const GameState& state, const ContentCatalog& catalog);
-bool canStartJupiterSlingshot(const GameState& state, const ContentCatalog& catalog);
-bool startJupiterSlingshotRun(GameState& state, const ContentCatalog& catalog);
-bool armJupiterSlingshot(GameState& state);
-bool startScenarioFlybyRun(
-    GameState& state,
-    const ContentCatalog& catalog,
-    std::string_view scenarioId,
-    std::string_view stepId,
-    ScenarioActionKind action = ScenarioActionKind::BeginActivity);
-bool canClaimSaturnCourse(const GameState& state);
 const Destination* scenarioRouteRewardDestination(
     const ContentCatalog& catalog,
     const ScenarioStepDefinition& step);
@@ -250,48 +228,18 @@ bool commitClaimedScenarioRoute(
     const ContentCatalog& catalog,
     std::string_view scenarioId,
     std::string_view stepId);
-bool claimSaturnCourse(GameState& state, const ContentCatalog& catalog);
-bool acknowledgeSaturnSlingshotFailure(GameState& state);
 
 bool destinationSupportsResearch(const Destination& destination);
 bool destinationSupportsSurface(const Destination& destination);
 bool destinationAllowsEnemyEncounters(const Destination& destination);
-double flybyCreditRewardMinimum(const Destination& destination, FlybyGrade grade);
-double flybyCreditRewardMaximum(const Destination& destination, FlybyGrade grade);
-int flybyResearchDataReward(FlybyGrade grade);
 double orbitCreditReward(const Destination& destination, OrbitGrade grade);
 int orbitResearchDataReward(const Destination& destination, OrbitGrade grade);
-bool flybyClearsGenericNextRoute(const GameState& state, const ContentCatalog& catalog);
-bool bankFlybyRouteClearance(GameState& state, const ContentCatalog& catalog);
 bool queueBlockedArrivalFlybyRecovery(GameState& state, const ContentCatalog& catalog);
-bool captureArrivalOrbit(GameState& state);
 bool shouldOpenArrivalOps(const LaunchOutcome& outcome, const ContentCatalog& catalog);
 bool shouldOpenPostArrivalPhases(const LaunchOutcome& outcome, const ContentCatalog& catalog);
-bool canRunArrivalFlyby(const GameState& state, const ContentCatalog& catalog);
-bool canEnterArrivalOrbit(const GameState& state, const ContentCatalog& catalog);
-bool requiresArrivalOrbitBeforeLanding(const GameState& state, const ContentCatalog& catalog);
-bool canAttemptArrivalLanding(const GameState& state, const ContentCatalog& catalog);
-bool canDepartCapturedArrivalOrbit(const GameState& state, const ContentCatalog& catalog);
-bool bankArrivalLandingFlightData(GameState& state, const ContentCatalog& catalog);
 int destinationHistoryValue(const std::vector<int>& values, const ContentCatalog& catalog, std::string_view destinationId);
-std::string arrivalOperationBlockReason(const GameState& state, const ContentCatalog& catalog, std::string_view operation);
 void clearResearchAndExpeditionState(GameState& state);
 void startArrivalOps(GameState& state, const LaunchOutcome& outcome);
-void startArrivalFlybyRun(GameState& state, const ContentCatalog& catalog);
-void setFlybyMove(GameState& state, double xAxis, double yAxis);
-void updateFlybyRun(GameState& state, double deltaSeconds);
-FlybyGrade flybyGrade(const FlybyRunState& flyby);
-void applyFlybyReward(GameState& state, const ContentCatalog& catalog, FlybyGrade grade);
-void completeFlybyRun(GameState& state, const ContentCatalog& catalog);
-void abortFlybyRun(GameState& state);
-void abortFlybyRun(GameState& state, const ContentCatalog& catalog);
-void startArrivalOrbitRun(GameState& state, const ContentCatalog& catalog);
-void setOrbitMove(GameState& state, double xAxis, double yAxis);
-void updateOrbitRun(GameState& state, double deltaSeconds);
-OrbitGrade orbitGrade(const OrbitRunState& orbit);
-void applyOrbitReward(GameState& state, const ContentCatalog& catalog, OrbitGrade grade);
-void completeOrbitRun(GameState& state, const ContentCatalog& catalog);
-void abortOrbitRun(GameState& state);
 void generateResearchProjects(GameState& state, const ContentCatalog& catalog, Random& rng);
 void addMaterials(MaterialInventory& owned, const MaterialInventory& delta);
 int identifiedArtifactCount(const MetaProgress& meta);
@@ -332,11 +280,6 @@ std::string_view surfaceSiteProfileName(SurfaceSiteProfile profile);
 std::string_view surfaceSiteProfileDetail(SurfaceSiteProfile profile);
 std::string researchOutcomeSummary(const ResearchOutcome& outcome);
 std::string surfaceActionSummary(const SurfaceActionOutcome& outcome);
-bool surfaceOpsTutorialSurveyComplete(const GameState& state);
-bool surfaceOpsTutorialDigComplete(const GameState& state);
-bool surfaceOpsTutorialDigUnlocked(const GameState& state);
-bool surfaceOpsTutorialMiningUnlocked(const GameState& state);
-bool surfaceOpsTutorialNeedsFirstSurveyBank(const GameState& state);
 ResearchOutcome completeResearchProject(GameState& state, const ContentCatalog& catalog, int index);
 void startSurfaceExpedition(GameState& state, const ContentCatalog& catalog, Random* rng = nullptr);
 SurfaceReturnLedger surfaceReturnLedger(const GameState& state, const ContentCatalog& catalog);
@@ -354,13 +297,6 @@ SurfaceDepthCapability surfaceDepthCapability(
     const ContentCatalog& catalog,
     int targetDepth);
 std::string surfaceDepthBlockerMessage(const SurfaceDepthCapability& capability);
-SurfaceActionOutcome startSurfaceScanRun(GameState& state, Random& rng);
-SurfaceActionOutcome pulseSurfaceScan(GameState& state, Random& rng);
-SurfaceActionOutcome bankSurfaceScan(GameState& state);
-SurfaceActionOutcome abortSurfaceScan(GameState& state);
-SurfaceActionOutcome startSurfacePushRun(GameState& state, Random& rng);
-SurfaceActionOutcome pushSurfaceDepthStep(GameState& state, Random& rng);
-SurfaceActionOutcome bankSurfacePush(GameState& state);
 SurfaceActionOutcome extractSurfacePayload(GameState& state);
 SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalog& catalog);
 

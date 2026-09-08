@@ -31,7 +31,6 @@ const requiredUiFiles = [
   "templates/rr-document-shell.rml",
   "templates/rr-workspace-shell.rml",
   "templates/rr-control-shell.rml",
-  "templates/rr-surface-minigame-shell.rml",
   "templates/rr-mining-shell.rml",
   "templates/rr-takeover-shell.rml",
   "templates/rr-results-shell.rml",

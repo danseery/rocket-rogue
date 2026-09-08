@@ -63,7 +63,7 @@ for (const relativePath of [
   }
 }
 
-// Route evaluation, generic Flyby execution, and generic extraction/reward
+// Route evaluation, physical arrival migration, and generic extraction/reward
 // delivery are narrower checks because their files also contain explicit
 // legacy-save adapters. Those adapters are deliberately outside these runtime
 // function boundaries and may retain old serialized identifiers.
@@ -77,11 +77,10 @@ for (const signature of [
 }
 
 const research = read("src/core/ResearchSystem.cpp");
+for (const retired of ["startArrivalFlybyRun", "startArrivalOrbitRun", "startSurfaceScanRun", "startSurfacePushRun"]) {
+  if (research.includes(retired)) violations.push(`Retired activity remains: ${retired}`);
+}
 for (const signature of [
-  "bool canStartScenarioFlyby(",
-  "bool startScenarioFlybyRun(",
-  "void completeFlybyRun(GameState& state, const ContentCatalog& catalog)",
-  "void abortFlybyRun(GameState& state, const ContentCatalog& catalog)",
   "SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalog& catalog)",
 ]) {
   requireNoAuthoredIds(`src/core/ResearchSystem.cpp:${signature}`, functionBody(research, signature));

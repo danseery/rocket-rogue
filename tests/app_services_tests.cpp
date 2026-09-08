@@ -164,7 +164,6 @@ public:
         miningEvaDeathProgress = snapshot.miningEvaDeathProgress;
         miningExtractionActive = snapshot.miningExtractionActive;
         miningExtractionProgress = snapshot.miningExtractionProgress;
-        flybyInputY = snapshot.flybyInputY;
         launchCourseOffset = snapshot.launchCourseOffset;
         launchCourseVelocity = snapshot.launchCourseVelocity;
         launchManualControlsEnabled = snapshot.launchManualControlsEnabled;
@@ -184,12 +183,6 @@ public:
         launchLandingAuthorized = snapshot.launchLandingAuthorized;
         launchLandingLocalFrame = snapshot.launchLandingLocalFrame;
         lastLaunchFailureCause = snapshot.lastLaunchFailureCause;
-        surfacePushSteps = snapshot.surfacePushSteps;
-        surfacePushMaterials = snapshot.surfacePushMaterials;
-        surfacePushRewardMarkers = snapshot.surfacePushRewardMarkers;
-        surfacePushRewardDepthOffsets = snapshot.surfacePushRewardDepthOffsets;
-        surfacePushForecastMarkers = snapshot.surfacePushForecastMarkers;
-        surfacePushForecastDepthOffsets = snapshot.surfacePushForecastDepthOffsets;
         miningSwarmActive = snapshot.miningSwarmActive;
         miningSwarmAlert = snapshot.miningSwarmAlert;
         miningSwarmWave = snapshot.miningSwarmWave;
@@ -622,7 +615,7 @@ std::string readyJupiterDepartureSave()
         rocket::captureSaveData(readyJupiterDepartureState(catalog)));
 }
 
-rocket::GameState completedPerfectJupiterDepartureState(const rocket::ContentCatalog& catalog)
+rocket::GameState confirmedJupiterDepartureState(const rocket::ContentCatalog& catalog)
 {
     rocket::GameState state = readyJupiterDepartureState(catalog);
     state.meta.launchLessons.stage = rocket::LaunchTrainingStage::Complete;
@@ -633,25 +626,17 @@ rocket::GameState completedPerfectJupiterDepartureState(const rocket::ContentCat
                rocket::content::scenario::outerTransfer,
                "briefing",
                rocket::ScenarioActionKind::AcknowledgeBriefing).applied);
-    assert(rocket::startScenarioFlybyRun(
-        state,
-        catalog,
-        rocket::content::scenario::outerTransfer,
-        "flyby"));
-    state.run.approach.flyby.completed = true;
-    state.run.approach.flyby.result = rocket::FlybyGrade::Perfect;
     rocket::syncLaunchConfig(state, catalog);
     return state;
 }
 
-std::string completedPerfectJupiterDepartureSave()
+std::string confirmedJupiterDepartureSave()
 {
     const rocket::ContentCatalog catalog = rocket::createDefaultContent();
-    rocket::GameState state = completedPerfectJupiterDepartureState(catalog);
+    rocket::GameState state = confirmedJupiterDepartureState(catalog);
     // Active realtime Flyby state is intentionally not part of the campaign
     // save. Persist the equivalent ReadyToClaim Hangar state; the in-memory
     // RmlUi test below covers the result-screen binding itself.
-    rocket::completeFlybyRun(state, catalog);
     state.run.expedition.progression.expeditionLevel = 1;
     state.run.expedition.progression.expeditionExperience = 0.0;
     state.run.expedition.progression.pendingRunUpgradeChoices = 0;
@@ -951,9 +936,9 @@ std::string activeJupiterSlingshotSave()
         rocket::content::destination::mars,
         rocket::content::destination::jupiter,
         rocket::FlybyGrade::Good,
-        rocket::tuning::flyby::jupiterSlingshotFuelSavings,
-        rocket::tuning::flyby::slingshotSpeedBoost,
-        rocket::tuning::flyby::jupiterSlingshotGoodInstabilityPenalty};
+        5.0,
+        0.20,
+        0.35};
     state.screen = rocket::Screen::Hangar;
     rocket::syncLaunchConfig(state, catalog);
     return rocket::serializeSaveData(rocket::captureSaveData(state));
@@ -1018,10 +1003,10 @@ void retiredJupiterDepartureBoardCannotResume()
     fixture->runner.shutdown();
 }
 
-void perfectJupiterDepartureClaimQueuesSaturn()
+void jupiterDepartureConfirmationQueuesSaturn()
 {
     auto fixture = std::make_unique<AppFixture>();
-    fixture->saves.value = completedPerfectJupiterDepartureSave();
+    fixture->saves.value = confirmedJupiterDepartureSave();
     assert(fixture->runner.initialize());
     fixture->ui.dispatchAction("continue_game");
     completeTitleLaunch(*fixture);
@@ -1029,7 +1014,7 @@ void perfectJupiterDepartureClaimQueuesSaturn()
     fixture->ui.dispatchAction(
         std::string(rocket::ui::actions::scenarioActionPrefix) +
         rocket::content::scenario::outerTransfer + "|flyby|" +
-        std::to_string(static_cast<int>(rocket::ScenarioActionKind::ClaimReward)));
+        std::to_string(static_cast<int>(rocket::ScenarioActionKind::AcknowledgeBriefing)));
     assert(fixture->runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
     fixture->host.now += 1.0 / 120.0;
     fixture->runner.frame();
@@ -1244,7 +1229,7 @@ int main()
         fixture.runner.shutdown();
     }
 #if !defined(__EMSCRIPTEN__)
-    perfectJupiterDepartureClaimQueuesSaturn();
+    jupiterDepartureConfirmationQueuesSaturn();
     uranusVectorGenericClaimQueuesNeptune();
     straylightApproachRunsAndEndsActOne();
 #endif
@@ -1373,8 +1358,7 @@ int main()
         assert(funding != nullptr);
         funding->briefingAcknowledged = true;
         rocket::startArrivalOps(flyby, moonArrival);
-        rocket::startArrivalFlybyRun(flyby, catalog);
-        assert(flyby.screen == rocket::Screen::Flyby && !flyby.run.approach.flyby.completed);
+        flyby.screen = rocket::Screen::Flight;
         rocket::Random flybyRng(0xF17B7ULL);
         const rocket::PreparedLaunch flybyLaunch =
             rocket::prepareLaunch(flyby, catalog, flybyRng);
@@ -1383,15 +1367,17 @@ int main()
             catalog,
             flybyLaunch,
             flybyLaunch};
+        flyby.run.flight = rocket::beginLaunchFlight(flybyLaunch, rocket::currentDestination(flyby, catalog));
+        flybyContext.flightArmed = true;
         flybyContext.firstTimeIntroductionsEnabled = false;
         const rocket::PanelDocumentPresentation flybyPresentation =
             rocket::buildGamePanelPresentation(flybyContext);
-        assert(flybyPresentation.templateKind == rocket::PanelTemplateKind::ControlPanel);
+        assert(flybyPresentation.metadata.screen == rocket::Screen::Flight);
 
         ui.setPanelPresentation(flybyPresentation);
-        ui.requestFocus("modal:flight_details");
+        ui.requestFocus("modal:inventory");
         ui.refresh();
-        assert(ui.focusedId() == "modal:flight_details");
+        assert(ui.focusedId() == "modal:inventory");
         ui.render();
         const rocket::UiDiagnostics transitionDiagnostics = ui.diagnostics();
         assert(transitionDiagnostics.documentRebuilds == 0);
@@ -1400,7 +1386,6 @@ int main()
         assert(ui.activateFocused());
         assert(ui.modalOpen());
         const std::string activeModalFocus = ui.focusedId();
-        assert(activeModalFocus.empty());
         ui.render(); // Clear the modal host rebuild before measuring HUD-only work.
 
         rocket::RealtimeHudState hud;
@@ -1423,7 +1408,7 @@ int main()
 
         assert(ui.cancel());
         assert(!ui.modalOpen());
-        assert(ui.focusedId() == "modal:flight_details");
+        assert(ui.focusedId() == "modal:inventory");
 
         const auto applyRealtimePresentation = [&](const rocket::PanelRenderContext& context) {
             const std::size_t logStart = host.logMessages.size();
@@ -1433,6 +1418,10 @@ int main()
             assert(!realtime.patches.empty());
             ui.setRealtimeHudState(realtime);
             ui.render();
+            for (std::size_t i = logStart; i < host.logMessages.size(); ++i) {
+                if (host.logMessages[i].find("Realtime RmlUi patch target is missing") != std::string::npos)
+                    std::cerr << "Screen " << static_cast<int>(context.state.screen) << ": " << host.logMessages[i] << '\n';
+            }
             assert(std::none_of(
                 host.logMessages.begin() + static_cast<std::ptrdiff_t>(logStart),
                 host.logMessages.end(),
@@ -1491,7 +1480,7 @@ int main()
         scan.run.destinationIndex = 2;
         rocket::startSurfaceExpedition(scan, catalog);
         rocket::Random scanRng(0x5CA11ULL);
-        assert(rocket::startSurfaceScanRun(scan, scanRng).applied);
+        assert(rocket::startMiningRun(scan, catalog).applied);
         const rocket::PreparedLaunch scanLaunch =
             rocket::prepareLaunch(scan, catalog, scanRng);
         rocket::PanelRenderContext scanContext {
@@ -1773,19 +1762,16 @@ int main()
         assert(surfaceHtml.find("data-ui-focus-id=\"action:drone_ops\"") != std::string::npos);
         ui.setPanelPresentation(surfacePresentation);
         ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
-        ui.requestFocus("action:survey_surface");
+        ui.requestFocus("action:mine_surface");
         ui.refresh();
 
         // Survey is unavailable at the prepared depth. Disabled controls do
         // not receive focus; the first navigation input enters the actionable
         // portion of the row.
-        constexpr std::array<std::string_view, 3> focusPath {
-            "action:push_surface",
+        constexpr std::array<std::string_view, 2> focusPath {
             "action:mine_surface",
             "action:extract_surface",
         };
-        assert(ui.focusedId().empty());
-        assert(ui.navigate(rocket::UiDirection::Right));
         assert(ui.focusedId() == focusPath.front());
         assert(!ui.navigate(rocket::UiDirection::Left));
         assert(ui.focusedId() == focusPath.front());
@@ -1839,9 +1825,8 @@ int main()
         // width.
         // Survey is intentionally disabled at the configured depth limit;
         // pointer reachability applies to the remaining actionable controls.
-        constexpr std::array<std::string_view, 3> surfaceActions {
+        constexpr std::array<std::string_view, 2> surfaceActions {
             rocket::ui::actions::mineSurface,
-            rocket::ui::actions::pushSurface,
             rocket::ui::actions::extractSurface,
         };
         std::array<bool, surfaceActions.size()> pointerReachable {};
@@ -1857,7 +1842,7 @@ int main()
                     pointerReachable[index] = pointerReachable[index]
                         || pointerAction == surfaceActions[index];
                 }
-                if (pointerAction == rocket::ui::actions::pushSurface) {
+                if (pointerAction == rocket::ui::actions::mineSurface) {
                     digPointerX = x;
                     digPointerY = y;
                 }
@@ -1870,8 +1855,7 @@ int main()
         if (!allSurfaceActionsReachable) {
             std::cerr << "Surface action reachability:"
                       << " mine=" << pointerReachable[0]
-                      << " push=" << pointerReachable[1]
-                      << " extract=" << pointerReachable[2] << '\n';
+                      << " extract=" << pointerReachable[1] << '\n';
         }
         assert(allSurfaceActionsReachable);
         assert(digPointerX >= 0 && digPointerY >= 0);
@@ -1919,7 +1903,7 @@ int main()
         rocket::GameState directDigState = digIntroductionState;
         rocket::ui::briefings::acknowledge(
             directDigState.meta.acknowledgedActivityBriefingIds,
-            rocket::ui::briefings::surfaceDigIntroduction);
+            rocket::ui::briefings::mining);
         rocket::Random directDigRng(0xD161D162ULL);
         const rocket::PreparedLaunch directDigLaunch =
             rocket::prepareLaunch(directDigState, catalog, directDigRng);
@@ -1936,7 +1920,7 @@ int main()
         ui.mouseUp(digPointerX, digPointerY, 0);
         assert(pointerAction.empty());
         ui.render();
-        assert(pointerAction == rocket::ui::actions::pushSurface);
+        assert(pointerAction == rocket::ui::actions::mineSurface);
         ui.shutdown();
     }
 
@@ -1976,9 +1960,7 @@ int main()
 
         assert(ui.navigate(rocket::UiDirection::Down));
         const std::string arrivalFocus = ui.focusedId();
-        assert(arrivalFocus == "action:arrival_flyby"
-            || arrivalFocus == "action:arrival_orbit"
-            || arrivalFocus == "action:arrival_landing");
+        assert(arrivalFocus == "action:arrival_landing");
         ui.shutdown();
     }
 
@@ -2740,35 +2722,21 @@ int main()
         fixture.runner.shutdown();
     }
 
-    // Beginning the Jupiter segment spends borrowed Mars momentum immediately
-    // and persists that consumption, while permanent tank ranks are untouched.
+    // Old saved assists cannot inject fuel, velocity, or steering penalties.
     {
-        AppFixture fixture;
-        fixture.saves.value = activeJupiterSlingshotSave();
-        assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("continue_game");
-        completeTitleLaunch(fixture);
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
-        fixture.host.now += 1.0 / 120.0;
-        fixture.runner.frame();
-        assert(fixture.ui.html.find("SLINGSHOT ACTIVE // WILD RIDE") != std::string::npos);
-        assert(fixture.ui.html.find("+35% flight instability") != std::string::npos);
-
-        fixture.ui.dispatchAction(std::string(rocket::ui::actions::continueJupiterSlingshot));
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
-        fixture.host.now += 1.0 / 120.0;
-        fixture.runner.frame();
-        assert(fixture.renderer.launchDestinationTier == 3);
-        assert(fixture.renderer.launchOriginTier == 2);
-        const std::optional<rocket::SaveData> spent = rocket::deserializeSaveData(fixture.saves.value);
-        assert(spent.has_value());
-        assert(!spent->pendingTransferAssist.active());
-        assert(spent->nextLaunchFuelBoost == 0.0);
-        assert(spent->nextLaunchSpeedBoost == 0.0);
-        assert(spent->nextLaunchInstabilityPenalty == 0.0);
-        assert(spent->launchUpgrades.fuelTanks == 2);
-        fixture.runner.shutdown();
+        const auto catalog = rocket::createDefaultContent();
+        auto state = rocket::createNewGame(catalog, 77);
+        const auto saved = rocket::deserializeSaveData(activeJupiterSlingshotSave());
+        assert(saved.has_value());
+        rocket::restoreSaveData(state, catalog, *saved);
+        rocket::Random rng(77);
+        const auto launch = rocket::prepareLaunch(state, catalog, rng);
+        assert(launch.slingshotFuelSavings == 0.0);
+        assert(launch.slingshotSpeedBoost == 0.0);
+        assert(launch.slingshotInstabilityPenalty == 0.0);
+        assert(launch.transferAssistId.empty());
     }
+
 
     // Failed replacement preserves both the prior save and the title barrier.
     {
