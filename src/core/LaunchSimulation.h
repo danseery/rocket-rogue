@@ -121,6 +121,7 @@ LaunchFlightStep updateLaunchFlight(
     const MiningRunState* landingSite = nullptr,
     const SystemDefinition* system = nullptr,
     const SystemLocation* location = nullptr);
+void advanceFlightHeading(FlightRunState& flight, double steer, double deltaSeconds);
 TelemetryEvent launchTelemetryAt(const PreparedLaunch& launch, const FlightRunState& flight);
 LaunchOutcome resolveLaunch(
     const PreparedLaunch& launch,

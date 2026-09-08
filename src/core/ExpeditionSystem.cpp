@@ -260,7 +260,11 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
 {
     if (e.undockReady) {
         e.cruise.active = false;
-        if (input.throttle <= 0.001) return {};
+        if (input.throttle <= 0.001) {
+            advanceFlightHeading(flight, input.steer, std::max(0.0, dt));
+            e.location.heading = flight.heading;
+            return {};
+        }
         if (departDock(e,flight) != ExpeditionResult::Applied) return {};
         e.undockReady = false;
         const auto *body = encounteredBody(e.location, system);

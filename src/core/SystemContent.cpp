@@ -5,16 +5,37 @@
 
 namespace rocket
 {
+double systemBodyApproachBlend(const SystemBodyDefinition &body, double radius)
+{
+    const double nearRadius = std::max(.52, body.radius * 2.0);
+    const double farRadius = std::max(nearRadius + .9, body.influenceRadius * 1.5);
+    const double t = std::clamp((farRadius-radius)/(farRadius-nearRadius), 0.0, 1.0);
+    return t*t*t*(t*(t*6.0-15.0)+10.0);
+}
+
+double systemBodyDisplayRadius(const SystemBodyDefinition &body)
+{
+    if (body.displayRadius > 0.0) return body.displayRadius;
+    return body.kind == SystemBodyKind::Star ? body.radius : body.radius * 1.25;
+}
+
 double systemFlightTimeScale(const SystemDefinition &system, SystemVector position)
 {
     double scale = 1.0;
     for (const auto &body : system.bodies) {
         if (body.influenceRadius <= 0.0) continue;
         const double radius = std::hypot(position.x-body.position.x, position.y-body.position.y);
-        const double start = body.id == "earth" ? .60 : 1.0;
-        const double t = std::clamp((radius/body.influenceRadius-start)/.50, 0.0, 1.0);
-        const double blend = t*t*t*(t*(t*6.0-15.0)+10.0);
-        scale = std::min(scale, std::lerp(.4, 1.0, blend));
+        if (body.id == "earth" || body.kind == SystemBodyKind::Star || body.kind == SystemBodyKind::Station) {
+            // Preserve the authored opening and non-orbit encounters.
+            const double start = body.id == "earth" ? .60 : 1.0;
+            const double t = std::clamp((radius/body.influenceRadius-start)/.50, 0.0, 1.0);
+            const double blend = t*t*t*(t*(t*6.0-15.0)+10.0);
+            scale = std::min(scale, std::lerp(.4, 1.0, blend));
+        } else {
+            // Camera scale blends geometrically. Release the close-range clock
+            // on that same envelope, rather than accelerating after zoom-out.
+            scale = std::min(scale, std::pow(.4, systemBodyApproachBlend(body, radius)));
+        }
     }
     return scale;
 }
@@ -27,12 +48,12 @@ const SystemDefinition &solarSystemDefinition()
     SystemDefinition result{
         "solar",
         {
-            {"sun", "", "Sun", SystemBodyKind::Star, {0, 0}, {}, 0.9, 2.2, 4, "", "", "Fatal solar impact"},
+            {"sun", "", "Sun", SystemBodyKind::Star, {-24, -8}, {}, 0.9, 2.2, 4, "", "", "Fatal solar impact"},
             {"mercury",
              "sun",
              "Mercury",
              SystemBodyKind::Terrestrial,
-             {3, -2},
+             {6, -4},
              {},
              .16,
              1.42,
@@ -44,7 +65,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Venus",
              SystemBodyKind::Terrestrial,
-             {-4, -3},
+             {-8, -6},
              {},
              .16,
              1.42,
@@ -56,7 +77,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Earth",
              SystemBodyKind::Terrestrial,
-             {6, 2},
+             {12, 4},
              {},
              .45,
              1.42,
@@ -69,7 +90,7 @@ const SystemDefinition &solarSystemDefinition()
              "earth",
              "Moon",
              SystemBodyKind::Moon,
-             {10, 2},
+             {16, 4},
              {},
              .16,
              1.42,
@@ -81,7 +102,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Mars",
              SystemBodyKind::Terrestrial,
-             {14, -3},
+             {28, -6},
              {},
              .16,
              1.42,
@@ -93,7 +114,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Jupiter",
              SystemBodyKind::Giant,
-             {20, 6},
+             {40, 12},
              {},
              .45,
              1.8,
@@ -105,7 +126,7 @@ const SystemDefinition &solarSystemDefinition()
              "jupiter",
              "Io",
              SystemBodyKind::Moon,
-             {24, 6},
+             {44, 12},
              {},
              .16,
              1.42,
@@ -117,7 +138,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Saturn",
              SystemBodyKind::Giant,
-             {-22, 12},
+             {-44, 24},
              {},
              .40,
              1.8,
@@ -129,7 +150,7 @@ const SystemDefinition &solarSystemDefinition()
              "saturn",
              "Titan",
              SystemBodyKind::Moon,
-             {-18, 12},
+             {-40, 24},
              {},
              .16,
              1.42,
@@ -141,7 +162,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Uranus",
              SystemBodyKind::Giant,
-             {-27, -14},
+             {-54, -28},
              {},
              .35,
              1.8,
@@ -153,7 +174,7 @@ const SystemDefinition &solarSystemDefinition()
              "uranus",
              "Titania",
              SystemBodyKind::Moon,
-             {-23, -14},
+             {-50, -28},
              {},
              .16,
              1.42,
@@ -165,7 +186,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Neptune",
              SystemBodyKind::Giant,
-             {27, -20},
+             {54, -40},
              {},
              .35,
              1.8,
@@ -177,7 +198,7 @@ const SystemDefinition &solarSystemDefinition()
              "neptune",
              "Triton",
              SystemBodyKind::Moon,
-             {31, -20},
+             {58, -40},
              {},
              .16,
              1.42,
@@ -189,7 +210,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Straylight",
              SystemBodyKind::Station,
-             {35, -14},
+             {70, -28},
              {},
              .10,
              1.42,
@@ -200,6 +221,17 @@ const SystemDefinition &solarSystemDefinition()
              true},
         }};
     for (auto &body : result.bodies) {
+        // Deliberately compressed relative sizes: recognizable and playful,
+        // while restoring the visual hierarchy of star, giants, terrestrials,
+        // and moons. Physical radii continue to own gameplay.
+        if (body.id == "sun") body.displayRadius = 1.35;
+        else if (body.id == "jupiter") body.displayRadius = .72;
+        else if (body.id == "saturn") body.displayRadius = .64;
+        else if (body.id == "uranus" || body.id == "neptune") body.displayRadius = .43;
+        else if (body.id == "earth" || body.id == "venus") body.displayRadius = .28;
+        else if (body.id == "mars") body.displayRadius = .21;
+        else if (body.id == "mercury") body.displayRadius = .14;
+        else if (body.kind == SystemBodyKind::Moon) body.displayRadius = .10;
         body.dockOffset = {body.id == "earth" ? body.influenceRadius * 1.1 + .40 : body.radius + .95, 0};
         if (body.id == "earth") {
             // Keep the service berth clear of the opening Earth-to-Moon lane.

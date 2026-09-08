@@ -691,8 +691,6 @@ LaunchFlightStep updateSpaceFlight(
     const double bodyRadius = body ? body->radius : flight_geometry::bodyRadius;
     constexpr double influenceRadius = flight_geometry::influenceRadius;
     constexpr double thrustAcceleration = 0.23;
-    constexpr double turnAcceleration = flight_controls::turnAcceleration;
-    constexpr double turnDamping = 5.2;
     constexpr double velocityToMetersPerSecond = flight_geometry::velocityToMetersPerSecond;
     const double realDt = std::clamp(
         deltaSeconds,
@@ -728,14 +726,7 @@ LaunchFlightStep updateSpaceFlight(
     flight.orbitCelebrationPending = false;
     flight.touchdownCelebrationPending = false;
 
-    const double turn = std::clamp(input.steer, -1.0, 1.0);
-    // Input steer is semantic screen direction: negative is left and positive
-    // is right. Mathematical heading angles increase counterclockwise, so the
-    // input sign must be inverted here for A/left to visibly turn left and
-    // D/right to visibly turn right.
-    flight.angularVelocity -= turn * turnAcceleration * controlDt;
-    flight.angularVelocity *= std::exp(-turnDamping * controlDt);
-    flight.heading += flight.angularVelocity * controlDt;
+    advanceFlightHeading(flight, input.steer, controlDt);
 
     // W is forward main thrust; S is reverse thrust, not a velocity brake.
     // With the nose upright, W arrests descent and S accelerates the fall.
@@ -1226,6 +1217,21 @@ LaunchFlightStep updatePhysicalFlight(FlightRunState& flight,const PreparedLaunc
 }
 
 } // namespace
+
+void advanceFlightHeading(FlightRunState& flight, double steer, double deltaSeconds)
+{
+    constexpr double turnAcceleration = flight_controls::turnAcceleration;
+    constexpr double turnDamping = 5.2;
+    const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+    const double turn = std::clamp(steer, -1.0, 1.0);
+    // Input steer is semantic screen direction: negative is left and positive
+    // is right. Mathematical heading angles increase counterclockwise, so the
+    // input sign must be inverted here for A/left to visibly turn left and
+    // D/right to visibly turn right.
+    flight.angularVelocity -= turn * turnAcceleration * dt;
+    flight.angularVelocity *= std::exp(-turnDamping * dt);
+    flight.heading += flight.angularVelocity * dt;
+}
 
 LaunchFlightStep updateLaunchFlight(
     FlightRunState& flight,

@@ -610,13 +610,13 @@ FlightCameraView physicalFlightCamera(
         const SystemVector focus = g.targetPosition;
         const double dx = snapshot.launchPositionX-focus.x, dy = snapshot.launchPositionY-focus.y;
         const double range = std::hypot(dx,dy);
-        const double fitRange = std::min(range,5.0);
+        const double fitRange = std::min(range,14.0);
         const double fraction = range > .001 ? fitRange/range : 0;
         // Keep a bounded target-facing view, then blend into the established
         // body-centered orbit camera. Distant targets use an edge marker.
         const Vec2 center {static_cast<float>(snapshot.launchPositionX-dx*fraction*.5),
             static_cast<float>(snapshot.launchPositionY-dy*fraction*.5)};
-        const float scale = static_cast<float>(std::clamp(1.45/(fitRange+.70),.25,.90));
+        const float scale = static_cast<float>(std::clamp(1.45/(fitRange+.70),.095,.90));
         // Earth below-left and Moon above-right use their real system positions.
         constexpr float departureRotation = kPi / 3.0F;
         result.transfer = {center,{0,0},scale,departureRotation};
@@ -646,17 +646,21 @@ FlightCameraView physicalFlightCamera(
         for (const auto& body : snapshot.system.bodies) {
             if (body.kind == SystemBodyKind::Star || body.kind == SystemBodyKind::Station) continue;
             // The Earth-to-Moon opening already has its authored launch framing.
-            if (body.id == "earth" && g.targetId == "moon") continue;
+            const bool openingEarthView = body.id == "earth" && g.targetId == "moon" &&
+                frameBody && frameBody->id == "earth";
             const double bodyX = body.position.x-frameOffset.x;
             const double bodyY = body.position.y-frameOffset.y;
             const double distance = std::hypot(snapshot.launchPositionX-bodyX,snapshot.launchPositionY-bodyY);
             const double nearRadius = std::max(.52,body.radius*2.0);
-            const double farRadius = std::max(nearRadius+.9,body.influenceRadius*1.5);
-            const float blend = smootherstep(static_cast<float>((farRadius-distance)/(farRadius-nearRadius)));
+            float blend = body.id == "earth"
+                ? 1.0F - smootherstep(static_cast<float>((distance - 2.2) / 1.3))
+                : static_cast<float>(systemBodyApproachBlend(body, distance));
+            if (openingEarthView)
+                blend *= smootherstep(static_cast<float>((distance - 1.0) / .56));
             if (blend <= strongestBlend) continue;
             strongestBlend = blend;
             const Camera2D bodyCamera {{static_cast<float>(bodyX),static_cast<float>(bodyY)},
-                {0,.20F},outerOrbitScreenRadius/static_cast<float>(nearRadius),departureRotation};
+                {0,.20F},body.id == "earth" ? .28F : outerOrbitScreenRadius/static_cast<float>(nearRadius),departureRotation};
             result.camera = blendCamera(result.transfer,bodyCamera,blend);
         }
     }
@@ -6795,12 +6799,12 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         const auto view = physicalFlightCamera(snapshot, 0);
         for (const auto& body : snapshot.system.bodies) {
             const auto p = view.camera.point(body.position.x - offset.x, body.position.y - offset.y);
-            const float radius = static_cast<float>(body.radius) * view.camera.scale;
+            const float radius = static_cast<float>(systemBodyDisplayRadius(body)) * view.camera.scale;
             const float pixelX = scenePixelCenterX_ + p.x * sceneWorldUnitX_;
             const float pixelY = sceneCssHeight_ - scenePixelCenterY_ - p.y * sceneWorldUnitY_;
             const auto& clip = packet_.logicalSceneClip;
-            const float halfWidth = radius * 1.25F * sceneWorldUnitX_;
-            const float halfHeight = radius * 1.25F * sceneWorldUnitY_;
+            const float halfWidth = radius * sceneWorldUnitX_;
+            const float halfHeight = radius * sceneWorldUnitY_;
             const bool bodyOffscreen = pixelX + halfWidth < clip.x ||
                 pixelX - halfWidth > clip.x + clip.width || pixelY + halfHeight < clip.y ||
                 pixelY - halfHeight > clip.y + clip.height;
@@ -6826,8 +6830,8 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             const int asset = body.id == "earth" ? EarthAsset : body.id == "mars" ? MarsAsset : body.id == "mercury" ? MercuryAsset : body.id == "venus" ? VenusAsset :
                 body.id == "jupiter" ? JupiterAsset : body.id == "saturn" ? SaturnAsset : body.id == "uranus" ? UranusAsset : body.id == "neptune" ? NeptuneAsset : MoonAsset;
             if (body.kind == SystemBodyKind::Star) drawCircle(p.x,p.y,radius,{1,.65F,.15F,1},64);
-            else if (body.kind == SystemBodyKind::Station) drawSprite(p.x,p.y,radius*3,radius*3,{1,1,1,1},ArkDamagedAsset);
-            else drawSprite(p.x,p.y,radius*2.5F,radius*2.5F,{1,1,1,1},asset);
+            else if (body.kind == SystemBodyKind::Station) drawSprite(p.x,p.y,radius*2.4F,radius*2.4F,{1,1,1,1},ArkDamagedAsset);
+            else drawSprite(p.x,p.y,radius*2.0F,radius*2.0F,{1,1,1,1},asset);
             if (body.id != snapshot.flightGuidance.targetId)
                 drawPoiLabel(p.x,p.y+radius+.045F,.0035F,body.name,PoiGuidanceKind::Ship);
         }

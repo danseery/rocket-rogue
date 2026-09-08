@@ -37,6 +37,9 @@ struct SystemBodyDefinition
     std::string environmentId = {};
     bool authoredObjectives = true;
     SystemVector dockOffset = {};
+    // Presentation size is independent from gravity, collision, and encounter
+    // geometry so the solar-system view can use readable arcade proportions.
+    double displayRadius = 0.0;
 };
 struct SystemDefinition
 {
@@ -50,6 +53,9 @@ const SystemBodyDefinition *bodyForEnvironment(const SystemDefinition &, std::st
 inline constexpr double earthLaunchSpeed = .60;
 SystemVector earthLaunchPosition();
 SystemVector systemDockPosition(const SystemBodyDefinition &);
+// Shared orbit/travel zoom envelope, independent of coordinate-frame ownership.
+double systemBodyApproachBlend(const SystemBodyDefinition &, double radius);
+double systemBodyDisplayRadius(const SystemBodyDefinition &);
 double systemFlightTimeScale(const SystemDefinition &, SystemVector position);
 double systemBodyGravityAcceleration(const SystemBodyDefinition &, double radius);
 struct PostSolarSystemRoster;

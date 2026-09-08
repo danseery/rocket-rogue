@@ -183,8 +183,31 @@ void persistentExpeditionTests()
             check(systemBodyGravityAcceleration(body,r*1.1)==0 &&
                 systemBodyGravityAcceleration(body,r*1.1-1e-7)<1e-8,
                 "Gravity must smoothly reach zero at the outer boundary");
-            check(std::hypot(dock.x-body.position.x,dock.y-body.position.y)-expeditionDockRadius > r*1.1,
-                "The complete Earth docking range must lie outside every gravity region");
+            check(std::hypot(dock.x-body.position.x,dock.y-body.position.y) > r*1.1,
+                "The Earth dock marker must lie outside every gravity region");
+        }
+        // Departure must not add a late clock boost after the camera has
+        // mostly zoomed out. Exercise the real Mars/Moon handoff envelope.
+        for (const auto* id : {"mars", "moon"}) {
+            const auto& body = *systemBody(solar, id);
+            const SystemDefinition isolated {"coast", {body}};
+            double previousApparentSpeed = 1.0;
+            for (int i=0; i<=200; ++i) {
+                const double radius = .52 + (body.influenceRadius*1.5-.52)*i/200.0;
+                const double blend = systemBodyApproachBlend(body, radius);
+                const double clock = systemFlightTimeScale(isolated, {body.position.x+radius,body.position.y});
+                const double cameraScale = std::exp(std::lerp(std::log(.25),std::log(.46/.52),blend));
+                const double apparentSpeed = clock*cameraScale;
+                check(apparentSpeed <= previousApparentSpeed+1e-9,
+                    "Orbit departure must not accelerate screen motion as zoom releases");
+                if (i>0) check(previousApparentSpeed-apparentSpeed < .003,
+                    "Orbit departure scale must converge without a visible step");
+                previousApparentSpeed = apparentSpeed;
+            }
+            const double boundary = body.influenceRadius*1.1;
+            check(std::abs(systemFlightTimeScale(isolated,{body.position.x+boundary-1e-6,body.position.y})-
+                systemFlightTimeScale(isolated,{body.position.x+boundary+1e-6,body.position.y})) < 1e-5,
+                "Changing orbit ownership must not change the flight clock");
         }
         const auto coast = integrateSystemCoast({dock.x,dock.y,0,0},1,solar);
         check(coast.x==dock.x && coast.y==dock.y && coast.vx==0 && coast.vy==0,
@@ -367,8 +390,8 @@ void persistentExpeditionTests()
     flight = beginLaunchFlight(prepared, catalog.destinations[1]);
     flight.active = true;
     flight.physicalFlight = true;
-    flight.positionX = -1.1;
-    flight.positionY = 0;
+    flight.positionX = systemBody(system,"sun")->position.x - 1.1;
+    flight.positionY = systemBody(system,"sun")->position.y;
     flight.velocityX = 4;
     flight.velocityY = 0;
     SystemLocation sunPath{"solar", "", CoordinateFrame::System, {}, {}, 0, ""};
@@ -383,8 +406,8 @@ void persistentExpeditionTests()
     flight = beginLaunchFlight(prepared, catalog.destinations[1]);
     flight.active = true;
     flight.physicalFlight = true;
-    flight.positionX = -3;
-    flight.positionY = 0;
+    flight.positionX = systemBody(system,"sun")->position.x - 3;
+    flight.positionY = systemBody(system,"sun")->position.y;
     flight.velocityX = 0;
     flight.velocityY = 0;
     flight.heading = 0;
@@ -413,13 +436,14 @@ void persistentExpeditionTests()
     check(recoverSiteBattery(e, "moon") == ExpeditionResult::AlreadyApplied,
           "Repeated delivery must not duplicate battery");
     e.cargo.materials.common = 7;
-    e.location = {"solar", "", CoordinateFrame::System, {0, 0}, {2, 0}, 0, ""};
+    e.location = {"solar", "", CoordinateFrame::System, systemBody(system,"sun")->position, {2, 0}, 0, ""};
     restoreSystemLocation(e.location, flight);
     check(loseExpedition(e, flight, system) == ExpeditionResult::Applied && e.wrecks.size() == 1,
           "Loss must create one wreck");
     check(e.batteries[0].owner == BatteryOwner::Wreck && e.cargo.materials.common == 0,
           "Loss must transfer ownership, not copy it");
-    check(std::hypot(e.wrecks[0].location.position.x, e.wrecks[0].location.position.y) >
+    check(std::hypot(e.wrecks[0].location.position.x-systemBody(system,"sun")->position.x,
+              e.wrecks[0].location.position.y-systemBody(system,"sun")->position.y) >
               system.bodies[0].radius + .65,
           "Sun impact salvage must have replacement-ship clearance");
     const auto persisted = deserializeExpedition(serializeExpedition(e));
@@ -500,6 +524,13 @@ void persistentExpeditionTests()
         check(ship.positionX==homePose.position.x && ship.fuelRemaining==dockFuel,"Waiting at dock cannot fall or consume fuel");
         check(expedition.location.position.x == homePose.position.x && ship.fuelRemaining == ship.fuelCapacity,
               "Departure must retain dock position and fuel");
+        const double dockHeading = ship.heading;
+        for (int frame = 0; frame < 12; ++frame)
+            advanceExpeditionFlight(expedition,ship,dockModel,expeditionEnvironment(journey,catalog),solarSystemDefinition(),{1,0,false,true},.05);
+        check(ship.heading != dockHeading && expedition.location.heading == ship.heading,
+              "Steering at the dock must rotate the ship without requiring velocity");
+        check(expedition.undockReady && !ship.active && ship.fuelRemaining == dockFuel,
+              "Pre-launch rotation must remain attached and consume no fuel");
         expedition.progression.expeditionLevel = 4;
         expedition.cargo.materials.common = 9;
         auto model = expeditionFlightModel(journey, catalog);
@@ -508,7 +539,10 @@ void persistentExpeditionTests()
         check(expedition.location.frame == CoordinateFrame::System && ship.mode == FlightMode::Travel,
               "Earth undocking must immediately use system flight outside the encounter boundary");
         const auto& solar = solarSystemDefinition();
-        const auto target = SystemVector{8.9, 2};
+        const auto* moon = systemBody(solar,"moon");
+        const auto* mars = systemBody(solar,"mars");
+        const auto* earth = systemBody(solar,"earth");
+        const auto target = SystemVector{moon->position.x-1.1,moon->position.y};
         const auto pilotTo = [&](SystemVector destination) {
             for (int frame = 0; frame < 12000; ++frame) {
                 captureSystemLocation(expedition.location, ship);
@@ -547,14 +581,14 @@ void persistentExpeditionTests()
         check(arrivalFixture.run.expedition.cargo.credits==payout,"Revisiting a paid site must not duplicate its arrival payout");
         expedition.cargo.credits=payout;
         const double afterMoon = ship.fuelRemaining;
-        check(pilotTo({8.7,0}), "Continuation pilot must clear the Moon before turning toward Mars");
-        check(pilotTo({12.9,-3}), "Manual continuation must reach Mars without per-leg initialization");
+        check(pilotTo({moon->position.x-1.3,moon->position.y-2.0}), "Continuation pilot must clear the Moon before turning toward Mars");
+        check(pilotTo({mars->position.x-1.1,mars->position.y}), "Manual continuation must reach Mars without per-leg initialization");
         check(expedition.location.bodyId == "mars" && ship.fuelRemaining < afterMoon,
               "Mars encounter must retain real fuel use");
         check(expedition.progression.expeditionLevel == 4 && expedition.cargo.materials.common == 9,
               "Cross-body travel must preserve XP and cargo");
-        check(pilotTo({8.1,3.0}), "Return pilot must brake outside Earth's approach");
-        check(pilotTo(systemDockPosition(*systemBody(solar,"earth"))), "Starter pilot fixture must be able to return to Earth dock");
+        check(pilotTo({earth->position.x+2.1,earth->position.y-2.0}), "Return pilot must brake outside Earth's approach");
+        check(pilotTo(systemDockPosition(*earth)), "Starter pilot fixture must be able to return to Earth dock");
         check(canDockExpedition(expedition,ship,solar), "Dock eligibility must match physical rendezvous");
         const int bankBefore = journey.meta.materials.common;
         check(dockExpedition(journey,solar) == ExpeditionResult::Applied && journey.meta.materials.common == bankBefore+9,

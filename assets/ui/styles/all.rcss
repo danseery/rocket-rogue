@@ -10617,7 +10617,10 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 .solar-ship { width: 8dp; height: 8dp; background-color: #7affae; border: 1dp #ffffff; margin-left: -4dp; margin-top: -4dp; }
 .solar-wreck { color: #ffbd67; }
 .solar-course { position: absolute; width: 2dp; height: 2dp; background-color: #6abde0; }
-.solar-marker { position: absolute; width: 5dp; height: 5dp; background-color: #79d4e9; }
+#rr-modal .expedition-map .solar-planet { position: absolute; padding: 0dp; min-width: 0dp; min-height: 0dp; margin: 0dp; background-color: transparent; border-width: 0dp; }
+.solar-planet img { width: 100%; height: 100%; }
+.solar-sun { width: 100%; height: 100%; background-color: #ffa626; border-radius: 50%; }
+#rr-modal .expedition-map .solar-planet-selected { border: 1dp #64edff; border-radius: 50%; }
 .solar-dock { position: absolute; color: #ffc76a; font-size: 12dp; }
 .solar-leader { position: absolute; width: 2dp; height: 2dp; background-color: #334855; }
 .expedition-warning { color: #ffbd67; }

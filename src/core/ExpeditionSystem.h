@@ -5,7 +5,7 @@
 
 namespace rocket
 {
-inline constexpr double expeditionDockRadius = .32;
+inline constexpr double expeditionDockRadius = 1.0;
 
 enum class ExpeditionResult
 {

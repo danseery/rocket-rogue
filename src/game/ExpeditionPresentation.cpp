@@ -77,14 +77,25 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     const auto action = [&](std::string_view label, std::string_view suffix, bool enabled = true) { return button(label, "expedition:" + std::string(suffix), enabled); };
     std::ostringstream map;
     map << "<section class=\"expedition-map\"><p>" << (e.cruise.active ? "PAUSED / CRUISE WILL RESUME" : "PAUSED / MANUAL FLIGHT") << "</p><div class=\"solar-map-scroll\"><div class=\"solar-map\">";
-    const auto x = [](double v) { return (v + 36) / 76 * 660; };
-    const auto y = [](double v) { return (24 - v) / 52 * 330; };
+    double minX = 0, maxX = 0, minY = 0, maxY = 0;
+    for (const auto& b : system.bodies) {
+        minX = std::min(minX,b.position.x); maxX = std::max(maxX,b.position.x);
+        minY = std::min(minY,b.position.y); maxY = std::max(maxY,b.position.y);
+    }
+    const double mapScale = std::min(576.0/std::max(1.0,maxX-minX),222.0/std::max(1.0,maxY-minY));
+    const auto x = [&](double v) { return 352.0+(v-(minX+maxX)*.5)*mapScale; };
+    const auto y = [&](double v) { return 175.0-(v-(minY+maxY)*.5)*mapScale; };
+    const auto diameter = [](const auto& b) { return std::clamp(systemBodyDisplayRadius(b)*64.0,16.0,64.0); };
     for (std::size_t i = 1; i < e.course.trajectory.size(); ++i) {
         const auto a = e.course.trajectory[i-1], b = e.course.trajectory[i];
         mapLine(map, "solar-course", x(a.x), y(a.y), x(b.x), y(b.y));
     }
     struct LabelBox { double x,y,w,h; };
     std::vector<LabelBox> labels;
+    for (const auto& b : system.bodies) {
+        const double size = diameter(b);
+        labels.push_back({x(b.position.x)-size*.5,y(b.position.y)-size*.5,size,size});
+    }
     for (const auto& b : system.bodies) {
         const bool hazard = std::find(e.course.intersectedHazards.begin(), e.course.intersectedHazards.end(), b.id) != e.course.intersectedHazards.end();
         const double width = 18 + b.name.size()*8.0;
@@ -100,7 +111,16 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         }
         labels.push_back(label);
         mapLine(map, "solar-leader", x(b.position.x), y(b.position.y), label.x+label.w*.5, label.y+13);
-        map << "<div class=\"solar-marker\" style=\"left:" << x(b.position.x) << "dp;top:" << y(b.position.y) << "dp;\"></div>";
+        const double size = diameter(b);
+        const std::string art = b.kind == SystemBodyKind::Station ? "straylight-ark-damaged"
+            : b.kind == SystemBodyKind::Moon ? "moon" : b.id;
+        map << "<button class=\"solar-planet" << (b.id == e.course.targetBodyId ? " solar-planet-selected" : "")
+            << "\" data-rr-action=\"expedition:preview:" << esc(b.id)
+            << "\" data-ui-focus-id=\"planet:" << esc(b.id) << "\" style=\"left:" << x(b.position.x)-size*.5
+            << "dp;top:" << y(b.position.y)-size*.5 << "dp;width:" << size << "dp;height:" << size << "dp;\">";
+        if (b.kind == SystemBodyKind::Star) map << "<div class=\"solar-sun\"></div>";
+        else map << "<img src=\"planets/" << art << ".png\" />";
+        map << "</button>";
         map << "<div class=\"solar-body" << (b.id == e.course.targetBodyId ? " solar-selected" : "") << (hazard ? " solar-hazard" : "")
             << "\" style=\"left:" << label.x << "dp;top:" << label.y << "dp;width:" << width << "dp;\">" << action(b.name, "preview:" + b.id) << "</div>";
         if (b.dock) {
@@ -170,7 +190,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
                 if (!body.dock) continue;
                 const auto dock = systemDockPosition(body);
                 const double range = std::hypot(position.position.x-dock.x,position.position.y-dock.y);
-                if (range > .65) continue;
+                if (range > expeditionDockRadius) continue;
                 panel.contentMarkup += canDockExpedition(e,flight,system)
                     ? "<p>In range — press Dock.</p>"
                     : (range > expeditionDockRadius ? "<p>Approach the DOCK marker, not Earth's surface.</p>"
