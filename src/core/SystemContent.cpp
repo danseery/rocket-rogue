@@ -48,12 +48,12 @@ const SystemDefinition &solarSystemDefinition()
     SystemDefinition result{
         "solar",
         {
-            {"sun", "", "Sun", SystemBodyKind::Star, {-24, -8}, {}, 0.9, 2.2, 4, "", "", "Fatal solar impact"},
+            {"sun", "", "Sun", SystemBodyKind::Star, {-3, -1}, {}, 0.9, 2.2, 4, "", "", "Fatal solar impact"},
             {"mercury",
              "sun",
              "Mercury",
              SystemBodyKind::Terrestrial,
-             {6, -4},
+             {4.5, -3},
              {},
              .16,
              1.42,
@@ -65,7 +65,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Venus",
              SystemBodyKind::Terrestrial,
-             {-8, -6},
+             {-6, -4.5},
              {},
              .16,
              1.42,
@@ -77,7 +77,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Earth",
              SystemBodyKind::Terrestrial,
-             {12, 4},
+             {9, 3},
              {},
              .45,
              1.42,
@@ -90,7 +90,7 @@ const SystemDefinition &solarSystemDefinition()
              "earth",
              "Moon",
              SystemBodyKind::Moon,
-             {16, 4},
+             {13, 3},
              {},
              .16,
              1.42,
@@ -102,7 +102,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Mars",
              SystemBodyKind::Terrestrial,
-             {28, -6},
+             {21, -4.5},
              {},
              .16,
              1.42,
@@ -114,7 +114,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Jupiter",
              SystemBodyKind::Giant,
-             {40, 12},
+             {30, 9},
              {},
              .45,
              1.8,
@@ -126,7 +126,7 @@ const SystemDefinition &solarSystemDefinition()
              "jupiter",
              "Io",
              SystemBodyKind::Moon,
-             {44, 12},
+             {34, 9},
              {},
              .16,
              1.42,
@@ -138,7 +138,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Saturn",
              SystemBodyKind::Giant,
-             {-44, 24},
+             {-33, 18},
              {},
              .40,
              1.8,
@@ -150,7 +150,7 @@ const SystemDefinition &solarSystemDefinition()
              "saturn",
              "Titan",
              SystemBodyKind::Moon,
-             {-40, 24},
+             {-29, 18},
              {},
              .16,
              1.42,
@@ -162,7 +162,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Uranus",
              SystemBodyKind::Giant,
-             {-54, -28},
+             {-40.5, -21},
              {},
              .35,
              1.8,
@@ -174,7 +174,7 @@ const SystemDefinition &solarSystemDefinition()
              "uranus",
              "Titania",
              SystemBodyKind::Moon,
-             {-50, -28},
+             {-36.5, -21},
              {},
              .16,
              1.42,
@@ -186,7 +186,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Neptune",
              SystemBodyKind::Giant,
-             {54, -40},
+             {40.5, -30},
              {},
              .35,
              1.8,
@@ -198,7 +198,7 @@ const SystemDefinition &solarSystemDefinition()
              "neptune",
              "Triton",
              SystemBodyKind::Moon,
-             {58, -40},
+             {44.5, -30},
              {},
              .16,
              1.42,
@@ -210,7 +210,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Straylight",
              SystemBodyKind::Station,
-             {70, -28},
+             {52.5, -21},
              {},
              .10,
              1.42,
@@ -226,12 +226,6 @@ const SystemDefinition &solarSystemDefinition()
         // and moons. Physical radii continue to own gameplay.
         if (body.id == "sun") body.displayRadius = 1.35;
         else if (body.id == "jupiter") body.displayRadius = .72;
-        else if (body.id == "saturn") body.displayRadius = .64;
-        else if (body.id == "uranus" || body.id == "neptune") body.displayRadius = .43;
-        else if (body.id == "earth" || body.id == "venus") body.displayRadius = .28;
-        else if (body.id == "mars") body.displayRadius = .21;
-        else if (body.id == "mercury") body.displayRadius = .14;
-        else if (body.kind == SystemBodyKind::Moon) body.displayRadius = .10;
         body.dockOffset = {body.id == "earth" ? body.influenceRadius * 1.1 + .40 : body.radius + .95, 0};
         if (body.id == "earth") {
             // Keep the service berth clear of the opening Earth-to-Moon lane.

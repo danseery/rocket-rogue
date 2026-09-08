@@ -610,13 +610,13 @@ FlightCameraView physicalFlightCamera(
         const SystemVector focus = g.targetPosition;
         const double dx = snapshot.launchPositionX-focus.x, dy = snapshot.launchPositionY-focus.y;
         const double range = std::hypot(dx,dy);
-        const double fitRange = std::min(range,14.0);
+        const double fitRange = std::min(range,5.0);
         const double fraction = range > .001 ? fitRange/range : 0;
         // Keep a bounded target-facing view, then blend into the established
         // body-centered orbit camera. Distant targets use an edge marker.
         const Vec2 center {static_cast<float>(snapshot.launchPositionX-dx*fraction*.5),
             static_cast<float>(snapshot.launchPositionY-dy*fraction*.5)};
-        const float scale = static_cast<float>(std::clamp(1.45/(fitRange+.70),.095,.90));
+        const float scale = static_cast<float>(std::clamp(1.45/(fitRange+.70),.25,.90));
         // Earth below-left and Moon above-right use their real system positions.
         constexpr float departureRotation = kPi / 3.0F;
         result.transfer = {center,{0,0},scale,departureRotation};
@@ -646,21 +646,16 @@ FlightCameraView physicalFlightCamera(
         for (const auto& body : snapshot.system.bodies) {
             if (body.kind == SystemBodyKind::Star || body.kind == SystemBodyKind::Station) continue;
             // The Earth-to-Moon opening already has its authored launch framing.
-            const bool openingEarthView = body.id == "earth" && g.targetId == "moon" &&
-                frameBody && frameBody->id == "earth";
+            if (body.id == "earth" && g.targetId == "moon") continue;
             const double bodyX = body.position.x-frameOffset.x;
             const double bodyY = body.position.y-frameOffset.y;
             const double distance = std::hypot(snapshot.launchPositionX-bodyX,snapshot.launchPositionY-bodyY);
             const double nearRadius = std::max(.52,body.radius*2.0);
-            float blend = body.id == "earth"
-                ? 1.0F - smootherstep(static_cast<float>((distance - 2.2) / 1.3))
-                : static_cast<float>(systemBodyApproachBlend(body, distance));
-            if (openingEarthView)
-                blend *= smootherstep(static_cast<float>((distance - 1.0) / .56));
+            const float blend = static_cast<float>(systemBodyApproachBlend(body, distance));
             if (blend <= strongestBlend) continue;
             strongestBlend = blend;
             const Camera2D bodyCamera {{static_cast<float>(bodyX),static_cast<float>(bodyY)},
-                {0,.20F},body.id == "earth" ? .28F : outerOrbitScreenRadius/static_cast<float>(nearRadius),departureRotation};
+                {0,.20F},outerOrbitScreenRadius/static_cast<float>(nearRadius),departureRotation};
             result.camera = blendCamera(result.transfer,bodyCamera,blend);
         }
     }
