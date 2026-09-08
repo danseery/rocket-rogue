@@ -294,14 +294,6 @@ inline void addStatChip(std::vector<RefitStatChip>& chips, std::string_view labe
     });
 }
 
-inline void addBeneficialReductionChip(std::vector<RefitStatChip>& chips, std::string_view label, double reduction)
-{
-    if (reduction < tuning::presentation::statChipMinimumMagnitude) {
-        return;
-    }
-    chips.push_back({std::string(label), display::signedFixed(-reduction, 1), true});
-}
-
 inline std::vector<RefitStatChip> moduleStatChips(const ShipModule& module)
 {
     if (module.surfaceDepthUpgradeKind != SurfaceDepthUpgradeKind::None) {

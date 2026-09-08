@@ -71,20 +71,4 @@ inline std::string damage(int value)
     return wholePercent(value) + " " + std::string(text::units::damage);
 }
 
-inline std::string trainingWithEffective(int training, int effectiveTraining)
-{
-    return std::to_string(training) + " (" + std::to_string(effectiveTraining) + " " + std::string(text::units::effective) + ")";
-}
-
-inline std::string stressWithSteps(int stress, int stressSteps)
-{
-    return wholePercent(stress) + " / " + std::to_string(stressSteps) + " " + std::string(text::units::steps);
-}
-
-inline std::string crewStressEffects(double navigationPenalty, double abortMultiplier)
-{
-    return std::string(text::labels::nav) + " +" + percent(navigationPenalty) + ", " +
-        std::string(text::labels::abort) + " " + multiplier(abortMultiplier);
-}
-
 } // namespace rocket::display

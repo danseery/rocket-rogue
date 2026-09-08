@@ -1315,10 +1315,7 @@ void RocketGameApp::consumeNextLaunchBoost()
     state_.run.nextLaunchFuelBoost = 0.0;
     state_.run.nextLaunchSpeedBoost = 0.0;
     state_.run.nextLaunchInstabilityPenalty = 0.0;
-    if (!session_.preparedLaunch.transferAssistId.empty() &&
-        state_.run.pendingTransferAssist.definitionId == session_.preparedLaunch.transferAssistId) {
-        state_.run.pendingTransferAssist = {};
-    }
+
 }
 
 double RocketGameApp::liveBurnMultiplier() const
@@ -5694,12 +5691,6 @@ RenderSnapshot RocketGameApp::snapshot() const
             if (const Destination* source = catalog_.findDestination(flightModel.config.routeTransit.originDestinationId)) {
                 result.launchOriginTier = source->tier;
             }
-        } else if (!flightModel.transferAssistId.empty()) {
-            if (const TransferAssistDefinition* assist = catalog_.findTransferAssist(flightModel.transferAssistId)) {
-                if (const Destination* source = catalog_.findDestination(assist->sourceDestinationId)) {
-                    result.launchOriginTier = source->tier;
-                }
-            }
         }
     }
     result.debugActOneCheckpoint = debugActOneCheckpoint_;
@@ -5926,7 +5917,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.launchProjectedFuelReserve = session_.flight.projectedFuelReserve;
         result.launchInsertionReserve = flightModel.arrivalReserveFuel;
         result.launchCourseLimit = launchCourseLimit(flightModel);
-        // The slingshot handoff is already physically in this lane during
+        // The ship is already physically in this lane during
         // preflight; expose it before arming so the launch scene never flashes
         // at center and then jumps sideways on ignition.
         result.launchCourseOffset = session_.flight.courseOffset;

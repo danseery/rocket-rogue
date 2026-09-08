@@ -231,14 +231,6 @@ const RouteLinkDefinition* ContentCatalog::findRouteLink(
     return found == routeLinks.end() ? nullptr : &*found;
 }
 
-const TransferAssistDefinition* ContentCatalog::findTransferAssist(std::string_view id) const
-{
-    const auto found = std::find_if(
-        transferAssists.begin(),
-        transferAssists.end(),
-        [&](const TransferAssistDefinition& definition) { return definition.id == id; });
-    return found == transferAssists.end() ? nullptr : &*found;
-}
 
 const ScenarioDefinition* ContentCatalog::findScenario(std::string_view id) const
 {

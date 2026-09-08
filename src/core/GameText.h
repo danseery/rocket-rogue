@@ -73,56 +73,7 @@ inline constexpr std::string_view enginesCut = "Engines cut. Cooler burn, less v
 inline constexpr std::string_view transferBurnStable = "Transfer burn stable. Survive to the required burn or abort.";
 inline constexpr std::string_view dataGoalReached = "Data goal reached. Return to Earth now, or overburn for extra telemetry.";
 inline constexpr std::string_view provingBurnStable = "Proving burn stable. Push for more data or return to Earth.";
-inline std::string provingBurnStartedForHome(bool arkKnown, bool outerExpedition = false)
-{
-    if (arkKnown) {
-        return "Launch underway. Watch the active gauge and turn around before the return margin to the Ark is gone.";
-    }
-    if (outerExpedition) {
-        return "Launch underway. Watch the active gauge and preserve the return margin to expedition staging.";
-    }
-    return std::string(provingBurnStarted);
-}
-inline std::string fuelReserveGoneForHome(bool arkKnown, bool outerExpedition = false)
-{
-    if (arkKnown) {
-        return "Fuel reserve is gone. Coasting back to the Ark on gravity and uncomfortable math.";
-    }
-    if (outerExpedition) {
-        return "Fuel reserve is gone. Coasting back to expedition staging on gravity and uncomfortable math.";
-    }
-    return std::string(fuelReserveGone);
-}
-inline std::string coastingHomeForHome(bool arkKnown, bool outerExpedition = false)
-{
-    if (arkKnown) {
-        return "Coasting back to the Ark. No thrust, less control, plenty of silence.";
-    }
-    if (outerExpedition) {
-        return "Coasting back to expedition staging. No thrust, less control, plenty of silence.";
-    }
-    return std::string(coastingHome);
-}
-inline std::string dataGoalReachedForHome(bool arkKnown, bool outerExpedition = false)
-{
-    if (arkKnown) {
-        return "Data goal reached. Return to Ark now, or overburn for extra telemetry.";
-    }
-    if (outerExpedition) {
-        return "Data goal reached. Recover to expedition staging now, or overburn for extra telemetry.";
-    }
-    return std::string(dataGoalReached);
-}
-inline std::string provingBurnStableForHome(bool arkKnown, bool outerExpedition = false)
-{
-    if (arkKnown) {
-        return "Proving burn stable. Push for more data or return to Ark.";
-    }
-    if (outerExpedition) {
-        return "Proving burn stable. Push for more data or recover to expedition staging.";
-    }
-    return std::string(provingBurnStable);
-}
+
 inline constexpr std::string_view engineCutConfirmed = "Engines off. Temperature is falling.";
 inline constexpr std::string_view thrustRestored = "Engines on. Temperature will climb under power.";
 inline constexpr std::string_view returnVehicleLost = "Return trajectory failed. Vehicle lost during recovery.";
@@ -229,51 +180,6 @@ inline std::string availability(bool arkKnown)
 
 inline constexpr std::string_view offline = "Mining Rig offline";
 
-inline std::string drawDetail(bool arkKnown)
-{
-    const std::string cadence = "Deploying costs 1 rig fuel. The rig consumes 1 fuel whenever its operating cycle completes while oxygen remains.";
-    if (arkKnown) {
-        return cadence + " The return stage is reserved and cannot be spent by the rig.";
-    }
-    return cadence + " The return stage is reserved and cannot be spent by the rig.";
-}
-
-inline std::string miningRunTarget(bool arkKnown)
-{
-    if (arkKnown) {
-        return "Stow useful payload before oxygen or rig fuel forces a recall.";
-    }
-    return "Stow useful payload before oxygen or rig fuel forces a recall.";
-}
-
-inline std::string miningBlockedStatus(bool arkKnown)
-{
-    if (arkKnown) {
-        return "Rig fuel is empty. Recover transfer fuel or load an Ark expedition pack before deploying.";
-    }
-    return "Rig fuel is empty. Return to base before deploying the Mining Rig.";
-}
-
-inline std::string miningFailedStatus(bool arkKnown)
-{
-    if (arkKnown) {
-        return "Rig fuel is dry. Emergency recall engaged; the protected return stage remains ready.";
-    }
-    return "Rig fuel is dry. Emergency recall engaged; the protected return stage remains ready.";
-}
-
-inline std::string miningStartedStatus(bool arkKnown)
-{
-    if (arkKnown) {
-        return "Mining Rig deployed from the Ark expedition pack and recovered transfer fuel.";
-    }
-    return "Mining Rig deployed from the expedition pack and recovered transfer fuel.";
-}
-
-inline std::string miningLog(bool arkKnown)
-{
-    return "Mining Rig deployed: -1 " + std::string(reserveLabel(arkKnown)) + ".";
-}
 } // namespace fuel
 
 namespace units {
@@ -404,13 +310,7 @@ inline std::string returnHomeLabel(bool arkKnown, bool outerExpedition = false)
     }
     return outerExpedition ? "Recover to Expedition" : std::string(returnHome);
 }
-inline std::string returningHomeLabel(bool arkKnown, bool outerExpedition = false)
-{
-    if (arkKnown) {
-        return "Returning to Ark";
-    }
-    return outerExpedition ? "Recovering to Expedition" : std::string(returningHome);
-}
+
 inline constexpr std::string_view arrivalOps = "Approach";
 inline constexpr std::string_view cutEngines = "Engines Off";
 inline constexpr std::string_view restoreThrust = "Engines On";
@@ -599,21 +499,6 @@ inline constexpr std::string_view phaseOutputs = "Outputs";
 inline constexpr std::string_view phaseRisk = "Risk";
 inline constexpr std::string_view phaseNext = "Next";
 
-inline std::string trainingDelta(int trainingGain)
-{
-    return "+" + std::to_string(trainingGain) + " training";
-}
-
-inline std::string stressDelta(int stressGain)
-{
-    return "+" + std::to_string(stressGain) + " stress";
-}
-
-inline std::string stressRecoveryNow(int stressRecovery)
-{
-    return "-" + std::to_string(stressRecovery) + " stress now";
-}
-
 inline std::string launchStressRelief(int stressRelief)
 {
     return "-" + std::to_string(stressRelief) + " stress";
@@ -683,16 +568,6 @@ inline std::string surfacePostureExtractDetailForHome(bool arkKnown, bool outerE
         return "Recover the physical payload to expedition staging before conditions get worse.";
     }
     return std::string(surfacePostureExtractDetail);
-}
-inline std::string surfaceExtractDetailForHome(bool arkKnown, bool outerExpedition = false)
-{
-    if (arkKnown) {
-        return "Return every material and artifact loaded onto the Ship to the Ark.";
-    }
-    if (outerExpedition) {
-        return "Recover every material and artifact loaded onto the Ship to the expedition.";
-    }
-    return std::string(surfaceExtractDetail);
 }
 
 inline std::string supplyCost(int cost)
@@ -774,39 +649,9 @@ inline std::string salvageRebuildDetail(int repairAmount)
     return "Strip spares from the yard and restore " + std::to_string(repairAmount) + " hull. It gets you launchable, not pretty.";
 }
 
-inline std::string simulatorDetail(int trainingGain, int stressGain)
-{
-    return "+" + std::to_string(trainingGain) + " training, +" + std::to_string(stressGain) + " stress. Repeated assignments cost more this expedition.";
-}
-
-inline std::string restDetail(int stressRecovery)
-{
-    return "-" + std::to_string(stressRecovery) + " stress at current difficulty. Repeated assignments cost more this expedition.";
-}
-
 inline constexpr std::string_view noRestDetail = "No stress or injury requires medical rest right now.";
 inline constexpr std::string_view simulatorCapped = "Training capped";
 inline constexpr std::string_view crewTooStressed = "Crew too stressed";
-
-inline std::string trainingImpact(int trainingGain)
-{
-    return "+" + std::to_string(trainingGain) + " training per simulator burn";
-}
-
-inline std::string restImpact(int restStressBonus)
-{
-    return "+" + std::to_string(restStressBonus) + " rest recovery";
-}
-
-inline std::string launchStressImpact(int launchStressRelief)
-{
-    return "-" + std::to_string(launchStressRelief) + " stress after launches";
-}
-
-inline std::string simulatorStressImpact(int trainingStressRelief)
-{
-    return "-" + std::to_string(trainingStressRelief) + " simulator stress";
-}
 
 inline std::string traitModifierImpact(std::string percentValue)
 {
@@ -844,46 +689,9 @@ inline std::string salvagedHull(int repaired)
     return "Salvage rebuild restored " + std::to_string(repaired) + " hull. The vehicle is launchable again.";
 }
 
-inline std::string tooStressedForTraining(std::string_view astronautName)
-{
-    return std::string(astronautName) + " is too stressed for simulator work. Rest the crew first.";
-}
-
-inline std::string simulatorComplete(std::string_view astronautName)
-{
-    return std::string(astronautName) + " completed simulator burns.";
-}
-
-inline std::string crewRecovered(std::string_view astronautName, int stressRecovery)
-{
-    return std::string(astronautName) + " recovered " + std::to_string(stressRecovery) + " stress under current mission conditions.";
-}
-
-inline std::string recruitJoined(std::string_view recruitName, bool emergency)
-{
-    return emergency
-        ? std::string(recruitName) + " took the next pilot slot."
-        : std::string(recruitName) + " joined the roster.";
-}
-
-inline std::string recruitId(int recruitNumber)
-{
-    return "recruit_" + std::to_string(recruitNumber);
-}
-
 inline std::string replacementId(int replacementNumber)
 {
     return "replacement_" + std::to_string(replacementNumber);
-}
-
-inline bool isReplacementId(std::string_view astronautId)
-{
-    return astronautId.rfind("replacement_", 0) == 0;
-}
-
-inline std::string nextGenerationName(std::string_view templateName)
-{
-    return std::string(templateName) + " II";
 }
 
 inline std::string moreFlightDataNeeded(std::string_view destinationName)
@@ -904,26 +712,6 @@ inline std::string transferAchievedNewRoute(std::string_view destinationName)
 inline std::string fullProfileReturned(std::string_view destinationName)
 {
     return "Full proving profile returned. Attempt the transfer to " + std::string(destinationName) + " when ready.";
-}
-
-inline std::string telemetryDecision(std::string_view message)
-{
-    return std::string(message) + ". Decide now: return or eject.";
-}
-
-inline std::string telemetryStatement(std::string_view message)
-{
-    return std::string(message) + ".";
-}
-
-inline std::string returnDriftWarning(std::string_view message)
-{
-    return std::string(message) + ". Coasting gives mission control fewer ways to help.";
-}
-
-inline std::string returnBurnWarning(std::string_view message)
-{
-    return std::string(message) + ". The return burn is still biting.";
 }
 
 } // namespace rocket::text

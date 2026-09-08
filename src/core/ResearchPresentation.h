@@ -418,13 +418,6 @@ inline void addDoubleChip(std::vector<PanelMetricPresentation>& chips, std::stri
     }
 }
 
-inline void addSignedPercentChip(std::vector<PanelMetricPresentation>& chips, std::string_view label, double value)
-{
-    if (std::abs(value) >= 0.005) {
-        chips.push_back(panelMetric(label, display::signedPercent(value)));
-    }
-}
-
 inline std::vector<PanelMetricPresentation> surfaceUpgradeChips(const SurfaceUpgradeStats& stats)
 {
     std::vector<PanelMetricPresentation> chips;
@@ -1518,14 +1511,6 @@ inline PanelButtonPresentation surfaceActionButton(std::string_view label, std::
         : disabledPanelButton(text::buttons::unavailable);
 }
 
-inline PanelButtonPresentation fieldSurfaceActionButton(const GameState& state, std::string_view label, std::string_view actionId, int cost, std::string cssClass = "")
-{
-    if (state.run.planetaryExpedition.miningRunUsed) {
-        return disabledPanelButton(text::buttons::unavailable);
-    }
-    return surfaceActionButton(label, actionId, state.run.planetaryExpedition.supply, cost, std::move(cssClass));
-}
-
 inline PanelButtonPresentation miningSurfaceActionButton(const GameState& state)
 {
     if (state.run.planetaryExpedition.miningRunUsed) {
@@ -1542,14 +1527,6 @@ inline std::string surfaceActionAvailability(int supply, int cost)
     return supply >= cost ? std::string(text::panel::ready) : text::panel::messages::needSupply(cost);
 }
 
-inline std::string fieldSurfaceActionAvailability(const GameState& state, int cost)
-{
-    if (state.run.planetaryExpedition.miningRunUsed) {
-        return std::string(text::panel::messages::surfaceFieldworkClosed);
-    }
-    return surfaceActionAvailability(state.run.planetaryExpedition.supply, cost);
-}
-
 inline std::string miningSurfaceActionAvailability(const GameState& state)
 {
     if (state.run.planetaryExpedition.miningRunUsed) {
@@ -1559,23 +1536,6 @@ inline std::string miningSurfaceActionAvailability(const GameState& state)
         return std::string(text::fuel::offline);
     }
     return text::fuel::availability(arkDiscovered(state));
-}
-
-inline std::string surfaceDepthBlockerLabel(const SurfaceDepthCapability& capability)
-{
-    switch (capability.blocker) {
-    case SurfaceDepthBlocker::SurveyRating:
-        return "Survey limit +" + std::to_string(capability.surveyRating) + " reached";
-    case SurfaceDepthBlocker::Unsurveyed:
-        return "Survey +" + std::to_string(capability.targetDepth) + " first";
-    case SurfaceDepthBlocker::BoreRating:
-        return "Bore limit +" + std::to_string(capability.boreRating) + " reached";
-    case SurfaceDepthBlocker::ReturnCritical:
-        return "Return range critical";
-    case SurfaceDepthBlocker::None:
-        break;
-    }
-    return std::string(text::buttons::unavailable);
 }
 
 inline std::string surfaceHazardRisk(double hazard, double scale, double relief)
@@ -1608,29 +1568,6 @@ inline SurfaceActionPreviewPresentation surfaceActionPreview(
         std::move(payoffChips),
         std::move(action)
     };
-}
-
-inline PlanetaryExpeditionState projectedSurveyExpedition(const PlanetaryExpeditionState& expedition, const SurfaceToolEffects& tools, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
-{
-    PlanetaryExpeditionState projected = expedition;
-    projected.supply = std::max(0, projected.supply - tuning::research::surveySupplyCost);
-    const MaterialInventory gain {.common = tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus};
-    projected.temporaryMaterials.common += gain.common;
-    projected.cargo += std::max(0, gain.common);
-    return projected;
-}
-
-inline std::vector<PanelMetricPresentation> surveyPayoffChips(const GameState& state, const SurfaceToolEffects& tools, const SurfaceCrewEffects& crew, const SurfaceSiteProfileEffects& site)
-{
-    std::vector<PanelMetricPresentation> chips;
-    chips.push_back(panelMetric("Mining layer", "Current"));
-    chips.push_back(panelMetric(
-        "Survey rating",
-        "+" + std::to_string(surfaceDepthRating(
-            state,
-            SurfaceDepthUpgradeKind::SurveyArray))));
-    addPositiveChip(chips, text::labels::commonMaterials, tuning::research::surveyCommonGain + tools.surveyCommonBonus + crew.surveyCommonBonus + site.surveyCommonBonus);
-    return chips;
 }
 
 inline std::vector<PanelMetricPresentation> extractPayoffChips(const PlanetaryExpeditionState& expedition)
@@ -1778,44 +1715,6 @@ inline MiningArenaRules upcomingMiningArenaRules(
         request.gateOverride = site->gateType;
     }
     return resolveMiningArenaRules(request);
-}
-
-inline SurfaceReturnSafetyPresentation surfaceReturnSafetyPresentation(
-    const GameState& state,
-    const ContentCatalog& catalog,
-    int absoluteDepth)
-{
-    SurfaceReturnSafetyPresentation presentation;
-    const SurfaceReturnSafetyAssessment assessment =
-        surfaceReturnSafetyAssessment(state, catalog, absoluteDepth);
-    presentation.severity = assessment.severity;
-    presentation.depth = assessment.depth;
-    presentation.estimatedReturnSeconds = assessment.estimatedReturnSeconds;
-    presentation.oxygenSeconds = assessment.oxygenSeconds;
-    presentation.fuelNeededAfterDeployment = assessment.fuelNeededAfterDeployment;
-    presentation.fuelAvailableAfterDeployment = assessment.fuelAvailableAfterDeployment;
-    presentation.fuelCycleSeconds = assessment.fuelCycleSeconds;
-    if (presentation.severity == SurfaceReturnSafetySeverity::Safe) {
-        return presentation;
-    }
-    presentation.title = presentation.severity == SurfaceReturnSafetySeverity::Critical
-        ? "RETURN RANGE CRITICAL"
-        : "RETURN MARGIN LOW";
-    presentation.cssClass = presentation.severity == SurfaceReturnSafetySeverity::Critical
-        ? "danger dig-endurance-warning"
-        : "caution dig-endurance-warning";
-
-    presentation.detail =
-        "DEPTH +" + std::to_string(presentation.depth) +
-        " RETURN: ~" + std::to_string(presentation.estimatedReturnSeconds) + "s\n" +
-        "OXYGEN: " + std::to_string(presentation.oxygenSeconds) + "s\n" +
-        "FUEL: " + std::to_string(presentation.fuelAvailableAfterDeployment) +
-        " available / " + std::to_string(presentation.fuelNeededAfterDeployment) + " needed\n" +
-        "FUEL LOOP: 1 / " + display::fixed(presentation.fuelCycleSeconds, 0) + "s\n\n";
-    presentation.detail += presentation.severity == SurfaceReturnSafetySeverity::Critical
-        ? "DO NOT MINE HERE.\nUpgrade endurance first."
-        : "MINE BRIEFLY.\nReturn as soon as the first payload is secured.";
-    return presentation;
 }
 
 inline std::string miningArenaForecastTitle(const MiningArenaRules& rules)

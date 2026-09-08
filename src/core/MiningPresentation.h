@@ -70,11 +70,6 @@ inline std::string miningOxygenValue(double seconds)
     return std::to_string(static_cast<int>(std::ceil(std::max(0.0, seconds)))) + "s";
 }
 
-inline std::string miningFuelCycleValue(double progress)
-{
-    return display::percent(1.0 - std::clamp(progress, 0.0, 1.0));
-}
-
 inline std::string miningToughnessValue(const MiningRunState& mining)
 {
     if (mining.targetMaxToughness <= 0.0) {

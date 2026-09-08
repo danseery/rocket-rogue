@@ -2731,10 +2731,18 @@ int main()
         rocket::restoreSaveData(state, catalog, *saved);
         rocket::Random rng(77);
         const auto launch = rocket::prepareLaunch(state, catalog, rng);
-        assert(launch.slingshotFuelSavings == 0.0);
-        assert(launch.slingshotSpeedBoost == 0.0);
-        assert(launch.slingshotInstabilityPenalty == 0.0);
-        assert(launch.transferAssistId.empty());
+        const auto restoredFlight = rocket::beginLaunchFlight(launch, rocket::currentDestination(state, catalog));
+        state.run.pendingTransferAssist = {};
+        state.run.nextLaunchFuelBoost = 0.0;
+        state.run.nextLaunchSpeedBoost = 0.0;
+        state.run.nextLaunchInstabilityPenalty = 0.0;
+        rocket::Random baselineRng(77);
+        const auto baseline = rocket::prepareLaunch(state, catalog, baselineRng);
+        const auto baselineFlight = rocket::beginLaunchFlight(baseline, rocket::currentDestination(state, catalog));
+        assert(restoredFlight.fuelRemaining == baselineFlight.fuelRemaining);
+        assert(restoredFlight.velocityX == baselineFlight.velocityX);
+        assert(restoredFlight.velocityY == baselineFlight.velocityY);
+        assert(launch.controlChaos == baseline.controlChaos);
     }
 
 

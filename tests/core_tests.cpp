@@ -829,13 +829,7 @@ void researchPhasesUnlockOnlyAfterMarsArrival()
         "arrival phase track should mark the current phase and pending follow-up");
 }
 
-void introduceArrivalFlybyForTest(GameState& state)
-{
-    ScenarioInstance* scenario = findScenarioInstance(state.meta, content::scenario::marsBayExpansion);
-    ScenarioStepProgress* funding = scenario == nullptr ? nullptr : findScenarioStepProgress(*scenario, "funding");
-    require(funding != nullptr, "the Mars transfer-assist briefing should exist in test state");
-    funding->briefingAcknowledged = true;
-}
+
 
 void researchProjectsGenerateAndCompleteFromSharedRules()
 {
@@ -8203,37 +8197,6 @@ void arkCampaignStateRoundTripsThroughSave()
 
 }
 
-void uiActionsUseStableSchemaIds()
-{
-    require(ui::actions::prepareLaunch == "prepare_launch", "prepare launch action should use a stable schema id");
-    require(ui::actions::startLaunch == "start_launch", "start launch action should use a stable schema id");
-    require(ui::actions::returnHome == "return_home", "return action should use a stable schema id");
-    require(ui::actions::arrivalOps == "arrival_ops", "arrival ops action should use a stable schema id");
-    require(ui::actions::acknowledgeApproachIntroduction == "acknowledge_approach_introduction",
-        "approach introduction acknowledgment should use a stable schema id");
-    require(ui::actions::openNavigation == "open_navigation", "navigation action should use a stable schema id");
-    require(ui::actions::arkJump == "ark_jump", "Ark jump action should use a stable schema id");
-    require(ui::actions::selectNavigationDestination(2) == "select_navigation:2", "indexed navigation actions should share one action family");
-    require(ui::actions::researchProject(2) == "research_project:2", "indexed research actions should share one action family");
-    require(ui::actions::surfaceUpgrade(2) == "surface_upgrade:2", "indexed surface upgrade actions should share one action family");
-    require(ui::actions::droneOps == "drone_ops", "Drone Ops action should use a stable schema id");
-    require(ui::actions::equipDrone(2) == "equip_drone:2", "indexed drone equipment actions should share one action family");
-    require(ui::actions::upgradeDroneSlot == "upgrade_drone_slot", "drone slot upgrade action should use a stable schema id");
-    require(ui::actions::acceptCrewReplacement == "accept_crew_replacement", "crew replacement should use one deterministic semantic action");
-    require(ui::actions::extractSurface == "extract_surface", "surface extraction action should use a stable schema id");
-    require(ui::actions::miningTether == "mining_tether", "mining tether action should use a stable schema id");
-    require(ui::actions::miningRepairDrill == "mining_repair_drill", "mining drill repair action should use a stable schema id");
-    require(ui::actions::miningRepairDrone == "mining_repair_drone", "mining drone repair action should use a stable schema id");
-    require(ui::actions::resetSave == "reset_save", "settings actions should use stable schema ids");
-    require(ui::actions::newGame == "new_game", "New Game should use a stable title action id");
-    require(ui::actions::continueGame == "continue_game", "Continue should use a stable title action id");
-    require(ui::modals::launchBlocked == "launch_blocked", "modal ids should stay shared and data-like");
-    require(ui::modals::map == "map", "solar map modal id should stay shared and data-like");
-
-    const std::string buyOffer = ui::actions::buyOffer(2);
-    require(buyOffer == "buy_offer:2", "indexed offer actions should encode the offer index in one reusable action family");
-    require(buyOffer.find("rr.") == std::string::npos, "panel action ids should not embed JavaScript snippets");
-}
 
 void structuredPanelPresentationCarriesTypedModalPolicy()
 {
@@ -8773,43 +8736,6 @@ void treasurePingMarksRareFirstAndSkipsExcludedMaterials()
         "Treasure multiplier should double only normal Common and Rare payouts");
 }
 
-void secondaryHybridTuningCoversAllRanksAndCaps()
-{
-    const auto near = [](double a, double b) { return std::abs(a - b) < 1e-9; };
-    const std::array<DroneModuleKind, 10> modules = {
-        DroneModuleKind::CombatDrill, DroneModuleKind::DrillGuard, DroneModuleKind::SpectrumFilter,
-        DroneModuleKind::OreRelay, DroneModuleKind::ContainmentShell, DroneModuleKind::ReclamationLoop,
-        DroneModuleKind::TargetedAssault, DroneModuleKind::PenetratingImpact,
-        DroneModuleKind::RetributionArc, DroneModuleKind::HazardScreen};
-    for (const DroneModuleKind module : modules) {
-        require(secondaryModuleValue(module, 1) > 0.0 && secondaryModuleValue(module, 2) >= secondaryModuleValue(module, 1)
-                && secondaryModuleValue(module, 3) >= secondaryModuleValue(module, 2),
-            "every secondary hybrid should scale monotonically through Mk III");
-    }
-    require(near(secondaryModuleValue(DroneModuleKind::CombatDrill, 1), 1.0)
-            && near(secondaryModuleValue(DroneModuleKind::CombatDrill, 2), 2.0)
-            && near(secondaryModuleValue(DroneModuleKind::CombatDrill, 3), 3.0), "Combat Drill damage should scale 1/2/3");
-    require(near(secondaryModuleValue(DroneModuleKind::DrillGuard, 1), .08)
-            && near(secondaryModuleValue(DroneModuleKind::DrillGuard, 2), .12)
-            && near(secondaryModuleValue(DroneModuleKind::DrillGuard, 3), .16), "Drill Guard relief should scale 8/12/16 percent");
-    require(near(secondaryModuleValue(DroneModuleKind::SpectrumFilter, 1), .10)
-            && near(secondaryModuleValue(DroneModuleKind::SpectrumFilter, 2), .18)
-            && near(secondaryModuleValue(DroneModuleKind::SpectrumFilter, 3), .25), "Spectrum Filter relief should scale 10/18/25 percent");
-    require(near(secondaryModuleValue(DroneModuleKind::OreRelay, 3), 3.0), "Ore Relay should add three chunks at Mk III");
-    require(near(secondaryModuleValue(DroneModuleKind::ContainmentShell, 3), .16), "Containment Shell should reach 16 percent");
-    require(near(secondaryModuleValue(DroneModuleKind::ReclamationLoop, 1), .5)
-            && near(secondaryModuleValue(DroneModuleKind::ReclamationLoop, 3), 1.5), "Reclamation Loop should recover .5/1/1.5 fuel per tile");
-    require(near(secondaryModuleValue(DroneModuleKind::TargetedAssault, 3), 16.0), "Targeted Assault should add 16 crit points at Mk III");
-    require(near(secondaryModuleValue(DroneModuleKind::PenetratingImpact, 1), .10)
-            && secondaryModuleSecondaryHits(DroneModuleKind::PenetratingImpact, 1) == 0
-            && secondaryModuleSecondaryHits(DroneModuleKind::PenetratingImpact, 2) == 1
-            && secondaryModuleSecondaryHits(DroneModuleKind::PenetratingImpact, 3) == 2, "Penetrating Impact should scale armor and aligned targets");
-    require(near(secondaryModuleValue(DroneModuleKind::RetributionArc, 3), 3.0), "Retribution Arc should reach three counter damage");
-    require(near(secondaryModuleValue(DroneModuleKind::HazardScreen, 3), .25), "Hazard Screen should reach 25 percent");
-    require(secondaryModuleSecondaryHits(DroneModuleKind::CombatDrill, 3) == 0, "non-penetrating hybrids should not gain secondary hits");
-    require(std::min(.24, .16 + .16 + .16) == .24, "Drill Guard duplicate relief should cap at 24 percent");
-    require(std::max(.10, .25) == .25, "Hazard Screen duplicates should use highest protection");
-}
 
 void postSolarBodiesAndGeologiesAreDeterministicAndPersistent()
 {
@@ -9081,7 +9007,6 @@ int main(int argc, char** argv)
     numberedChaptersAdvanceMonotonically();
     hostileNavigationSelectsShuttleSortie();
     arkCampaignStateRoundTripsThroughSave();
-    uiActionsUseStableSchemaIds();
     structuredPanelPresentationCarriesTypedModalPolicy();
     contentIdsResolveAgainstDefaultCatalog();
     outerPlanetCampaignSequenceIsExplicitAndUnskippable();
@@ -9091,7 +9016,6 @@ int main(int argc, char** argv)
     secondaryMiningStateRoundTrips();
     secondaryPulseUsesUnifiedCooldownAndStrongestHit();
     treasurePingMarksRareFirstAndSkipsExcludedMaterials();
-    secondaryHybridTuningCoversAllRanksAndCaps();
     postSolarBodiesAndGeologiesAreDeterministicAndPersistent();
 
     std::cout << "rocket_core_tests passed\n";

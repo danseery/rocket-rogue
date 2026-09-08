@@ -74,11 +74,6 @@ inline PanelLayoutMode panelLayoutMode(Screen screen)
         : PanelLayoutMode::PhaseBoard;
 }
 
-inline bool usesPhaseBoard(Screen screen)
-{
-    return panelLayoutMode(screen) == PanelLayoutMode::PhaseBoard;
-}
-
 inline constexpr PanelVisualFamily panelVisualFamily(Screen screen) noexcept
 {
     switch (screen) {

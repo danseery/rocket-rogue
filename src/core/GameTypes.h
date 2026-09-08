@@ -1425,20 +1425,6 @@ struct RouteLinkDefinition {
     bool oneWayExpedition = false;
 };
 
-struct TransferAssistDefinition {
-    std::string id;
-    std::string sourceDestinationId;
-    std::string targetDestinationId;
-    std::string availabilityScenarioId;
-    std::string availabilityStepId;
-    std::vector<LaunchTrainingStage> allowedLaunchStages;
-    FlybyGrade minimumGrade = FlybyGrade::Good;
-    double fuelSavings = 0.0;
-    double speedBoostBase = 0.0;
-    double goodInstabilityPenalty = 0.0;
-    int impactHullDamage = 0;
-    std::string displayName;
-};
 
 struct LaunchConfig {
     std::string destinationId;
