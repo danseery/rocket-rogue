@@ -133,7 +133,7 @@ jobs:
             'assets\ui\styles\shells.rcss', 'assets\ui\styles\families.rcss', 'assets\ui\styles\screen-exceptions.rcss',
             'assets\ui\styles\legacy.rcss',
             'rr-document-shell.rml', 'rr-workspace-shell.rml', 'rr-control-shell.rml',
-            'rr-surface-minigame-shell.rml', 'rr-mining-shell.rml', 'rr-takeover-shell.rml',
+            'rr-mining-shell.rml', 'rr-takeover-shell.rml',
             'rr-results-shell.rml', 'rr-modal-shell.rml',
             'scene.vert.spv', 'scene.frag.spv', 'scene_instance.vert.spv', 'scene_instance.frag.spv',
             'rml_ui.vert.spv', 'rml_ui.frag.spv',
@@ -326,7 +326,7 @@ jobs:
             assets/ui/styles/shells.rcss assets/ui/styles/families.rcss assets/ui/styles/screen-exceptions.rcss \
             assets/ui/styles/legacy.rcss \
             rr-document-shell.rml rr-workspace-shell.rml rr-control-shell.rml \
-            rr-surface-minigame-shell.rml rr-mining-shell.rml rr-takeover-shell.rml \
+            rr-mining-shell.rml rr-takeover-shell.rml \
             rr-results-shell.rml rr-modal-shell.rml \
             scene.vert.spv scene.frag.spv scene_instance.vert.spv scene_instance.frag.spv \
             rml_ui.vert.spv rml_ui.frag.spv \
