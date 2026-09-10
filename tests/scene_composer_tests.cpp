@@ -2576,26 +2576,54 @@ void testMiningRigStaysVisibleAndTracksHeading()
         / (firstLength * firstDrillLength) > 0.999F);
     assertMiningDrillMounted(first, firstDrill);
 
-    snapshot.miningDrillHeadWidthScale = 1.75;
-    snapshot.miningSideCutterReach = 1.5;
-    const ScenePacket& upgradedPacket = composer.compose(snapshot);
-    int visibleDrillParts = 0;
     const rocket::SceneAtlasUvRect drillUv = rocket::mapSceneAtlasUvRect(
         TextureId::DrillBit, 0.0F, 0.0F, 1.0F / 6.0F, 1.0F);
-    for (const SceneDraw& draw : upgradedPacket.draws) {
-        if (draw.drawType != SceneDrawType::InstancedQuad || draw.atlasPage != drillUv.page) continue;
-        for (std::size_t index = 0; index < draw.instanceCount; ++index) {
-            const SceneInstance instance = rocket::unpackSceneInstance(
-                upgradedPacket.instances[draw.firstInstance + index]);
-            if (instance.textured && std::abs(instance.u0-drillUv.u0) < 0.00004F &&
-                std::abs(instance.v0-drillUv.v0) < 0.00004F &&
-                std::abs(instance.u1-drillUv.u1) < 0.00004F &&
-                std::abs(instance.v1-drillUv.v1) < 0.00004F) ++visibleDrillParts;
+    // The side sprites must use cell dimensions at every rank and heading.
+    // A pixel-sized minimum applied in scene units made them span the screen.
+    for (int viewportWidth : {720, 1280}) {
+        for (int rank = 1; rank <= 3; ++rank) {
+            for (int heading = 0; heading < 8; ++heading) {
+                RenderSnapshot upgraded = snapshot;
+                const double angle = heading * 3.141592653589793 / 4.0;
+                upgraded.miningHullDirX = std::cos(angle);
+                upgraded.miningHullDirY = std::sin(angle);
+                upgraded.miningDrillHeadWidthScale = 1.0 + rank * 0.25;
+                upgraded.miningSideCutterReach = rank * 0.5;
+                SceneComposer upgradedComposer;
+                upgradedComposer.setViewport({viewportWidth, 800, viewportWidth, 800, 1.0F});
+                upgradedComposer.setTextureReady(TextureId::DrillBit, true);
+                const ScenePacket& upgradedPacket = upgradedComposer.compose(upgraded);
+                std::vector<SceneInstance> parts;
+                for (const SceneDraw& draw : upgradedPacket.draws) {
+                    if (draw.drawType != SceneDrawType::InstancedQuad || draw.atlasPage != drillUv.page) continue;
+                    for (std::size_t index = 0; index < draw.instanceCount; ++index) {
+                        const SceneInstance instance = rocket::unpackSceneInstance(
+                            upgradedPacket.instances[draw.firstInstance + index]);
+                        if (instance.textured && std::abs(instance.u0-drillUv.u0) < 0.00004F &&
+                            std::abs(instance.v0-drillUv.v0) < 0.00004F &&
+                            std::abs(instance.u1-drillUv.u1) < 0.00004F &&
+                            std::abs(instance.v1-drillUv.v1) < 0.00004F) parts.push_back(instance);
+                    }
+                }
+                assert(parts.size() == 3);
+                const float cellSize = std::min(upgradedPacket.surfaceCamera.cellWidth,
+                    upgradedPacket.surfaceCamera.cellHeight);
+                const auto& head = parts[0];
+                const float headLength = std::hypot(head.axisYx, head.axisYy);
+                for (std::size_t i = 1; i < parts.size(); ++i) {
+                    const auto& cutter = parts[i];
+                    const float widthCells = 2.0F * std::hypot(cutter.axisXx, cutter.axisXy) / cellSize;
+                    assert(std::abs(widthCells - upgraded.miningSideCutterReach) < 0.01F);
+                    const float cutterLength = std::hypot(cutter.axisYx, cutter.axisYy);
+                    assert(cutterLength > 0.0F && cutterLength < headLength);
+                    assert((head.axisYx * cutter.axisYx + head.axisYy * cutter.axisYy)
+                        / (headLength * cutterLength) > 0.999F);
+                    assert(std::hypot(cutter.centerX - head.centerX, cutter.centerY - head.centerY)
+                        < headLength * 2.0F + cellSize * upgraded.miningSideCutterReach);
+                }
+            }
         }
     }
-    assert(visibleDrillParts == 3);
-    snapshot.miningDrillHeadWidthScale = 1.0;
-    snapshot.miningSideCutterReach = 0.0;
 
     // A large presentation-time step snaps to the new heading, avoiding the
     // intentional short steering Slerp while checking the opposite direction.

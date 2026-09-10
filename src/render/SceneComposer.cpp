@@ -5208,7 +5208,9 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             const Vec2 lateral {-drillDirection.y, drillDirection.x};
             const float cutterOffset = drillW * 0.50F + cellSize * static_cast<float>(snapshot.miningSideCutterReach) * 0.50F;
             const float cutterLength = drillH * 0.58F;
-            const float cutterWidth = std::max(2.0F, cellSize * static_cast<float>(snapshot.miningSideCutterReach));
+            // Sprite dimensions use scene units, so scale the reach by the
+            // terrain cell size without a pixel-sized minimum.
+            const float cutterWidth = cellSize * static_cast<float>(snapshot.miningSideCutterReach);
             for (float side : {-1.0F, 1.0F}) {
                 drawSpriteRotated(
                     drillOrigin.x + drillDirection.x * cutterLength * 0.62F + lateral.x * cutterOffset * side,
