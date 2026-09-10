@@ -4,6 +4,7 @@
 #include "core/GameState.h"
 #include "core/ResearchSystem.h"
 #include "core/IncomingMessages.h"
+#include "core/SolarProgression.h"
 
 #include <algorithm>
 #include <charconv>
@@ -508,11 +509,11 @@ void applyReward(
         break;
     }
     case ScenarioRewardKind::CampaignMilestone:
-        // A takeover milestone is deliberately committed by its explicit
-        // story acknowledgement, not by the claim that opens the takeover.
-        // The reward ledger still records the claimed step, preventing a
-        // reload from duplicating the discovery while preserving the choice
-        // to read the beat before campaign state advances.
+        state.meta.campaignMilestone = reward.milestone;
+        if (reward.milestone == CampaignMilestone::ArkDiscovered) {
+            state.run.expedition.straylightRevealed = true;
+            state.meta.straylightDiscoveryAcknowledged = true;
+        }
         break;
     }
     instance.awardedRewardIds.push_back(id);
@@ -930,8 +931,12 @@ bool validateCampaignProgressionCatalog(const ContentCatalog& catalog, std::stri
                 definition.steps.begin(), definition.steps.end(), [&](const ScenarioStepDefinition& later) {
                     return containsId(later.prerequisites, step.id);
                 });
+            const bool optionalSolarMission = std::any_of(
+                catalog.solarMissions.begin(), catalog.solarMissions.end(), [&](const SolarMissionDefinition& mission) {
+                    return mission.optional && mission.scenarioId == definition.id && mission.claimStepId == step.id;
+                });
             if (!hasDependentStep && !isTerminalClaim && step.completionEvent != ScenarioEventKind::None &&
-                definition.instantiateByDefault) {
+                definition.instantiateByDefault && !optionalSolarMission) {
                 return fail("Scenario '" + definition.id + "/" + step.id + "' ends without a route, milestone, or successor.");
             }
         }
@@ -1445,31 +1450,6 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
             presentation.actionLabel = "Retry " + presentation.title;
         }
     }
-    if (presentation.state == ScenarioStepState::ReadyToClaim &&
-        presentation.action == ScenarioActionKind::ClaimReward) {
-        for (const Destination& destination : catalog.destinations) {
-            const bool unlocksRoute = std::any_of(
-                step->rewards.begin(),
-                step->rewards.end(),
-                [&](const ScenarioReward& reward) {
-                    return std::any_of(
-                        destination.routeRequirementKeys.begin(),
-                        destination.routeRequirementKeys.end(),
-                        [&](std::string_view key) {
-                            return rewardGrantsRouteRequirementKey(catalog, reward, key);
-                        });
-                });
-            if (unlocksRoute) {
-                if (presentation.actionLabel.rfind("Lock ", 0) == 0) {
-                    break;
-                }
-                // Surface-contract rewards authorize a destination directly;
-                // only a flight challenge is a distinct course-locking beat.
-                presentation.actionLabel = "Lock " + destination.name;
-                break;
-            }
-        }
-    }
     return presentation;
 }
 
@@ -1619,6 +1599,10 @@ CampaignNextStep campaignNextStep(const GameState& state, const ContentCatalog& 
 CampaignProgressionAuditResult auditCampaignProgression(const GameState& state, const ContentCatalog& catalog)
 {
     CampaignProgressionAuditResult result;
+    std::string solarError;
+    if (!validateSolarMissionCatalog(catalog, &solarError)) {
+        return {false, CampaignProgressionIssue::MissingPrimaryNextStep, std::move(solarError)};
+    }
     if (!state.run.expedition.travelInitialized && state.run.routeTransit.active()) {
         const RouteLinkDefinition* route = routeLinkForTransit(catalog, state.run.routeTransit);
         if (route == nullptr || currentDestination(state, catalog).id != state.run.routeTransit.originDestinationId) {
@@ -1636,6 +1620,18 @@ CampaignProgressionAuditResult auditCampaignProgression(const GameState& state, 
                 return {false, CampaignProgressionIssue::InvalidScenarioState,
                     "A scenario reward is claimed before its objective is complete."};
             }
+        }
+    }
+    if (state.screen == Screen::Hangar &&
+        state.run.expedition.location.bodyId == "earth" &&
+        !state.run.expedition.coursePlayerSelected &&
+        !state.run.expedition.course.targetBodyId.empty()) {
+        if (const SolarMissionDefinition* recommended =
+                solarMissionForBody(catalog, state.run.expedition.course.targetBodyId);
+            recommended != nullptr && !recommended->optional &&
+            solarMissionClaimed(state, catalog, *recommended)) {
+            return {false, CampaignProgressionIssue::MissingPrimaryNextStep,
+                "A completed solar mission still recommends itself."};
         }
     }
     // Physical solar travel always supplies a route home or a recoverable loss.

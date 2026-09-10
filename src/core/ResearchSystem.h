@@ -66,7 +66,11 @@ struct SurfaceUpgradeEffects {
     double oreAttractionRadius = 0.0;
     double drillPower = 0.0;
     double drillCooling = 0.0;
+    double drillHeatReduction = 0.0;
     double drillDurability = 0.0;
+    double drillHeadWidth = 0.0;
+    double sideCutterReach = 0.0;
+    double hardRockPower = 0.0;
     double hardRockBounceRelief = 0.0;
     double oreYieldChance = 0.0;
     double scannerRadius = 0.0;

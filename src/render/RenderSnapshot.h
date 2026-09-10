@@ -214,6 +214,11 @@ struct RenderSnapshot {
     bool orbitalLaserFiring = false;
     bool orbitalSurveying = false;
     std::vector<OrbitalSurveyLayer> orbitalSurveyLayers;
+    struct OrbitalShaftMarker {
+        double bearing = 0.0;
+        double depth = 0.0;
+    };
+    std::vector<OrbitalShaftMarker> orbitalExistingShafts;
     std::array<PlanetLandingZone, 6> landingZones;
     PlanetLandingZone orbitalZone;
     double orbitalShaftBearing = 0.0;
@@ -323,6 +328,8 @@ struct RenderSnapshot {
     double miningTargetY = 0.0;
     double miningHeat = 0.0;
     double miningDrillIntegrity = 1.0;
+    double miningDrillHeadWidthScale = 1.0;
+    double miningSideCutterReach = 0.0;
     double miningDroneHealth = 1.0;
     double miningReturnZoneX = 0.0;
     double miningReturnZoneY = 0.0;
@@ -339,7 +346,7 @@ struct RenderSnapshot {
     // -1 means no active mining actor. Otherwise this rises from zero after a
     // manual Survey Pulse to one when the shared scanner is ready again.
     double miningScannerRechargeProgress = -1.0;
-    double miningOreAttractionRadius = 2.15;
+    double miningOreAttractionRadius = 2.75;
     double miningScannerRadius = 5.5;
     double miningFailurePulse = 0.0;
     bool miningEvaDeathActive = false;

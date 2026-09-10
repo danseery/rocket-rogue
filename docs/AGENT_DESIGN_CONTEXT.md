@@ -32,7 +32,7 @@ The desired aesthetic is:
 - Manual descent preserves momentum; the explicit Land command stops and aligns before resuming gravity. Real support and rig clearance permit surface or underground touchdown.
 - Touchdown, deployment, packing and manual ascent share terrain, ship position and camera continuity. Mining clocks begin only after deployment.
 - Mining uses separate Rig/EVA actors, independent oxygen and powered-use Rig fuel. Recover physical payload to the parked ship; drones cannot bank cargo by elapsed transit time.
-- Keep campaign goals and rewards explicit. Opening teaching, economy, departure-grade/data gates, Ark/endgame integration and crew development have specific TBD entries in the GDD.
+- Keep campaign goals and rewards explicit. The v23 solar artifact chain through Straylight's reveal is canonical; economy, Ark activation/post-solar play and expanded crew development retain their specific GDD boundaries.
 - Typed content owns named beats and route requirements; reusable systems consume typed state and events. See [SCENARIO_FRAMEWORK.md](SCENARIO_FRAMEWORK.md).
 
 ## Planet And Resource Pillars
@@ -87,7 +87,7 @@ This retains loadout-driven autonomous swarm combat while allowing a vulnerable 
 
 ## Ark And Base Progression
 
-The GDD fixes open physical solar travel with Earth as initial service home. Moon, Mars, Io, Saturn, Uranus and Neptune supply six unique batteries; the derelict Straylight can be found early and becomes home only after explicit activation with all six installed. Batteries remain physical cargo at risk, can be stored at Earth, and must then be carried to the Ark; losses produce recoverable wreck ownership. Rank I ship tracks are available at Earth; ranks II/III require two/four distinct batteries ever banked or installed. Preserve the 20-ore Moon and 8-ore Mars contracts and Io Hazard Drone sequence. Initialized solar expeditions use real travel, recommended leads, Earth docking, carried salvage, deterministic Rank I installation, and wreck recovery. Preserve those shared operations; a scenario claim cannot create a replacement flight or reset its resources. Physical battery missions and Ark/post-solar integration remain GDD S3/S4 work. See [Persistent Expeditions](PERSISTENT_EXPEDITIONS.md).
+The GDD fixes open physical solar travel with Earth as initial service home. Moon, Mars, Io, Titan, Titania, and Triton supply six unique batteries; only claiming Triton reveals the reachable Straylight derelict. Batteries remain physical cargo at risk, can be stored at Earth, and must then be carried to the Ark; losses produce recoverable wreck ownership. Rank I ship tracks are available at Earth; ranks II/III require two/four distinct batteries ever banked or installed. Preserve the 20-ore Moon and 8-ore Mars contracts and Io Hazard Drone sequence. Initialized solar expeditions use real travel, recommended leads, Earth docking, carried salvage, deterministic Rank I installation, and wreck recovery. Preserve those shared operations; a scenario claim cannot create a replacement flight or reset its resources. Physical battery missions and Ark/post-solar integration remain GDD S3/S4 work. See [Persistent Expeditions](PERSISTENT_EXPEDITIONS.md).
 
 Ship sections such as Bio Farm, Robotics, Medical, Living, Command, Engineering, Science, Cargo/Hangar, Environmental, and Cultural systems can become future unlock families.
 
@@ -96,7 +96,7 @@ Ship sections such as Bio Farm, Robotics, Medical, Living, Command, Engineering,
 Prefer incremental systems that hook into the shared C++ application and preserve parity between native Vulkan 1.3 and WebGL2 builds:
 
 - Add content types and presentation helpers before new architecture.
-- Save version 21 is the only accepted schema. Older or malformed payloads are rejected and preserved until the player explicitly confirms New Campaign; no migration or automatic replacement is allowed. The v21 checkpoint uses its own storage key and cannot recover an older campaign.
+- Save version 23 is the only accepted schema. Older or malformed payloads are rejected and preserved until the player explicitly confirms New Campaign; no migration or automatic replacement is allowed. Older checkpoints cannot recover an incompatible campaign.
 - Make new systems visible through concise UI states.
 - Avoid enemies throughout the solar system and Aaru Vale; enemy combat begins only after Arkfall near Khepri Prime.
 - Treat Rig fuel as a visible finite physical tradeoff. The tank begins with the expedition allotment and can gain fuel only from physical fuel cells; there is no shared reserve, deployment fee, timed fuel cycle, or separate return stage. Autonomous bay units are Support Drones.

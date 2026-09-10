@@ -3672,7 +3672,7 @@ void GameRmlUi::closeModal()
 
 void GameRmlUi::dispatchAction(const std::string& action)
 {
-    const bool closesModal = !openModalId_.empty();
+    const bool closesModal = !openModalId_.empty() && !action.starts_with("expedition:preview:");
     if (closesModal) {
         clearFocusTargets();
         openModalId_.clear();

@@ -5,9 +5,9 @@
 namespace rocket::save_schema {
 
 inline constexpr std::string_view header = "RR_SAVE_V1";
-// Version twenty-one intentionally starts a new campaign generation. Older
+// Version twenty-three intentionally starts a new campaign generation. Older
 // payloads are rejected and preserved until the player explicitly starts a new campaign.
-inline constexpr int currentVersion = 21;
+inline constexpr int currentVersion = 23;
 inline constexpr char keyValueDelimiter = '=';
 inline constexpr char listDelimiter = ',';
 inline constexpr char textListDelimiter = '|';
@@ -114,6 +114,10 @@ inline constexpr std::string_view runUpgradeReturnScreen = "runUpgradeReturnScre
 inline constexpr std::string_view runRigUpgradeRanks = "runRigUpgradeRanks";
 inline constexpr std::string_view runDroneRanks = "runDroneRanks";
 inline constexpr std::string_view selectedSynergyIds = "selectedSynergyIds";
+inline constexpr std::string_view runUpgradeDraftCount = "runUpgradeDraftCount";
+inline constexpr std::string_view wideDrillHeadOffered = "wideDrillHeadOffered";
+inline constexpr std::string_view sideCuttersOffered = "sideCuttersOffered";
+inline constexpr std::string_view pendingGraftConflicts = "pendingGraftConflicts";
 inline constexpr std::string_view miningActive = "miningActive";
 inline constexpr std::string_view miningArenaMetadata = "miningArenaMetadata";
 inline constexpr std::string_view miningRewardLedger = "miningRewardLedger";

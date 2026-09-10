@@ -18,6 +18,7 @@
 #include "core/PostSolarSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/ScenarioSystem.h"
+#include "core/SolarProgression.h"
 #include "core/RefitPresentation.h"
 #include "core/Tuning.h"
 #include "core/SaveData.h"
@@ -66,6 +67,13 @@ constexpr double kMiningEvaDeathFadeToBlackSeconds = 0.62;
 constexpr double kMiningEvaDeathFadeFromBlackSeconds = 0.32;
 
 int destinationIndexForId(const ContentCatalog& catalog, std::string_view destinationId);
+
+bool lunarProspectorRewardClaimed(const GameState& state)
+{
+    const auto* scenario = findScenarioInstance(state.meta, content::scenario::lunarProspector);
+    const auto* anomaly = scenario ? findScenarioStepProgress(*scenario, "anomaly") : nullptr;
+    return state.meta.lunarProspectorClaimed || (anomaly && anomaly->claimed);
+}
 
 std::uint64_t surfaceSiteSeed(
     std::uint64_t campaignSeed,
@@ -824,6 +832,7 @@ void RocketGameApp::prepareSurfaceArrivalIfNeeded(const Destination& destination
         : 0;
     SurfaceLandingBuildRequest request;
     request.destinationId = destination.id;
+    request.bodyId = systemSite == nullptr ? std::string{} : systemSite->id;
     request.zoneId = requestedZone;
     request.landingOrdinal = completedLandings + 1;
     request.siteSeed = surfaceSiteSeed(state_.seed, destination.id, request.landingOrdinal);
@@ -861,6 +870,8 @@ void RocketGameApp::prepareSurfaceArrivalIfNeeded(const Destination& destination
         prepared.systemId = expedition.location.systemId;
         prepared.bodyId = systemSite->id;
         prepared.persistentSiteId = siteId;
+        prepared.expeditionTemplate.bodyId = systemSite->id;
+        prepared.miningTemplate.bodyId = systemSite->id;
     }
     if (!prepared.valid) {
         services_.host.log(
@@ -1323,6 +1334,30 @@ double RocketGameApp::liveBurnMultiplier() const
     return session_.flight.currentMultiplier;
 }
 
+bool RocketGameApp::restoreContinuousExpeditionScreen()
+{
+    auto& expedition = state_.run.expedition;
+    auto& flight = session_.flight;
+    if (!expedition.travelInitialized) return false;
+
+    const bool serviceDock = operationalHomeDocked(expedition);
+    bool changed = false;
+    if (serviceDock && (expedition.course.targetBodyId.empty() ||
+        expedition.course.targetBodyId == expedition.homeBodyId)) {
+        const std::string lead = recommendedExpeditionLead(state_, catalog_);
+        if (const auto* body = systemBody(solarSystemDefinition(), lead);
+            body && body->id != expedition.homeBodyId && expeditionMapBodyRevealed(state_, *body)) {
+            const auto model = expeditionFlightModel(state_, catalog_);
+            if (plotSystemCourse(expedition, flight, solarSystemDefinition(), body->id, &model) ==
+                ExpeditionResult::Applied) {
+                expedition.cruise.active = false;
+                changed = true;
+            }
+        }
+    }
+    return changed;
+}
+
 void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
 {
     landingSiteView_.reset();
@@ -1342,6 +1377,7 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
     keyboardRealtimeInput_ = {};
     controllerRealtimeInput_ = {};
     hasSavedGame_ = false;
+    earthDockIntroEligibleAfterReload_ = false;
     checkpointRecoveryAvailable_ = false;
     titleNotice_.clear();
     panelDirty_ = true;
@@ -1351,6 +1387,7 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
         restoreSaveData(state_, catalog_, *saveData);
         if (!state_.run.expedition.travelInitialized) (void)initializeLiveExpedition(state_, catalog_);
         (void)beginEarthOpening(state_, catalog_);
+        const bool recoveredContinuousFlight = restoreContinuousExpeditionScreen();
         const CampaignProgressionAuditResult audit = auditCampaignProgression(state_, catalog_);
         if (!audit.valid) {
             state_ = createNewGame(catalog_, 0x524F434B45544ULL);
@@ -1377,17 +1414,21 @@ void RocketGameApp::loadSavedGameOrDefault(bool showTitleScreen)
             }
             state_.statusLine = std::string(text::status::saveRestored);
             hasSavedGame_ = true;
+            earthDockIntroEligibleAfterReload_ = state_.screen == Screen::Hangar &&
+                operationalHomeDocked(state_.run.expedition) &&
+                state_.run.expedition.location.bodyId == "earth";
             if (!state_.run.expedition.travelInitialized && !hostileSystemActive(state_) && !state_.meta.ark.firstJumpComplete) {
                 titleNotice_ = "TRAVEL POSITION UNAVAILABLE / This legacy route record is preserved. Continuous travel needs a recorded physical flight or landing state.";
             }
+            if (recoveredContinuousFlight) save();
         }
     } else if (!storedSave.empty()) {
-        // v21 is an intentional fresh-campaign boundary. Preserve the old
+        // v23 is an intentional fresh-campaign boundary. Preserve the old
         // payload byte-for-byte until the player explicitly starts a new
         // campaign; incompatible active and checkpoint saves are never
         // offered as recovery paths.
         checkpointRecoveryAvailable_ = false;
-        titleNotice_ = "CAMPAIGN UPDATE \xC2\xB7 A new campaign is required.";
+        titleNotice_ = "CAMPAIGN UPDATE / This save was created by an older campaign version. Begin a new campaign.";
         hasSavedGame_ = false;
     }
 
@@ -2260,6 +2301,10 @@ void RocketGameApp::tick(double deltaSeconds)
         save();
         panelDirty_ = true;
     }
+    if (!debugSessionActive_ && restoreContinuousExpeditionScreen()) {
+        save();
+        panelDirty_ = realtimeHudDirty_ = true;
+    }
     if (!debugSessionActive_ && beginEarthOpening(state_,catalog_)) {
         beginSceneFadeFromBlack(kFirstTransmissionTransitionSeconds);
         session_.preparedLaunch = expeditionFlightModel(state_,catalog_);
@@ -2275,6 +2320,7 @@ void RocketGameApp::tick(double deltaSeconds)
         save();
         panelDirty_ = true;
     }
+    const bool lunarProspectorComplete = lunarProspectorRewardClaimed(state_);
     if (state_.run.expedition.travelInitialized && !expeditionDecision.pendingId.empty() && !expeditionDecision.awaitingAscent && !services_.ui.modalOpen()) {
         refreshPanel();
         if (services_.ui.modalOpen()) { releaseRealtimeInputs(true); return; }
@@ -2283,47 +2329,53 @@ void RocketGameApp::tick(double deltaSeconds)
         save();
         panelDirty_ = true;
     }
+    const bool solarProgressChanged = reconcileSolarMissionMessages(state_, catalog_);
+    if (solarProgressChanged) {
+        save();
+        panelDirty_ = true;
+    }
     if (state_.screen == Screen::Mining && state_.run.mining.active) {
         bool cargoMessageQueued = false;
-        if (state_.run.mining.cargo >= miningRigCargoCapacityMass())
+        const MiningRunState& mining = state_.run.mining;
+        if (mining.cargo >= miningRigCargoCapacityMass(state_, catalog_))
             cargoMessageQueued |= enqueueIncomingMessage(state_.incomingMessages, catalog_,
                 {"campaign.rig_full_tip", "rig_full_tip", "default"});
-        if (shipHoldUsed(state_) >= shipHoldCapacity(state_, catalog_))
+        const bool rigHasOverflowOre = materialCargoMass(mining.temporaryMaterials) > 0;
+        const bool prospectorHasOverflowOre = std::any_of(
+            mining.miniDrones.begin(),
+            mining.miniDrones.end(),
+            [](const MiningMiniDroneAgent& drone) {
+                return materialCargoMass(drone.haulMaterials) > 0;
+            });
+        if (shipHoldUsed(state_) >= shipHoldCapacity(state_, catalog_) &&
+            (rigHasOverflowOre || prospectorHasOverflowOre))
             cargoMessageQueued |= enqueueIncomingMessage(state_.incomingMessages, catalog_,
                 {"campaign.ship_full_tip", "ship_full_tip", "default"});
         if (cargoMessageQueued) { save(); panelDirty_ = true; }
     }
     const auto& dockExpeditionState = state_.run.expedition;
-    bool nearEarthDock = false;
-    if (dockExpeditionState.travelInitialized && state_.screen == Screen::Flight &&
-        session_.flight.active && session_.flight.mode != FlightMode::Landing) {
-        const auto& system = solarSystemDefinition();
-        if (const auto* earth = systemBody(system, "earth")) {
-            auto ship = dockExpeditionState.location;
-            captureSystemLocation(ship, session_.flight);
-            ship = convertSystemFrame(ship, CoordinateFrame::System, "", system);
-            const auto dock = systemDockPosition(*earth);
-            nearEarthDock = std::hypot(ship.position.x-dock.x, ship.position.y-dock.y) <= 0.40;
-        }
-    }
+    const bool nearEarthDock = dockExpeditionState.travelInitialized && state_.screen == Screen::Flight &&
+        expeditionDockInRange(dockExpeditionState, session_.flight, solarSystemDefinition(), "earth");
     const bool inspectingEarthDock = dockExpeditionState.travelInitialized &&
         !earthLaunchReady(dockExpeditionState) &&
-        ((state_.screen == Screen::Flight &&
-            (dockExpeditionState.course.targetBodyId == "earth" || nearEarthDock)) ||
+        ((state_.screen == Screen::Flight && nearEarthDock) ||
          (state_.screen == Screen::Hangar && operationalHomeDocked(dockExpeditionState) &&
           dockExpeditionState.location.bodyId == "earth" &&
           !openingMissionRetryEligible(state_)));
-    if (state_.meta.lunarProspectorClaimed) {
+    if (lunarProspectorComplete) {
         for (auto& message : state_.incomingMessages.pending)
             if (message.messageId == "earth_dock_intro") message.variantId = "services";
     }
     const bool dockMessagePending = std::any_of(state_.incomingMessages.pending.begin(),
         state_.incomingMessages.pending.end(), [](const auto& message) { return message.messageId == "earth_dock_intro"; });
-    if (inspectingEarthDock && !dockMessagePending && enqueueIncomingMessage(state_.incomingMessages, catalog_,
-        {state_.meta.lunarProspectorClaimed ? "campaign.earth_dock.services" : "campaign.earth_dock.moon_first",
-         "earth_dock_intro", state_.meta.lunarProspectorClaimed ? "services" : "moon_first"})) {
-        save();
-        panelDirty_ = true;
+    if (earthDockIntroEligibleAfterReload_ && inspectingEarthDock) {
+        earthDockIntroEligibleAfterReload_ = false;
+        if (!dockMessagePending && enqueueIncomingMessage(state_.incomingMessages, catalog_,
+            {lunarProspectorComplete ? "campaign.earth_dock.services" : "campaign.earth_dock.moon_first",
+             "earth_dock_intro", lunarProspectorComplete ? "services" : "moon_first"})) {
+            save();
+            panelDirty_ = true;
+        }
     }
     if (!state_.incomingMessages.pending.empty() && !services_.ui.modalOpen()) {
         refreshPanel();
@@ -2462,6 +2514,10 @@ void RocketGameApp::tick(double deltaSeconds)
             0.0,
             session_.asteroidImpactFeedbackSeconds - clampedDelta);
         const auto previousBody = state_.run.expedition.location.bodyId;
+        const bool departingCommittedSite = session_.flight.landing.siteCommitted;
+        const std::string departingSiteId = state_.run.expedition.location.siteId;
+        if (departingCommittedSite && !departingSiteId.empty())
+            storeVisitedSite(state_, departingSiteId);
         const bool liveExpedition = state_.run.expedition.travelInitialized;
         if (liveExpedition) session_.preparedLaunch = expeditionFlightModel(state_, catalog_);
         // Departure assistance only lifts the ship out of the local surface.
@@ -2497,11 +2553,19 @@ void RocketGameApp::tick(double deltaSeconds)
             landingSiteView_ ? &landingSiteView_->world : nullptr);
         if (liveExpedition && previousBody != state_.run.expedition.location.bodyId) {
             storeOrbitalSite();
+            if (departingCommittedSite) {
+                state_.run.shipDamage += physicalFlightCampaignDamage(session_.flight, state_.run.shipDamage);
+                state_.run.mining = {};
+                state_.run.planetaryExpedition.active = false;
+                session_.flight.landing = {};
+                state_.statusLine = "Planetary influence cleared. Physical flight continues.";
+            }
             surfaceArrival_.reset();
             landingSiteView_.reset();
             session_.orbitalWork = {};
             session_.preparedLaunch = expeditionFlightModel(state_, catalog_);
             panelDirty_ = true;
+            save();
         }
         if (!step.landingZoneId.empty()) {
             // The crossed gate, not survey selection, owns this landing.
@@ -2586,14 +2650,14 @@ void RocketGameApp::tick(double deltaSeconds)
                 queueControllerHapticCue(ControllerHapticCue::Touchdown);
             }
         } else if (step.flyby) {
-            storeOrbitalSite();
-            surfaceArrival_.reset();
-            if (session_.flight.landing.siteCommitted) {
-                state_.run.shipDamage+=physicalFlightCampaignDamage(session_.flight,state_.run.shipDamage);
-                state_.run.mining={};
-                state_.run.planetaryExpedition.active=false;
-                landingSiteView_.reset();
-                finishArrivalVisit("DEPARTURE COMPLETE - left the destination influence.");
+            if (liveExpedition) {
+                // Live system travel owns body exits continuously. This is a
+                // defensive recovery for an older in-memory terminal result.
+                session_.flight.active = true;
+                session_.flight.phase = FlightPhase::Transfer;
+                session_.flight.flybyRecorded = false;
+                state_.screen = Screen::Flight;
+                state_.statusLine = "Planetary influence cleared. Physical flight continues.";
             } else {
                 completeLaunch(destination.targetMultiplier, RecoveryMethod::TransferArrival);
                 finishArrivalVisit("FLYBY RECORDED — trajectory left the destination influence.");
@@ -5298,6 +5362,7 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
             && miningSceneHandoff_ == MiningSceneHandoff::None && !levelUp_.resolving
             && !session_.destruction.active
             && (!earthLaunchReady(state_.run.expedition) || session_.launchQueued),
+        session_.waypointPreviewCourse.targetBodyId.empty() ? nullptr : &session_.waypointPreviewCourse,
     };
 }
 
@@ -5469,6 +5534,14 @@ void RocketGameApp::runUiAction(const std::string& action)
             if (earthLaunchReady(state_.run.expedition) &&
                 action.substr(incomingPrefix.size()) == "campaign.lunar_approach") {
                 startLaunch();
+            }
+            for (const SolarMissionDefinition& mission : catalog_.solarMissions) {
+                if (acknowledgement->messageId == mission.briefingMessageId) {
+                    (void)performScenarioAction(
+                        state_, catalog_, mission.scenarioId, "briefing",
+                        ScenarioActionKind::AcknowledgeBriefing);
+                    break;
+                }
             }
             save();
             panelDirty_ = true;
@@ -5800,6 +5873,8 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningScannerRechargeProgress = tuning::mining::scannerRechargePresentationProgress(
             expedition.scannerCooldownSeconds);
         const MiningDrillStats miningStats = miningDrillStats(state_, catalog_);
+        result.miningDrillHeadWidthScale = miningStats.headWidthScale;
+        result.miningSideCutterReach = miningStats.sideCutterReach;
         if (!surfaceBaySequence_.active() && state_.screen == Screen::Mining) {
             result.miningPoiGuidance = miningPoiGuidanceTarget(
                 mining,
@@ -5809,6 +5884,7 @@ RenderSnapshot RocketGameApp::snapshot() const
                 result.miningAtReturnZone);
         }
         result.miningOreAttractionRadius = tuning::mining::rigOreAttractionRadiusCells +
+            miningStats.sideCutterReach + 0.95 * std::max(0.0, miningStats.headWidthScale - 1.0) +
             surfaceUpgradeEffects(state_, catalog_).oreAttractionRadius;
         result.miningScannerRadius =
             mining.operatorMode == MiningOperatorMode::Jetpack
@@ -5928,6 +6004,9 @@ RenderSnapshot RocketGameApp::snapshot() const
             result.flightGuidance = expeditionGuidance(state_,session_.orbitalWork.surveyComplete,surfaceArrival_.prepared && surfaceArrival_.prepared->laserComplete);
             result.systemLocation = state_.run.expedition.location;
             result.system = solarSystemDefinition();
+            std::erase_if(result.system.bodies, [&](const SystemBodyDefinition& body) {
+                return !solarBodyRevealed(state_, catalog_, body.id);
+            });
             result.wrecks = state_.run.expedition.wrecks;
         }
         result.launchFlightPhase = static_cast<int>(session_.flight.phase);
@@ -5960,6 +6039,31 @@ RenderSnapshot RocketGameApp::snapshot() const
             result.orbitalShaftBearing = landingZoneSiteBearing(result.orbitalZone,
                 prepared.shaftX + orbital_laser::shaftCenterOffset, prepared.miningTemplate.returnZoneX,
                 prepared.miningTemplate.terrain.width);
+        }
+        const auto& activeExpedition = state_.run.expedition;
+        for (const auto& site : activeExpedition.sites) {
+            if (site.systemId != activeExpedition.location.systemId ||
+                site.bodyId != activeExpedition.location.bodyId ||
+                (surfaceArrival_.prepared &&
+                    site.siteId == surfaceArrival_.prepared->persistentSiteId))
+                continue;
+            const auto zoneSeparator = site.siteId.rfind(':');
+            const auto* zone = zoneSeparator == std::string::npos
+                ? nullptr : planetLandingZone(std::string_view(site.siteId).substr(zoneSeparator + 1));
+            const auto& orbital = site.orbital;
+            const auto& mining = site.mining;
+            const bool drilled = orbital.laserComplete || orbital.laserBlocked ||
+                orbital.laserDepth > mining.entryDepthZone || orbital.laserRow > 4 ||
+                orbital.laserRowWork > 0.0;
+            if (!zone || !drilled || mining.terrain.width <= 0 || mining.terrain.height <= 0)
+                continue;
+            const double depth = orbital.laserDepth - mining.entryDepthZone +
+                static_cast<double>(orbital.laserRow) / mining.terrain.height;
+            result.orbitalExistingShafts.push_back({
+                landingZoneSiteBearing(*zone,
+                    orbital.shaftX + orbital_laser::shaftCenterOffset,
+                    mining.returnZoneX, mining.terrain.width),
+                std::clamp(depth, 0.08, 5.0)});
         }
         result.orbitalOverlay = work.overlay * (1.0 - scaleProfile.landingBlend);
         result.orbitalSurveyProgress = work.surveyComplete ? 1.0 : std::clamp(work.elapsed / 2.0, 0.0, 1.0);

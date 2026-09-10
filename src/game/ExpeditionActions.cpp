@@ -2,6 +2,7 @@
 #include "core/ExpeditionSystem.h"
 #include "core/PayloadTransfer.h"
 #include "core/ResearchSystem.h"
+#include "core/SolarProgression.h"
 #include <charconv>
 
 namespace rocket {
@@ -9,7 +10,7 @@ void RocketGameApp::toggleCruiseControl() {
     if (!state_.run.expedition.travelInitialized || state_.screen != Screen::Flight || services_.ui.modalOpen() ||
         session_.flight.mode == FlightMode::Landing || !session_.flight.active) return;
     const auto result = toggleCruise(state_.run.expedition);
-    state_.statusLine = result == ExpeditionResult::InvalidTarget ? "Plot a destination on the map first." :
+    state_.statusLine = result == ExpeditionResult::InvalidTarget ? "Set a waypoint on the map first." :
         state_.run.expedition.cruise.active ? "CRUISE ACTIVE - manual approach required. C / L3 to cancel." : "CRUISE OFF - manual flight.";
     save();
     panelDirty_ = true;
@@ -25,12 +26,35 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
     };
     const auto close = [&] {
         services_.ui.closeModal();
+        session_.waypointPreviewCourse = {};
         if (pauseReason_ == PauseReason::BlockingModal || pauseReason_ == PauseReason::ControllerUiFocus) clearControllerPause();
         release();
     };
-    const auto plot = [&](std::string_view id) {
+    const auto plot = [&](std::string_view id, bool playerSelected = false) {
+        const auto* body = systemBody(solarSystemDefinition(), id);
+        if (!body || !solarBodyRevealed(state_, catalog_, body->id)) {
+            state_.statusLine = "That destination has not been discovered.";
+            return ExpeditionResult::InvalidTarget;
+        }
         const auto model = expeditionFlightModel(state_, catalog_);
-        return plotSystemCourse(e, session_.flight, solarSystemDefinition(), id, &model);
+        const auto result = plotSystemCourse(e, session_.flight, solarSystemDefinition(), id, &model);
+        if (result == ExpeditionResult::Applied) e.coursePlayerSelected = playerSelected;
+        return result;
+    };
+    const auto preview = [&](std::string_view id) {
+        const auto* body = systemBody(solarSystemDefinition(), id);
+        if (!body || !solarBodyRevealed(state_, catalog_, body->id)) {
+            state_.statusLine = "That destination has not been discovered.";
+            return ExpeditionResult::InvalidTarget;
+        }
+        auto position = e.location;
+        captureSystemLocation(position, session_.flight);
+        const auto model = expeditionFlightModel(state_, catalog_);
+        session_.waypointPreviewCourse = previewSystemCourse(
+            position, session_.flight, solarSystemDefinition(), id, e.homeBodyId, &model);
+        return session_.waypointPreviewCourse.targetBodyId.empty()
+            ? ExpeditionResult::InvalidTarget
+            : ExpeditionResult::Applied;
     };
     if (action == "expedition:retry_opening") {
         if (retryOpeningMission(state_,catalog_) == ExpeditionResult::Applied) {
@@ -49,7 +73,8 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         return true;
     }
     if (action == "expedition:map") {
-        if (!e.course.targetBodyId.empty()) plot(e.course.targetBodyId);
+        session_.waypointPreviewCourse = {};
+        if (!e.course.targetBodyId.empty()) preview(e.course.targetBodyId);
         release();
         refreshPanel();
         services_.ui.openModal("map");
@@ -57,13 +82,16 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
     }
     if (action == "expedition:close") { close(); }
     else if (action.starts_with("expedition:preview:")) {
-        plot(action.substr(19));
+        preview(action.substr(19));
         refreshPanel();
         return true;
     } else if (action.starts_with("expedition:plot:")) {
-        if (plot(action.substr(16)) == ExpeditionResult::Applied) {
+        if (plot(action.substr(16), true) == ExpeditionResult::Applied) {
             close();
-            state_.statusLine = e.cruise.active ? "Course plotted / CRUISE ACTIVE" : "Course plotted / manual flight";
+            const auto* waypoint = systemBody(solarSystemDefinition(), e.course.targetBodyId);
+            state_.statusLine = operationalHomeDocked(e)
+                ? (waypoint ? waypoint->name : std::string("Destination")) + " waypoint set. Depart dock when ready."
+                : e.cruise.active ? "Waypoint set / CRUISE ACTIVE" : "Waypoint set / manual flight";
             state_.run.flight.courseNoticeSeconds = 3.0;
         }
     } else if (action.starts_with("expedition:decision:")) {
@@ -85,23 +113,45 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
             surfaceArrival_.reset();
             landingSiteView_.reset();
             close();
-            state_.statusLine = "Thrust to undock. Plotting a course does not steer the ship.";
-        }
+            const auto* waypoint = systemBody(solarSystemDefinition(), e.course.targetBodyId);
+            state_.statusLine = "Thrust to undock" +
+                (waypoint ? " toward " + waypoint->name : std::string{}) +
+                ". The waypoint marks direction; flight remains manual.";
+        } else state_.statusLine = "Departure is available only from an operational dock.";
     } else if (action == "expedition:dock") {
         const auto cargo = e.cargo.materials;
         const auto payout = static_cast<int>(e.cargo.credits);
         if (dockExpedition(state_, solarSystemDefinition()) == ExpeditionResult::Applied) {
             close();
-            state_.screen = Screen::Hangar;
-            state_.run.shipDamage = 0;
-            state_.run.mining = {};
-            state_.run.planetaryExpedition = {};
             session_.flight.landing = {};
-            session_.flightArmed = false;
-            state_.statusLine = operationalHomeDocked(e) ?
-                "DOCKED - Banked " + std::to_string(cargo.common) + " common / " + std::to_string(cargo.rare) +
-                    " rare / " + std::to_string(cargo.exotic) + " exotic and " + std::to_string(payout) + " credits. Ship serviced. Expedition complete." :
-                "Derelict dock reached. No servicing available.";
+            if (operationalHomeDocked(e)) {
+                state_.screen = Screen::Hangar;
+                state_.run.shipDamage = 0;
+                state_.run.mining = {};
+                state_.run.planetaryExpedition = {};
+                session_.flightArmed = false;
+                std::string nextWaypoint;
+                const auto* selectedMission = solarMissionForBody(catalog_, e.course.targetBodyId);
+                const bool stale = selectedMission && solarMissionClaimed(state_, catalog_, *selectedMission);
+                if (!e.coursePlayerSelected || e.course.targetBodyId.empty() || e.course.targetBodyId == e.homeBodyId || stale) {
+                    const std::string lead = recommendedExpeditionLead(state_, catalog_);
+                    const auto* body = systemBody(solarSystemDefinition(), lead);
+                    if (body && body->id != e.homeBodyId && solarBodyRevealed(state_, catalog_, body->id) &&
+                        plot(lead) == ExpeditionResult::Applied)
+                        nextWaypoint = body->name;
+                }
+                state_.statusLine = "DOCKED - Banked " + std::to_string(cargo.common) + " common / " + std::to_string(cargo.rare) +
+                    " rare / " + std::to_string(cargo.exotic) + " exotic and " + std::to_string(payout) +
+                    " credits. Ship serviced." + (nextWaypoint.empty() ? std::string{} : " Next waypoint: " + nextWaypoint + ".");
+            } else {
+                state_.screen = Screen::Flight;
+                e.undockReady = true;
+                session_.flight.physicalFlight = true;
+                session_.flight.phase = FlightPhase::Transfer;
+                session_.flight.mode = FlightMode::Orbit;
+                session_.flightArmed = true;
+                state_.statusLine = "Derelict dock reached. No servicing available. Thrust to release.";
+            }
         } else state_.statusLine = "Match the dock marker and slow below 0.20 relative speed.";
     } else if (action == "expedition:abandon") {
         refreshPanel();
@@ -123,7 +173,15 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         captureSystemLocation(e.location, session_.flight);
         if (parsed.ec == std::errc() && parsed.ptr == text.data() + text.size()) {
             const auto result = salvageWreck(e, id, solarSystemDefinition(), shipHoldCapacity(state_, catalog_));
-            state_.statusLine = result == ExpeditionResult::Applied ? "Wreck cargo transferred aboard." : "Rendezvous with the wreck and match its speed to recover cargo.";
+            state_.statusLine = result == ExpeditionResult::Applied
+                ? "Wreck recovered. Upgrades restored; remaining cargo stays salvageable."
+                : "Rendezvous with the wreck and match its speed to recover cargo and upgrades.";
+        }
+    } else if (action == "expedition:graft_conflict:keep" || action == "expedition:graft_conflict:recovered") {
+        const bool recovered = action.ends_with(":recovered");
+        if (resolveRecoveredGraftConflict(e, 0, recovered) == ExpeditionResult::Applied) {
+            close();
+            state_.statusLine = recovered ? "Recovered graft installed." : "Current graft retained.";
         }
     } else if (action.starts_with("expedition:install:")) {
         const auto* module = catalog_.findModule(action.substr(19));

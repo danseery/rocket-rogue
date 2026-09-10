@@ -107,7 +107,7 @@ constexpr std::array<LegacyCampaignScenarioBinding, 4> legacyCampaignScenarioBin
     {CampaignObjectiveId::LunarProspector, content::scenario::lunarProspector, "briefing", "delivery"},
     {CampaignObjectiveId::MarsBayExpansion, content::scenario::marsBayExpansion, "briefing", "delivery"},
     {CampaignObjectiveId::IoVolcanicDescent, content::scenario::volcanicDescent, "commission", "recovery"},
-    {CampaignObjectiveId::SaturnSlingshot, content::scenario::outerTransfer, "briefing", "flyby"},
+    {CampaignObjectiveId::SaturnSlingshot, content::scenario::saturnDeparture, "briefing", "artifact"},
 }};
 
 const LegacyCampaignScenarioBinding* legacyCampaignScenarioBinding(CampaignObjectiveId objective)
@@ -1434,7 +1434,40 @@ bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, R
     }
 
     const int offerCount = std::min(3, static_cast<int>(candidates.size()));
+    const int draftNumber = state.run.expedition.progression.runUpgradeDraftCount + 1;
+    std::vector<std::string> forcedRigIds;
+    if (draftNumber == 1) {
+        forcedRigIds = {content::surfaceUpgrade::highTorqueMotor, content::surfaceUpgrade::wideDrillHead};
+    } else if (draftNumber <= 3 && !state.run.expedition.progression.sideCuttersOffered &&
+               runRigUpgradeRank(state, content::surfaceUpgrade::sideCutters) == 0) {
+        forcedRigIds.push_back(content::surfaceUpgrade::sideCutters);
+    }
+    const auto isDrillCandidate = [&](const WeightedRunUpgradeCandidate& candidate) {
+        if (candidate.offer.kind != RunUpgradeKind::Rig) return false;
+        const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(candidate.offer.definitionId);
+        return upgrade != nullptr && upgrade->category == SurfaceUpgradeCategory::Drill;
+    };
+    forcedRigIds.erase(std::remove_if(forcedRigIds.begin(), forcedRigIds.end(), [&](const std::string& id) {
+        return std::none_of(candidates.begin(), candidates.end(), [&](const auto& candidate) {
+            return candidate.offer.kind == RunUpgradeKind::Rig && candidate.offer.definitionId == id;
+        });
+    }), forcedRigIds.end());
+    if (forcedRigIds.empty() && std::any_of(candidates.begin(), candidates.end(), isDrillCandidate)) {
+        const auto drill = std::find_if(candidates.begin(), candidates.end(), isDrillCandidate);
+        forcedRigIds.push_back(drill->offer.definitionId);
+    }
     for (int slot = 0; slot < offerCount; ++slot) {
+        if (slot < static_cast<int>(forcedRigIds.size())) {
+            const auto forced = std::find_if(candidates.begin(), candidates.end(), [&](const auto& candidate) {
+                return candidate.offer.kind == RunUpgradeKind::Rig &&
+                    candidate.offer.definitionId == forcedRigIds[static_cast<std::size_t>(slot)];
+            });
+            if (forced != candidates.end()) {
+                state.run.expedition.progression.runUpgradeOffers[static_cast<std::size_t>(slot)] = forced->offer;
+                candidates.erase(forced);
+                continue;
+            }
+        }
         int totalWeight = 0;
         for (const WeightedRunUpgradeCandidate& candidate : candidates) {
             totalWeight += runUpgradeOfferWeight(candidate.rarity);
@@ -1452,6 +1485,16 @@ bool generateRunUpgradeOffers(GameState& state, const ContentCatalog& catalog, R
     }
     state.run.expedition.progression.runUpgradeOfferCount = offerCount;
     state.run.expedition.progression.runUpgradeOfferPending = offerCount > 0;
+    if (offerCount > 0) {
+        ++state.run.expedition.progression.runUpgradeDraftCount;
+        for (int slot = 0; slot < offerCount; ++slot) {
+            const std::string& id = state.run.expedition.progression.runUpgradeOffers[static_cast<std::size_t>(slot)].definitionId;
+            state.run.expedition.progression.wideDrillHeadOffered =
+                state.run.expedition.progression.wideDrillHeadOffered || id == content::surfaceUpgrade::wideDrillHead;
+            state.run.expedition.progression.sideCuttersOffered =
+                state.run.expedition.progression.sideCuttersOffered || id == content::surfaceUpgrade::sideCutters;
+        }
+    }
     return state.run.expedition.progression.runUpgradeOfferPending;
 }
 
@@ -1482,6 +1525,7 @@ bool chooseRunUpgrade(GameState& state, const ContentCatalog& catalog, int index
             found->rank = expectedRank;
         }
         installedName = upgrade->name + " " + runUpgradeRankLabel(expectedRank);
+        state.run.mining.rigGeometryValidated = false;
         break;
     }
     case RunUpgradeKind::DroneRank: {
@@ -1556,7 +1600,11 @@ SurfaceUpgradeEffects surfaceUpgradeEffects(const GameState& state, const Conten
         effects.oreAttractionRadius += upgrade.stats.oreAttractionRadius * scale;
         effects.drillPower += upgrade.stats.drillPower * scale;
         effects.drillCooling += upgrade.stats.drillCooling * scale;
+        effects.drillHeatReduction += upgrade.stats.drillHeatReduction * scale;
         effects.drillDurability += upgrade.stats.drillDurability * scale;
+        effects.drillHeadWidth += upgrade.stats.drillHeadWidth * scale;
+        effects.sideCutterReach += upgrade.stats.sideCutterReach * scale;
+        effects.hardRockPower += upgrade.stats.hardRockPower * scale;
         effects.hardRockBounceRelief += upgrade.stats.hardRockBounceRelief * scale;
         effects.oreYieldChance += upgrade.stats.oreYieldChance * scale;
         effects.scannerRadius += upgrade.stats.scannerRadius * scale;

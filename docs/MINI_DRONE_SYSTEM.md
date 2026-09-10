@@ -112,6 +112,6 @@ Io is the current deliberate exception and tutorial: its soil never pays, it gen
 
 ## Future Hooks
 
-Save version 21 is an intentional fresh-start boundary. It persists Support Drone ownership, assignments, runtime, physical payload ownership, and active Mining state. Every non-v21 or malformed campaign is rejected without partial restoration or migration and remains untouched until New Campaign is explicitly confirmed.
+Save version 23 is an intentional fresh-start boundary. It persists Support Drone ownership, assignments, runtime, physical payload ownership, and active Mining state. Every non-v23 or malformed campaign is rejected without partial restoration or migration and remains untouched until New Campaign is explicitly confirmed.
 
 Future passes can add branching per-unit upgrade trees, Support Drone repair, rarity-specific visual treatments, and more signature-specific effects. Keep enemy combat post-solar and swarm execution autonomous: the EVA sidearm protects the vulnerable operator, while buildcraft remains the source of sustained combat strength.

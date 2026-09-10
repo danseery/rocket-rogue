@@ -130,6 +130,7 @@ add_library(rocket_core
     src/core/ResearchSystem.cpp
     src/core/RigFuelSystem.cpp
     src/core/ScenarioSystem.cpp
+    src/core/SolarProgression.cpp
     src/core/SaveData.cpp
     src/input/ControllerInput.cpp)
 target_include_directories(rocket_core PUBLIC src)

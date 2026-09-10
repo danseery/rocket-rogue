@@ -9852,6 +9852,39 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     line-height: 1.15;
 }
 
+/* At a service dock, departure is the only action that returns to flight.
+   Keep it above shipyard choices and visually dominant on both layouts. */
+#rr-panel .expedition-home .expedition-dock-departure {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    margin: 12px 0px 4px 0px;
+    padding: 10px;
+    background-color: #071c24;
+    border-width: 1px;
+    border-color: #247b8e;
+}
+#rr-panel .expedition-home .expedition-dock-departure p {
+    width: 100%;
+    margin: 0px 0px 7px 0px;
+    color: #7deeff;
+    font-size: 12px;
+    font-weight: bold;
+}
+#rr-panel .expedition-home .expedition-dock-departure button {
+    width: 100%;
+    min-height: 56px;
+    height: 56px;
+    margin: 0px;
+    color: #edffff;
+    background-color: #185b4a;
+    border-color: #62efff;
+    font-size: 18px;
+    font-weight: bold;
+    line-height: 56px;
+}
+
 /* The side-rail cockpit is narrower than the desktop flight lane. Keep both
    action rows inside their card instead of allowing the legacy 372px lane to
    push buttons beyond the panel border. */
@@ -10199,6 +10232,11 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 .expedition-flight-bar { position: absolute; bottom: 8dp; left: 12dp; right: 12dp; background-color: #071019ee; border: 1dp #407382; padding: 8dp; }
 .expedition-flight-bar p { margin: 2dp; color: #73ddeb; font-size: 12dp; }
 .expedition-flight-bar button { margin: 3dp; font-size: 12dp; }
+.expedition-flight-bar .expedition-dock-action { width: 100%; margin-top: 6dp; }
+.expedition-flight-bar .expedition-dock-action button {
+    width: 100%; min-height: 52dp; height: 52dp; margin: 0dp; color: #edffff;
+    background-color: #185b4a; border-color: #62efff; font-size: 18dp; font-weight: bold; line-height: 52dp;
+}
 /* The short flight dock reserves separate space for telemetry and navigation. */
 #rr-document.rr-bottom-dock #rr-panel.live-hud-family-panel .live-hud-header,
 #rr-document.rr-bottom-dock #rr-panel.live-hud-family-panel .rr-objective-strip,
@@ -10212,27 +10250,46 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 #rr-document.rr-bottom-dock #rr-panel.live-hud-family-panel .expedition-flight-bar {
     top: 70dp; bottom: 8dp; left: 47%; right: 12dp; margin: 0dp;
 }
-.solar-map-scroll { width: 100%; overflow-x: auto; overflow-y: hidden; height: 360dp; }
+.solar-map-heading { display: flex; justify-content: space-between; align-items: center; margin: 0dp 0dp 8dp; color: #66859a; font-size: 11dp; letter-spacing: 1dp; }
+.solar-map-heading strong { color: #a8bac4; font-weight: normal; }
+.solar-map-scroll { width: 100%; overflow-x: auto; overflow-y: hidden; height: 360dp; border: 1dp #18384a; background-color: #030910; }
 .solar-map-scroll scrollbarhorizontal { display: block; visibility: visible; width: auto; height: 10dp; background-color: #111c26; }
 .solar-map-scroll scrollbarhorizontal slidertrack { display: block; height: 10dp; background-color: #111c26; }
 .solar-map-scroll scrollbarhorizontal sliderbar { display: block; height: 8dp; min-width: 30dp; margin-top: 1dp; background-color: #4e6b80; border-radius: 4dp; }
 .solar-map-scroll scrollbarhorizontal sliderarrowdec, .solar-map-scroll scrollbarhorizontal sliderarrowinc { display: none; }
 .expedition-home button.disabled, .expedition-home button.disabled:hover, .expedition-home button.disabled:focus { color: #6f8290; border-color: #334855; background-color: #101923; }
-.solar-map { position: relative; width: 704dp; height: 350dp; background-color: #050c14; }
+.solar-map { position: relative; width: 704dp; height: 350dp; background-color: #030910; }
+.solar-orbit { position: absolute; border: 1dp #16364a; border-radius: 999dp; opacity: 0.72; }
 .solar-body { position: absolute; }
-#rr-modal .expedition-map .solar-body button { padding: 0dp 4dp; font-size: 11dp; height: 24dp; min-height: 24dp; max-height: 24dp; line-height: 24dp; width: 100%; min-width: 0dp; background-color: #09151d; border-width: 1dp; }
+#rr-modal .expedition-map .solar-body button { padding: 0dp 3dp; font-size: 10dp; height: 20dp; min-height: 20dp; max-height: 20dp; line-height: 20dp; width: 100%; min-width: 0dp; color: #b8c8d0; background-color: #07121a; border: 1dp #29485a; letter-spacing: .5dp; }
+#rr-modal .expedition-map .solar-moon-label button { color: #879da9; border-color: #213a49; font-size: 9dp; }
 .solar-selected button { border-color: #64edff; color: #64edff; }
 .solar-hazard button { border-color: #f3a451; color: #f3a451; }
-.solar-ship, .solar-wreck { position: absolute; color: #7affae; font-size: 11dp; }
-.solar-ship { width: 8dp; height: 8dp; background-color: #7affae; border: 1dp #ffffff; margin-left: -4dp; margin-top: -4dp; }
-.solar-wreck { color: #ffbd67; }
-.solar-course { position: absolute; width: 2dp; height: 2dp; background-color: #6abde0; }
-#rr-modal .expedition-map .solar-planet { position: absolute; padding: 0dp; min-width: 0dp; min-height: 0dp; margin: 0dp; background-color: transparent; border-width: 0dp; }
+.solar-wreck { position: absolute; color: #ffbd67; font-size: 11dp; padding: 1dp 3dp; background-color: #1b1209; border: 1dp #8c6534; }
+.solar-course { position: absolute; width: 2dp; height: 2dp; background-color: #4fdcec; opacity: .80; }
+.solar-moon-link { position: absolute; width: 2dp; height: 2dp; background-color: #315367; opacity: .75; }
+#rr-modal .expedition-map .solar-planet,
+#rr-modal .expedition-map .solar-planet:hover,
+#rr-modal .expedition-map .solar-planet:focus { position: absolute; padding: 0dp; min-width: 0dp; min-height: 0dp; margin: 0dp; background-color: transparent; border-width: 0dp; }
 .solar-planet img { width: 100%; height: 100%; }
-.solar-sun { width: 100%; height: 100%; background-color: #ffa626; border-radius: 50%; }
-#rr-modal .expedition-map .solar-planet-selected { border: 1dp #64edff; border-radius: 50%; }
-.solar-dock { position: absolute; color: #ffc76a; font-size: 12dp; }
-.solar-leader { position: absolute; width: 2dp; height: 2dp; background-color: #334855; }
+.solar-sun { width: 100%; height: 100%; background-color: #ffa626; border-radius: 999dp; }
+#rr-modal .expedition-map .solar-planet-sun,
+#rr-modal .expedition-map .solar-planet-sun:hover,
+#rr-modal .expedition-map .solar-planet-sun:focus { background-color: #ffa626; border: 2dp #ffd06f; border-radius: 999dp; }
+#rr-modal .expedition-map .solar-planet-selected,
+#rr-modal .expedition-map .solar-planet-selected:hover,
+#rr-modal .expedition-map .solar-planet-selected:focus { background-color: transparent; border: 2dp #64edff; border-radius: 999dp; }
+#rr-modal .expedition-map .solar-planet-sun.solar-planet-selected,
+#rr-modal .expedition-map .solar-planet-sun.solar-planet-selected:hover,
+#rr-modal .expedition-map .solar-planet-sun.solar-planet-selected:focus { background-color: #ffa626; }
+.solar-map-help { margin: 8dp 0dp 5dp; color: #6fb8ca; font-size: 10dp; text-align: center; letter-spacing: .4dp; }
+.solar-selection { display: flex; align-items: center; justify-content: space-between; min-height: 64dp; margin: 8dp 0dp 6dp; padding: 8dp 10dp; background-color: #07121a; border: 1dp #284a5c; }
+.solar-selection-copy { flex: 1; }
+.solar-selection-copy h3 { margin: 0dp 0dp 3dp; color: #edf9fb; font-size: 16dp; }
+.solar-selection-copy p { margin: 2dp 0dp; color: #a8bac4; font-size: 11dp; }
+.solar-selection-action { width: 190dp; margin-left: 12dp; }
+#rr-modal .expedition-map .solar-selection-action button { width: 100%; color: #041014; background-color: #43c9dd; border-color: #a9f6ff; }
+.solar-map-manifest { margin: 5dp 0dp 8dp; color: #8297a3; font-size: 10dp; text-align: center; }
 .expedition-warning { color: #ffbd67; }
 #rr-modal.modal-map { width: 760dp; max-width: 88%; min-width: 0dp; box-sizing: border-box; }
 @media (max-width: 560dp) { .shipyard-track { width: 94%; } .expedition-home { max-width: 88%; } }

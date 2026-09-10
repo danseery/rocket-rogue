@@ -11,6 +11,8 @@ namespace rocket {
 
 struct ProgressionArtifactOpportunity {
     std::string destinationId;
+    std::string bodyId;
+    std::string artifactId;
     std::string scenarioId;
     std::string stepId;
     std::string miningSiteDefinitionId;
@@ -18,6 +20,7 @@ struct ProgressionArtifactOpportunity {
 };
 
 struct ProgressionArtifactPlacement {
+    std::string artifactId;
     int ordinal = 0;
     int targetDepth = 1;
     int withinDepthSlot = 0;
@@ -35,7 +38,8 @@ int recoveredProgressionArtifactDestinationCount(
 std::optional<ProgressionArtifactOpportunity> unresolvedProgressionArtifactOpportunity(
     const GameState& state,
     const ContentCatalog& catalog,
-    std::string_view destinationId);
+    std::string_view destinationId,
+    std::string_view bodyId = {});
 ProgressionArtifactPlacement resolveProgressionArtifactPlacement(
     const GameState& state,
     const ContentCatalog& catalog,

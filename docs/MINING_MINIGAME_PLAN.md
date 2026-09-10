@@ -183,13 +183,15 @@ Research and contract content supplies these progression hooks. Economy and unlo
 - Arkfall emergency kit: Mk I Attack and Defense Support Drones, hostile-contact mitigation, and at least three Drone Bay slots without replacing stronger existing equipment.
 - Perimeter Drone Network: Perimeter Coordination makes advanced combat grafts and named synergies eligible in Level Up drafts.
 
-Expedition Level Up offers can rank the existing temporary Rig upgrades through Rank III. Current examples include:
+Expedition Level Up offers can rank the Rig build through Rank III. The build survives docking, planet changes, and Rig loss; only main-ship loss moves it into a recoverable wreck. Current drill tracks are:
 
-- Thermal Drill Jackets and Coolant Mist for heat control.
+- High-Torque Motor for additive cutting power.
+- Wide Drill Head for main-head width and Side Cutters for lower-power lateral reach.
+- Hard-Rock Teeth for hard-rock cutting power and Coolant Mist for heat generation.
 - Wideband Pulse and Deep Echo Mapper for scanner reach.
 - Shock Mounts and Recoil Braces for hard-rock bounce and durability.
 - Ore Hopper and Ore-Scent Array for ore yield.
-- Cargo Skids and Emergency Winch for extraction/oxygen safety.
+- Cargo Skids, Ore Hopper, and Expandable Panniers for real Rig capacity.
 
 ## Hostile-System Layer
 
@@ -211,6 +213,6 @@ The player's operator sidearm is a vulnerable recovery tool rather than the prim
 - `src/core/ScenarioSystem.*` owns scenario actions/events, claims, rewards, route requirements, and state-derived objective presentation. Mining receives a generic scenario/site context and reports typed results; it does not branch on campaign, destination, or narrative IDs.
 - `src/game/RocketGameApp.*` owns screen transitions and platform-neutral routed aim, fire, drill, scan, tether, operator-toggle, and stow/leave actions.
 - `src/render/SceneComposer.*` turns mining snapshots into backend-neutral scene packets consumed by native Vulkan and browser WebGL2, including the parked rig, static operator, independently moving Support Drones, reticle, tracer, tether, thrust, and active-actor-centered shield/scanner effects. Rendering must not decide gameplay outcomes.
-- Save version 21 persists the current physical Mining runtime, loose objects, fuel cells, actor tanks, Support Drones and payload ownership, plus current expedition progression. Every non-v21 or malformed campaign is rejected and preserved until explicit New Campaign confirmation; no legacy progression migration runs.
+- Save version 23 persists the current physical Mining runtime, loose objects, fuel cells, actor tanks, Support Drones and payload ownership, plus drill geometry, draft guarantees, expedition progression, and recoverable wreck builds. Every non-v23 or malformed campaign is rejected and preserved until explicit New Campaign confirmation; no legacy progression migration runs.
 
 When changing mining, keep the fuel/oxygen tradeoff visible and test deployment handoffs, direct mining outcomes, parked-layer service and manual ascent.

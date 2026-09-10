@@ -1,49 +1,39 @@
-# Persistent expeditions
+# Persistent Solar Expeditions
 
-The [GDD](Rocket_Rogue_Game_Design_Document.docx) is the definitive design. This document describes the shared C++ implementation of solar travel and the return-or-continue loop. Battery missions and Ark/post-solar campaign integration remain specific TBDs in GDD Section 8.
+The solar campaign uses one continuous physical ship pose across launch, orbit, interplanetary travel, landing, ascent, docking, destruction, and wreck recovery. Menus and incoming messages pause simulation. Setting a waypoint changes only the marker, course preview, and fuel forecast; it never starts Cruise or moves the ship.
 
-## Runtime ownership
+## Campaign loop
 
-`SystemContent` defines stationary system transforms, body relationships, environment profiles, landing sites, hazards, and dock markers. Geology reuse does not imply shared campaign objectives: Mercury and Venus have separate site identities and no Moon/Mars objective binding. Gas giants have no terrain landing site; Io, Titan, Titania, and Triton supply satellite environments.
+Each mission follows the same loop: receive a briefing, land and mine, pulse the artifact with the scanner, tether it to the ship, explicitly claim the completed mission, then return to Earth for service or continue manually. Claims grant rewards and discoveries once without changing the ship pose or opening another screen.
 
-`FlightRunState` is the live ship. `SystemLocation` supplies frame identity and the saved pose boundary. `advanceExpeditionFlight` routes manual/cruise inputs through `updateLaunchFlight`, encounters bodies from actual position, and converts position and velocity with boundary hysteresis. Target selection never calls `beginLaunchFlight`, changes resources, or grants route permission.
+The main route is Moon, Mars, Io, Titan, Titania, and Triton. Mercury and Venus are optional recoveries revealed after the Moon. Earth is the sole solar service home. Gas giants remain map landmarks while their named moons contain the mining missions.
 
-`ExpeditionProgressionState` owns temporary XP, drafts, ranks, grafts, and synergies. `PersistentSiteState` owns dormant terrain and local objects. Loading a visited site preserves excavation without restoring an older build. Rig fuel is an independent expedition tank and does not refill on landing or destination change.
+## Artifacts and batteries
 
-## Opening and flight guidance
+Every landable solar mining world owns one deterministic, persistent artifact. Its world, sector, terrain, position, scan state, and ownership survive sector changes, revisits, and reloads. A scanner pulse must physically reach it before it is revealed, and tethered delivery to the ship records recovery. Mission artifacts cannot be permanently destroyed and can be recovered with a full ore hold.
 
-The campaign opens at the authored Earth launch berth, held at rest with Moon selected and cruise off. `beginEarthOpening` runs only for demonstrably unstarted Earth campaigns; prior attempts, progress, sites, wrecks and uncertain records preserve the existing location. The campaign-once `lunar_approach` Incoming Message explains launch, controls, trajectory and orbit capture. Ready to launch acknowledges the message; a separate Launch action releases the berth and starts the expedition with its authored departure impulse. Fresh gameplay inputs are required. The berth, acknowledgement and release persist in v21; reloading cannot launch again or grant another impulse.
+The six main artifacts carry the Moon, Mars, Io, Titan, Titania, and Triton batteries. Capture moves a battery from its site to the ship. Earth docking moves carried batteries to Earth Storage and records research. Ship destruction moves carried batteries into the recoverable wreck. Mercury and Venus artifacts grant recovery rewards without batteries or route progress.
 
-`FlightGuidance` supplies target position, bearing/distance, actual-body orbit guidance, predicted impact and one next-action hint to native and web. The bounded approach camera frames actual Earth below-left and the Moon above-right, then blends into local lunar orbit and descent. The Earth home icon appears only when the entire Earth sprite is outside the actual flight viewport, with no duplicate home icon when Earth is selected. Dock markers render independently of planet visibility. These camera transforms never alter physical position or momentum. Orbit bands preview the selected destination while departing a home frame, then belong to the actual encountered expedition body; landing gates appear only in their owning body frame; the navigation target uses a separate marker or edge arrow. `refreshExpeditionTrajectory` forecasts coasting with the live integrator and frame conversions, suppressing recursive prediction. The map's unattended-cruise forecast remains distinct.
+## Expedition builds and wrecks
 
-Depart dock arms an attached waiting state. Forward thrust calls the shared release operation and applies normal thrust in the same step; waiting cannot consume fuel or fall. Optional `opening1` fields preserve initialization, departure history and this waiting state within v21. No campaign reset is required.
+An expedition build lasts until the main ship is destroyed or abandoned. Earth service, planetary travel, sector changes, Mining Rig destruction, recovery, and replacement preserve level, XP, pending choices, Rig ranks, Support Drone ranks, grafts, and synergies.
 
-## Navigation and servicing
+Main-ship loss stores cargo, carried batteries, unbanked payout, and the earned build in the wreck. The replacement starts with a fresh build. Salvage restores build data even with a full hold and consumes that build payload once; leftover ore remains recoverable. Distinct upgrades and synergies merge, duplicate ranks keep the higher rank through III, and unspent choices combine. Conflicting grafts pause for an explicit slot choice. Transient combat targets and cooldowns do not transfer.
 
-`plotSystemCourse` computes guidance only. Numerical fuel forecasts and unattended-cruise trajectory previews use the live integrator; forecast mode suppresses recursive HUD predictions. The fuel estimate assumes burn-and-coast piloting and a disclosed manual-approach allowance. A failed forecast is reported as unavailable. It is not an autopilot arrival guarantee.
+## Drill progression
 
-`ToggleCruise` is C / left-stick click in Flight. Cruise applies ordinary forward thrust and steering toward the selected body center. Manual steering/thrust cancels it. There is no braking, obstacle avoidance, capture assistance, or resource exemption. Map inspection pauses gameplay and resumes the prior cruise state after fresh-input handling.
+The starter Mining Rig cuts 20 percent faster than the prior baseline. High-Torque Motor adds 25 percent of improved starter power per rank. Wide Drill Head adds 25 percent of original head width per rank. Side Cutters add 0.5 cells on each side per rank at 60 percent power. Hard-Rock Teeth add 25 percent power against Hard Rock per rank. Coolant Mist reduces drilling heat generation by 15 percentage points per rank. All have three ranks.
 
-The Earth service dock is 1.962 units toward the Moon from Earth center, outside every local gravity region including its full docking range. Dock offsets belong to system content. Explicitly attached Earth dock saves follow the current marker, preserving resources and heading; free-flight and surface positions remain unchanged. `canDockExpedition` and `dockExpedition` use the same range/speed requirements; docking is explicit. Operational-home docking banks carried ore and arrival payout, services the ship and Rig tank, and clears temporary progression once. Departing retains the dock pose and creates no destination-relative replacement flight.
+The physical drill, rendered drill, terrain contact, movement collision, and clearance checks share the upgraded geometry. Overlapping contacts damage a cell once at the stronger value. Fuel and heat exposure remain time based. Every draft includes an eligible drill choice while ranks remain; the first draft includes High-Torque Motor and one width choice, and the other width choice appears by the third draft unless already owned.
 
-`PayloadTransfer` assigns contract ore first and puts ordinary deliveries into the expedition hold. The initial hold carries 60 ore and keeps its capacity across visits; rejected excess remains with its carrier or at the site. First accepted authored-site arrival carries the existing arrival payout; the site registry prevents repeat payout on revisits. Home banking makes these credits spendable in the deterministic next-rank shipyard. Installed capability and existing prices are preserved. Rank I is available without lessons or random offers; further research depends on the battery milestones defined by the GDD.
+The Rig starts at 24 cargo capacity. Cargo Skids, Ore Hopper, and Expandable Panniers add 2, 1, and 3 capacity per rank. Collection, available space, load display, Full state, and quarter-capacity load penalties read the same effective capacity.
 
-## Recovery and decisions
+## Discovery and waypoints
 
-Unlocked Drone Ops remains available at an operational home and at the parked mining ship. Returning from loadout selection restores that service location without entering a route/refit gate; drone unlocks, costs, choices, and effects use the existing systems.
+New campaigns chart only the Sun, Earth, and Moon. Claiming the Moon reveals Mercury, Venus, and Mars. Each later main claim reveals the next gas giant and its mission moon. Only the claimed Triton artifact reveals Straylight.
 
-Ship loss and explicit abandonment create one wreck per expedition loss, containing carried salvage and unbanked payout. Fatal-body impacts place a signal outside the collider along the incoming path. A viable replacement appears at the operational home with permanent capability retained and temporary progression reset. `salvageWreck` requires physical rendezvous and explicit transfer; excess ore stays in the wreck if the hold fills. Repeated transfer and docking cannot duplicate cargo.
+The map keeps preview selection separate from the saved waypoint. Planet artwork and labels update the preview while the modal remains open. **Set waypoint: [world]** commits the choice. Closing preserves the previous waypoint. At Earth the dock shows the recommended next mission, the selected waypoint, and a prominent departure action. A deliberate valid waypoint remains selected until the player changes it or completes it.
 
-`queueExpeditionDecision` records a significant completed site objective. After ascent and safe presentation, the shared modal coordinator presents return home, recommended lead, or map. Acknowledgements and pending occurrences persist. Ordinary visits do not create this interruption. Incoming Messages remain the separate reusable one-button transmission component and use the same modal priority and input rules.
+## Save boundary
 
-Scenario rewards and acknowledgements never relocate an initialized expedition. Moon/Mars rewards produce leads. Retired timing activities have no simulation, screen or scenario action. Broader flexible-order battery/story reconciliation remains TBD S3.
-
-## Persistence and verification
-
-Version 21 remains the only accepted campaign schema. Optional travel/economy records default safely for existing v21 saves; no campaign reset or migration to another version is performed. A valid recorded physical flight/landing or confirmed Earth home initializes travel once. A pre-deployment flight without a Mining tank retains its prepared Rig allotment, or initializes the existing pack-plus-remaining-fuel allotment once; ship propellant stays unchanged. Retired activity records without a physical pose resume at a safe approach; existing physical poses never move during migration. Other ambiguous route records retain their data and display a position-unavailable notice. Legacy/post-solar compatibility paths are not evidence that the battery/Ark integration is complete.
-
-Tests cover frame conversion, unselected encounters, ordinary cruise collisions and manual cancellation, a physically piloted Earth–Moon–Mars–Earth circuit, persistent build/site records, home banking, next-rank eligibility, wreck ownership, payout recovery, optional-site objective isolation, shared modal pauses, semantic actions, and exact v21 save/load. Existing landing, underground excavation, towing, deployment, and ascent tests remain relevant. Human play checks own travel feel, sustained fuel pressure, map readability, and physical controller acceptance.
-
-## Local gravity
-
-Each body applies capped inverse-square gravity inside its authored influence radius, then smoothly fades to zero by 1.1 times that radius. Bodies beyond this boundary exert no pull; live flight and forecasts share the same calculation. Local landing gravity remains separate.
+Save schema v23 is the only accepted campaign format. Older and malformed campaign saves go directly to the new-campaign flow with clear copy. There is no migration, progression inference, retired activity repair, or remote-Hangar reconciliation. All v23 mission, artifact, battery, discovery, message, waypoint, physical flight, site, drill, draft-guarantee, and recoverable-wreck-build state persists directly.

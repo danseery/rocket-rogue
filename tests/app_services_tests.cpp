@@ -7,6 +7,7 @@
 #include "core/ExpeditionSystem.h"
 #include "core/GameUi.h"
 #include "core/MiningSystem.h"
+#include "core/PayloadTransfer.h"
 #include "core/ResearchSystem.h"
 #include "core/SaveData.h"
 #include "core/ScenarioSystem.h"
@@ -166,6 +167,8 @@ public:
         miningExtractionProgress = snapshot.miningExtractionProgress;
         launchCourseOffset = snapshot.launchCourseOffset;
         launchCourseVelocity = snapshot.launchCourseVelocity;
+        launchVelocityX = snapshot.launchVelocityX;
+        launchVelocityY = snapshot.launchVelocityY;
         launchManualControlsEnabled = snapshot.launchManualControlsEnabled;
         launchHeatEnabled = snapshot.launchHeatEnabled;
         launchAsteroidsEnabled = snapshot.launchAsteroidsEnabled;
@@ -251,6 +254,8 @@ public:
     double flybyInputY = 0.0;
     double launchCourseOffset = 0.0;
     double launchCourseVelocity = 0.0;
+    double launchVelocityX = 0.0;
+    double launchVelocityY = 0.0;
     double launchFuelCapacity = 0.0;
     double launchTravelProgress = 0.0;
     double launchDestructionElapsed = 0.0;
@@ -571,6 +576,28 @@ std::string activeMiningSave(double drillHeat)
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
+std::string fullShipMiningSave(bool hasOverflowOre)
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0xF011ULL);
+    state.run.destinationIndex = 2;
+    rocket::startSurfaceExpedition(state, catalog);
+    state.run.planetaryExpedition.miningSitePrepared = true;
+    assert(rocket::startMiningRun(state, catalog).applied);
+    const int holdCapacity = rocket::shipHoldCapacity(state, catalog);
+    if (state.run.expedition.travelInitialized) {
+        state.run.expedition.cargo.materials.common = holdCapacity;
+    } else {
+        state.meta.materials.common = holdCapacity;
+    }
+    state.incomingMessages = {};
+    if (hasOverflowOre) {
+        state.run.mining.temporaryMaterials.common = 1;
+        state.run.mining.cargo = 1;
+    }
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
 std::string readyMiningDepartureSave()
 {
     const rocket::ContentCatalog catalog = rocket::createDefaultContent();
@@ -584,6 +611,46 @@ std::string readyMiningDepartureSave()
     mining.droneY = mining.returnZoneY;
     mining.temporaryMaterials.rare = 1;
     assert(rocket::miningAtReturnZone(mining));
+    return rocket::serializeSaveData(rocket::captureSaveData(state));
+}
+
+std::string completedMoonReturnSave()
+{
+    const rocket::ContentCatalog catalog = rocket::createDefaultContent();
+    rocket::GameState state = rocket::createNewGame(catalog, 0xE4174ULL);
+    assert(rocket::initializeLiveExpedition(state, catalog));
+    assert(rocket::performScenarioAction(state, catalog,
+        rocket::content::scenario::lunarProspector, "briefing",
+        rocket::ScenarioActionKind::AcknowledgeBriefing).applied);
+    rocket::recordScenarioEvent(state, catalog, {rocket::ScenarioEventKind::SafeMaterialDelivered,
+        rocket::content::scenario::lunarProspector, "delivery", "moon", "common", 20, 0});
+    rocket::recordScenarioEvent(state, catalog, {rocket::ScenarioEventKind::ProtectedObjectiveExtracted,
+        rocket::content::scenario::lunarProspector, "anomaly", "moon",
+        rocket::content::miningSite::lunarAnomalyCrevice, 1, 0});
+    assert(rocket::performScenarioAction(state, catalog,
+        rocket::content::scenario::lunarProspector, "anomaly",
+        rocket::ScenarioActionKind::ClaimReward).applied);
+    auto& expedition = state.run.expedition;
+    auto& flight = state.run.flight;
+    expedition.openingInitialized = true;
+    expedition.departureHistoryKnown = true;
+    expedition.departureCount = 2;
+    expedition.active = true;
+    expedition.location = {"solar", "moon", rocket::CoordinateFrame::Body,
+        {1.20, 0.0}, {0.03, 0.02}, 0.2, {}};
+    expedition.decision = {};
+    expedition.progression.pendingRunUpgradeChoices = 0;
+    expedition.progression.runUpgradeOfferPending = false;
+    expedition.progression.runUpgradeOfferCount = 0;
+    expedition.progression.runUpgradeReturnScreen = rocket::Screen::Flight;
+    flight.active = flight.physicalFlight = true;
+    flight.mode = rocket::FlightMode::Orbit;
+    flight.phase = rocket::FlightPhase::Transfer;
+    flight.failureCause = rocket::LaunchFailureCause::None;
+    rocket::restoreSystemLocation(expedition.location, flight);
+    state.screen = rocket::Screen::Flight;
+    state.meta.campaignIntroductionAcknowledged = true;
+    state.incomingMessages = {};
     return rocket::serializeSaveData(rocket::captureSaveData(state));
 }
 
@@ -1119,7 +1186,6 @@ int main()
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #endif
 
-    retiredJupiterDepartureBoardCannotResume();
     {
         AppFixture fixture;
         assert(fixture.runner.initialize());
@@ -1171,14 +1237,40 @@ int main()
         assert(fixture.runner.initialize());
         fixture.runner.app().debugStartExpedition();
         assert(fixture.ui.html.find("ORBITAL DOCK") != std::string::npos);
+        assert(fixture.ui.html.find("expedition-dock-departure") != std::string::npos);
+        assert(fixture.ui.html.find("DEPART FOR Moon") != std::string::npos);
+        assert(fixture.ui.html.find("Change waypoint") != std::string::npos);
         fixture.runner.app().tick(.01);
         fixture.ui.dispatchAction("ack_incoming_message:campaign.earth_dock.moon_first");
         fixture.ui.dispatchAction("expedition:map");
         assert(fixture.ui.modalOpenValue);
+        assert(fixture.ui.html.find("SET WAYPOINT") != std::string::npos);
+        assert(fixture.ui.html.find("DOCKED / CHOOSE NEXT DESTINATION") != std::string::npos);
+        assert(fixture.ui.html.find("RETURN TO THE DOCK SCREEN TO DEPART") != std::string::npos);
+        assert(fixture.ui.html.find("Back to dock") != std::string::npos);
+        assert(fixture.ui.html.find("Set waypoint: Moon") != std::string::npos);
+        assert(fixture.ui.html.find("solar-orbit") != std::string::npos);
+        assert(fixture.ui.html.find("expedition:preview:earth") != std::string::npos);
+        assert(fixture.ui.html.find("expedition:preview:moon") != std::string::npos);
+        assert(fixture.ui.html.find("expedition:preview:mars") == std::string::npos);
+        assert(fixture.ui.html.find("expedition:preview:venus") == std::string::npos);
+        assert(fixture.ui.html.find("expedition:preview:straylight") == std::string::npos);
         const auto paused = fixture.runner.app().deterministicStateHash();
         for (int i=0;i<60;++i) fixture.runner.app().tick(1.0/60.0);
         assert(fixture.runner.app().deterministicStateHash()==paused);
-        fixture.ui.dispatchAction("expedition:plot:mars");
+        fixture.ui.dispatchAction("expedition:preview:venus");
+        assert(fixture.runner.app().deterministicStateHash()==paused);
+        assert(fixture.ui.modalOpenValue);
+        assert(fixture.ui.html.find("Set waypoint: Venus") == std::string::npos);
+        assert(fixture.ui.html.find("Set waypoint: Moon") != std::string::npos);
+        fixture.ui.dispatchAction("expedition:close");
+        fixture.ui.dispatchAction("expedition:map");
+        assert(fixture.ui.html.find("Set waypoint: Moon") != std::string::npos);
+        fixture.ui.dispatchAction("expedition:preview:earth");
+        assert(fixture.ui.html.find("Already docked at Earth") != std::string::npos);
+        assert(fixture.ui.html.find("planet surface is not landable") != std::string::npos);
+        fixture.ui.dispatchAction("expedition:preview:moon");
+        fixture.ui.dispatchAction("expedition:plot:moon");
         assert(!fixture.ui.modalOpenValue);
         assert(fixture.runner.app().currentScreen()==static_cast<int>(rocket::Screen::Hangar));
         fixture.ui.dispatchAction("expedition:depart");
@@ -1199,6 +1291,91 @@ int main()
         assert(fixture.runner.app().currentScreen()==static_cast<int>(rocket::Screen::Hangar));
         assert(fixture.ui.html.find("Replacement")!=std::string::npos);
         assert(fixture.saves.storeCount==0);
+        fixture.runner.shutdown();
+    }
+    {
+        // The Earth dock orientation waits for a reload at the dock. It must
+        // not interrupt an in-progress session just because a failure hands
+        // the player back to Earth.
+        const auto catalog = rocket::createDefaultContent();
+        auto state = rocket::createNewGame(catalog, 0xEAD0CULL);
+        state.screen = rocket::Screen::Hangar;
+        assert(rocket::initializeLiveExpedition(state, catalog));
+        state.run.expedition.openingInitialized = true;
+        state.run.expedition.departureCount = 1;
+        state.meta.lunarProspectorClaimed = true;
+        AppFixture fixture;
+        fixture.saves.value = rocket::serializeSaveData(rocket::captureSaveData(state));
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
+        fixture.runner.app().tick(.01);
+        const auto reloaded = rocket::deserializeSaveData(fixture.saves.value);
+        assert(reloaded && std::any_of(
+            reloaded->incomingMessages.pending.begin(), reloaded->incomingMessages.pending.end(),
+            [](const rocket::IncomingMessageOccurrence& message) {
+                return message.id == "campaign.earth_dock.services";
+            }));
+        fixture.runner.shutdown();
+    }
+    {
+        const auto catalog = rocket::createDefaultContent();
+        auto state = rocket::createNewGame(catalog, 0xD0C5A7ULL);
+        state.screen = rocket::Screen::Hangar;
+        assert(rocket::initializeLiveExpedition(state, catalog));
+        state.meta.unlockKeys.push_back(rocket::content::unlock::routeMars);
+        state.run.expedition.course.targetBodyId = "earth";
+        state.meta.campaignIntroductionAcknowledged = true;
+        state.incomingMessages.acknowledgedMessages.push_back("earth_dock_intro");
+        AppFixture fixture;
+        fixture.saves.value = rocket::serializeSaveData(rocket::captureSaveData(state));
+        assert(fixture.runner.initialize());
+        const auto recovered = rocket::deserializeSaveData(fixture.saves.value);
+        assert(recovered && recovered->expedition.course.targetBodyId == "moon");
+        fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
+        assert(fixture.ui.html.find("NEXT MISSION: Moon") != std::string::npos);
+        assert(fixture.ui.html.find("WAYPOINT: Moon") != std::string::npos);
+        assert(fixture.ui.html.find("DEPART FOR Moon") != std::string::npos);
+        fixture.ui.dispatchAction("expedition:map");
+        fixture.ui.dispatchAction("expedition:preview:moon");
+        assert(fixture.ui.html.find("Set waypoint: Moon") != std::string::npos);
+        fixture.ui.dispatchAction("expedition:plot:moon");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
+        assert(fixture.ui.html.find("Moon waypoint set. Depart dock when ready.") != std::string::npos);
+        assert(fixture.ui.html.find("DEPART FOR Moon") != std::string::npos);
+        fixture.runner.shutdown();
+    }
+    {
+        const auto catalog = rocket::createDefaultContent();
+        auto state = rocket::createNewGame(catalog, 0xD0C612ULL);
+        assert(rocket::initializeLiveExpedition(state, catalog));
+        const auto& system = rocket::solarSystemDefinition();
+        const auto* earth = rocket::systemBody(system, "earth");
+        assert(earth);
+        const auto dock = rocket::systemDockPosition(*earth);
+        auto& expedition = state.run.expedition;
+        auto& flight = state.run.flight;
+        state.screen = rocket::Screen::Flight;
+        state.meta.campaignIntroductionAcknowledged = true;
+        state.incomingMessages.acknowledgedMessages.push_back("earth_dock_intro");
+        expedition.active = true;
+        expedition.departureCount = 1;
+        expedition.course.targetBodyId = "earth";
+        expedition.location = {system.id, "", rocket::CoordinateFrame::System,
+            {dock.x + rocket::expeditionDockRadius * 0.5, dock.y},
+            {earth->velocity.x + 0.5, earth->velocity.y}, 0, {}};
+        rocket::restoreSystemLocation(expedition.location, flight);
+        flight.active = flight.physicalFlight = true;
+        flight.mode = rocket::FlightMode::Travel;
+        AppFixture fixture;
+        fixture.saves.value = rocket::serializeSaveData(rocket::captureSaveData(state));
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
+        assert(fixture.ui.html.find("class=\"expedition-dock-action\"") != std::string::npos);
+        assert(fixture.ui.html.find("class=\"ok\" data-ui-focus-id=\"action:expedition:dock\"") != std::string::npos);
+        assert(fixture.ui.html.find("slow below 0.20 relative speed") != std::string::npos);
         fixture.runner.shutdown();
     }
     {
@@ -1229,9 +1406,6 @@ int main()
         fixture.runner.shutdown();
     }
 #if !defined(__EMSCRIPTEN__)
-    jupiterDepartureConfirmationQueuesSaturn();
-    uranusVectorGenericClaimQueuesNeptune();
-    straylightApproachRunsAndEndsActOne();
 #endif
 
 #if !defined(__EMSCRIPTEN__)
@@ -1350,14 +1524,7 @@ int main()
         moonArrival.type = rocket::LaunchResultType::MissionComplete;
         moonArrival.frontierTransfer = true;
         moonArrival.destinationId = rocket::content::destination::moon;
-        rocket::ScenarioInstance* marsBay = rocket::findScenarioInstance(
-            flyby.meta, rocket::content::scenario::marsBayExpansion);
-        rocket::ScenarioStepProgress* funding = marsBay == nullptr
-            ? nullptr
-            : rocket::findScenarioStepProgress(*marsBay, "funding");
-        assert(funding != nullptr);
-        funding->briefingAcknowledged = true;
-        rocket::startArrivalOps(flyby, moonArrival);
+        rocket::initializeLiveExpedition(flyby, catalog);
         flyby.screen = rocket::Screen::Flight;
         rocket::Random flybyRng(0xF17B7ULL);
         const rocket::PreparedLaunch flybyLaunch =
@@ -2376,6 +2543,41 @@ int main()
         fixture.runner.shutdown();
     }
 
+    // Filling the ship is allowed without interruption. The warning begins
+    // only after newly mined ore exists outside that already-full hold.
+    {
+        const auto shipOverflowWarningPending = [](const std::string& payload) {
+            const auto save = rocket::deserializeSaveData(payload);
+            assert(save.has_value());
+            return std::any_of(
+                save->incomingMessages.pending.begin(),
+                save->incomingMessages.pending.end(),
+                [](const rocket::IncomingMessageOccurrence& message) {
+                    return message.messageId == "ship_full_tip";
+                });
+        };
+
+        AppFixture exactlyFull;
+        exactlyFull.saves.value = fullShipMiningSave(false);
+        assert(exactlyFull.runner.initialize());
+        exactlyFull.ui.dispatchAction("continue_game");
+        completeTitleLaunch(exactlyFull);
+        exactlyFull.host.now += 1.0 / 60.0;
+        exactlyFull.runner.frame();
+        assert(!shipOverflowWarningPending(exactlyFull.saves.value));
+        exactlyFull.runner.shutdown();
+
+        AppFixture overCapacity;
+        overCapacity.saves.value = fullShipMiningSave(true);
+        assert(overCapacity.runner.initialize());
+        overCapacity.ui.dispatchAction("continue_game");
+        completeTitleLaunch(overCapacity);
+        overCapacity.host.now += 1.0 / 60.0;
+        overCapacity.runner.frame();
+        assert(shipOverflowWarningPending(overCapacity.saves.value));
+        overCapacity.runner.shutdown();
+    }
+
     // Depart Planet keeps the landed scene alive for the complete bay-close,
     // ignition, and ascent ritual. Settlement happens once in memory, but the
     // save is not replaced until the cinematic hands off to the next screen.
@@ -2660,65 +2862,6 @@ int main()
         fixture.host.now += 0.11;
         fixture.runner.frame();
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
-        fixture.runner.shutdown();
-    }
-
-    // Claiming the Mars contract opens the saved Jupiter options beat. The
-    // player may review either independent contributor before opening Refit.
-    {
-        AppFixture fixture;
-        fixture.saves.value = readyMarsExpansionClaimSave();
-        assert(fixture.runner.initialize());
-        fixture.ui.dispatchAction("continue_game");
-        completeTitleLaunch(fixture);
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
-
-        fixture.ui.dispatchAction(
-            std::string(rocket::ui::actions::scenarioActionPrefix) +
-            rocket::content::scenario::marsBayExpansion + "|delivery|" +
-            std::to_string(static_cast<int>(rocket::ScenarioActionKind::ClaimReward)));
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
-        fixture.host.now += 1.0 / 120.0;
-        fixture.runner.frame();
-        const std::optional<rocket::SaveData> saved = rocket::deserializeSaveData(fixture.saves.value);
-        assert(saved.has_value());
-        for (int pendingChoice = 0;
-             pendingChoice < 4 && fixture.ui.html.find("surface_upgrade:0") != std::string::npos;
-             ++pendingChoice) {
-            fixture.ui.dispatchAction("surface_upgrade:0");
-            fixture.host.now += 1.0 / 120.0;
-            fixture.runner.frame();
-        }
-        assert(std::find(
-            saved->unlockKeys.begin(),
-            saved->unlockKeys.end(),
-            rocket::content::unlock::routeJupiter) != saved->unlockKeys.end());
-        const auto marsScenario = std::find_if(
-            saved->scenarios.begin(),
-            saved->scenarios.end(),
-            [](const rocket::ScenarioInstance& instance) {
-                return instance.id == rocket::content::scenario::marsBayExpansion;
-            });
-        const rocket::ScenarioStepProgress* funding = marsScenario == saved->scenarios.end()
-            ? nullptr
-            : rocket::findScenarioStepProgress(*marsScenario, "funding");
-        assert(funding != nullptr && !funding->briefingAcknowledged);
-
-        fixture.ui.dispatchAction(std::string(rocket::ui::actions::openJupiterRefit));
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Upgrade));
-        const std::optional<rocket::SaveData> acknowledged = rocket::deserializeSaveData(fixture.saves.value);
-        assert(acknowledged.has_value());
-        const auto acknowledgedMars = std::find_if(
-            acknowledged->scenarios.begin(),
-            acknowledged->scenarios.end(),
-            [](const rocket::ScenarioInstance& instance) {
-                return instance.id == rocket::content::scenario::marsBayExpansion;
-            });
-        const rocket::ScenarioStepProgress* acknowledgedFunding =
-            acknowledgedMars == acknowledged->scenarios.end()
-            ? nullptr
-            : rocket::findScenarioStepProgress(*acknowledgedMars, "funding");
-        assert(acknowledgedFunding != nullptr && acknowledgedFunding->briefingAcknowledged);
         fixture.runner.shutdown();
     }
 
@@ -3113,19 +3256,19 @@ int main()
         assert(fixture.saves.storeCount == 0);
         assert(fixture.saves.value == original);
         assert(fixture.ui.html.find("data-rr-action=\"continue_game\"") == std::string::npos);
-        assert(fixture.ui.html.find("CAMPAIGN UPDATE \xC2\xB7 A new campaign is required.") != std::string::npos);
+        assert(fixture.ui.html.find("This save was created by an older campaign version") != std::string::npos);
         fixture.runner.shutdown();
     };
-    std::string v17Save = levelUpExpeditionSave();
-    const std::size_t versionOffset = v17Save.find("version=21");
+    std::string v22Save = levelUpExpeditionSave();
+    const std::size_t versionOffset = v22Save.find("version=23");
     assert(versionOffset != std::string::npos);
-    v17Save.replace(versionOffset, 10, "version=17");
-    requireFreshCampaignBoundary(v17Save);
+    v22Save.replace(versionOffset, 10, "version=22");
+    requireFreshCampaignBoundary(v22Save);
     requireFreshCampaignBoundary("RR_SAVE_V0\ncredits=1\n");
     std::string futureSave = levelUpExpeditionSave();
-    const std::size_t futureVersionOffset = futureSave.find("version=21");
+    const std::size_t futureVersionOffset = futureSave.find("version=23");
     assert(futureVersionOffset != std::string::npos);
-    futureSave.replace(futureVersionOffset, 10, "version=22");
+    futureSave.replace(futureVersionOffset, 10, "version=24");
     requireFreshCampaignBoundary(futureSave);
 
     assert(host.viewportMetrics().logicalWidth == 1280);

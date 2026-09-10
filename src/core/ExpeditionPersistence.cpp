@@ -75,6 +75,38 @@ bool readCargo(std::istream &in, ExpeditionCargo &c)
            std::isfinite(c.shipPropellant) && std::isfinite(c.shipRepair) && c.shipPropellant >= 0 &&
            c.shipRepair >= 0;
 }
+void writeBuild(std::ostream& out, const ExpeditionProgressionState& build)
+{
+    out << build.expeditionLevel << ' ' << build.expeditionExperience << ' '
+        << build.pendingRunUpgradeChoices << ' ' << build.runUpgradeDraftCount << ' '
+        << build.wideDrillHeadOffered << ' ' << build.sideCuttersOffered << ' ';
+    out << build.runRigUpgradeRanks.size() << ' ';
+    for (const auto& rank : build.runRigUpgradeRanks) out << std::quoted(rank.upgradeId) << ' ' << rank.rank << ' ';
+    out << build.runDroneRanks.size() << ' ';
+    for (const auto& rank : build.runDroneRanks) out << std::quoted(rank.droneId) << ' ' << rank.rank << ' ';
+    out << build.selectedSynergyIds.size() << ' ';
+    for (const auto& id : build.selectedSynergyIds) out << std::quoted(id) << ' ';
+    out << build.droneModuleAssignments.size() << ' ';
+    for (const auto& graft : build.droneModuleAssignments)
+        out << graft.equippedFrame << ' ' << std::quoted(graft.primaryDroneId) << ' ' << static_cast<int>(graft.module) << ' ';
+}
+bool readBuild(std::istream& in, ExpeditionProgressionState& build)
+{
+    std::size_t count = 0;
+    if (!(in >> build.expeditionLevel >> build.expeditionExperience >> build.pendingRunUpgradeChoices
+        >> build.runUpgradeDraftCount >> build.wideDrillHeadOffered >> build.sideCuttersOffered) ||
+        build.expeditionLevel < 1 || !std::isfinite(build.expeditionExperience) || build.expeditionExperience < 0 ||
+        build.pendingRunUpgradeChoices < 0 || build.runUpgradeDraftCount < 0) return false;
+    if (!(in >> count) || count > 4096) return false;
+    for (std::size_t i=0;i<count;++i) { RunRigUpgradeRank rank; if (!(in >> std::quoted(rank.upgradeId) >> rank.rank) || rank.upgradeId.empty() || rank.rank<1 || rank.rank>3) return false; build.runRigUpgradeRanks.push_back(std::move(rank)); }
+    if (!(in >> count) || count > 4096) return false;
+    for (std::size_t i=0;i<count;++i) { RunDroneRank rank; if (!(in >> std::quoted(rank.droneId) >> rank.rank) || rank.droneId.empty() || rank.rank<1 || rank.rank>3) return false; build.runDroneRanks.push_back(std::move(rank)); }
+    if (!(in >> count) || count > 4096) return false;
+    for (std::size_t i=0;i<count;++i) { std::string id; if (!(in >> std::quoted(id)) || id.empty()) return false; build.selectedSynergyIds.push_back(std::move(id)); }
+    if (!(in >> count) || count > 4096) return false;
+    for (std::size_t i=0;i<count;++i) { DroneFrameModuleAssignment graft; int module=0; if (!(in >> graft.equippedFrame >> std::quoted(graft.primaryDroneId) >> module) || graft.equippedFrame<0 || module<0 || module>static_cast<int>(DroneModuleKind::HazardScreen)) return false; graft.module=static_cast<DroneModuleKind>(module); build.droneModuleAssignments.push_back(std::move(graft)); }
+    return true;
+}
 } // namespace
 std::string serializeExpedition(const PersistentExpeditionState &e)
 {
@@ -84,7 +116,8 @@ std::string serializeExpedition(const PersistentExpeditionState &e)
     out << e.active << ' ' << e.arkActivated << ' ' << std::quoted(e.homeBodyId) << ' ';
     writeLocation(out, e.location);
     writeCargo(out, e.cargo);
-    out << std::quoted(e.course.targetBodyId) << ' ' << e.cruise.active << ' ' << e.nextWreckId << ' ';
+    out << std::quoted(e.course.targetBodyId) << ' ' << e.coursePlayerSelected << ' ' << e.straylightRevealed << ' '
+        << e.cruise.active << ' ' << e.nextWreckId << ' ';
     for (const auto &b : e.batteries)
         out << std::quoted(b.id) << ' ' << std::quoted(b.sourceSiteId) << ' ' << static_cast<int>(b.owner)
             << ' ' << b.wreckId << ' ' << b.discovered << ' ' << b.researchEarned << ' ';
@@ -94,6 +127,8 @@ std::string serializeExpedition(const PersistentExpeditionState &e)
         out << w.id << ' ';
         writeLocation(out, w.location);
         writeCargo(out, w.cargo);
+        out << w.buildRecoverable << ' ';
+        writeBuild(out, w.build);
     }
     out << std::quoted(e.decision.pendingId) << ' ' << e.decision.awaitingAscent << ' '
         << e.decision.acknowledgedIds.size() << ' ';
@@ -142,7 +177,7 @@ std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view 
     if (!(in >> e.active >> e.arkActivated >> std::quoted(e.homeBodyId)) || !readLocation(in, e.location) ||
         !readCargo(in, e.cargo))
         return std::nullopt;
-    if (!(in >> std::quoted(e.course.targetBodyId) >> e.cruise.active >> e.nextWreckId))
+    if (!(in >> std::quoted(e.course.targetBodyId) >> e.coursePlayerSelected >> e.straylightRevealed >> e.cruise.active >> e.nextWreckId))
         return std::nullopt;
     for (auto &b : e.batteries)
     {
@@ -161,7 +196,8 @@ std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view 
     for (std::size_t i = 0; i < count; ++i)
     {
         WreckState w;
-        if (!(in >> w.id) || !readLocation(in, w.location) || !readCargo(in, w.cargo))
+        if (!(in >> w.id) || !readLocation(in, w.location) || !readCargo(in, w.cargo) ||
+            !(in >> w.buildRecoverable) || !readBuild(in, w.build))
             return std::nullopt;
         e.wrecks.push_back(std::move(w));
     }
@@ -254,16 +290,6 @@ std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view 
             }
         }
         in >> std::ws;
-    }
-    // Old v21 sites were exclusively the original wedge. Keep their identity
-    // and world, adding only the missing sector suffix.
-    for (auto& site : e.sites) {
-        if (site.siteId.find(":zone_") == std::string::npos) {
-            if (e.location.siteId == site.siteId && e.location.bodyId == site.bodyId)
-                e.location.siteId += ":zone_1";
-            site.siteId += ":zone_1";
-            if (site.bodyId == "moon" && e.moonTutorialZone.empty()) e.moonTutorialZone = "zone_1";
-        }
     }
     if (e.undockReady && (e.active || !e.location.siteId.ends_with(".dock"))) return std::nullopt;
     if (!in.eof() || !validBatteryOwnership(e))

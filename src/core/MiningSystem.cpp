@@ -12,6 +12,7 @@
 #include "core/MiniDroneCoordination.h"
 #include "core/MiningProgression.h"
 #include "core/ScenarioSystem.h"
+#include "core/SolarProgression.h"
 #include "core/RigFuelSystem.h"
 #include "core/Tuning.h"
 
@@ -1067,9 +1068,10 @@ bool canOccupyRigHull(
     double x,
     double y,
     double forwardX,
-    double forwardY)
+    double forwardY,
+    rig_geometry::Profile profile = {})
 {
-    return rig_geometry::contacts(terrain,x,y,forwardX,forwardY).empty();
+    return rig_geometry::contacts(terrain,x,y,forwardX,forwardY,profile).empty();
 }
 
 bool canOccupyControlledActor(
@@ -1078,7 +1080,8 @@ bool canOccupyControlledActor(
     double y,
     bool suit,
     double hullDirX,
-    double hullDirY)
+    double hullDirY,
+    rig_geometry::Profile profile = {})
 {
     return suit
         ? canOccupyActor(
@@ -1087,7 +1090,7 @@ bool canOccupyControlledActor(
             y,
             tuning::mining::operatorColliderRadiusCells,
             true)
-        : canOccupyRigHull(terrain, x, y, hullDirX, hullDirY);
+        : canOccupyRigHull(terrain, x, y, hullDirX, hullDirY, profile);
 }
 
 bool drillableCell(const MiningCell* cell)
@@ -1325,6 +1328,9 @@ bool applyDrillDamage(GameState& state, const MiningDrillStats& stats, int x, in
     double drillPower = stats.power;
     if (!softMiningMaterial(material)) {
         drillPower *= tuning::mining::denseMaterialDrillPowerScale;
+    }
+    if (material == MiningCellMaterial::HardRock) {
+        drillPower *= 1.0 + std::max(0.0, stats.hardRockPower);
     }
     if (mining.drillHeat >= tuning::mining::heatSlowThreshold) {
         drillPower *= tuning::mining::overheatedDrillSlow;
@@ -2788,7 +2794,11 @@ struct DrillFootprintCell {
 void recordRigContact(MiningRunState& mining, const rig_geometry::Contact& contact);
 void recordMiningMovementCollision(MiningRunState& mining, double attemptedX, double attemptedY);
 
-std::vector<DrillFootprintCell> drillFootprintCells(const MiningRunState& mining, double dirX, double dirY)
+std::vector<DrillFootprintCell> drillFootprintCells(
+    const MiningRunState& mining,
+    const MiningDrillStats& stats,
+    double dirX,
+    double dirY)
 {
     const double length = std::sqrt(dirX * dirX + dirY * dirY);
     if (length < 0.001) {
@@ -2799,15 +2809,16 @@ std::vector<DrillFootprintCell> drillFootprintCells(const MiningRunState& mining
 
     const bool suit = operatorControlled(mining);
     const double footprintLength = controlledDrillRange(mining);
-    const double baseHalfWidth = suit ? 0.30 : 0.95;
+    const double baseHalfWidth = suit ? 0.30 : 0.95 * std::max(1.0, stats.headWidthScale);
     const double tipHalfWidth = suit ? 0.16 : 0.24;
     const double originOffset = controlledDrillOriginOffset(mining);
     const double originX = controlledActorX(mining) + dirX * originOffset;
     const double originY = controlledActorY(mining) + dirY * originOffset;
-    const int minX = std::max(0, static_cast<int>(std::floor(originX - footprintLength - baseHalfWidth)));
-    const int maxX = std::min(mining.terrain.width - 1, static_cast<int>(std::ceil(originX + footprintLength + baseHalfWidth)));
-    const int minY = std::max(0, static_cast<int>(std::floor(originY - footprintLength - baseHalfWidth)));
-    const int maxY = std::min(mining.terrain.height - 1, static_cast<int>(std::ceil(originY + footprintLength + baseHalfWidth)));
+    const double totalHalfWidth = baseHalfWidth + (suit ? 0.0 : std::max(0.0, stats.sideCutterReach));
+    const int minX = std::max(0, static_cast<int>(std::floor(originX - footprintLength - totalHalfWidth)));
+    const int maxX = std::min(mining.terrain.width - 1, static_cast<int>(std::ceil(originX + footprintLength + totalHalfWidth)));
+    const int minY = std::max(0, static_cast<int>(std::floor(originY - footprintLength - totalHalfWidth)));
+    const int maxY = std::min(mining.terrain.height - 1, static_cast<int>(std::ceil(originY + footprintLength + totalHalfWidth)));
 
     std::vector<DrillFootprintCell> cells;
     for (int y = minY; y <= maxY; ++y) {
@@ -2818,14 +2829,23 @@ std::vector<DrillFootprintCell> drillFootprintCells(const MiningRunState& mining
             }
 
             if (!suit) {
-                const auto triangle = rig_geometry::triangle(controlledActorX(mining),controlledActorY(mining),dirX,dirY);
+                const auto mainTriangle = rig_geometry::triangle(
+                    controlledActorX(mining),controlledActorY(mining),dirX,dirY,
+                    {stats.headWidthScale, 0.0});
+                const auto triangle = rig_geometry::triangle(
+                    controlledActorX(mining),controlledActorY(mining),dirX,dirY,
+                    {stats.headWidthScale, stats.sideCutterReach});
                 if (rig_geometry::triangleContact(triangle,x,y,.025).depth <= rig_geometry::skin) continue;
                 const double cross = std::abs((x+.5-originX)*dirY-(y+.5-originY)*dirX);
                 const double along=(x+.5-originX)*dirX+(y+.5-originY)*dirY;
                 const double t=std::clamp(along/footprintLength,0.0,1.0);
-                const double damageHalfWidth=.95+(.24-.95)*t+.18;
+                const double mainHalfWidth=baseHalfWidth+(.24-baseHalfWidth)*t+.18;
+                const double damageHalfWidth=mainHalfWidth+stats.sideCutterReach;
                 const double centerBias = 1.0-std::clamp(cross / damageHalfWidth,0.0,1.0);
-                cells.push_back({x,y,.48+centerBias*.52});
+                const double mainPower = rig_geometry::triangleContact(mainTriangle,x,y,.025).depth > rig_geometry::skin
+                    ? .48+centerBias*.52 : 0.0;
+                const double cutterPower = cross <= damageHalfWidth ? 0.60 : 0.0;
+                cells.push_back({x,y,std::max(mainPower,cutterPower)});
                 continue;
             }
             const double cellX = static_cast<double>(x) + 0.5;
@@ -2871,7 +2891,7 @@ bool applyDrillFootprintDamage(GameState& state, const MiningDrillStats& stats, 
     MiningRunState& mining = state.run.mining;
     const MiningDrillStats& actorStats = stats;
     const MiningArenaRules arenaRules = activeMiningArenaRules(mining);
-    const std::vector<DrillFootprintCell> cells = drillFootprintCells(mining, dirX, dirY);
+    const std::vector<DrillFootprintCell> cells = drillFootprintCells(mining, stats, dirX, dirY);
     if (cells.empty()) {
         return false;
     }
@@ -2905,10 +2925,9 @@ bool applyDrillFootprintDamage(GameState& state, const MiningDrillStats& stats, 
     }
 
     bool touchedHardMaterial = false;
+    bool touchedHardRock = false;
     bool touchedSoftMaterial = false;
     bool brokeAny = false;
-    double maxHeatDelta = 0.0;
-    double maxIntegrityExposure = 0.0;
     for (const DrillFootprintCell& contact : cells) {
         MiningCell* cell = miningCellAt(mining.terrain, contact.x, contact.y);
         if (cell == nullptr) {
@@ -2922,20 +2941,20 @@ bool applyDrillFootprintDamage(GameState& state, const MiningDrillStats& stats, 
         const double contactDt = dt * contact.powerScale;
         touchedSoftMaterial = touchedSoftMaterial || softMiningMaterial(cell->material);
         touchedHardMaterial = touchedHardMaterial || !softMiningMaterial(cell->material);
-        double heatDelta = arenaRules.mechanics.drillHeat ? drillHeatDelta(cell->material, actorStats, contactDt) : 0.0;
-        maxHeatDelta = std::max(maxHeatDelta, heatDelta);
-        if (arenaRules.mechanics.drillIntegrity) {
-            maxIntegrityExposure = std::max(maxIntegrityExposure, contactDt);
-        }
+        touchedHardRock = touchedHardRock || cell->material == MiningCellMaterial::HardRock;
         brokeAny = applyDrillDamage(state, actorStats, contact.x, contact.y, contactDt) || brokeAny;
     }
 
     if (arenaRules.mechanics.drillHeat || arenaRules.mechanics.drillIntegrity) {
-        applyDrillSystemLoad(mining, actorStats, maxHeatDelta, maxIntegrityExposure);
+        const double heatDelta = arenaRules.mechanics.drillHeat
+            ? drillHeatDelta(touchedHardRock ? MiningCellMaterial::HardRock : MiningCellMaterial::Regolith, actorStats, dt)
+            : 0.0;
+        applyDrillSystemLoad(mining, actorStats, heatDelta, arenaRules.mechanics.drillIntegrity ? dt : 0.0);
     }
     mining.contactIntensity = std::max(mining.contactIntensity, touchedHardMaterial ? 0.82 : 0.35);
     if (!operatorControlled(mining)) {
-        const auto hit=rig_geometry::triangleContact(rig_geometry::triangle(mining.droneX,mining.droneY,dirX,dirY),
+        const auto hit=rig_geometry::triangleContact(rig_geometry::triangle(
+            mining.droneX,mining.droneY,dirX,dirY,{stats.headWidthScale,stats.sideCutterReach}),
             cells.front().x,cells.front().y,.025);
         recordRigContact(mining,hit);
         dirX=-hit.normal.x;
@@ -3010,7 +3029,10 @@ MiningElementalAffinity applyEnvironmentalHazardExposure(
     };
 
     if (drillTouchesTerrain) {
-        for (const DrillFootprintCell& contact : drillFootprintCells(mining, controlledAimX(mining), controlledAimY(mining))) {
+        const MiningDrillStats activeStats = operatorControlled(mining)
+            ? miningOperatorDrillStats()
+            : miningDrillStats(state, catalog);
+        for (const DrillFootprintCell& contact : drillFootprintCells(mining, activeStats, controlledAimX(mining), controlledAimY(mining))) {
             recordCell(miningCellAt(mining.terrain, contact.x, contact.y), dt * contact.powerScale);
         }
     }
@@ -3301,7 +3323,8 @@ void damageMiningArtifact(MiningRunState& mining, double damage)
         return;
     }
     artifact.health = std::max(0.0, artifact.health - damage);
-    if (mining.gate.active && mining.gate.compatibilityCritical && mining.gate.fragileArtifact) {
+    if (!mining.scenarioId.empty() ||
+        (mining.gate.active && mining.gate.compatibilityCritical && mining.gate.fragileArtifact)) {
         artifact.health = std::max(artifact.health, artifact.maxHealth * 0.10);
     }
     artifact.revealed = true;
@@ -5492,7 +5515,7 @@ void refreshTargetCell(MiningRunState& mining)
 
     const MiningCell* directTarget = miningCellAt(mining.terrain, targetX, targetY);
     if (!operatorControlled(mining)) {
-        const auto contacts=drillFootprintCells(mining,dx,dy);
+        const auto contacts=drillFootprintCells(mining,MiningDrillStats{},dx,dy);
         if (!contacts.empty()) {
             targetX=contacts.front().x;
             targetY=contacts.front().y;
@@ -5582,6 +5605,9 @@ void configureProgressionArtifactOnActiveLayer(
             destination,
             true,
             false);
+    }
+    if (mining.artifact.present && !placement.artifactId.empty()) {
+        mining.artifact.id = placement.artifactId;
     }
     if (!mining.gate.active && mining.artifact.present) {
         const int artifactX = std::clamp(
@@ -6125,6 +6151,8 @@ void initializeMiningDepth(GameState& state, const ContentCatalog& catalog, cons
 void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int direction)
 {
     MiningRunState& mining = state.run.mining;
+    const MiningDrillStats drillStats = miningDrillStats(state, catalog);
+    const rig_geometry::Profile geometry {drillStats.headWidthScale, drillStats.sideCutterReach};
     const Destination* destination = catalog.findDestination(mining.destinationId);
     if (destination == nullptr || direction == 0) {
         return;
@@ -6144,14 +6172,15 @@ void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int di
             [targetDepth](const auto& layer){return layer.depthZone==targetDepth;});
         if (target==mining.depthLayers.end()) return;
         const double arrivalY=direction>0 ? 4.0 : target->terrain.height-3.5;
-        if (!canOccupyControlledActor(target->terrain,transitionX,arrivalY,suitTravels,mining.hullDirX,mining.hullDirY)) return;
-        const double radius=suitTravels ? tuning::mining::operatorColliderRadiusCells : rig_geometry::drillTip;
+        if (!canOccupyControlledActor(target->terrain,transitionX,arrivalY,suitTravels,mining.hullDirX,mining.hullDirY,geometry)) return;
+        const double radius=suitTravels ? tuning::mining::operatorColliderRadiusCells :
+            std::max(rig_geometry::drillTip, rig_geometry::effectiveHalfWidth(geometry));
         // Check the adjoining lips, not just the destination spawn point.
         for (double y=radius+0.01; y<=4.0; y+=0.25) {
             const double nextY=direction>0 ? y : target->terrain.height-y;
             const double oldY=direction>0 ? mining.terrain.height-y : y;
-            if (!canOccupyControlledActor(target->terrain,transitionX,nextY,suitTravels,mining.hullDirX,mining.hullDirY) ||
-                !canOccupyControlledActor(mining.terrain,transitionX,oldY,suitTravels,mining.hullDirX,mining.hullDirY)) return;
+            if (!canOccupyControlledActor(target->terrain,transitionX,nextY,suitTravels,mining.hullDirX,mining.hullDirY,geometry) ||
+                !canOccupyControlledActor(mining.terrain,transitionX,oldY,suitTravels,mining.hullDirX,mining.hullDirY,geometry)) return;
         }
         if (!suitTravels || tetheredRigTravels) {
             // Sweep across the real seam, including the drill, rather than
@@ -6168,8 +6197,8 @@ void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int di
             const double rigArrivalY = arrivalY + (tetheredRigTravels ? (direction > 0 ? -.9 : .9) : 0);
             const double endY = rigArrivalY + (direction > 0 ? upper.height : 0);
             const double heading = std::atan2(mining.hullDirY,mining.hullDirX);
-            if (!canOccupyRigHull(target->terrain,transitionX,rigArrivalY,mining.hullDirX,mining.hullDirY) ||
-                rig_geometry::sweep(joined,mining.droneX,startY,heading,transitionX,endY,heading).fraction < 1) return;
+            if (!canOccupyRigHull(target->terrain,transitionX,rigArrivalY,mining.hullDirX,mining.hullDirY,geometry) ||
+                rig_geometry::sweep(joined,mining.droneX,startY,heading,transitionX,endY,heading,geometry).fraction < 1) return;
         }
     }
     MiningArtifactObject travelingArtifact;
@@ -6478,13 +6507,14 @@ void simulateMiningActorMotion(
 
     if (!suit) {
         const double angle=std::atan2(mining.hullDirY,mining.hullDirX);
-        const auto horizontal=rig_geometry::sweep(mining.terrain,positionX,positionY,angle,nextX,positionY,angle);
+        const rig_geometry::Profile geometry {drillStats.headWidthScale, drillStats.sideCutterReach};
+        const auto horizontal=rig_geometry::sweep(mining.terrain,positionX,positionY,angle,nextX,positionY,angle,geometry);
         positionX=std::lerp(positionX,nextX,horizontal.fraction);
         if(horizontal.fraction<1) {
             recordRigContact(mining,horizontal.contact);
             velocityX=0;collisionX=-horizontal.contact.normal.x;collisionY=-horizontal.contact.normal.y;
         }
-        const auto vertical=rig_geometry::sweep(mining.terrain,positionX,positionY,angle,positionX,nextY,angle);
+        const auto vertical=rig_geometry::sweep(mining.terrain,positionX,positionY,angle,positionX,nextY,angle,geometry);
         positionY=std::lerp(positionY,nextY,vertical.fraction);
         if(vertical.fraction<1) {
             recordRigContact(mining,vertical.contact);
@@ -6574,7 +6604,10 @@ void updateMiningLooseObjects(GameState& state, const ContentCatalog& catalog, d
     MiningRunState& mining = state.run.mining;
     constexpr double chunkCollider = 0.10;
     constexpr double rigCollectionRadius = 0.70;
+    const MiningDrillStats drillStats = miningDrillStats(state, catalog);
     const double attractionRadius = tuning::mining::rigOreAttractionRadiusCells +
+        std::max(0.0, drillStats.sideCutterReach) +
+        0.95 * std::max(0.0, drillStats.headWidthScale - 1.0) +
         surfaceUpgradeEffects(state, catalog).oreAttractionRadius;
     const auto clearPickupPath = [&](double x, double y) {
         const double dx = mining.droneX-x, dy = mining.droneY-y;
@@ -6629,7 +6662,7 @@ void updateMiningLooseObjects(GameState& state, const ContentCatalog& catalog, d
         const double oreDistance = std::hypot(oreDx,oreDy);
         if (rigSharesLayer && chunk.kind == MiningLooseObjectKind::Material &&
             chunk.carrierFrame < 0 && !chunk.tethered && chunk.pickupDelaySeconds <= 0.0 &&
-            miningRigCargoAvailableMass(mining) >= std::max(1,chunk.cargoValue) &&
+            miningRigCargoAvailableMass(state, catalog) >= std::max(1,chunk.cargoValue) &&
             oreDistance > 0.001 && oreDistance <= attractionRadius && clearPickupPath(chunk.x,chunk.y)) {
             const double response = 1.0-std::exp(-14.0*dt);
             const double speed = std::min(5.0,oreDistance*8.0);
@@ -6707,7 +6740,7 @@ void updateMiningLooseObjects(GameState& state, const ContentCatalog& catalog, d
             continue;
         }
         const int chunkMass = std::max(1, chunk.cargoValue);
-        if (miningRigCargoAvailableMass(mining) < chunkMass) {
+        if (miningRigCargoAvailableMass(state, catalog) < chunkMass) {
             state.statusLine = "RIG FULL — ore remains in the tunnel.";
             continue;
         }
@@ -7081,7 +7114,7 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     stats.integrityRelief += miningDurability * 0.075;
     stats.terrainWidth = std::clamp(tuning::mining::terrainWidth + static_cast<int>(std::round(miningWidth * 4.0)), 48, 84);
     stats.terrainHeight = std::clamp(tuning::mining::terrainHeight + static_cast<int>(std::round(miningDepth * 5.0)), 32, 58);
-    stats.storage += miningStorage;
+    stats.cargoCapacityBonus += miningStorage;
     stats.engineEfficiency += miningEngineEfficiency;
 
     if (hasUnlockKey(state.meta, content::unlock::surfaceDrills)) {
@@ -7109,16 +7142,22 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
         stats.speed += tuning::mining::chipmunkSpeedBonus;
     }
     const SurfaceUpgradeEffects surfaceUpgrades = surfaceUpgradeEffects(state, catalog);
-    stats.power += surfaceUpgrades.drillPower * 0.75;
+    stats.power += surfaceUpgrades.drillPower;
     stats.oreYieldChance += surfaceUpgrades.oreYieldChance;
     stats.scannerRadius += surfaceUpgrades.scannerRadius;
     stats.speed += surfaceUpgrades.droneSpeed;
     stats.oxygenSeconds += surfaceUpgrades.oxygenSeconds;
-    stats.heatRiseScale = std::clamp(stats.heatRiseScale - surfaceUpgrades.drillCooling * 0.060, 0.50, 1.0);
+    stats.heatRiseScale = std::clamp(
+        stats.heatRiseScale - surfaceUpgrades.drillCooling * 0.060 - surfaceUpgrades.drillHeatReduction,
+        0.10,
+        1.0);
     stats.heatCoolingPerSecond += surfaceUpgrades.drillCooling * 0.025;
     stats.integrityRelief += surfaceUpgrades.drillDurability * 0.070;
     stats.hardRockBounceRelief += surfaceUpgrades.hardRockBounceRelief;
-    stats.storage += surfaceUpgrades.droneStorage;
+    stats.cargoCapacityBonus += surfaceUpgrades.droneStorage;
+    stats.headWidthScale += surfaceUpgrades.drillHeadWidth;
+    stats.sideCutterReach += surfaceUpgrades.sideCutterReach;
+    stats.hardRockPower += surfaceUpgrades.hardRockPower;
     stats.engineEfficiency += surfaceUpgrades.droneEngineEfficiency;
     stats.artifactTowEfficiency += surfaceUpgrades.artifactTowEfficiency;
 
@@ -7135,7 +7174,10 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
     stats.integrityRelief = std::clamp(stats.integrityRelief, 0.0, 0.70);
     stats.passiveDroneMiningRate = std::clamp(stats.passiveDroneMiningRate, 0.0, 0.40);
     stats.hardRockBounceRelief = std::clamp(stats.hardRockBounceRelief, 0.0, 0.55);
-    stats.storage = std::max(0.0, stats.storage);
+    stats.cargoCapacityBonus = std::max(0.0, stats.cargoCapacityBonus);
+    stats.headWidthScale = std::clamp(stats.headWidthScale, 1.0, 1.75);
+    stats.sideCutterReach = std::clamp(stats.sideCutterReach, 0.0, 1.5);
+    stats.hardRockPower = std::clamp(stats.hardRockPower, 0.0, 0.75);
     stats.engineEfficiency = std::clamp(stats.engineEfficiency, 0.0, 0.75);
     stats.artifactTowEfficiency = std::clamp(stats.artifactTowEfficiency, 0.0, 0.80);
     stats.oxygenSeconds = std::clamp(stats.oxygenSeconds, 0.0, tuning::mining::maximumOxygenSeconds);
@@ -7147,7 +7189,7 @@ MiningDrillStats miningOperatorDrillStats()
 {
     MiningDrillStats stats;
     stats.power =
-        tuning::mining::baseDrillPower *
+        tuning::mining::operatorBaseDrillPower *
         tuning::mining::operatorDrillPowerScale;
     stats.speed = tuning::mining::operatorSpeedCellsPerSecond;
     stats.scannerRadius = tuning::mining::scannerRevealRadius;
@@ -7328,9 +7370,20 @@ int miningRigCargoCapacityMass()
     return tuning::mining::rigCargoCapacityMass;
 }
 
+int miningRigCargoCapacityMass(const GameState& state, const ContentCatalog& catalog)
+{
+    return tuning::mining::rigCargoCapacityMass +
+        std::max(0, static_cast<int>(std::lround(miningDrillStats(state, catalog).cargoCapacityBonus)));
+}
+
 int miningRigCargoAvailableMass(const MiningRunState& mining)
 {
     return std::max(0, miningRigCargoCapacityMass() - miningCarriedCargo(mining));
+}
+
+int miningRigCargoAvailableMass(const GameState& state, const ContentCatalog& catalog)
+{
+    return std::max(0, miningRigCargoCapacityMass(state, catalog) - miningCarriedCargo(state.run.mining));
 }
 
 int miningBankedCargo(const MiningRunState& mining)
@@ -7524,19 +7577,21 @@ MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& ca
             (suit ? 1.0 : std::clamp(1.0 - stats.artifactTowEfficiency, 0.20, 1.0))
         : 0.0;
     load.currentLoad = (suit ? 0.0 : static_cast<double>(miningCarriedCargo(mining))) + towWeight;
+    load.capacity = suit
+        ? tuning::mining::rigCargoCapacityMass
+        : tuning::mining::rigCargoCapacityMass + std::max(0.0, stats.cargoCapacityBonus);
     load.freeBuffer = suit
         ? tuning::mining::operatorArtifactFreeBuffer
-        : tuning::mining::baseCarryBufferCargo + stats.storage;
-    load.capacity = tuning::mining::rigCargoCapacityMass;
+        : load.capacity * 0.25;
     load.full = !suit && load.currentLoad >= load.capacity;
     if (!suit) {
         if (load.currentLoad >= load.capacity) {
             load.band = RigLoadBand::Full;
-        } else if (load.currentLoad >= 18.0) {
+        } else if (load.currentLoad >= load.capacity * 0.75) {
             load.band = RigLoadBand::Packrat;
-        } else if (load.currentLoad >= 12.0) {
+        } else if (load.currentLoad >= load.capacity * 0.50) {
             load.band = RigLoadBand::Laden;
-        } else if (load.currentLoad >= 6.0) {
+        } else if (load.currentLoad >= load.capacity * 0.25) {
             load.band = RigLoadBand::Standard;
         }
     }
@@ -8131,7 +8186,8 @@ SurfaceActionOutcome startMiningRun(
         ? unresolvedProgressionArtifactOpportunity(
             state,
             catalog,
-            expedition.destinationId)
+            expedition.destinationId,
+            expedition.bodyId)
         : std::nullopt;
     const std::optional<ProgressionArtifactPlacement> progressionPlacement =
         progressionOpportunity.has_value()
@@ -8161,6 +8217,7 @@ SurfaceActionOutcome startMiningRun(
     mining.rewardBudget = rewardBudget;
     mining.progressionCreditEligible = progressionCreditEligible;
     mining.destinationId = expedition.destinationId;
+    mining.bodyId = expedition.bodyId;
     const std::string_view postSolarSystemId = expedition.postSolarSystemId.empty()
         ? postSolarSystemForDestination(expedition.destinationId)
         : std::string_view(expedition.postSolarSystemId);
@@ -8187,6 +8244,10 @@ SurfaceActionOutcome startMiningRun(
     }
     mining.scenarioId = expedition.pendingScenarioId;
     mining.scenarioStepId = expedition.pendingScenarioStepId;
+    if (progressionOpportunity.has_value()) {
+        mining.scenarioId = progressionOpportunity->scenarioId;
+        mining.scenarioStepId = progressionOpportunity->stepId;
+    }
     mining.miningSiteDefinitionId = expedition.pendingMiningSiteDefinitionId;
     mining.miningSiteBiome = siteDefinition != nullptr
         ? siteDefinition->biome
@@ -8387,6 +8448,7 @@ std::uint64_t surfaceLandingPreparationKey(
         }
     };
     mixBytes(request.destinationId);
+    mixBytes(request.bodyId);
     mixBytes(request.zoneId);
     mixBytes(request.scenarioId);
     mixBytes(request.scenarioStepId);
@@ -8842,6 +8904,7 @@ PreparedSurfaceLanding prepareSurfaceLanding(
     }
 
     PlanetaryExpeditionState& expedition = preview.run.planetaryExpedition;
+    expedition.bodyId = request.bodyId;
     expedition.pendingScenarioId = resolved.scenarioId;
     expedition.pendingScenarioStepId = resolved.scenarioStepId;
     expedition.pendingMiningSiteDefinitionId = resolved.miningSiteDefinitionId;
@@ -9279,6 +9342,7 @@ MiningTetherTargetResolution resolveMiningTetherTarget(const MiningRunState& min
         artifact.state != MiningArtifactState::Loose && gateHasHardLock(mining.gate);
     const bool suitRequired =
         mining.gate.objectivePassage == MiningPassageClass::SuitOnly &&
+        artifact.state != MiningArtifactState::Loose &&
         !evaActive;
     // Ties belong to the artifact. It is the more time-sensitive recovery
     // target and avoids a nearby rig stealing a visually overlapping grab.
@@ -9440,15 +9504,7 @@ MiningScannerResult pulseMiningScanner(GameState& state, const ContentCatalog& c
         return {};
     }
     const MiningArenaRules arenaRules = activeMiningArenaRules(mining);
-    const bool contextualProtectedObjective =
-        mining.gate.protectedObjective.kind == ProtectedObjectiveKind::Artifact &&
-        mining.artifact.present &&
-        !mining.artifact.revealed;
-    // The first Moon lesson keeps the general fog/scanner system out of the
-    // way, but the scanner becomes a required contextual verb the instant the
-    // lunar anomaly activates. Do not let the tutorial rules suppress that
-    // authored pulse.
-    if (!arenaRules.mechanics.fogAndScanner && !contextualProtectedObjective) {
+    if (!arenaRules.mechanics.fogAndScanner) {
         return {};
     }
     ensureMiningMiniDroneAgents(state, catalog);
@@ -9462,10 +9518,8 @@ MiningScannerResult pulseMiningScanner(GameState& state, const ContentCatalog& c
     const double originX = controlledActorX(mining);
     const double originY = controlledActorY(mining);
     // A campaign cocoon is a declared objective, not a random buried cache.
-    // The first pulse must establish that its outer seal exists even if the
-    // player has not yet walked close enough for the local reveal radius.
-    // Keep deeper layers and the artifact itself hidden until their authored
-    // discovery/completion rules allow them.
+    // Its outer seal can be mapped as an authored site feature, while the
+    // artifact itself still has to fall inside an actual scanner pulse.
     bool protectedObjectiveSignal = false;
     if (hasLayeredCocoon(mining) && !cocoonComplete(mining) &&
         mining.gate.activeCocoonLayer == 0 &&
@@ -9473,13 +9527,9 @@ MiningScannerResult pulseMiningScanner(GameState& state, const ContentCatalog& c
         revealCocoonLayer(mining, 0);
         protectedObjectiveSignal = true;
     }
-    if (!hasLayeredCocoon(mining) &&
-        mining.gate.protectedObjective.kind == ProtectedObjectiveKind::Artifact &&
-        mining.artifact.present && !mining.artifact.revealed) {
-        revealProtectedObjective(mining);
-        protectedObjectiveSignal = true;
-    }
     revealAround(mining, originX, originY, scannerRadius);
+    protectedObjectiveSignal = protectedObjectiveSignal ||
+        (!artifactRevealedBefore && mining.artifact.revealed);
     const bool surveyCompleteBeforePulse = mining.gate.surveyComplete;
     bool gateStateChanged = false;
     auto activateGateMarkers = [&](double originX, double originY, double radius) {
@@ -9681,7 +9731,25 @@ void updateMiningArtifact(GameState& state, const ContentCatalog& catalog, doubl
         // The capture field is the ship bay itself. Once the relic crosses it,
         // commit it to the Ship manifest immediately instead of leaving it in
         // the rig's temporary ledger until the rig also reaches the pad.
-        mining.stowedArtifacts.push_back(artifactRecordForObject(artifact, mining.destinationId));
+        const std::string& artifactOrigin = mining.bodyId.empty() ? mining.destinationId : mining.bodyId;
+        mining.stowedArtifacts.push_back(artifactRecordForObject(artifact, artifactOrigin));
+        if (state.run.expedition.travelInitialized) {
+            if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, artifactOrigin);
+                mission != nullptr && !mission->batteryId.empty()) {
+                (void)recoverSiteBattery(state.run.expedition, mission->batteryId);
+            }
+        }
+        if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, artifactOrigin)) {
+            const ScenarioDefinition* scenario = catalog.findScenario(mission->scenarioId);
+            const ScenarioStepDefinition* step = scenario
+                ? findScenarioStepDefinition(*scenario, mission->claimStepId) : nullptr;
+            if (step && step->completionEvent != ScenarioEventKind::None) {
+                recordScenarioEvent(state, catalog,
+                    {step->completionEvent, mission->scenarioId, mission->claimStepId,
+                     step->eventOriginId.empty() ? artifactOrigin : step->eventOriginId,
+                     step->eventTargetId.empty() ? mission->artifactId : step->eventTargetId, 1, 0});
+            }
+        }
         mining.stowedCargo += tuning::mining::artifactCargo;
         mining.artifactSecuredCelebrationSeconds = 2.0;
         if (mining.gate.completeOnShipCapture) {
@@ -9944,7 +10012,9 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     const MiningDrillStats activeDrillStats =
         suitActive ? miningOperatorDrillStats() : stats;
     if (!mining.rigGeometryValidated && mining.rigDepthZone == mining.depthZone) {
-        rig_geometry::recoverOverlap(mining.terrain,mining.droneX,mining.droneY,std::atan2(mining.hullDirY,mining.hullDirX));
+        rig_geometry::recoverOverlap(
+            mining.terrain,mining.droneX,mining.droneY,std::atan2(mining.hullDirY,mining.hullDirX),
+            {stats.headWidthScale,stats.sideCutterReach});
         mining.rigGeometryValidated=true;
     }
     if (!suitActive && !mining.rigDisabled && mining.rigFuel.current>0.0) {
@@ -9953,7 +10023,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         const double delta=std::remainder(desired-angle,6.283185307179586)*
             (1.0-std::exp(-tuning::mining::visualHeadingSlerpPerSecond*dt));
         const auto turn=rig_geometry::sweep(mining.terrain,mining.droneX,mining.droneY,angle,
-            mining.droneX,mining.droneY,angle+delta);
+            mining.droneX,mining.droneY,angle+delta,{stats.headWidthScale,stats.sideCutterReach});
         mining.hullDirX=std::cos(angle+delta*turn.fraction);
         mining.hullDirY=std::sin(angle+delta*turn.fraction);
         if(turn.fraction<1) {recordRigContact(mining,turn.contact);recordMiningMovementCollision(mining,-turn.contact.normal.x,-turn.contact.normal.y);}
@@ -9965,6 +10035,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         mining.drillIntegrity > 0.0 &&
         !drillFootprintCells(
              mining,
+             activeDrillStats,
              drillDirectionX,
              drillDirectionY)
              .empty();

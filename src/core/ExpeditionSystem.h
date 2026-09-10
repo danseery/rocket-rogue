@@ -6,6 +6,7 @@
 namespace rocket
 {
 inline constexpr double expeditionDockRadius = 1.0;
+inline constexpr double expeditionSalvageRadius = 1.95;
 
 enum class ExpeditionResult
 {
@@ -48,6 +49,7 @@ ExpeditionResult loadEarthBattery(PersistentExpeditionState &, std::string_view 
 ExpeditionResult installArkBattery(PersistentExpeditionState &, std::string_view batteryId);
 ExpeditionResult activateStraylight(PersistentExpeditionState &);
 ExpeditionResult salvageWreck(PersistentExpeditionState &, std::uint64_t wreckId, const SystemDefinition &, int holdCapacity = 2147483647);
+ExpeditionResult resolveRecoveredGraftConflict(PersistentExpeditionState&, int conflictIndex, bool useRecovered);
 ExpeditionResult loseExpedition(PersistentExpeditionState &, FlightRunState &, const SystemDefinition &);
 ExpeditionResult useShipSupplies(PersistentExpeditionState &, FlightRunState &);
 void storeVisitedSite(GameState &, std::string_view siteId);
@@ -62,7 +64,9 @@ ExpeditionResult launchEarthOpening(GameState &, const ContentCatalog &);
 FlightGuidance expeditionGuidance(const GameState &, bool surveyed = false, bool laserComplete = false);
 void refreshExpeditionTrajectory(PersistentExpeditionState &, FlightRunState &, const PreparedLaunch &, const Destination &, const SystemDefinition &);
 bool operationalHomeDocked(const PersistentExpeditionState &);
+bool expeditionMapBodyRevealed(const GameState &, const SystemBodyDefinition &);
 void recordExpeditionArrival(GameState &, const ContentCatalog &, const LaunchOutcome &);
+bool expeditionDockInRange(const PersistentExpeditionState &, const FlightRunState &, const SystemDefinition &, std::string_view dockBodyId = {});
 bool canDockExpedition(const PersistentExpeditionState &, const FlightRunState &, const SystemDefinition &);
 bool canSalvageWreck(const PersistentExpeditionState &, const FlightRunState &, const SystemDefinition &, std::uint64_t id, bool requireMatchedSpeed = true);
 const Destination &expeditionEnvironment(const GameState &, const ContentCatalog &);

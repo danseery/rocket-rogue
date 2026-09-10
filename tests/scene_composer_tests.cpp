@@ -1,6 +1,7 @@
 #include "core/UiViewportLayout.h"
 #include "core/Tuning.h"
 #include "core/FlightInstrumentLayout.h"
+#include "core/FlightSystem.h"
 #include "render/SceneAtlas.h"
 #include "render/SceneClip.h"
 #include "render/SceneComposer.h"
@@ -1313,29 +1314,39 @@ void testPhysicalLandingCameraDoesNotRetainTransferBodies()
     assert(hasTexture(packet, TextureId::RocketClosed));
 }
 
+void testExistingOrbitalShaftsRemainVisibleOutsideTheirActiveWedge()
+{
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::Flight;
+    snapshot.destinationTier = 2;
+    snapshot.frontierTransfer = true;
+    snapshot.launchPhysicalFlight = true;
+    snapshot.launchApproachBlend = 1.0;
+    snapshot.launchPositionX = 0.44;
+    snapshot.launchPositionY = 0.0;
+    snapshot.orbitalOverlay = 1.0;
+    snapshot.landingZones = rocket::planetLandingZones();
+    snapshot.orbitalZone = snapshot.landingZones[3];
+
+    SceneComposer baselineComposer;
+    baselineComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const ScenePacket baseline = baselineComposer.compose(snapshot);
+
+    snapshot.orbitalExistingShafts.push_back({
+        snapshot.landingZones[0].centerBearing,
+        2.4});
+    SceneComposer shaftComposer;
+    shaftComposer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const ScenePacket withShaft = shaftComposer.compose(snapshot);
+
+    // A stored shaft contributes two radial strokes and two mouth rings even
+    // while a different wedge owns the active survey and landing guidance.
+    assert(withShaft.instances.size() >= baseline.instances.size() + 4U);
+}
+
 
 void testUndiscoveredStraylightIsForeshadowedBehindNeptuneOnly()
 {
-    const auto findTextureInstance = [](const ScenePacket& packet, TextureId texture) {
-        const rocket::SceneAtlasUvRect expected = rocket::mapSceneAtlasUvRect(
-            texture, 0.0F, 0.0F, 1.0F, 1.0F);
-        const auto found = std::find_if(
-            packet.instances.begin(),
-            packet.instances.end(),
-            [&](const PackedSceneInstance& packed) {
-                const SceneInstance instance = rocket::unpackSceneInstance(packed);
-                return instance.textured
-                    && std::abs(instance.u0 - expected.u0) < 0.001F
-                    && std::abs(instance.v0 - expected.v0) < 0.001F
-                    && std::abs(instance.u1 - expected.u1) < 0.001F
-                    && std::abs(instance.v1 - expected.v1) < 0.001F;
-            });
-        assert(found != packet.instances.end());
-        return std::pair {
-            static_cast<std::size_t>(std::distance(packet.instances.begin(), found)),
-            rocket::unpackSceneInstance(*found)};
-    };
-
     SceneComposer composer;
     composer.setViewport({1280, 800, 1280, 800, 1.0F});
     composer.setTextureReady(TextureId::Neptune, true);
@@ -1347,17 +1358,10 @@ void testUndiscoveredStraylightIsForeshadowedBehindNeptuneOnly()
     neptune.frontierTransfer = true;
     neptune.arkCondition = rocket::ArkCondition::NotFound;
     const ScenePacket& neptunePacket = composer.compose(neptune);
-    const auto [arkIndex, ark] = findTextureInstance(
-        neptunePacket, TextureId::ArkOperational);
-    const auto [neptuneIndex, planet] = findTextureInstance(
-        neptunePacket, TextureId::Neptune);
-    const float arkWidth = std::hypot(ark.axisXx, ark.axisXy) * 2.0F;
-    const float planetWidth = std::hypot(planet.axisXx, planet.axisXy) * 2.0F;
-    assert(arkIndex < neptuneIndex);
-    assert(arkWidth < planetWidth);
-    assert(std::hypot(
-        ark.centerX - planet.centerX,
-        ark.centerY - planet.centerY) < 0.30F);
+    assert(std::none_of(
+        neptunePacket.draws.begin(),
+        neptunePacket.draws.end(),
+        [](const SceneDraw& draw) { return draw.texture == TextureId::ArkOperational; }));
 
     RenderSnapshot uranus = neptune;
     uranus.destinationTier = 5;
@@ -2222,6 +2226,75 @@ void testMiningLooseObjectsAreVisibleWorldEntities()
     }
 }
 
+void testMiningLooseObjectsUseContinuousWorldCoordinates()
+{
+    rocket::MiningRunState mining;
+    mining.terrain.width = 4;
+    mining.terrain.height = 4;
+    mining.terrain.cells.resize(16);
+    mining.droneX = 1.0;
+    mining.droneY = 1.0;
+    mining.targetTipX = 1.0;
+    mining.targetTipY = 2.0;
+
+    rocket::MiningLooseObject chunk;
+    chunk.material = rocket::MiningCellMaterial::CommonOre;
+    chunk.x = 2.5;
+    chunk.y = 2.5;
+    mining.looseObjects.push_back(chunk);
+
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningShipPresent = false;
+    snapshot.miningArtifact = {
+        true,
+        chunk.x,
+        chunk.y,
+        1.0,
+        1.0,
+        0,
+        0,
+        static_cast<int>(rocket::MiningArtifactState::Loose),
+        true,
+        false
+    };
+
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const ScenePacket& packet = composer.compose(snapshot);
+
+    const auto artifactGlow = std::find_if(
+        packet.instances.begin(),
+        packet.instances.end(),
+        [](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return !instance.textured
+                && instance.shape == SceneInstanceShape::RadialGlow
+                && instance.color.r > 0.70F
+                && instance.color.b > 0.90F
+                && instance.color.a > 0.20F;
+        });
+    const auto oreMarker = std::find_if(
+        packet.instances.begin(),
+        packet.instances.end(),
+        [](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return !instance.textured
+                && instance.shape == SceneInstanceShape::Polygon
+                && instance.segments == miningMaterialMarkerSegments(
+                    rocket::MiningCellMaterial::CommonOre)
+                && std::abs(instance.color.r - 0.74F) < 0.015F
+                && std::abs(instance.color.g - 0.78F) < 0.015F
+                && std::abs(instance.color.b - 0.84F) < 0.015F;
+        });
+
+    assert(artifactGlow != packet.instances.end());
+    assert(oreMarker != packet.instances.end());
+    const SceneInstance artifact = rocket::unpackSceneInstance(*artifactGlow);
+    const SceneInstance ore = rocket::unpackSceneInstance(*oreMarker);
+    assert(std::abs(ore.centerX - artifact.centerX) < 0.002F);
+    assert(std::abs(ore.centerY - artifact.centerY) < 0.002F);
+}
+
 void testMiningCellsAndScannerMarksUseMaterialSilhouettes()
 {
     const std::array<std::pair<rocket::MiningCellMaterial, Color>, 3> materials {{
@@ -2502,6 +2575,27 @@ void testMiningRigStaysVisibleAndTracksHeading()
     assert((first.axisYx * firstDrill.axisYx + first.axisYy * firstDrill.axisYy)
         / (firstLength * firstDrillLength) > 0.999F);
     assertMiningDrillMounted(first, firstDrill);
+
+    snapshot.miningDrillHeadWidthScale = 1.75;
+    snapshot.miningSideCutterReach = 1.5;
+    const ScenePacket& upgradedPacket = composer.compose(snapshot);
+    int visibleDrillParts = 0;
+    const rocket::SceneAtlasUvRect drillUv = rocket::mapSceneAtlasUvRect(
+        TextureId::DrillBit, 0.0F, 0.0F, 1.0F / 6.0F, 1.0F);
+    for (const SceneDraw& draw : upgradedPacket.draws) {
+        if (draw.drawType != SceneDrawType::InstancedQuad || draw.atlasPage != drillUv.page) continue;
+        for (std::size_t index = 0; index < draw.instanceCount; ++index) {
+            const SceneInstance instance = rocket::unpackSceneInstance(
+                upgradedPacket.instances[draw.firstInstance + index]);
+            if (instance.textured && std::abs(instance.u0-drillUv.u0) < 0.00004F &&
+                std::abs(instance.v0-drillUv.v0) < 0.00004F &&
+                std::abs(instance.u1-drillUv.u1) < 0.00004F &&
+                std::abs(instance.v1-drillUv.v1) < 0.00004F) ++visibleDrillParts;
+        }
+    }
+    assert(visibleDrillParts == 3);
+    snapshot.miningDrillHeadWidthScale = 1.0;
+    snapshot.miningSideCutterReach = 0.0;
 
     // A large presentation-time step snaps to the new heading, avoiding the
     // intentional short steering Slerp while checking the opposite direction.
@@ -3520,6 +3614,7 @@ int main()
     testPhysicalApproachCameraAppliesToMarsAndLaterDestinations();
     testPhysicalLandingCameraBlendsWithoutTeleportingUnauthorizedImpacts();
     testPhysicalLandingCameraDoesNotRetainTransferBodies();
+    testExistingOrbitalShaftsRemainVisibleOutsideTheirActiveWedge();
     testUndiscoveredStraylightIsForeshadowedBehindNeptuneOnly();
     testPolygonInstanceMatchesTriangleFan();
     testOrderedBatchingAndWideLineInstancing();
@@ -3529,6 +3624,7 @@ int main()
     testMiningEvaDeathAddsPresentationWithoutReplacingTheSuit();
     testMiningActiveAnchorOwnsDefenseEffects();
     testMiningLooseObjectsAreVisibleWorldEntities();
+    testMiningLooseObjectsUseContinuousWorldCoordinates();
     testMiningCellsAndScannerMarksUseMaterialSilhouettes();
     testSceneTransitionFadesEverySceneToBlack();
     testTetheredArtifactAuraHasNoRectangularOverlay();

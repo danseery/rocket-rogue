@@ -21,11 +21,20 @@ inline constexpr double drillHalfWidth = drillSpriteLength * .88 * .25;
 inline constexpr double skin = .00001;
 struct Point { double x = 0, y = 0; };
 struct Contact { int x = 0, y = 0; double depth = 0; Point normal; bool passage = false; };
-inline std::array<Point, 3> triangle(double x, double y, double dx, double dy) {
+struct Profile {
+    double headWidthScale = 1.0;
+    double sideCutterReach = 0.0;
+};
+inline double effectiveHalfWidth(Profile profile) {
+    return drillHalfWidth * std::max(1.0, profile.headWidthScale) +
+        std::max(0.0, profile.sideCutterReach);
+}
+inline std::array<Point, 3> triangle(double x, double y, double dx, double dy, Profile profile = {}) {
     const double len = std::hypot(dx,dy);
     if (len < .0001) { dx=0; dy=1; } else { dx/=len; dy/=len; }
-    return {{{x+dx*drillBase-dy*drillHalfWidth,y+dy*drillBase+dx*drillHalfWidth},
-        {x+dx*drillBase+dy*drillHalfWidth,y+dy*drillBase-dx*drillHalfWidth},
+    const double halfWidth = effectiveHalfWidth(profile);
+    return {{{x+dx*drillBase-dy*halfWidth,y+dy*drillBase+dx*halfWidth},
+        {x+dx*drillBase+dy*halfWidth,y+dy*drillBase-dx*halfWidth},
         {x+dx*drillTip,y+dy*drillTip}}};
 }
 inline Contact triangleContact(const std::array<Point,3>& p, int x, int y, double margin=0) {
@@ -61,8 +70,8 @@ inline Contact circleContact(double cx,double cy,int x,int y) {
     const std::array<Point,4> normals{{{-1,0},{1,0},{0,-1},{0,1}}};
     return {x,y,bodyRadius+edges[i],normals[i]};
 }
-inline std::vector<Contact> contacts(const MiningTerrain& terrain,double x,double y,double dx,double dy) {
-    const auto bit=triangle(x,y,dx,dy);
+inline std::vector<Contact> contacts(const MiningTerrain& terrain,double x,double y,double dx,double dy, Profile profile = {}) {
+    const auto bit=triangle(x,y,dx,dy,profile);
     double left=x-bodyRadius,right=x+bodyRadius,top=y-bodyRadius,bottom=y+bodyRadius;
     for(auto p:bit) { left=std::min(left,p.x);right=std::max(right,p.x);top=std::min(top,p.y);bottom=std::max(bottom,p.y); }
     std::vector<Contact> result;
@@ -93,12 +102,13 @@ inline bool improves(const std::vector<Contact>& before,const std::vector<Contac
 }
 struct Sweep { double fraction=1; Contact contact; };
 inline Sweep sweep(const MiningTerrain& terrain,double x,double y,double angle,
-    double targetX,double targetY,double targetAngle) {
+    double targetX,double targetY,double targetAngle, Profile profile = {}) {
     const double rotation=std::remainder(targetAngle-angle,6.283185307179586);
+    const double rotationRadius = std::max(drillTip, effectiveHalfWidth(profile));
     const int steps=std::max(1,static_cast<int>(std::ceil(
-        (std::hypot(targetX-x,targetY-y)+std::abs(rotation)*drillTip)/.04)));
+        (std::hypot(targetX-x,targetY-y)+std::abs(rotation)*rotationRadius)/.04)));
     auto at=[&](double t){return contacts(terrain,std::lerp(x,targetX,t),std::lerp(y,targetY,t),
-        std::cos(angle+rotation*t),std::sin(angle+rotation*t));};
+        std::cos(angle+rotation*t),std::sin(angle+rotation*t),profile);};
     auto previous=at(0); double accepted=0;
     for(int i=1;i<=steps;++i) {
         const double t=static_cast<double>(i)/steps;
@@ -114,14 +124,15 @@ inline Sweep sweep(const MiningTerrain& terrain,double x,double y,double angle,
     }
     return {};
 }
-inline void recoverOverlap(const MiningTerrain& terrain,double& x,double& y,double angle) {
-    if(contacts(terrain,x,y,std::cos(angle),std::sin(angle)).empty()) return;
-    for(double radius=.05;radius<=2*bodyRadius+.001;radius+=.05)
+inline void recoverOverlap(const MiningTerrain& terrain,double& x,double& y,double angle, Profile profile = {}) {
+    if(contacts(terrain,x,y,std::cos(angle),std::sin(angle),profile).empty()) return;
+    const double recoveryRadius = 2.0 * std::max(bodyRadius, effectiveHalfWidth(profile));
+    for(double radius=.05;radius<=recoveryRadius+.001;radius+=.05)
         for(int i=0;i<64;++i) {
             const double a=i*6.283185307179586/64;
             const double tx=x+std::cos(a)*radius,ty=y+std::sin(a)*radius;
-            if(!contacts(terrain,tx,ty,std::cos(angle),std::sin(angle)).empty()) continue;
-            if(sweep(terrain,x,y,angle,tx,ty,angle).fraction>=1.0) {x=tx;y=ty;return;}
+            if(!contacts(terrain,tx,ty,std::cos(angle),std::sin(angle),profile).empty()) continue;
+            if(sweep(terrain,x,y,angle,tx,ty,angle,profile).fraction>=1.0) {x=tx;y=ty;return;}
         }
 }
 }

@@ -428,7 +428,11 @@ inline std::vector<PanelMetricPresentation> surfaceUpgradeChips(const SurfaceUpg
         2);
     addDoubleChip(chips, "Drill", stats.drillPower);
     addDoubleChip(chips, "Cooling", stats.drillCooling);
+    addPercentChip(chips, "Heat reduction", stats.drillHeatReduction);
     addDoubleChip(chips, "Durability", stats.drillDurability);
+    addPercentChip(chips, "Head width", stats.drillHeadWidth);
+    addDoubleChip(chips, "Side reach", stats.sideCutterReach);
+    addPercentChip(chips, "Hard-rock power", stats.hardRockPower);
     addPositiveChip(chips, "Depth reach", depthReach);
     addPercentChip(chips, "Recoil", stats.hardRockBounceRelief);
     addPercentChip(chips, "Ore yield", stats.oreYieldChance);
@@ -439,7 +443,7 @@ inline std::vector<PanelMetricPresentation> surfaceUpgradeChips(const SurfaceUpg
     if (stats.oxygenSeconds > 0.0) {
         chips.push_back(panelMetric("Oxygen", "+" + std::to_string(static_cast<int>(std::round(stats.oxygenSeconds))) + "s"));
     }
-    addDoubleChip(chips, "Storage", stats.droneStorage);
+    addDoubleChip(chips, "Rig capacity", stats.droneStorage);
     addPercentChip(chips, "Haul engines", stats.droneEngineEfficiency);
     addPercentChip(chips, "Towline", stats.artifactTowEfficiency);
     if (stats.scannerPulseDamage > 0) {
@@ -634,8 +638,33 @@ inline SurfaceUpgradeCardPresentation runUpgradeOfferCardPresentation(
     case RunUpgradeKind::Rig:
         if (const SurfaceUpgrade* upgrade = catalog.findSurfaceUpgrade(offer.definitionId)) {
             card.title = upgrade->name + " " + runUpgradeRankLabel(offer.targetRank);
-            card.detail = "Rank " + runUpgradeRankLabel(offer.targetRank) + " adds another full stack this expedition. " + upgrade->description;
+            card.detail = upgrade->description;
             card.effectChips = surfaceUpgradeChips(upgrade->stats);
+            if (upgrade->stats.drillPower > 0.0) {
+                const double before = miningDrillStats(state, catalog).power;
+                const double after = before + upgrade->stats.drillPower;
+                card.effectChips.insert(card.effectChips.begin(), panelMetric("Cutting power", display::fixed(before, 2) + " -> " + display::fixed(after, 2)));
+            } else if (upgrade->stats.drillHeadWidth > 0.0) {
+                const double before = 100.0 * miningDrillStats(state, catalog).headWidthScale;
+                const double after = before + 100.0 * upgrade->stats.drillHeadWidth;
+                card.effectChips.insert(card.effectChips.begin(), panelMetric("Head width", display::fixed(before, 0) + "% -> " + display::fixed(after, 0) + "%"));
+            } else if (upgrade->stats.sideCutterReach > 0.0) {
+                const double before = miningDrillStats(state, catalog).sideCutterReach;
+                const double after = before + upgrade->stats.sideCutterReach;
+                card.effectChips.insert(card.effectChips.begin(), panelMetric("Side reach", display::fixed(before, 1) + " -> " + display::fixed(after, 1) + " cells"));
+            } else if (upgrade->stats.drillHeatReduction > 0.0) {
+                const double before = 100.0 * surfaceUpgradeEffects(state, catalog).drillHeatReduction;
+                const double after = before + 100.0 * upgrade->stats.drillHeatReduction;
+                card.effectChips.insert(card.effectChips.begin(), panelMetric("Heat reduction", display::fixed(before, 0) + "% -> " + display::fixed(after, 0) + "%"));
+            } else if (upgrade->stats.hardRockPower > 0.0) {
+                const double before = 100.0 * miningDrillStats(state, catalog).hardRockPower;
+                const double after = before + 100.0 * upgrade->stats.hardRockPower;
+                card.effectChips.insert(card.effectChips.begin(), panelMetric("Hard-rock power", display::fixed(before, 0) + "% -> " + display::fixed(after, 0) + "%"));
+            } else if (upgrade->stats.droneStorage > 0.0) {
+                const double before = miningRigCargoCapacityMass(state, catalog);
+                const double after = before + upgrade->stats.droneStorage;
+                card.effectChips.insert(card.effectChips.begin(), panelMetric("Rig capacity", display::fixed(before, 0) + " -> " + display::fixed(after, 0)));
+            }
             if (upgrade->stats.scannerPulseDamage > 0) {
                 for (PanelMetricPresentation& chip : card.effectChips) {
                     if (chip.label == "Scan pulse") {

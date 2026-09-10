@@ -1036,6 +1036,9 @@ void expeditionExperienceQueuesDistinctSelectableOffers()
     const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     require(state.run.expedition.progression.runUpgradeOfferPending && state.run.expedition.progression.runUpgradeOfferCount == 3,
         "a populated run-upgrade pool should expose three cards");
+    require(state.run.expedition.progression.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::highTorqueMotor &&
+            state.run.expedition.progression.runUpgradeOffers[1].definitionId == content::surfaceUpgrade::wideDrillHead,
+        "the first draft must include cutting power and a width upgrade");
     for (int left = 0; left < state.run.expedition.progression.runUpgradeOfferCount; ++left) {
         for (int right = left + 1; right < state.run.expedition.progression.runUpgradeOfferCount; ++right) {
             const RunUpgradeOffer& a = state.run.expedition.progression.runUpgradeOffers[static_cast<std::size_t>(left)];
@@ -1051,6 +1054,11 @@ void expeditionExperienceQueuesDistinctSelectableOffers()
         "selection should consume exactly one choice and clear only the current board");
     require(state.screen == originalScreen,
         "core offer selection must not mutate screens or auto-open the next board");
+    require(generateRunUpgradeOffers(state, catalog, rng) &&
+            std::any_of(state.run.expedition.progression.runUpgradeOffers.begin(),
+                state.run.expedition.progression.runUpgradeOffers.begin() + state.run.expedition.progression.runUpgradeOfferCount,
+                [](const RunUpgradeOffer& offer) { return offer.definitionId == content::surfaceUpgrade::sideCutters; }),
+        "the other width upgrade must appear by the third draft");
 }
 
 void sharedFlightInstrumentPresentationMatchesEachMode()
@@ -1105,7 +1113,7 @@ void combatRunUpgradesWaitForFirstEnemyEncounter()
     ContentCatalog catalog = createDefaultContent();
     catalog.surfaceUpgrades = {
         *catalog.findSurfaceUpgrade(content::surfaceUpgrade::resonantDischarge),
-        *catalog.findSurfaceUpgrade(content::surfaceUpgrade::thermalDrillJackets)};
+        *catalog.findSurfaceUpgrade(content::surfaceUpgrade::coolantMist)};
     catalog.miniDrones.clear();
     catalog.droneModules.clear();
     catalog.droneSynergies.clear();
@@ -1115,7 +1123,7 @@ void combatRunUpgradesWaitForFirstEnemyEncounter()
     Random rng(6424);
     require(generateRunUpgradeOffers(state, catalog, rng), "non-combat upgrades should remain available before enemy contact");
     require(state.run.expedition.progression.runUpgradeOfferCount == 1 &&
-            state.run.expedition.progression.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::thermalDrillJackets,
+            state.run.expedition.progression.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::coolantMist,
         "Resonant Discharge should stay out of the early upgrade pool before an enemy is encountered");
 
     state.run.expedition.progression.runUpgradeOffers = {{
@@ -1123,7 +1131,7 @@ void combatRunUpgradesWaitForFirstEnemyEncounter()
     state.run.expedition.progression.runUpgradeOfferCount = 1;
     state.run.expedition.progression.runUpgradeOfferPending = true;
     require(generateRunUpgradeOffers(state, catalog, rng) &&
-            state.run.expedition.progression.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::thermalDrillJackets,
+            state.run.expedition.progression.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::coolantMist,
         "a saved pre-contact combat draft should be rerolled without consuming its earned pick");
 
     state.meta.hasEncounteredEnemy = true;
@@ -1192,7 +1200,7 @@ void postExtractionLevelUpDraftRestoresWithoutSurfaceRuntime()
     state.run.expedition.progression.pendingRunUpgradeChoices = 1;
     state.run.expedition.progression.runUpgradeOffers[0] = {
         RunUpgradeKind::Rig,
-        content::surfaceUpgrade::thermalDrillJackets,
+        content::surfaceUpgrade::coolantMist,
         1,
         -1};
     state.run.expedition.progression.runUpgradeOfferCount = 1;
@@ -1224,7 +1232,11 @@ void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
 
     GameState upgraded = baseline;
     upgraded.run.expedition.progression.runRigUpgradeRanks = {
-        {content::surfaceUpgrade::thermalDrillJackets, 1},
+        {content::surfaceUpgrade::coolantMist, 1},
+        {content::surfaceUpgrade::highTorqueMotor, 1},
+        {content::surfaceUpgrade::wideDrillHead, 1},
+        {content::surfaceUpgrade::sideCutters, 1},
+        {content::surfaceUpgrade::hardRockTeeth, 1},
         {content::surfaceUpgrade::widebandPulse, 1},
         {content::surfaceUpgrade::cargoSkids, 1},
         {content::surfaceUpgrade::shockMounts, 1},
@@ -1233,11 +1245,23 @@ void selectedSurfaceUpgradesModifyMiningAndSurfaceStats()
 
     const MiningDrillStats baselineStats = miningDrillStats(baseline, catalog);
     const MiningDrillStats upgradedStats = miningDrillStats(upgraded, catalog);
+    require(nearlyEqual(tuning::mining::baseDrillPower, 5.04) &&
+            nearlyEqual(miningOperatorDrillStats().power,
+                tuning::mining::operatorBaseDrillPower * tuning::mining::operatorDrillPowerScale),
+        "the Rig starter boost must leave the EVA drill at its original cutting power");
     require(upgradedStats.heatRiseScale < baselineStats.heatRiseScale, "thermal field upgrades should reduce mining heat rise");
+    require(nearlyEqual(baselineStats.power, tuning::mining::baseDrillPower) &&
+            nearlyEqual(upgradedStats.power - baselineStats.power, tuning::mining::baseDrillPower * 0.25),
+        "starter and High-Torque cutting power must use the authored additive values");
+    require(nearlyEqual(upgradedStats.headWidthScale, 1.25) && nearlyEqual(upgradedStats.sideCutterReach, 0.5) &&
+            nearlyEqual(upgradedStats.hardRockPower, 0.25),
+        "width, side reach, and hard-rock upgrades must resolve independently");
     require(upgradedStats.scannerRadius > baselineStats.scannerRadius, "scanner field upgrades should widen pulse reveal radius");
     require(upgradedStats.integrityRelief > baselineStats.integrityRelief, "shock mounts should improve mining durability");
     require(upgradedStats.hardRockBounceRelief > baselineStats.hardRockBounceRelief, "shock mounts should reduce hard-rock recoil");
     require(upgradedStats.oreYieldChance > baselineStats.oreYieldChance, "ore field upgrades should improve yield odds");
+    require(miningRigCargoCapacityMass(upgraded, catalog) == 26,
+        "Cargo Skids I must increase real Rig capacity from 24 to 26");
     require(surfaceToolEffects(upgraded.meta).hazardRelief >= surfaceToolEffects(baseline.meta).hazardRelief, "cargo field upgrades should reduce Push Deeper hazard risk");
 
     const SurfaceExpeditionPresentation presentation = planetaryExpeditionPresentation(upgraded, catalog);
@@ -1463,7 +1487,15 @@ void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
             std::abs(state.run.expedition.progression.expeditionExperience) < 0.001 &&
             state.run.expedition.progression.pendingRunUpgradeChoices == 1,
         "completing an authored material-delivery objective should award exactly 10 expedition XP");
-    require(claimMarsBayExpansion(state, catalog), "the completed Mars objective should explicitly fabricate Slot 2");
+    require(recordScenarioEvent(
+                state, catalog,
+                {ScenarioEventKind::ArtifactRecovered, {}, {}, "mars",
+                 content::protectedObjective::marsSignalArtifact, 1, 0}),
+        "the Mars slot fixture should recover the mission artifact before claiming its reward");
+    require(performScenarioAction(
+                state, catalog, content::scenario::marsBayExpansion, "artifact",
+                ScenarioActionKind::ClaimReward).applied,
+        "the completed Mars mission should explicitly fabricate Slot 2");
     require(state.meta.droneBaySlots == 2 && state.meta.equippedDroneIds.size() == 1,
         "Mars should add an empty second slot without assigning another drone");
     state.meta.materials.common = 20;
@@ -2067,6 +2099,12 @@ void miningArtifactTetherAndDestructionRules()
         "artifact tether test should start mining at an artifact-enabled tier");
 
     MiningArtifactObject& artifact = state.run.mining.artifact;
+    artifact.present = true;
+    artifact.id = content::protectedObjective::lunarSignalArtifact;
+    artifact.state = MiningArtifactState::Loose;
+    artifact.x = state.run.mining.droneX;
+    artifact.y = state.run.mining.droneY + 1.0;
+    artifact.health = artifact.maxHealth = 10.0;
     artifact.revealed = true;
     state.run.mining.droneX = artifact.x;
     state.run.mining.droneY = artifact.y - 1.0;
@@ -2183,6 +2221,8 @@ void miningArtifactSaveRoundTrips()
     require(
         startMiningRun(state, catalog, {MiningAct::ActOne, 8, 92933, true, MiningGateType::None}, true).applied,
         "artifact save test should start mining at an artifact-enabled tier");
+    state.run.mining.artifact.present = true;
+    state.run.mining.artifact.id = content::protectedObjective::lunarSignalArtifact;
     state.run.mining.artifact.state = MiningArtifactState::Loose;
     state.run.mining.artifact.tethered = true;
     state.run.mining.artifact.health = 0.64;
@@ -4860,6 +4900,45 @@ void miningUsesRigFuelReserve()
         "physical fuel-cell contact should restart a zero-fuel rig");
 }
 
+void drillPowerUpgradesProduceMeasuredCuttingGains()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    const auto oneTickDamage = [&](MiningCellMaterial material, const std::vector<RunRigUpgradeRank>& ranks) {
+        GameState state = createNewGame(catalog, 92939);
+        state.run.destinationIndex = 2;
+        startSurfaceExpedition(state, catalog);
+        prepareMiningSiteForTest(state);
+        require(startMiningRun(state, catalog, {MiningAct::ActOne, 4, 92939}, false).applied,
+            "measured drill-power fixture should start");
+        state.run.expedition.progression.runRigUpgradeRanks = ranks;
+        MiningRunState& mining = state.run.mining;
+        for (MiningCell& cell : mining.terrain.cells) cell = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
+        MiningCell* target = miningCellAt(mining.terrain, 33, 4);
+        require(target != nullptr, "measured drill-power target should exist");
+        *target = {material, 100.0, 100.0, true, false};
+        mining.droneX = 33.0 - rig_geometry::drillTip + .01;
+        mining.droneY = 4.0;
+        mining.hullDirX = 1.0;
+        mining.hullDirY = 0.0;
+        mining.rigGeometryValidated = true;
+        setMiningDrilling(state, true);
+        updateMiningRun(state, catalog, 0.08);
+        return 100.0 - target->remainingToughness;
+    };
+
+    const double starterCommon = oneTickDamage(MiningCellMaterial::CommonOre, {});
+    const double torqueCommon = oneTickDamage(MiningCellMaterial::CommonOre,
+        {{content::surfaceUpgrade::highTorqueMotor, 1}});
+    require(starterCommon > 0.0 && nearlyEqual(torqueCommon / starterCommon, 1.25, 0.001),
+        "High-Torque Motor I must cut ordinary terrain 25 percent faster than the improved starter Rig");
+
+    const double starterHard = oneTickDamage(MiningCellMaterial::HardRock, {});
+    const double teethHard = oneTickDamage(MiningCellMaterial::HardRock,
+        {{content::surfaceUpgrade::hardRockTeeth, 1}});
+    require(starterHard > 0.0 && nearlyEqual(teethHard / starterHard, 1.25, 0.001),
+        "Hard-Rock Teeth I must multiply final Hard Rock cutting power by 25 percent");
+}
+
 void rigFuelLoopRanksControlOperatingCadence()
 {
     const std::array<double, 4> expectedEfficiency {0.0, 0.1, 0.2, 0.3};
@@ -5824,7 +5903,7 @@ void miningRefitModulesImproveDrillProfileIncrementally()
     require(upgradedStats.hardRockBounceRelief > baseStats.hardRockBounceRelief, "durability modules should reduce hard-rock recoil");
     require(upgradedStats.terrainWidth > baseStats.terrainWidth, "survey modules should widen the mining terrain");
     require(upgradedStats.terrainHeight > baseStats.terrainHeight, "deep-bore modules should deepen the mining terrain");
-    require(upgradedStats.storage > baseStats.storage, "cargo refits should increase mining free carry");
+    require(upgradedStats.cargoCapacityBonus > baseStats.cargoCapacityBonus, "cargo refits should increase Rig capacity");
     require(upgradedStats.engineEfficiency > baseStats.engineEfficiency, "hauler refits should reduce load burden");
 
     upgraded.run.destinationIndex = 2;
@@ -5851,7 +5930,7 @@ void miningEvaFixedDrillProfileIgnoresRigUpgrades()
         content::module::diamondBearings
     };
     upgraded.run.expedition.progression.runRigUpgradeRanks = {
-        {content::surfaceUpgrade::thermalDrillJackets, 1},
+        {content::surfaceUpgrade::coolantMist, 1},
         {content::surfaceUpgrade::shockMounts, 1},
         {content::surfaceUpgrade::oreScentArray, 1},
         {content::surfaceUpgrade::oreHopper, 1}
@@ -5872,7 +5951,7 @@ void miningEvaFixedDrillProfileIgnoresRigUpgrades()
     require(
         std::abs(
             operatorStats.power -
-            tuning::mining::baseDrillPower *
+            tuning::mining::operatorBaseDrillPower *
                 tuning::mining::operatorDrillPowerScale) < 0.000001 &&
             std::abs(operatorStats.heatRiseScale - 1.0) < 0.000001 &&
             std::abs(
@@ -6032,6 +6111,8 @@ void activeMiningRoundTripsThroughSave()
     state.run.mining.rigFuel = {1.25, 4.0};
     state.run.mining.rigOxygen = {12.5, 30.0};
     state.run.mining.suitOxygen = {6.25, 15.0};
+    state.run.mining.cargo = 25;
+    state.run.expedition.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::cargoSkids, 1}};
     state.run.mining.temporaryMaterials.exotic = 1;
     state.run.mining.stowedMaterials.common = 2;
     state.run.mining.stowedCargo = 3;
@@ -6103,6 +6184,8 @@ void activeMiningRoundTripsThroughSave()
     require(restored.run.mining.stowedMaterials.common == 2, "mining stowed materials should round trip");
     require(restored.run.mining.stowedCargo == 3, "mining stowed cargo should round trip");
     require(restored.run.mining.stowedArtifacts.size() == 1, "mining stowed artifacts should round trip");
+    require(restored.run.mining.cargo == 25 && miningRigCargoCapacityMass(restored, catalog) == 26,
+        "the upgraded 26-unit Rig hold and cargo beyond the original limit should round trip");
     require(restored.run.mining.enemiesDefeated == 3, "mining defeated enemy count should round trip");
     require(std::abs(restored.run.mining.defenseDamageDealt - 4.25) < 0.000001, "mining defense damage should round trip");
     require(std::abs(restored.run.mining.enemyDamageTaken - 0.125) < 0.000001, "mining enemy damage should round trip");
@@ -7520,6 +7603,13 @@ void saveRoundTripPreservesProgress()
     state.meta.memorials.push_back("Test Pilot lost during Mars");
     state.run.crew.front().archetypeId = "capybara_endurance";
     state.run.crew.front().status = CrewStatus::Injured;
+    state.run.expedition.progression.runUpgradeDraftCount = 3;
+    state.run.expedition.progression.wideDrillHeadOffered = true;
+    state.run.expedition.progression.sideCuttersOffered = true;
+    state.run.expedition.progression.pendingGraftConflicts = {{
+        0,
+        {0, "active_drone", DroneModuleKind::SpectrumFilter},
+        {0, "wreck_drone", DroneModuleKind::CombatDrill}}};
 
     const std::string text = serializeSaveData(captureSaveData(state));
     const auto save = deserializeSaveData(text);
@@ -7563,6 +7653,12 @@ void saveRoundTripPreservesProgress()
     require(restored.meta.memorials.size() == 1, "memorials should round trip");
     require(restored.run.crew.front().archetypeId == "capybara_endurance", "crew archetype should round trip");
     require(restored.run.crew.front().status == CrewStatus::Injured, "crew status should round trip");
+    require(restored.run.expedition.progression.runUpgradeDraftCount == 3 &&
+            restored.run.expedition.progression.wideDrillHeadOffered &&
+            restored.run.expedition.progression.sideCuttersOffered &&
+            restored.run.expedition.progression.pendingGraftConflicts.size() == 1 &&
+            restored.run.expedition.progression.pendingGraftConflicts.front().recovered.primaryDroneId == "wreck_drone",
+        "v23 draft guarantees and unresolved wreck graft choices should round trip");
 }
 
 void progressedSavesSkipTheFirstLaunchIntroduction()
@@ -7580,14 +7676,14 @@ void progressedSavesSkipTheFirstLaunchIntroduction()
     GameState progressedRestored = createNewGame(catalog, 2);
     restoreSaveData(progressedRestored, catalog, freshSave);
     require(ui::briefings::acknowledged(progressedRestored.meta.acknowledgedActivityBriefingIds, ui::briefings::launch),
-        "a campaign with recorded launch history should migrate past the first-flight introduction");
+        "a current campaign with recorded launch history should skip the first-flight introduction");
 }
 
 
 void saveSchemaConstantsMatchSerializedFields()
 {
     const ContentCatalog catalog = createDefaultContent();
-    require(save_schema::currentVersion == 21, "the current save schema should be version twenty-one");
+    require(save_schema::currentVersion == 23, "the current save schema should be version twenty-three");
     GameState state = createNewGame(catalog, 12);
     state.run.credits = 123.0;
     state.run.inventoryModuleIds = {content::module::sparrowEngine, content::module::cryoLoop};
@@ -7620,6 +7716,10 @@ void saveSchemaConstantsMatchSerializedFields()
     require(text.find(std::string(save_schema::field::runRigUpgradeRanks) + save_schema::keyValueDelimiter) != std::string::npos, "run rig ranks should use a shared schema name");
     require(text.find(std::string(save_schema::field::runDroneRanks) + save_schema::keyValueDelimiter) != std::string::npos, "run drone ranks should use a shared schema name");
     require(text.find(std::string(save_schema::field::selectedSynergyIds) + save_schema::keyValueDelimiter) != std::string::npos, "selected synergies should use a shared schema name");
+    require(text.find(std::string(save_schema::field::runUpgradeDraftCount) + save_schema::keyValueDelimiter) != std::string::npos, "drill draft count should use a shared schema name");
+    require(text.find(std::string(save_schema::field::wideDrillHeadOffered) + save_schema::keyValueDelimiter) != std::string::npos, "wide-head guarantee state should use a shared schema name");
+    require(text.find(std::string(save_schema::field::sideCuttersOffered) + save_schema::keyValueDelimiter) != std::string::npos, "side-cutter guarantee state should use a shared schema name");
+    require(text.find(std::string(save_schema::field::pendingGraftConflicts) + save_schema::keyValueDelimiter) != std::string::npos, "wreck graft choices should use a shared schema name");
     require(text.find(std::string(save_schema::field::droneModuleAssignments) + save_schema::keyValueDelimiter) != std::string::npos, "temporary drone grafts should use a shared schema name");
     require(text.find(std::string(save_schema::field::miningRigState) + save_schema::keyValueDelimiter) != std::string::npos, "mining rig state key should use shared schema name");
     require(text.find(std::string(save_schema::field::miningOperatorState) + save_schema::keyValueDelimiter) != std::string::npos, "mining operator state key should use shared schema name");
@@ -7641,13 +7741,13 @@ void saveSchemaConstantsMatchSerializedFields()
             text.find("pendingDroneModuleOfferIndex=") == std::string::npos &&
             text.find("pendingDroneModuleFrame=") == std::string::npos &&
             text.find("pendingDroneModuleReplacementConfirmation=") == std::string::npos,
-        "version-fifteen saves must not persist the retired surface draft subflows");
+        "current saves must not persist the retired surface draft subflows");
     require(text.find("fieldInsight=") == std::string::npos &&
             text.find("fieldInsightAwardKeys=") == std::string::npos &&
             text.find("miningDraftsEarned=") == std::string::npos &&
             text.find("pendingFieldDraftThreshold=") == std::string::npos &&
             text.find("fieldDraftReturnScreen=") == std::string::npos,
-        "version-fifteen saves must not persist retired Field Insight progression");
+        "current saves must not persist retired Field Insight progression");
     require(text.find("droneUpgrades=") == std::string::npos &&
             text.find("droneUpgradeCredits=") == std::string::npos,
         "version-fifteen saves must not persist retired permanent drone progression");
@@ -8324,7 +8424,7 @@ void contentIdsResolveAgainstDefaultCatalog()
     require(arkProject != nullptr, "ark scaffold research id should resolve");
     require(arkProject->requiredDestinationTier == 3, "ark scaffold should start at the outer-planets phase");
     require(arkProject->rewardUnlockKey == content::unlock::arkScaffold, "ark scaffold should unlock the future home-base hook");
-    require(catalog.findSurfaceUpgrade(content::surfaceUpgrade::thermalDrillJackets) != nullptr, "surface upgrade ids should resolve");
+    require(catalog.findSurfaceUpgrade(content::surfaceUpgrade::coolantMist) != nullptr, "surface upgrade ids should resolve");
     require(catalog.findSurfaceUpgrade(content::surfaceUpgrade::widebandPulse) != nullptr, "scanner surface upgrade id should resolve");
     require(catalog.findMiniDrone(content::drone::miningDrone) != nullptr, "mining drone id should resolve");
     require(catalog.findMiniDrone(content::drone::resourceDrone) != nullptr, "resource drone id should resolve");
@@ -8598,13 +8698,13 @@ void secondaryMiningStateRoundTrips()
     state.run.expedition.progression.expeditionExperience = 37.5;
     state.run.expedition.progression.pendingRunUpgradeChoices = 2;
     state.run.expedition.progression.runUpgradeOffers = {{
-        {RunUpgradeKind::Rig, content::surfaceUpgrade::thermalDrillJackets, 2, -1},
+        {RunUpgradeKind::Rig, content::surfaceUpgrade::coolantMist, 2, -1},
         {RunUpgradeKind::DroneRank, content::drone::surveyDrone, 3, -1},
         {RunUpgradeKind::DroneGraft, "pulse_strike", 0, 1}}};
     state.run.expedition.progression.runUpgradeOfferCount = 3;
     state.run.expedition.progression.runUpgradeOfferPending = true;
     state.run.expedition.progression.runUpgradeReturnScreen = Screen::Mining;
-    state.run.expedition.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::thermalDrillJackets, 2}};
+    state.run.expedition.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::coolantMist, 2}};
     state.run.expedition.progression.runDroneRanks = {{content::drone::surveyDrone, 3}};
     state.run.expedition.progression.selectedSynergyIds = {"relic_pathfinder", "full_spectrum_swarm"};
     state.meta.hasEncounteredEnemy = true;
@@ -8626,7 +8726,7 @@ void secondaryMiningStateRoundTrips()
         "expedition level, experience, and queued run choices should round trip");
     require(restored.run.expedition.progression.runUpgradeOfferPending && restored.run.expedition.progression.runUpgradeOfferCount == 3 &&
             restored.run.expedition.progression.runUpgradeOffers[0].kind == RunUpgradeKind::Rig &&
-            restored.run.expedition.progression.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::thermalDrillJackets &&
+            restored.run.expedition.progression.runUpgradeOffers[0].definitionId == content::surfaceUpgrade::coolantMist &&
             restored.run.expedition.progression.runUpgradeOffers[1].kind == RunUpgradeKind::DroneRank &&
             restored.run.expedition.progression.runUpgradeOffers[1].targetRank == 3 &&
             restored.run.expedition.progression.runUpgradeOffers[2].kind == RunUpgradeKind::DroneGraft &&
@@ -8841,53 +8941,13 @@ void rigCompoundCollisionSweepsAndRecovery()
     terrain.cells[7*20+7].material=MiningCellMaterial::HardRock;
     require(rig_geometry::contacts(terrain,6,6,1,0).empty(),"empty rectangle corners must not block the circular body");
     terrain.cells[7*20+7].material=MiningCellMaterial::Empty;
+    terrain.cells[7*20+8].material=MiningCellMaterial::HardRock;
+    require(rig_geometry::contacts(terrain,6,6,1,0).empty() &&
+            !rig_geometry::contacts(terrain,6,6,1,0,{1.75,1.5}).empty(),
+        "upgraded head and side-cutter dimensions must participate in Rig clearance");
+    terrain.cells[7*20+8].material=MiningCellMaterial::Empty;
     terrain.cells[6*20+8].suitOnlyPassage=true;
     require(!rig_geometry::contacts(terrain,6,6,1,0).empty(),"the solid drill must respect EVA-only passage cells");
-}
-
-void retiredActivitySavesResumePhysicalFlight()
-{
-    const auto catalog = createDefaultContent();
-    auto original = createNewGame(catalog, 0xA77A);
-    original.run.destinationIndex = static_cast<int>(std::distance(catalog.destinations.begin(),
-        std::find_if(catalog.destinations.begin(), catalog.destinations.end(), [](const auto& destination) {
-            return destination.id == content::destination::moon;
-        })));
-    original.run.credits = 37.0;
-    original.run.shipDamage = 12;
-    original.run.flight.fuelRemaining = 7.0;
-    original.run.flight.physicalFlight = false;
-    original.screen = Screen::Flight;
-    const auto serialized = serializeSaveData(captureSaveData(original));
-    for (int retiredScreen : {11, 12}) {
-        auto text = serialized;
-        const auto screen = text.find("screen=1\n");
-        require(screen != std::string::npos, "fixture must expose the v21 screen field");
-        text.replace(screen, 9, "screen=" + std::to_string(retiredScreen) + "\n");
-        const auto saved = deserializeSaveData(text);
-        require(saved.has_value(), "retired v21 activity IDs remain readable");
-        auto restored = createNewGame(catalog, 1);
-        restoreSaveData(restored, catalog, *saved);
-        require(restored.screen == Screen::Flight && restored.run.flight.physicalFlight,
-            "retired activities must resume the physical flight solver");
-        require(nearlyEqual(restored.run.flight.fuelRemaining, 7.0) &&
-                nearlyEqual(restored.run.credits, 37.0) && restored.run.shipDamage == 12,
-            "activity migration must preserve fuel, money, and hull damage");
-        require(!restored.run.flight.orbit.captured && !restored.run.flight.orbit.rewardAwarded,
-            "migration must not award orbit capture or a minigame reward");
-        restored.run.flight.positionX = 0.83;
-        restored.run.flight.velocityY = 0.21;
-        require(resumePhysicalApproach(restored, catalog), "physical approach should resume");
-        require(nearlyEqual(restored.run.flight.positionX, 0.83) &&
-                nearlyEqual(restored.run.flight.velocityY, 0.21),
-            "existing physical positions and momentum must not be relocated");
-    }
-    for (const auto& scenario : catalog.scenarios) {
-        for (const auto& step : scenario.steps) {
-            require(step.activity == ScenarioActivityKind::None || step.activity == ScenarioActivityKind::MiningSite,
-                "scenarios may not start a retired timing activity");
-        }
-    }
 }
 
 int main(int argc, char** argv)
@@ -8897,7 +8957,6 @@ int main(int argc, char** argv)
         std::cout << "Expedition checks passed\n";
         return 0;
     }
-    rigCompoundCollisionSweepsAndRecovery();
     try { persistentExpeditionTests(); }
     catch (const std::exception& error) { std::cerr << "Expedition: " << error.what() << '\n'; return 1; }
     incomingMessageTests();
@@ -8931,11 +8990,9 @@ int main(int argc, char** argv)
     miningShipServiceRestoresOxygenWithoutEndingRun();
     droneBayUnlocksSlotsLoadoutsAndMiningEffects();
     scenarioUiActionsDoNotAwardExpeditionExperience();
-    saturnArtifactQueuesPhysicalUranusRoute();
     scenarioAndCocoonStateRoundTrips();
     activeFlightRoundTripsThroughSave();
     surfaceMiningUsesRigFuelAndRunsOnce();
-    physicalMiningArtifactsAreSingleAndDeliveryGated();
     miningArtifactTetherAndDestructionRules();
     miningArtifactRewardsResolveOnExtraction();
     miningArtifactSaveRoundTrips();
@@ -8968,6 +9025,7 @@ int main(int argc, char** argv)
     mammalBossChambersGrantAdvancedRewards();
     enemyMovementTypesHaveDistinctBehavior();
     miningDrillBreaksCellsAndMarksChunks();
+    drillPowerUpgradesProduceMeasuredCuttingGains();
     miningUsesRigFuelReserve();
     rigFuelLoopRanksControlOperatingCadence();
     miningDrillFootprintCapsWearToWorstContact();
@@ -8996,21 +9054,16 @@ int main(int argc, char** argv)
     miningEvaAuditRegressionGuardsHold();
     roughSurfaceExtractionReportsLostPayload();
     roughMiningOreCreditsTheSurvivingContractPayload();
-    retiredActivitySavesResumePhysicalFlight();
     saveRoundTripPreservesProgress();
     progressedSavesSkipTheFirstLaunchIntroduction();
     saveSchemaConstantsMatchSerializedFields();
     legacyRecordsTrackAchievementStats();
     unifiedPhysicalFlightCapturesOrbitAndResolvesTouchdown();
     flightProgressHelpersShareTravelAndReturnMath();
-    arkDiscoveryAndScriptedJumpProgression();
-    numberedChaptersAdvanceMonotonically();
     hostileNavigationSelectsShuttleSortie();
     arkCampaignStateRoundTripsThroughSave();
     structuredPanelPresentationCarriesTypedModalPolicy();
     contentIdsResolveAgainstDefaultCatalog();
-    outerPlanetCampaignSequenceIsExplicitAndUnskippable();
-    storyBriefingsTakeOverAndPersist();
     miningThermalCutoffAndGuidanceAreExplicit();
     marsMiningPressureFitsOxygenWindow();
     secondaryMiningStateRoundTrips();

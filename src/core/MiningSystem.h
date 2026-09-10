@@ -14,7 +14,7 @@
 namespace rocket {
 
 namespace orbital_laser {
-inline constexpr double secondsPerLayer = 3.0;
+inline constexpr double secondsPerLayer = 1.5;
 // Twice the original five-cell shaft. Even-width cuts sit between two cells.
 inline constexpr int shaftWidthCells = 10;
 inline constexpr int shaftLeftCells = shaftWidthCells / 2;
@@ -34,7 +34,10 @@ struct MiningDrillStats {
     double oreYieldChance = 0.0;
     double heatRiseScale = 1.0;
     double heatCoolingPerSecond = 0.0;
-    double storage = 0.0;
+    double cargoCapacityBonus = 0.0;
+    double headWidthScale = 1.0;
+    double sideCutterReach = 0.0;
+    double hardRockPower = 0.0;
     double engineEfficiency = 0.0;
     double artifactTowEfficiency = 0.0;
     int terrainWidth = 0;
@@ -57,7 +60,7 @@ struct MiningActorHull {
 struct MiningLoadStats {
     double currentLoad = 0.0;
     double capacity = tuning::mining::rigCargoCapacityMass;
-    double freeBuffer = tuning::mining::baseCarryBufferCargo;
+    double freeBuffer = 0.0;
     double burden = 0.0;
     double speedMultiplier = 1.0;
     double fuelConsumptionMultiplier = 1.0;
@@ -84,6 +87,7 @@ struct MiningSwarmPreview {
 // cinematic staging is part of the save contract.
 struct SurfaceLandingBuildRequest {
     std::string destinationId;
+    std::string bodyId;
     int landingOrdinal = 0;
     std::uint64_t siteSeed = 0;
     std::string scenarioId;
@@ -208,7 +212,9 @@ MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& 
 MiningDrillStats miningOperatorDrillStats();
 std::string_view rigLoadBandName(RigLoadBand band);
 int miningRigCargoCapacityMass();
+int miningRigCargoCapacityMass(const GameState&, const ContentCatalog&);
 int miningRigCargoAvailableMass(const MiningRunState& mining);
+int miningRigCargoAvailableMass(const GameState&, const ContentCatalog&);
 // These are the single source of truth for the currently controlled actor's
 // oxygen readout. UI warnings and guidance use them rather than duplicating
 // the rig/EVA branch.

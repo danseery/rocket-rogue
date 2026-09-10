@@ -302,6 +302,7 @@ private:
         ResultViewState result;
         ArrivalFanfareState arrivalFanfare;
         OrbitalWorkState orbitalWork;
+        CoursePlan waypointPreviewCourse;
 
         explicit LaunchSessionState(FlightRunState& authoritativeFlight)
             : flight(authoritativeFlight)
@@ -328,6 +329,7 @@ private:
             result = {};
             arrivalFanfare = {};
             orbitalWork = {};
+            waypointPreviewCourse = {};
         }
     };
 
@@ -352,6 +354,7 @@ private:
     bool levelUpActivationLocked() const;
     void observeExpeditionExperience();
     void loadSavedGameOrDefault(bool showTitleScreen);
+    bool restoreContinuousExpeditionScreen();
     void beginDebugSandbox(const std::string& statusLine);
     void seedDebugDroneLoadout();
     void captureDebugDroneLoadout();
@@ -466,6 +469,9 @@ private:
     double titleLaunchElapsedSeconds_ = 0.0;
     SceneTransition sceneTransition_;
     bool hasSavedGame_ = false;
+    // The dock orientation belongs at the start of a dock visit, never in
+    // the failure handoff that may have returned the player there.
+    bool earthDockIntroEligibleAfterReload_ = false;
     bool checkpointRecoveryAvailable_ = false;
     std::string titleNotice_;
     bool panelDirty_ = true;

@@ -241,7 +241,7 @@ const SystemDefinition &solarSystemDefinition()
         // Optional bodies reuse existing geology; spatial identity stays distinct.
         if (body.id == "mercury") body.environmentId = "moon";
         if (body.id == "venus") body.environmentId = "mars";
-        if (body.id == "mercury" || body.id == "venus") body.authoredObjectives = false;
+        if (body.id == "mercury" || body.id == "venus") body.authoredObjectives = true;
     }
     return result;
     }();
@@ -261,6 +261,10 @@ SystemVector earthLaunchPosition()
 SystemVector systemDockPosition(const SystemBodyDefinition &body)
 {
     return {body.position.x + body.dockOffset.x, body.position.y + body.dockOffset.y};
+}
+SystemVector systemNavigationPosition(const SystemBodyDefinition &body)
+{
+    return body.dock ? systemDockPosition(body) : body.position;
 }
 double systemBodyGravityAcceleration(const SystemBodyDefinition &body, double radius)
 {

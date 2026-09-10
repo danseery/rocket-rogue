@@ -972,7 +972,7 @@ LaunchFlightStep updateSpaceFlight(
         flight.mode=FlightMode::Travel;
         flight.phase=FlightPhase::Transfer;
         flight.handoff={FlightMode::Orbit,FlightMode::Travel,0.0,flight.positionX,flight.positionY,flight.heading};
-    } else if (flight.mode == FlightMode::Travel && flight.orbit.enteredInfluence &&
+    } else if (!system && flight.mode == FlightMode::Travel && flight.orbit.enteredInfluence &&
         radius > approachBoundary*1.25 && radialVelocity > 0.0) {
         flight.active = false;
         flight.phase = FlightPhase::Flyby;

@@ -23,6 +23,7 @@ struct ContentCatalog {
     std::vector<Destination> destinations;
     std::vector<RouteLinkDefinition> routeLinks;
     std::vector<ScenarioDefinition> scenarios;
+    std::vector<SolarMissionDefinition> solarMissions;
     std::vector<ScenarioFactoryDefinition> scenarioFactories;
     std::vector<MiningSiteDefinition> miningSites;
 
@@ -42,6 +43,7 @@ struct ContentCatalog {
         std::string_view sourceDestinationId,
         std::string_view targetDestinationId) const;
     const ScenarioDefinition* findScenario(std::string_view id) const;
+    const SolarMissionDefinition* findSolarMission(std::string_view bodyId) const;
     const ScenarioFactoryDefinition* findScenarioFactory(std::string_view id) const;
     const MiningSiteDefinition* findMiningSite(std::string_view id) const;
 };

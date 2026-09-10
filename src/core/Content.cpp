@@ -2,6 +2,7 @@
 #include "core/ContentIds.h"
 #include "core/GameText.h"
 #include "core/ScenarioSystem.h"
+#include "core/SolarProgression.h"
 #include "core/PayloadTransfer.h"
 #include "core/Tuning.h"
 
@@ -240,6 +241,14 @@ const ScenarioDefinition* ContentCatalog::findScenario(std::string_view id) cons
     return found == scenarios.end() ? nullptr : &*found;
 }
 
+const SolarMissionDefinition* ContentCatalog::findSolarMission(std::string_view bodyId) const
+{
+    const auto found = std::find_if(solarMissions.begin(), solarMissions.end(), [bodyId](const SolarMissionDefinition& mission) {
+        return mission.bodyId == bodyId;
+    });
+    return found == solarMissions.end() ? nullptr : &*found;
+}
+
 const ScenarioFactoryDefinition* ContentCatalog::findScenarioFactory(std::string_view id) const
 {
     const auto found = std::find_if(scenarioFactories.begin(), scenarioFactories.end(), [id](const ScenarioFactoryDefinition& factory) {
@@ -283,6 +292,24 @@ ContentCatalog createDefaultContent()
     catalog.incomingMessages.push_back({"earth_dock_intro", "mission_control_fennec", "Earth orbital dock", "Understood", false,
         {{"moon_first", "That's Earth's orbital dock. Bring your salvage here to bank it, refuel, repair the ship, and install ship upgrades. For now, head to the Moon and complete your first mining contract. The dock will be here when you return.", {}},
          {"services", "That's Earth's orbital dock. Bring your salvage here to bank it, refuel, repair the ship, and install ship upgrades before your next expedition.", {}}}});
+    const auto addMissionMessages = [&](std::string id, std::string world, std::string objective,
+                                        std::string next) {
+        catalog.incomingMessages.push_back({id + "_briefing", "mission_control_fennec",
+            world + " mission", "Understood", true,
+            {{"default", std::move(objective), {}}}});
+        catalog.incomingMessages.push_back({id + "_complete", "mission_control_fennec",
+            world + " mission complete", "Understood", true,
+            {{"default", "Artifact secured. " + std::move(next) +
+                " Earth service is recommended, or continue manually from the system map.", {}}}});
+    };
+    addMissionMessages("moon_mission", "Moon", "Recover 20 Common Ore, then pulse the anomaly, excavate it, and tether the artifact to the ship.", "Prospector support and drone slot one are online. Mars, Mercury, and Venus are now charted.");
+    addMissionMessages("mars_mission", "Mars", "Recover 8 Common Ore, pulse the terrain, and return the Martian artifact to the ship.", "Drone slot two is online. Jupiter and Io are now charted; Io is the next mission.");
+    addMissionMessages("io_mission", "Io", "Commission Hazard support, cool the thermal seal, excavate all four segments, and recover the artifact.", "The Io battery is secured. Saturn and Titan are now charted; Titan is the next mission.");
+    addMissionMessages("titan_mission", "Titan", "Survey the landing site, pulse the buried signal, and recover the artifact.", "The Titan battery is secured. Uranus and Titania are now charted; Titania is the next mission.");
+    addMissionMessages("titania_mission", "Titania", "Survey the landing site, pulse the buried signal, and recover the artifact.", "The Titania battery is secured. Neptune and Triton are now charted; Triton is the next mission.");
+    addMissionMessages("triton_mission", "Triton", "Survey the landing site, pulse the buried signal, and recover the final artifact.", "The sixth battery is secured. An impossible contact beyond Neptune has been revealed: Straylight.");
+    addMissionMessages("mercury_mission", "Mercury", "Optional recovery: pulse the surface signal and return its artifact to the ship.", "The optional recovery reward is secured.");
+    addMissionMessages("venus_mission", "Venus", "Optional recovery: pulse the surface signal and return its artifact to the ship.", "The optional recovery reward is secured.");
 
     catalog.incomingMessages.push_back({"hard_landing_tip", "mission_control_fennec", "Easy on the landing gear", "Understood", true,
         {{"default", "You're down safely, but that impact damaged the hull. Keep the ship upright and apply forward thrust before touchdown to slow your descent. Use short pulses to settle gently onto the ground. A softer landing will spare the ship.", {MessageHint::FlightThrust}}}});
@@ -290,8 +317,9 @@ ContentCatalog createDefaultContent()
 
     catalog.incomingMessages.push_back({"rig_full_tip", "mission_control_fennec", "Rig cargo full", "Heading back", true,
         {{"default", "Your Rig is full. Return to the parked ship to unload your ore, then head back out if you have room and supplies to keep mining.", {}}}, MessageDeliveryContext::Mining});
-    catalog.incomingMessages.push_back({"ship_full_tip", "mission_control_fennec", "Ship cargo full", "Understood", true,
-        {{"default", "The ship's hold is full. It can't accept more ore. Extra ore stays with the Rig or Prospector, and will be left here when you depart. Return to the dock to bank your cargo and make room.", {}}}, MessageDeliveryContext::Mining});
+    catalog.incomingMessages.push_back({"ship_full_tip", "mission_control_fennec", "Easy there, space squirrel", "Understood", true,
+        {{"default", "Hoarding is frowned upon around here. The ship is full, so anything else you dig up stays behind. Head to the dock and empty the hold before you excavate the whole planet.", {}}}, MessageDeliveryContext::Mining});
+    catalog.incomingMessages.back().concerned = true;
 
     catalog.modules = {
         module(content::module::fuelTanks1, "Fuel Tanks I", SlotType::Fuel, Rarity::Common, {}, content::unlock::starter, {"launch", "fuel"}, {}, RefitTrack::Reach, 1, "", true, LaunchUpgradeKind::FuelTanks, 1),
@@ -371,19 +399,22 @@ ContentCatalog createDefaultContent()
     catalog.surfaceUpgrades = {
         surfaceUpgrade("ore_magnet", "Ore Magnet", "Pull nearby loose ore into the Rig. Each rank adds 1 cell of collection radius, up to 3 ranks.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.oreAttractionRadius = 1.0}, {"drone", "cargo", "collection"}),
         surfaceUpgrade(content::surfaceUpgrade::resonantDischarge, "Resonant Discharge", "A combat-tuned scanner pulse shocks enemies caught in the player-centered ring.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.scannerPulseDamage = 1}, {"scanner", "combat", "pulse"}),
-        surfaceUpgrade(content::surfaceUpgrade::thermalDrillJackets, "Thermal Drill Jackets", "Insulated drill collars bleed heat before the bit redlines and steady deeper pushes.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillCooling = 2.4, .drillDurability = 0.4}, {"drill", "cooling", "depth"}),
+        surfaceUpgrade(content::surfaceUpgrade::highTorqueMotor, "High-Torque Motor", "Adds 25% of the starter Rig's cutting power per rank.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillPower = tuning::mining::baseDrillPower * 0.25}, {"drill", "power"}),
+        surfaceUpgrade(content::surfaceUpgrade::wideDrillHead, "Wide Drill Head", "Widens the main cutting head by 25% of its original width per rank.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillHeadWidth = 0.25}, {"drill", "width"}),
+        surfaceUpgrade(content::surfaceUpgrade::sideCutters, "Side Cutters", "Adds 0.5 cells of cutting reach on each side per rank at 60% power.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.sideCutterReach = 0.5}, {"drill", "width", "cutters"}),
+        surfaceUpgrade(content::surfaceUpgrade::hardRockTeeth, "Hard-Rock Teeth", "Adds 25% cutting power against hard rock per rank.", Rarity::Uncommon, SurfaceUpgradeCategory::Drill, {.hardRockPower = 0.25}, {"drill", "power", "hard-rock"}),
         surfaceUpgrade(content::surfaceUpgrade::widebandPulse, "Wideband Pulse", "A wider scanner ping maps shadowed ore seams, bad pockets, and one deeper layer.", Rarity::Common, SurfaceUpgradeCategory::Scanner, {.scannerRadius = 2.5, .hazardRelief = 0.02}, {"scanner", "reveal", "depth"}),
-        surfaceUpgrade(content::surfaceUpgrade::cargoSkids, "Cargo Skids", "Low-friction skids help the Mining Rig haul heavier canisters without load drag getting ugly.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.droneStorage = 2.0, .droneEngineEfficiency = 0.08}, {"drone", "cargo"}),
+        surfaceUpgrade(content::surfaceUpgrade::cargoSkids, "Cargo Skids", "Adds 2 Rig cargo capacity per rank and reduces load drag.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.droneStorage = 2.0, .droneEngineEfficiency = 0.08}, {"drone", "cargo"}),
         surfaceUpgrade(content::surfaceUpgrade::shockMounts, "Shock Mounts", "Spring-loaded mounts protect the drill train through hard-rock chatter and contact jolts.", Rarity::Uncommon, SurfaceUpgradeCategory::Drill, {.drillDurability = 2.2, .hardRockBounceRelief = 0.18, .hazardRelief = 0.015}, {"drill", "durability", "recoil"}),
         surfaceUpgrade(content::surfaceUpgrade::oreScentArray, "Ore-Scent Array", "Spectral sniffers help the crew sort richer pockets from plain dust before the dig.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.oreYieldChance = 0.14, .scannerRadius = 1.2, .hazardRelief = 0.01}, {"scanner", "yield", "survey"}),
-        surfaceUpgrade(content::surfaceUpgrade::coolantMist, "Coolant Mist", "A hiss of cold vapor keeps the drill biting without cooking the head.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillCooling = 1.6, .drillDurability = 0.6}, {"drill", "cooling"}),
+        surfaceUpgrade(content::surfaceUpgrade::coolantMist, "Coolant Mist", "Reduces drilling heat generation by 15 percentage points per rank.", Rarity::Common, SurfaceUpgradeCategory::Drill, {.drillHeatReduction = 0.15}, {"drill", "cooling"}),
         surfaceUpgrade(content::surfaceUpgrade::recoilBraces, "Recoil Braces", "Kickback struts turn hard-rock bonks into controlled shoves while the drone keeps moving.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.drillDurability = 0.5, .hardRockBounceRelief = 0.24, .droneSpeed = 0.25}, {"drone", "recoil", "control"}),
-        surfaceUpgrade(content::surfaceUpgrade::oreHopper, "Ore Hopper", "A squat canister rack gives loose ore a cleaner ride back to the ship zone.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.oreYieldChance = 0.07, .droneStorage = 1.0}, {"drone", "yield"}),
+        surfaceUpgrade(content::surfaceUpgrade::oreHopper, "Ore Hopper", "Adds 1 Rig cargo capacity per rank and improves ore yield.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.oreYieldChance = 0.07, .droneStorage = 1.0}, {"drone", "yield"}),
         // Keep the established ID for save compatibility. This is an artifact
         // handling upgrade, not the retired EVA-to-rig return-tether concept.
         surfaceUpgrade(content::surfaceUpgrade::emergencyWinch, "Artifact Winch", "A powered recovery spool reduces artifact towing burden by 25% per rank.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.artifactTowEfficiency = 0.25}, {"artifact", "tether", "transport"}),
         surfaceUpgrade(content::surfaceUpgrade::deepEchoMapper, "Deep Echo Mapper", "Low-frequency pings read deeper silhouettes and artifact pockets before the flare fades.", Rarity::Rare, SurfaceUpgradeCategory::Scanner, {.oreYieldChance = 0.04, .scannerRadius = 3.0, .hazardRelief = 0.015}, {"scanner", "depth", "artifact"}),
-        surfaceUpgrade(content::surfaceUpgrade::expandablePanniers, "Expandable Panniers", "Fold-out panniers widen the free carry buffer before ore starts slowing the drone.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.droneStorage = 3.0}, {"drone", "cargo", "storage"}),
+        surfaceUpgrade(content::surfaceUpgrade::expandablePanniers, "Expandable Panniers", "Adds 3 Rig cargo capacity per rank.", Rarity::Common, SurfaceUpgradeCategory::Drone, {.droneStorage = 3.0}, {"drone", "cargo", "storage"}),
         surfaceUpgrade(content::surfaceUpgrade::vectorNozzles, "Vector Nozzles", "Trim jets keep loaded turns crisp and burn less fuel under a heavy haul.", Rarity::Uncommon, SurfaceUpgradeCategory::Drone, {.droneSpeed = 0.15, .droneEngineEfficiency = 0.25}, {"drone", "engine", "load"}),
         surfaceUpgrade(content::surfaceUpgrade::artifactTowline, "Artifact Towline", "Braided towline spreads artifact drag so tethered relics pull cleaner toward the ship.", Rarity::Rare, SurfaceUpgradeCategory::Drone, {.artifactTowEfficiency = 0.40}, {"drone", "artifact", "tether"})
     };
@@ -639,31 +670,31 @@ ContentCatalog createDefaultContent()
         },
         {
             content::scenario::marsBayExpansion,
-            2,
+            3,
             content::unlock::routeMars,
             content::destination::mars,
             {
                 {"briefing", {}, "MARS", "Bay Expansion",
                     std::string("Recover ") + std::to_string(tuning::research::marsBayCommonOreGoal) +
                         " Martian Common Ore. Oxygen, drill heat, integrity, repairs, and the return decision are now live.",
-                    "REWARD // EMPTY SUPPORT DRONE SLOT 2", "Accept Contract", {},
+                    "DELIVER ORE, THEN RECOVER THE ARTIFACT", "Accept Contract", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"delivery", {"briefing"}, "MARS", "Bay Expansion",
                     std::string("Deliver ") + std::to_string(tuning::research::marsBayCommonOreGoal) +
                         " Mars Common Ore loaded onto the Ship. Normal departure returns all Ship ore. The reward opens an empty slot. No second Support Drone is required.",
-                    "REWARD // EMPTY SUPPORT DRONE SLOT 2", "Fabricate Slot 2", {},
+                    "ORE DELIVERED // RECOVER THE ARTIFACT", "Pulse Scanner", {},
                     ScenarioEventKind::SafeMaterialDelivered, content::destination::mars, "common",
-                    tuning::research::marsBayCommonOreGoal, 0, false, true, false,
-                    ScenarioActionKind::ClaimReward, {},
+                    tuning::research::marsBayCommonOreGoal, 0, false, false, false,
+                    ScenarioActionKind::None, {}, {}},
+                {"artifact", {"delivery"}, "MARS", "Martian Artifact",
+                    "Pulse the terrain signal, excavate the cache, and tether the artifact to the ship.",
+                    "REWARD // EMPTY SUPPORT DRONE SLOT 2 + IO ROUTE", "Claim Mars Mission", {},
+                    ScenarioEventKind::ArtifactRecovered, "mars", content::protectedObjective::marsSignalArtifact,
+                    1, 0, false, true, false, ScenarioActionKind::ClaimReward, {},
                      {{ScenarioRewardKind::DroneBaySlots, {}, 2, false},
                       {ScenarioRewardKind::UnlockKey, content::unlock::routeJupiter, 0, false},
-                      {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}},
-                {"funding", {"delivery"}, "JUPITER TRANSFER", "The Jupiter Window",
-                    "Io is the next exploration lead. Return to Earth to bank and service, or plot an onward course using your remaining fuel. Watch Jupiter's gravity on approach.",
-                    "COMPARE FUEL MARGIN AND HAZARDS ON THE SYSTEM MAP", "Understood", {},
-                    ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
-                    ScenarioActionKind::AcknowledgeBriefing, {}, {}}
+                      {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}}
             }
         },
         {
@@ -683,84 +714,77 @@ ContentCatalog createDefaultContent()
                      {ScenarioRewardKind::SupportDrone, content::drone::hazardDrone, 1, true}}},
                 {"recovery", {"commission"}, "IO // JUPITER SYSTEM", "Artifact Recovery",
                     "Discover the thermal seal, cool and excavate its four segments, then tether the exposed artifact home.",
-                    "REWARD // 75 ARTIFACT XP + 10 OBJECTIVE XP + OUTER TRANSFER DATA", "Begin Volcanic Recovery", {},
-                    ScenarioEventKind::ProtectedObjectiveExtracted, {}, content::miningSite::thermalLayeredRecovery, 1, 0, false, false, false,
+                    "REWARD // SATURN SYSTEM ROUTE", "Claim Io Mission", {},
+                    ScenarioEventKind::ProtectedObjectiveExtracted, {}, content::miningSite::thermalLayeredRecovery, 1, 0, false, true, false,
                     ScenarioActionKind::BeginActivity, content::miningSite::thermalLayeredRecovery,
-                    {{ScenarioRewardKind::UnlockKey, "outer_transfer_ready", 0, false}}}
-            }
-        },
-        {
-            content::scenario::outerTransfer,
-            1,
-            "outer_transfer_ready",
-            content::destination::jupiter,
-            {
-                {"briefing", {}, "JUPITER DEPARTURE", "Outer System Departure",
-                    "Prepare for the Saturn transfer. Departure commits the expedition outward.",
-                    "REWARD // SATURN ROUTE", "Review", {},
-                    ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
-                    ScenarioActionKind::AcknowledgeBriefing, {}, {}},
-                {"flyby", {"briefing"}, "JUPITER DEPARTURE", "Outer System Departure",
-                    "Lock the Saturn course, then depart using the flight controls.",
-                    "REWARD // SATURN ROUTE", "Lock Saturn Course", {},
-                    ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
-                    ScenarioActionKind::AcknowledgeBriefing, {},
-                    {{ScenarioRewardKind::RouteAccess, content::destination::saturn, 0, false},
-                      {ScenarioRewardKind::FrontierReadiness, {}, 0, false}}}
+                    {{ScenarioRewardKind::RouteAccess, content::destination::saturn, 0, false}}}
             }
         },
         {
             content::scenario::saturnDeparture,
-            1,
+            2,
             content::unlock::routeSaturn,
             content::destination::saturn,
             {
-                {"artifact", {}, "SATURN DEPARTURE", "Artifact Secured",
-                    "Recover one Saturn artifact and return it safely to permanent inventory.",
-                    "REWARD // URANUS ROUTE", "Lock Uranus Course", {},
-                    ScenarioEventKind::ArtifactRecovered, content::destination::saturn, {}, 1, 0,
+                {"briefing", {}, "TITAN // SATURN SYSTEM", "Titan Artifact Mission",
+                    "Survey Titan, pulse the buried signal, and return its artifact to the ship.",
+                    "OBJECTIVE // RECOVER TITAN ARTIFACT", "Accept Mission", {},
+                    ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
+                    ScenarioActionKind::AcknowledgeBriefing, {}, {}},
+                {"artifact", {"briefing"}, "TITAN // SATURN SYSTEM", "Titan Artifact",
+                    "Recover Titan's artifact and return it safely to the ship.",
+                    "REWARD // URANUS SYSTEM ROUTE", "Claim Titan Mission", {},
+                    ScenarioEventKind::ArtifactRecovered, "titan", content::protectedObjective::titanSignalArtifact, 1, 0,
                     false, true, false, ScenarioActionKind::ClaimReward, {},
                     {{ScenarioRewardKind::RouteAccess, content::destination::uranus, 0, false}}}
             }
         },
         {
             content::scenario::uranusDeparture,
-            1,
+            2,
             content::unlock::routeUranus,
             content::destination::uranus,
             {
-                {"briefing", {}, "URANUS DEPARTURE", "Signal Beyond Neptune",
-                    "Neptune is the last charted world. A repeating carrier signal is pulsing from the dark beyond it. Build a stable Neptune vector before the expedition leaves Uranus.",
-                    "OBJECTIVE // 2 FLIGHT DATA", "Track Signal", {},
+                {"briefing", {}, "TITANIA // URANUS SYSTEM", "Titania Artifact Mission",
+                    "Survey Titania, pulse the buried signal, and return its artifact to the ship.",
+                    "OBJECTIVE // RECOVER TITANIA ARTIFACT", "Accept Mission", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
-                {"artifact", {"briefing"}, "URANUS DEPARTURE", "Uranus Artifact",
-                    "Recover the Uranus artifact and return it safely. Its telemetry supplies the first Flight Data key.",
-                    "PROGRESS // 1 FLIGHT DATA", "Recover Artifact", {},
-                    ScenarioEventKind::ArtifactRecovered, content::destination::uranus, {},
-                    1, 0, false, false, false, ScenarioActionKind::None, {}, {}},
-                {"vector", {"artifact"}, "URANUS DEPARTURE", "Neptune Vector",
-                    "Artifact telemetry secured. Complete a Good or Perfect Orbit to bank the second Flight Data key.",
-                    "REWARD // NEPTUNE ROUTE", "Lock Neptune Course", {},
-                    ScenarioEventKind::FlightDataBanked, content::destination::uranus, content::destination::neptune,
-                    2, 0, false, true, false, ScenarioActionKind::ClaimReward, {},
+                {"artifact", {"briefing"}, "TITANIA // URANUS SYSTEM", "Titania Artifact",
+                    "Recover Titania's artifact and return it safely to the ship.",
+                    "REWARD // NEPTUNE SYSTEM ROUTE", "Claim Titania Mission", {},
+                    ScenarioEventKind::ArtifactRecovered, "titania", content::protectedObjective::titaniaSignalArtifact,
+                    1, 0, false, true, false, ScenarioActionKind::ClaimReward, {},
                     {{ScenarioRewardKind::RouteAccess, content::destination::neptune, 0, false}}}
             }
         },
         {
             content::scenario::neptuneDiscovery,
-            1,
+            2,
             content::unlock::routeNeptune,
             content::destination::neptune,
             {
-                {"arrival", {}, "NEPTUNE", "Signal Beyond Neptune",
-                    "The Neptune vector resolves on an impossible mass beyond the charted system.",
-                    "OBJECTIVE // UNKNOWN CONTACT", "Investigate Contact", {},
-                    ScenarioEventKind::DestinationReached, {}, content::destination::neptune,
+                {"briefing", {}, "TRITON // NEPTUNE SYSTEM", "Triton Artifact Mission",
+                    "Survey Triton, pulse the final buried signal, and return its artifact to the ship.",
+                    "OBJECTIVE // RECOVER TRITON ARTIFACT", "Accept Mission", {},
+                    ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
+                    ScenarioActionKind::AcknowledgeBriefing, {}, {}},
+                {"artifact", {"briefing"}, "TRITON // NEPTUNE SYSTEM", "Triton Artifact",
+                    "Recover Triton's artifact. Its signal resolves the impossible contact beyond Neptune.",
+                    "REWARD // REVEAL STRAYLIGHT", "Claim Triton Mission", {},
+                    ScenarioEventKind::ArtifactRecovered, "triton", content::protectedObjective::tritonSignalArtifact,
                     1, 0, false, true, false, ScenarioActionKind::ClaimReward, {},
                     {{ScenarioRewardKind::CampaignMilestone, {}, 0, false, {}, CampaignMilestone::ArkDiscovered}}}
             }
         },
+        {content::scenario::mercuryArtifact, 1, content::unlock::routeMars, content::destination::moon, {
+            {"briefing", {}, "MERCURY", "Mercury Artifact Recovery", "Pulse and recover Mercury's optional artifact.", "OPTIONAL ARTIFACT", "Accept Mission", {}, ScenarioEventKind::None, {}, {}, 1, 0, true, false, false, ScenarioActionKind::AcknowledgeBriefing, {}, {}},
+            {"artifact", {"briefing"}, "MERCURY", "Mercury Artifact", "Return Mercury's artifact to the ship.", "REWARD // ARTIFACT XP", "Claim Mercury Recovery", {}, ScenarioEventKind::ArtifactRecovered, "mercury", content::protectedObjective::mercurySignalArtifact, 1, 0, false, true, false, ScenarioActionKind::ClaimReward, {}, {}}
+        }},
+        {content::scenario::venusArtifact, 1, content::unlock::routeMars, content::destination::mars, {
+            {"briefing", {}, "VENUS", "Venus Artifact Recovery", "Pulse and recover Venus's optional artifact.", "OPTIONAL ARTIFACT", "Accept Mission", {}, ScenarioEventKind::None, {}, {}, 1, 0, true, false, false, ScenarioActionKind::AcknowledgeBriefing, {}, {}},
+            {"artifact", {"briefing"}, "VENUS", "Venus Artifact", "Return Venus's artifact to the ship.", "REWARD // ARTIFACT XP", "Claim Venus Recovery", {}, ScenarioEventKind::ArtifactRecovered, "venus", content::protectedObjective::venusSignalArtifact, 1, 0, false, true, false, ScenarioActionKind::ClaimReward, {}, {}}
+        }},
         {
             content::scenario::generatedTemplate,
             1,
@@ -787,34 +811,21 @@ ContentCatalog createDefaultContent()
                 step.action != ScenarioActionKind::ClaimReward) {
                 step.activity = ScenarioActivityKind::MiningSite;
             }
-            const bool awardsRoute = std::any_of(
-                step.rewards.begin(), step.rewards.end(), [](const ScenarioReward& reward) {
-                    return reward.kind == ScenarioRewardKind::RouteAccess;
-                });
-            if (awardsRoute) {
-                step.transition = {ScenarioTransitionKind::QueueRewardedRoute, Screen::Hangar, StoryBriefingId::None};
-            }
+            // Solar mission claims grant their rewards in place. Physical flight,
+            // departure, and the player's chosen waypoint remain untouched.
+            step.transition = {};
         }
     }
-    const auto authoredScenario = [&](std::string_view id) -> ScenarioDefinition* {
-        const auto found = std::find_if(catalog.scenarios.begin(), catalog.scenarios.end(), [&](const ScenarioDefinition& scenario) {
-            return scenario.id == id;
-        });
-        return found == catalog.scenarios.end() ? nullptr : &*found;
+    catalog.solarMissions = {
+        {"moon", "moon", content::scenario::lunarProspector, "anomaly", content::protectedObjective::lunarSignalArtifact, "moon", {}, content::unlock::routeMars, "mars", "moon_mission_briefing", "moon_mission_complete", 0, false},
+        {"mars", "mars", content::scenario::marsBayExpansion, "artifact", content::protectedObjective::marsSignalArtifact, "mars", content::unlock::routeMars, content::unlock::routeJupiter, "io", "mars_mission_briefing", "mars_mission_complete", 1, false},
+        {"io", "jupiter", content::scenario::volcanicDescent, "recovery", content::protectedObjective::ioMinorArtifact, "io", content::unlock::routeJupiter, content::unlock::routeSaturn, "titan", "io_mission_briefing", "io_mission_complete", 2, false},
+        {"titan", "saturn", content::scenario::saturnDeparture, "artifact", content::protectedObjective::titanSignalArtifact, "titan", content::unlock::routeSaturn, content::unlock::routeUranus, "titania", "titan_mission_briefing", "titan_mission_complete", 3, false},
+        {"titania", "uranus", content::scenario::uranusDeparture, "artifact", content::protectedObjective::titaniaSignalArtifact, "titania", content::unlock::routeUranus, content::unlock::routeNeptune, "triton", "titania_mission_briefing", "titania_mission_complete", 4, false},
+        {"triton", "neptune", content::scenario::neptuneDiscovery, "artifact", content::protectedObjective::tritonSignalArtifact, "triton", content::unlock::routeNeptune, {}, "straylight", "triton_mission_briefing", "triton_mission_complete", 5, false},
+        {"mercury", "moon", content::scenario::mercuryArtifact, "artifact", content::protectedObjective::mercurySignalArtifact, {}, content::unlock::routeMars, {}, {}, "mercury_mission_briefing", "mercury_mission_complete", 0, true},
+        {"venus", "mars", content::scenario::venusArtifact, "artifact", content::protectedObjective::venusSignalArtifact, {}, content::unlock::routeMars, {}, {}, "venus_mission_briefing", "venus_mission_complete", 0, true}
     };
-    if (ScenarioDefinition* lunar = authoredScenario(content::scenario::lunarProspector)) {
-        lunar->steps[2].transition = {ScenarioTransitionKind::OpenScreen, Screen::Hangar, StoryBriefingId::None};
-    }
-    if (ScenarioDefinition* mars = authoredScenario(content::scenario::marsBayExpansion)) {
-        mars->steps[1].transition = {ScenarioTransitionKind::OpenScreen, Screen::Hangar, StoryBriefingId::None};
-    }
-    if (ScenarioDefinition* neptune = authoredScenario(content::scenario::neptuneDiscovery)) {
-        neptune->steps[0].transition = {ScenarioTransitionKind::PresentStoryTakeover, Screen::Hangar, StoryBriefingId::StraylightDiscovery};
-        neptune->steps[0].presentationMode = ScenarioPresentationMode::Takeover;
-        neptune->steps[0].goalText = "Investigate the impossible mass beyond Neptune.";
-        neptune->steps[0].gateText = "A safe Neptune arrival is required.";
-        neptune->steps[0].nextStepText = "Acknowledge the contact and begin the approach.";
-    }
     catalog.scenarioFactories = {
         {"generated_mining", 1, content::scenario::generatedTemplate, 0x5343454E4152494FULL}
     };
@@ -825,6 +836,9 @@ ContentCatalog createDefaultContent()
     }
     if (!validateCargoRequirements(catalog, &scenarioError)) {
         throw std::logic_error("Invalid cargo catalog: " + scenarioError);
+    }
+    if (!validateSolarMissionCatalog(catalog, &scenarioError)) {
+        throw std::logic_error("Invalid solar mission catalog: " + scenarioError);
     }
     std::string messageError;
     if (!validateIncomingMessages(catalog, &messageError)) throw std::runtime_error(messageError);

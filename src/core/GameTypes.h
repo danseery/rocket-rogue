@@ -884,7 +884,11 @@ struct SurfaceUpgradeStats {
     double oreAttractionRadius = 0.0;
     double drillPower = 0.0;
     double drillCooling = 0.0;
+    double drillHeatReduction = 0.0;
     double drillDurability = 0.0;
+    double drillHeadWidth = 0.0;
+    double sideCutterReach = 0.0;
+    double hardRockPower = 0.0;
     double hardRockBounceRelief = 0.0;
     double oreYieldChance = 0.0;
     double scannerRadius = 0.0;
@@ -1254,6 +1258,22 @@ struct ScenarioDefinition {
     // procedural factory template remains catalog data until a factory makes
     // a concrete instance, so it cannot silently become a live contract.
     bool instantiateByDefault = true;
+};
+
+struct SolarMissionDefinition {
+    std::string bodyId;
+    std::string environmentId;
+    std::string scenarioId;
+    std::string claimStepId;
+    std::string artifactId;
+    std::string batteryId;
+    std::string prerequisiteUnlockKey;
+    std::string routeUnlockKey;
+    std::string nextBodyId;
+    std::string briefingMessageId;
+    std::string completionMessageId;
+    int progressionOrdinal = 0;
+    bool optional = false;
 };
 
 struct ScenarioFactoryDefinition {
@@ -1632,6 +1652,15 @@ struct ExpeditionProgressionState {
     std::vector<RunRigUpgradeRank> runRigUpgradeRanks;
     std::vector<RunDroneRank> runDroneRanks;
     std::vector<std::string> selectedSynergyIds;
+    int runUpgradeDraftCount = 0;
+    bool wideDrillHeadOffered = false;
+    bool sideCuttersOffered = false;
+    struct GraftConflict {
+        int equippedFrame = -1;
+        DroneFrameModuleAssignment current;
+        DroneFrameModuleAssignment recovered;
+    };
+    std::vector<GraftConflict> pendingGraftConflicts;
 };
 
 struct PlanetaryExpeditionState {
@@ -2289,6 +2318,8 @@ struct WreckState {
     std::uint64_t id = 0;
     SystemLocation location;
     ExpeditionCargo cargo;
+    ExpeditionProgressionState build;
+    bool buildRecoverable = false;
 };
 struct OrbitalSiteProgress {
     std::vector<OrbitalSurveyLayer> surveyLayers;
@@ -2324,6 +2355,8 @@ struct PersistentExpeditionState {
     std::string homeBodyId = "earth";
     SystemLocation location;
     CoursePlan course;
+    bool coursePlayerSelected = false;
+    bool straylightRevealed = false;
     CruiseState cruise;
     ExpeditionCargo cargo;
     std::vector<PersistentSiteState> sites;
@@ -2331,8 +2364,8 @@ struct PersistentExpeditionState {
     std::string moonTutorialZone;
     std::array<BeaconBatteryState, 6> batteries {{
         {"moon", "moon.beacon"}, {"mars", "mars.beacon"},
-        {"io", "io.beacon"}, {"saturn", "saturn.beacon"},
-        {"uranus", "uranus.beacon"}, {"neptune", "neptune.beacon"}
+        {"io", "io.beacon"}, {"titan", "titan.beacon"},
+        {"titania", "titania.beacon"}, {"triton", "triton.beacon"}
     }};
     std::vector<WreckState> wrecks;
     std::uint64_t nextWreckId = 1;

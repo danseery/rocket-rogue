@@ -1,6 +1,7 @@
 #include "core/ArtifactProgression.h"
 
 #include "core/ScenarioSystem.h"
+#include "core/SolarProgression.h"
 #include "core/Tuning.h"
 
 #include <algorithm>
@@ -113,10 +114,34 @@ int recoveredProgressionArtifactDestinationCount(
 std::optional<ProgressionArtifactOpportunity> unresolvedProgressionArtifactOpportunity(
     const GameState& state,
     const ContentCatalog& catalog,
-    std::string_view destinationId)
+    std::string_view destinationId,
+    std::string_view bodyId)
 {
-    if (destinationId.empty() || hasPermanentArtifactFrom(state, destinationId)) {
+    const std::string_view physicalBody = bodyId.empty() ? destinationId : bodyId;
+    if (destinationId.empty() || hasPermanentArtifactFrom(state, physicalBody)) {
         return std::nullopt;
+    }
+
+    if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, physicalBody)) {
+        if (!solarMissionAvailable(state, *mission) || solarMissionClaimed(state, catalog, *mission)) {
+            return std::nullopt;
+        }
+        const ScenarioDefinition* definition = catalog.findScenario(mission->scenarioId);
+        const ScenarioStepDefinition* step = definition == nullptr
+            ? nullptr
+            : findScenarioStepDefinition(*definition, mission->claimStepId);
+        const ScenarioStepState stepState = scenarioStepState(
+            state, catalog, mission->scenarioId, mission->claimStepId);
+        if (step == nullptr ||
+            (stepState != ScenarioStepState::Active && stepState != ScenarioStepState::ReadyToClaim)) {
+            return std::nullopt;
+        }
+        return ProgressionArtifactOpportunity {
+            std::string(destinationId), std::string(physicalBody), mission->artifactId,
+            mission->scenarioId, mission->claimStepId, step->miningSiteDefinitionId,
+            step->miningSiteDefinitionId.empty()
+                ? mission->scenarioId + ":" + mission->claimStepId
+                : step->miningSiteDefinitionId};
     }
 
     const PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
@@ -142,6 +167,8 @@ std::optional<ProgressionArtifactOpportunity> unresolvedProgressionArtifactOppor
                 stepDefinesProgressionArtifact(catalog, *pendingStep)) {
                 return ProgressionArtifactOpportunity {
                     std::string(destinationId),
+                    std::string(physicalBody),
+                    {},
                     expedition.pendingScenarioId,
                     expedition.pendingScenarioStepId,
                     pendingStep->miningSiteDefinitionId,
@@ -181,6 +208,7 @@ std::optional<ProgressionArtifactOpportunity> unresolvedProgressionArtifactOppor
             }
             ProgressionArtifactOpportunity opportunity;
             opportunity.destinationId = std::string(destinationId);
+            opportunity.bodyId = std::string(physicalBody);
             opportunity.scenarioId = instance.id;
             opportunity.stepId = step.id;
             opportunity.miningSiteDefinitionId = step.miningSiteDefinitionId;
@@ -197,55 +225,51 @@ ProgressionArtifactPlacement resolveProgressionArtifactPlacement(
     const GameState& state,
     const ContentCatalog& catalog,
     const Destination& destination,
-    int miningDifficulty,
+    int /*miningDifficulty*/,
     std::string_view siteIdentity)
 {
     ProgressionArtifactPlacement placement;
-    placement.ordinal = recoveredProgressionArtifactDestinationCount(state, catalog);
+    const std::string_view bodyId = state.run.planetaryExpedition.bodyId.empty()
+        ? std::string_view(destination.id)
+        : std::string_view(state.run.planetaryExpedition.bodyId);
+    if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, bodyId)) {
+        placement.artifactId = mission->artifactId;
+        placement.ordinal = mission->optional ? 0 : mission->progressionOrdinal;
+    } else {
+        placement.ordinal = recoveredProgressionArtifactDestinationCount(state, catalog);
+    }
 
-    const int uncappedDepth = 1 + placement.ordinal / 3;
-    placement.targetDepth = std::min(
-        uncappedDepth,
-        tuning::surfaceDepthProgression::maximumDepthRating);
-    placement.withinDepthSlot = uncappedDepth > placement.targetDepth
-        ? 2
-        : placement.ordinal % 3;
-    if (placement.withinDepthSlot == 0) {
+    if (placement.ordinal <= 0) {
+        placement.targetDepth = 1;
+        placement.withinDepthSlot = 0;
         return placement;
     }
 
-    const double tierPressure = std::clamp(
-        static_cast<double>(destination.tier - 1) / 7.0,
-        0.0,
-        1.0);
-    const double difficultyPressure = std::clamp(
-        static_cast<double>(miningDifficulty - 1) / 9.0,
-        0.0,
-        1.0);
-    const double pressure = tierPressure * 0.60 + difficultyPressure * 0.40;
-    const int lower = placement.withinDepthSlot == 1 ? 11 : 15;
-    const int upper = placement.withinDepthSlot == 1 ? 14 : 20;
+    // Keep the first recovery centered, then deepen the authored route in a
+    // readable staircase: Mars stays reachable on the first layer, Io and
+    // Titan occupy depth two, Titania depth three, and Triton depth four.
+    // Within a shared layer the second artifact sits lower. Lateral variation
+    // grows with mission stage without ever spending the vertical distance
+    // budget, which previously allowed Mars to appear near the layer entry.
+    const int uncappedDepth = placement.ordinal < 4
+        ? 1 + placement.ordinal / 2
+        : placement.ordinal - 1;
+    placement.targetDepth = std::min(
+        uncappedDepth,
+        tuning::surfaceDepthProgression::maximumDepthRating);
+    placement.withinDepthSlot = 1 + placement.ordinal % 2;
+    placement.verticalOffset = 10 + (placement.ordinal % 2) * 4;
 
     std::uint64_t seed = mixHash(state.seed, textHash(destination.id));
     seed = mixHash(seed, static_cast<std::uint64_t>(placement.ordinal + 1));
     seed = mixHash(seed, textHash(siteIdentity));
-    const int jitter = seededChoice(seed, 0xA17FULL, 3) - 1;
-    const int pressureDistance = lower + static_cast<int>(std::lround(
-        pressure * static_cast<double>(upper - lower)));
-    placement.manhattanDistance = std::clamp(
-        pressureDistance + jitter,
-        lower,
-        upper);
-
-    const int minimumVertical = std::max(1, placement.manhattanDistance - 10);
-    const int maximumVertical = std::min(10, placement.manhattanDistance - 1);
-    placement.verticalOffset = minimumVertical + seededChoice(
+    const int horizontalMagnitude = placement.ordinal + seededChoice(
         seed,
         0x51EEDULL,
-        maximumVertical - minimumVertical + 1);
-    const int horizontalMagnitude = placement.manhattanDistance - placement.verticalOffset;
+        placement.ordinal + 1);
     const int side = seededChoice(seed, 0x51DEULL, 2) == 0 ? -1 : 1;
     placement.horizontalOffset = horizontalMagnitude * side;
+    placement.manhattanDistance = placement.verticalOffset + horizontalMagnitude;
     return placement;
 }
 

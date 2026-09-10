@@ -53,6 +53,9 @@ const SystemBodyDefinition *bodyForEnvironment(const SystemDefinition &, std::st
 inline constexpr double earthLaunchSpeed = .60;
 SystemVector earthLaunchPosition();
 SystemVector systemDockPosition(const SystemBodyDefinition &);
+// Waypoints for dock-bearing bodies lead to the service berth, not the
+// collision body at the center of its gravity field.
+SystemVector systemNavigationPosition(const SystemBodyDefinition &);
 // Shared orbit/travel zoom envelope, independent of coordinate-frame ownership.
 double systemBodyApproachBlend(const SystemBodyDefinition &, double radius);
 double systemBodyDisplayRadius(const SystemBodyDefinition &);

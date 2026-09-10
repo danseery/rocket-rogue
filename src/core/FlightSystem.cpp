@@ -259,8 +259,10 @@ void leaveLocalLanding(FlightRunState& flight)
     const double radial = flight_geometry::bodyRadius+land.altitude/flight_landing::metersPerOrbitUnit;
     flight.positionX = nx*radial+ny*land.horizontalPosition/flight_landing::metersPerOrbitUnit;
     flight.positionY = ny*radial-nx*land.horizontalPosition/flight_landing::metersPerOrbitUnit;
-    flight.velocityX = (nx*land.verticalVelocity+ny*land.lateralVelocity)/flight_landing::velocityConversion;
-    flight.velocityY = (ny*land.verticalVelocity-nx*land.lateralVelocity)/flight_landing::velocityConversion;
+    // Local ascent telemetry is already expressed in m/s. Convert it with the
+    // same scale used by orbit telemetry so the handoff preserves perceived speed.
+    flight.velocityX = (nx*land.verticalVelocity+ny*land.lateralVelocity)/flight_geometry::velocityToMetersPerSecond;
+    flight.velocityY = (ny*land.verticalVelocity-nx*land.lateralVelocity)/flight_geometry::velocityToMetersPerSecond;
     flight.heading = land.heading+land.basisAngle-1.5707963267948966;
     flight.handoff = {FlightMode::Landing, FlightMode::Orbit, 0.0,
         flight.positionX, flight.positionY, flight.heading};

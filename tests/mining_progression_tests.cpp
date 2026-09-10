@@ -6,6 +6,8 @@
 #include "core/MiningSystem.h"
 #include "core/SaveData.h"
 #include "core/SaveSchema.h"
+#include "core/ScenarioSystem.h"
+#include "core/SolarProgression.h"
 
 #include <algorithm>
 #include <array>
@@ -67,7 +69,7 @@ void allActLevelContractsResolve()
                 require(!miningMaterialAllowed(rules, MiningCellMaterial::ExoticVein), "Act 1 should never permit exotic mineral veins");
                 require(!miningEnemyAllowed(rules, MiningEnemyType::Ant), "Act 1 should have no enemy roster");
                 require(rules.enemyHealthScale == 0.0 && rules.enemyDamageScale == 0.0, "Act 1 should not expose combat scaling");
-                require(rules.mechanics.fogAndScanner == (difficulty >= 2), "Act 1 scanner gate should match its level table");
+                require(rules.mechanics.fogAndScanner, "Act 1 should use local visibility and scanner pulses from its first level");
                 require(rules.mechanics.oxygenAndFuel, "Act 1 endurance resources should be active from the first Moon expedition");
                 require(miningMaterialAllowed(rules, MiningCellMaterial::HardRock) == (difficulty >= 3), "Act 1 Hard Rock gate should match its level table");
                 require(rules.mechanics.drillHeat == (difficulty >= 4), "Act 1 heat gate should match its level table");
@@ -114,9 +116,10 @@ void allActLevelContractsResolve()
     const MiningArenaRules actOneLevelOne = resolveMiningArenaRules({MiningAct::ActOne, 1, 1});
     const MiningArenaRules actOneLevelTwo = resolveMiningArenaRules({MiningAct::ActOne, 2, 1});
     const MiningArenaRules actOneLevelThree = resolveMiningArenaRules({MiningAct::ActOne, 3, 1});
-    require(!actOneLevelOne.mechanics.fogAndScanner && actOneLevelOne.mechanics.oxygenAndFuel,
-        "Act 1 level 1 should teach movement, drilling, fuel, and oxygen without general scanner fog");
-    require(actOneLevelTwo.mechanics.fogAndScanner && actOneLevelTwo.mechanics.oxygenAndFuel, "Act 1 level 2 should introduce scanner and endurance resources");
+    require(actOneLevelOne.mechanics.fogAndScanner && actOneLevelOne.mechanics.oxygenAndFuel,
+        "Act 1 level 1 should teach scanner visibility alongside movement, drilling, fuel, and oxygen");
+    require(actOneLevelTwo.mechanics.fogAndScanner && actOneLevelTwo.mechanics.oxygenAndFuel,
+        "Act 1 level 2 should retain scanner and endurance resources");
     require(miningMaterialAllowed(actOneLevelThree, MiningCellMaterial::HardRock), "Act 1 level 3 should introduce hard rock");
 
     const MiningArenaRules actTwoLevelOne = resolveMiningArenaRules({MiningAct::ActTwo, 1, 1});
@@ -543,68 +546,38 @@ void miningGateContractsAndRuntimeAreDeterministic()
         "active gate state and compatibility site identity should survive save/load while transient derived state reloads dirty");
 }
 
-void progressionArtifactPlacementAdvancesThreePerDepth()
+void progressionArtifactPlacementDeepensByMissionStage()
 {
-    ContentCatalog catalog = createDefaultContent();
-    const auto addArtifactScenario = [&](std::string id, std::string destinationId) {
-        ScenarioDefinition scenario;
-        scenario.id = std::move(id);
-        scenario.destinationId = std::move(destinationId);
-        ScenarioStepDefinition step;
-        step.id = "artifact";
-        step.completionEvent = ScenarioEventKind::ArtifactRecovered;
-        step.eventOriginId = scenario.destinationId;
-        scenario.steps.push_back(std::move(step));
-        catalog.scenarios.push_back(std::move(scenario));
-    };
-    addArtifactScenario("uranus_artifact_test", content::destination::uranus);
-    addArtifactScenario("neptune_artifact_test", content::destination::neptune);
-
+    const ContentCatalog catalog = createDefaultContent();
     GameState state = createNewGame(catalog, 0xA471FAC7ULL);
-    const Destination* jupiter = catalog.findDestination(content::destination::jupiter);
-    require(jupiter != nullptr, "Jupiter should exist for progression artifact placement tests");
-
-    const ProgressionArtifactPlacement first = resolveProgressionArtifactPlacement(
-        state, catalog, *jupiter, 1, "first_artifact");
-    require(first.ordinal == 0 && first.targetDepth == 1 && first.withinDepthSlot == 0 &&
-            first.horizontalOffset == 0 && first.verticalOffset == 10,
-        "the first progression artifact should be centered ten cells below the depth-one entry");
-
-    state.meta.artifacts.push_back({"random_mars_bonus", content::destination::mars});
-    require(resolveProgressionArtifactPlacement(state, catalog, *jupiter, 1, "first_artifact").ordinal == 0,
-        "an incidental artifact from a non-authored destination must not advance progression placement");
-
-    state.meta.artifacts.push_back({"jupiter_progression", content::destination::jupiter});
-    const ProgressionArtifactPlacement secondEasy = resolveProgressionArtifactPlacement(
-        state, catalog, *jupiter, 1, "second_artifact");
-    const ProgressionArtifactPlacement secondHard = resolveProgressionArtifactPlacement(
-        state, catalog, *jupiter, 10, "second_artifact");
-    require(secondEasy.targetDepth == 1 && secondEasy.withinDepthSlot == 1 &&
-            std::abs(secondEasy.horizontalOffset) <= 10 && secondEasy.verticalOffset >= 1 &&
-            secondEasy.verticalOffset <= 10 && secondEasy.manhattanDistance >= 11 &&
-            secondEasy.manhattanDistance <= 14,
-        "the second artifact should stay on depth one inside the first displacement band");
-    require(secondHard.manhattanDistance >= secondEasy.manhattanDistance,
-        "raising mining difficulty must not make the same progression slot easier");
-
-    state.meta.artifacts.push_back({"jupiter_duplicate", content::destination::jupiter});
-    require(resolveProgressionArtifactPlacement(state, catalog, *jupiter, 5, "second_artifact").ordinal == 1,
-        "duplicate artifacts from one authored destination must count only once");
-
-    state.meta.artifacts.push_back({"saturn_progression", content::destination::saturn});
-    const ProgressionArtifactPlacement third = resolveProgressionArtifactPlacement(
-        state, catalog, *jupiter, 5, "third_artifact");
-    require(third.targetDepth == 1 && third.withinDepthSlot == 2 &&
-            third.manhattanDistance >= 15 && third.manhattanDistance <= 20 &&
-            std::abs(third.horizontalOffset) <= 10 && third.verticalOffset <= 10,
-        "the third artifact should remain on depth one inside the harder displacement band");
-
-    state.meta.artifacts.push_back({"uranus_progression", content::destination::uranus});
-    const ProgressionArtifactPlacement fourth = resolveProgressionArtifactPlacement(
-        state, catalog, *jupiter, 10, "fourth_artifact");
-    require(fourth.ordinal == 3 && fourth.targetDepth == 2 && fourth.withinDepthSlot == 0 &&
-            fourth.horizontalOffset == 0 && fourth.verticalOffset == 10,
-        "the fourth progression artifact should reset to the centered depth-two layout");
+    const std::array<int, 6> expectedMainDepths {1, 1, 2, 2, 3, 4};
+    for (const SolarMissionDefinition& mission : catalog.solarMissions) {
+        const Destination* environment = catalog.findDestination(mission.environmentId);
+        require(environment != nullptr, "every solar mission must resolve its geology environment");
+        state.run.planetaryExpedition.bodyId = mission.bodyId;
+        const ProgressionArtifactPlacement placement = resolveProgressionArtifactPlacement(
+            state, catalog, *environment, 5, mission.artifactId);
+        require(placement.artifactId == mission.artifactId,
+            "artifact placement must retain the physical world's unique artifact identity");
+        require(placement.ordinal == (mission.optional ? 0 : mission.progressionOrdinal),
+            "main artifact depth must follow mission stage while optional worlds stay at stage zero");
+        const int expectedDepth = mission.optional
+            ? 1
+            : expectedMainDepths[static_cast<std::size_t>(mission.progressionOrdinal)];
+        require(placement.targetDepth == expectedDepth,
+            "main artifacts must follow the readable depth-one through depth-four mission staircase");
+        if (mission.optional || mission.progressionOrdinal == 0) {
+            require(placement.horizontalOffset == 0 && placement.verticalOffset == 10,
+                "the Moon and optional inner-world artifacts should use the centered introductory placement");
+        } else {
+            const int magnitude = std::abs(placement.horizontalOffset);
+            require(magnitude >= mission.progressionOrdinal &&
+                    magnitude <= mission.progressionOrdinal * 2,
+                "lateral placement variation should widen predictably with main mission stage");
+            require(placement.verticalOffset == 10 + (mission.progressionOrdinal % 2) * 4,
+                "the later artifact sharing a depth layer should sit visibly below the earlier one");
+        }
+    }
 }
 
 void authoredArtifactLayerIsPrebuiltAtResolvedDepth()
@@ -994,6 +967,53 @@ void evaTetherFollowsAndRecoversAtShip()
         "Bank / Leave should dock a tethered same-layer Mining Rig and bank its payload");
 }
 
+void solarCampaignClaimsAdvanceToStraylight()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0x522022ULL);
+    ensureScenarioInstances(state, catalog);
+    const std::array<std::string_view, 6> bodies {"moon", "mars", "io", "titan", "titania", "triton"};
+    for (std::size_t index = 0; index < bodies.size(); ++index) {
+        const SolarMissionDefinition* mission = nextSolarMission(state, catalog);
+        require(mission && mission->bodyId == bodies[index], "main missions should follow physical-body order");
+        const ScenarioDefinition* scenario = catalog.findScenario(mission->scenarioId);
+        require(scenario != nullptr, "each solar mission should resolve its scenario");
+        for (const ScenarioStepDefinition& step : scenario->steps) {
+            if (step.mandatoryBriefing)
+                require(performScenarioAction(state, catalog, scenario->id, step.id,
+                    ScenarioActionKind::AcknowledgeBriefing).applied, "mission briefing should be explicit");
+            if (step.completionEvent == ScenarioEventKind::ManualAction)
+                require(performScenarioAction(state, catalog, scenario->id, step.id,
+                    ScenarioActionKind::BeginActivity).applied, "mission setup action should be available");
+            else if (step.completionEvent != ScenarioEventKind::None)
+                require(recordScenarioEvent(state, catalog,
+                    {step.completionEvent, scenario->id, step.id, step.eventOriginId,
+                     step.eventTargetId, step.requiredProgress, step.requiredGrade}),
+                    "mission event should advance its own objective");
+            if (step.claimRequired)
+                require(performScenarioAction(state, catalog, scenario->id, step.id,
+                    ScenarioActionKind::ClaimReward).applied, "mission should accept one explicit claim");
+        }
+        require(solarMissionClaimed(state, catalog, *mission), "claimed mission should persist");
+        state.screen = Screen::Flight;
+        state.run.expedition.travelInitialized = true;
+        state.run.expedition.location.bodyId = mission->bodyId;
+        state.run.expedition.course.targetBodyId = mission->bodyId;
+        state.run.expedition.coursePlayerSelected = false;
+        state.run.flight.mode = FlightMode::Orbit;
+        require(reconcileSolarMissionMessages(state, catalog),
+            "claim and ascent should queue one completion message and recommend Earth");
+        require(state.run.expedition.course.targetBodyId == "earth" &&
+                !state.run.expedition.cruise.active,
+            "main mission completion should mark Earth without activating Cruise");
+        state.incomingMessages = {};
+        if (index + 1 < bodies.size())
+            require(solarBodyRevealed(state, catalog, bodies[index + 1]), "claim should reveal the next mission world");
+    }
+    require(arkDiscovered(state) && solarBodyRevealed(state, catalog, "straylight"),
+        "the claimed Triton mission should reveal Straylight");
+}
+
 } // namespace
 
 int main()
@@ -1004,7 +1024,8 @@ int main()
     enemyThemesFollowProgressionAndRemainDeterministic();
     progressionSaveFieldsRoundTripAndLegacyDefault();
     miningGateContractsAndRuntimeAreDeterministic();
-    progressionArtifactPlacementAdvancesThreePerDepth();
+    progressionArtifactPlacementDeepensByMissionStage();
+    solarCampaignClaimsAdvanceToStraylight();
     authoredArtifactLayerIsPrebuiltAtResolvedDepth();
     thermalSiteRulesAreContentDriven();
     layeredCocoonsHonorAuthoredRevealPolicies();

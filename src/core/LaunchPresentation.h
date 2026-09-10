@@ -379,6 +379,9 @@ inline LaunchPanelPresentation launchPanelPresentation(
         presentation.destinationName = body ? body->name : "Solar space";
         if (!body || body->dock || body->siteId.empty()) {
             const auto guidance = expeditionGuidance(state);
+            presentation.sectionTitle = state.run.expedition.undockReady
+                ? "Docked \xE2\x80\xA2 " + guidance.targetName
+                : "Manual Flight \xE2\x80\xA2 " + guidance.targetName;
             presentation.objectiveTitle = earthLaunchReady(state.run.expedition) ? "LAUNCH FROM EARTH" :
                 state.run.expedition.undockReady ? "READY TO UNDOCK" : "APPROACH " + guidance.targetName;
             presentation.objectiveCopy = guidance.nextAction;

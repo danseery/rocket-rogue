@@ -2613,7 +2613,7 @@ std::string buildGamePanelMarkup(
                 << modalButton("Settings", ui::modals::settings, "title-action title-settings")
                 << "</div>";
         } else {
-            const bool incompatibleCampaign = context.titleNotice == "CAMPAIGN UPDATE \xC2\xB7 A new campaign is required.";
+            const bool incompatibleCampaign = context.titleNotice.starts_with("CAMPAIGN UPDATE / This save was created");
             out << button(incompatibleCampaign ? "New Campaign" : "New Game", ui::actions::newGame, "title-action title-new-game", true);
             out << modalButton("Settings", ui::modals::settings, "title-action title-settings");
         }
@@ -2621,7 +2621,7 @@ std::string buildGamePanelMarkup(
             << "<span class=\"title-save-state ";
         out << (context.checkpointRecoveryAvailable ? "save-empty\">CHECKPOINT AVAILABLE"
             : (context.hasSavedGame ? "save-found\">SAVE SIGNAL ACQUIRED"
-                : (context.titleNotice == "CAMPAIGN UPDATE \xC2\xB7 A new campaign is required."
+                : (context.titleNotice.starts_with("CAMPAIGN UPDATE / This save was created")
                     ? "save-empty\">INCOMPATIBLE CAMPAIGN"
                     : "save-empty\">NO LOCAL SAVE DETECTED")));
         out << "</span>";
@@ -4504,16 +4504,15 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
     std::ostringstream key;
     if (state.run.expedition.travelInitialized) {
         const auto& e = state.run.expedition;
-        key << e.location.bodyId << ':' << e.cruise.active << ':' << e.course.targetBodyId << ':' << e.decision.pendingId << ':' << e.decision.awaitingAscent << ':'
-            << canDockExpedition(e, state.run.flight, solarSystemDefinition()) << '|';
-        auto dockPosition = e.location;
-        captureSystemLocation(dockPosition, context.launchFlight ? *context.launchFlight : state.run.flight);
-        dockPosition = convertSystemFrame(dockPosition, CoordinateFrame::System, "", solarSystemDefinition());
+        key << e.location.bodyId << ':' << e.cruise.active << ':' << e.course.targetBodyId << ':'
+            << (context.waypointPreviewCourse ? context.waypointPreviewCourse->targetBodyId : std::string{}) << ':'
+            << e.decision.pendingId << ':' << e.decision.awaitingAscent << ':'
+            << canDockExpedition(e, state.run.flight, solarSystemDefinition()) << ':'
+            << expeditionDockInRange(e, state.run.flight, solarSystemDefinition()) << '|';
         for (const auto& body : solarSystemDefinition().bodies) {
             if (!body.dock) continue;
-            const auto dock = systemDockPosition(body);
-            const double range = std::hypot(dockPosition.position.x-dock.x,dockPosition.position.y-dock.y);
-            key << (range<=expeditionDockRadius) << '|';
+            key << expeditionDockInRange(e, context.launchFlight ? *context.launchFlight : state.run.flight,
+                solarSystemDefinition(), body.id) << '|';
         }
         for (const auto& w : e.wrecks) key << w.id << ':' << canSalvageWreck(e, state.run.flight, solarSystemDefinition(), w.id)
             << ':' << canSalvageWreck(e, state.run.flight, solarSystemDefinition(), w.id, false) << '|';

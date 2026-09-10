@@ -11,8 +11,8 @@ OREBIT is a C++20 rocket-launch roguelite with direct Vulkan 1.3 applications fo
 - Surface and underground touchdown, Rig/EVA actors, physical cargo, separate oxygen and Rig fuel, Support Drones and manual ascent from the parked ship.
 - Deterministic mining sites, protected artifacts, cached layers, permanent ship/Drone ownership and temporary Expedition XP buildcraft.
 - Persistent solar travel, a spatial map, direct-target cruise, Earth docking, carried salvage, a deterministic Rank I shipyard, wreck recovery, and a return-or-continue decision after significant objectives.
-- Moon/Mars contracts and the lunar Incoming Message tutorial retain their rewards and physical recovery. Battery missions and Ark/post-solar campaign integration remain TBD in the GDD; see [Persistent Expeditions](docs/PERSISTENT_EXPEDITIONS.md).
-- Exact version-21 campaign persistence; incompatible data stays untouched until explicit New Campaign confirmation.
+- The canonical solar campaign runs Moon, Mars, Io, Titan, Titania and Triton artifact missions, with optional Mercury and Venus recoveries. The six main artifacts supply Straylight's six batteries; claiming Triton's mission reveals the reachable Ark. See [Persistent Expeditions](docs/PERSISTENT_EXPEDITIONS.md).
+- Exact version-23 campaign persistence; incompatible data stays untouched until explicit New Campaign confirmation.
 
 Design details are indexed in [Documentation Map](docs/README.md). Reusable campaign content belongs in typed definitions and events; see [Scenario Framework](docs/SCENARIO_FRAMEWORK.md).
 

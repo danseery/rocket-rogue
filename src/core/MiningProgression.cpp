@@ -135,10 +135,11 @@ void applyActOneProgression(MiningArenaRules& rules, int difficulty)
     rules.mechanics.movement = true;
     rules.mechanics.drilling = true;
     rules.mechanics.returnZone = true;
-    // Fuel, oxygen, and physical load are the foundational surface pressures,
-    // including on the first Moon expedition.  The scanner remains contextual
-    // until its authored anomaly appears, while heat and integrity arrive later.
+    // Fuel, oxygen, physical load, and local scanner visibility are the
+    // foundational surface systems, including on the first Moon expedition.
+    // Heat and integrity arrive later.
     rules.mechanics.oxygenAndFuel = true;
+    rules.mechanics.fogAndScanner = true;
     allow(rules.allowedMaterials, MiningCellMaterial::Empty);
     allow(rules.allowedMaterials, MiningCellMaterial::Regolith);
     allow(rules.allowedMaterials, MiningCellMaterial::CommonOre);
@@ -147,9 +148,6 @@ void applyActOneProgression(MiningArenaRules& rules, int difficulty)
     allow(rules.allowedRoomFeatures, MiningCellFeature::None);
     allow(rules.allowedRoomFeatures, MiningCellFeature::MainTunnel);
 
-    if (difficulty >= 2) {
-        rules.mechanics.fogAndScanner = true;
-    }
     if (difficulty >= 3) {
         allow(rules.allowedMaterials, MiningCellMaterial::HardRock);
         allow(rules.allowedRoomFeatures, MiningCellFeature::BranchTunnel);

@@ -18,7 +18,7 @@ DRILL HERE and LAND HERE point to the surface, with their text offset beside the
 
 Each site has a stable system/body/sector identity and is generated from that identity and the campaign seed. Visit count never changes generation. Save the selected site's survey and excavation before switching; restore its own cached layers, loose resources and objective state on return. This includes scanned or partially drilled sites never landed on. Site restoration never rolls back player inventory, upgrades, expedition progression or campaign rewards.
 
-The first scanned Moon sector receives the tutorial anomaly once per campaign. Other sectors receive ordinary mining content. Existing saves retain their recorded anomaly placement and completion; collected artifacts never regenerate. Optional v21 fields use the recorded sector or the original sector fallback for older records.
+The first scanned Moon sector receives the tutorial anomaly once per campaign. Other sectors receive ordinary mining content. Existing saves retain their recorded anomaly placement and completion; collected artifacts never regenerate. Optional v23 fields use the recorded sector or the original sector fallback for older records.
 
 Descent, touchdown, mining and ascent retain the selected site's terrain and body ownership. The shared surface camera uses uniform scale and square tiles, preserving the ship and terrain anchors through deployment.
 

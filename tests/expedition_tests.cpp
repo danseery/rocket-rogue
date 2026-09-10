@@ -8,6 +8,7 @@
 #include "core/PayloadTransfer.h"
 #include "core/MiningSystem.h"
 #include "core/FlightSystem.h"
+#include "core/SolarProgression.h"
 #include <cmath>
 #include <stdexcept>
 #include <iostream>
@@ -27,6 +28,26 @@ void persistentExpeditionTests()
     using namespace rocket;
     {
         const auto catalog = createDefaultContent();
+        auto state = createNewGame(catalog, 0x5A17ULL);
+        const auto& system = solarSystemDefinition();
+        const auto revealed = [&](std::string_view id) {
+            const auto* body = systemBody(system, id);
+            return body && solarBodyRevealed(state, catalog, id);
+        };
+        check(revealed("sun") && revealed("earth") && revealed("moon"),
+            "The opening chart must contain only the known Earth-Moon system");
+        check(!revealed("venus") && !revealed("mars") && !revealed("straylight"),
+            "Uncharted worlds and the Ark must remain absent from the system map");
+        state.meta.unlockKeys.push_back(content::unlock::routeMars);
+        check(revealed("mars") && !revealed("jupiter"),
+            "A route unlock must reveal its destination without leaking the next route");
+        check(revealed("venus"), "The Moon claim route must reveal both optional inner worlds");
+        state.meta.campaignMilestone = CampaignMilestone::ArkDiscovered;
+        check(revealed("straylight"),
+            "The Ark must appear only after the saved Triton-claim milestone");
+    }
+    {
+        const auto catalog = createDefaultContent();
         auto state = createNewGame(catalog, 776);
         performScenarioAction(state,catalog,content::scenario::lunarProspector,"briefing",ScenarioActionKind::AcknowledgeBriefing);
         recordScenarioEvent(state,catalog,{ScenarioEventKind::SafeMaterialDelivered,
@@ -34,6 +55,10 @@ void persistentExpeditionTests()
         check(state.meta.ownedDroneIds.empty(), "Ore delivery must not grant the Prospector");
         recordScenarioEvent(state,catalog,{ScenarioEventKind::ProtectedObjectiveExtracted,
             content::scenario::lunarProspector,"anomaly","moon",content::miningSite::lunarAnomalyCrevice,1,0});
+        auto objective = scenarioObjectiveForDestination(state, catalog, content::destination::moon);
+        check(objective.state == ScenarioStepState::ReadyToClaim &&
+              objective.actionLabel == "Confirm Recovery",
+            "The Moon reward action must describe claiming the recovered artifact, not locking Mars");
         performScenarioAction(state,catalog,content::scenario::lunarProspector,"anomaly",ScenarioActionKind::ClaimReward);
         check(state.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
             "First artifact recovery must grant and equip the Prospector");
@@ -41,6 +66,47 @@ void persistentExpeditionTests()
             "Prospector reward must introduce the helper with an incoming message");
         performScenarioAction(state,catalog,content::scenario::lunarProspector,"anomaly",ScenarioActionKind::ClaimReward);
         check(state.meta.equippedDroneIds.size()==1,"Repeated recovery must not duplicate the Prospector");
+        performScenarioAction(state,catalog,content::scenario::marsBayExpansion,"briefing",ScenarioActionKind::AcknowledgeBriefing);
+        recordScenarioEvent(state,catalog,{ScenarioEventKind::SafeMaterialDelivered,
+            content::scenario::marsBayExpansion,"delivery","mars","common",tuning::research::marsBayCommonOreGoal,0});
+        recordScenarioEvent(state,catalog,{ScenarioEventKind::ArtifactRecovered,
+            content::scenario::marsBayExpansion,"artifact","mars",content::protectedObjective::marsSignalArtifact,1,0});
+        objective = scenarioObjectiveForDestination(state, catalog, content::destination::mars);
+        check(objective.state == ScenarioStepState::ReadyToClaim &&
+              objective.actionLabel == "Claim Mars Mission",
+            "The Mars reward action must describe claiming the recovered artifact, not locking Jupiter");
+    }
+
+    {
+        const auto catalog = createDefaultContent();
+        auto state = createNewGame(catalog, 0xD0C6ULL);
+        check(initializeLiveExpedition(state, catalog), "Dock-range fixture must initialize live travel");
+        check(departHome(state, catalog) == ExpeditionResult::Applied,
+            "Dock-range fixture must enter physical flight");
+        const auto& system = solarSystemDefinition();
+        const auto* earth = systemBody(system, "earth");
+        check(earth != nullptr, "Dock-range fixture requires Earth");
+        const auto dock = systemDockPosition(*earth);
+        auto& expedition = state.run.expedition;
+        auto& flight = state.run.flight;
+        expedition.location = {system.id, "", CoordinateFrame::System,
+            {dock.x + expeditionDockRadius, dock.y}, {earth->velocity.x + 1.0, earth->velocity.y}, 0, {}};
+        restoreSystemLocation(expedition.location, flight);
+        flight.active = flight.physicalFlight = true;
+        flight.mode = FlightMode::Travel;
+        check(expeditionDockInRange(expedition, flight, system, "earth"),
+            "Dock alert and action range must include the shared radius boundary");
+        check(!canDockExpedition(expedition, flight, system),
+            "Being in range must not bypass the matched-speed docking requirement");
+        expedition.location.velocity = earth->velocity;
+        restoreSystemLocation(expedition.location, flight);
+        check(canDockExpedition(expedition, flight, system),
+            "Matching dock speed at the shared boundary must allow docking");
+        expedition.location.position.x += 0.001;
+        restoreSystemLocation(expedition.location, flight);
+        check(!expeditionDockInRange(expedition, flight, system, "earth") &&
+              !canDockExpedition(expedition, flight, system),
+            "Dock alert and docking eligibility must end together outside the shared radius");
     }
 
     {
@@ -66,6 +132,13 @@ void persistentExpeditionTests()
         for (int i=0;i<40;++i) updateMiningRun(state,catalog,.025);
         check(state.run.mining.temporaryMaterials.common == 1,
             "Rig must pull nearby loose ore inward and collect it once");
+        auto drillReach = fixture();
+        drillReach.run.mining.looseObjects.front().x =
+            drillReach.run.mining.droneX + tuning::mining::drillRangeCells + 0.65;
+        const double drillReachStartX = drillReach.run.mining.looseObjects.front().x;
+        updateMiningRun(drillReach,catalog,.025);
+        check(drillReach.run.mining.looseObjects.front().x < drillReachStartX,
+            "Base attraction must cover the Rig's full mounted drill reach");
         auto full = fixture();
         full.run.mining.cargo = miningRigCargoCapacityMass();
         full.run.mining.temporaryMaterials.common = miningRigCargoCapacityMass();
@@ -88,6 +161,32 @@ void persistentExpeditionTests()
         updateMiningRun(upgraded,catalog,.025);
         check(upgraded.run.mining.looseObjects.front().x < 14.5,
             "Ore Magnet ranks must expand attraction reach");
+
+        auto falling = fixture();
+        auto& fallingMining = falling.run.mining;
+        fallingMining.cargo = miningRigCargoCapacityMass();
+        fallingMining.temporaryMaterials.common = miningRigCargoCapacityMass();
+        fallingMining.gravityDirectionX = 0.0;
+        fallingMining.gravityDirectionY = 1.0;
+        fallingMining.gravityStrength = 8.0;
+        for (int x = 0; x < fallingMining.terrain.width; ++x) {
+            *miningCellAt(fallingMining.terrain, x, 12) =
+                {MiningCellMaterial::Bedrock, 4, 4, false, false};
+        }
+        for (int i = 0; i < 160; ++i) {
+            updateMiningRun(falling, catalog, .025);
+        }
+        check(fallingMining.looseObjects.size() == 1,
+            "Uncollected drill ore must remain in the tunnel");
+        const MiningLooseObject& settledOre = fallingMining.looseObjects.front();
+        const MiningCell* settledCell = miningCellAt(
+            fallingMining.terrain,
+            static_cast<int>(std::floor(settledOre.x)),
+            static_cast<int>(std::floor(settledOre.y)));
+        check(settledCell != nullptr && !miningMaterialSolid(settledCell->material),
+            "Gravity-driven drill ore must remain in open terrain");
+        check(settledOre.y > 11.0 && settledOre.y < 11.9,
+            "Gravity-driven drill ore must settle above solid rock");
     }
     {
         const auto catalog = createDefaultContent();
@@ -106,9 +205,18 @@ void persistentExpeditionTests()
         flight.mode = FlightMode::Landing;
         flight.orbit.captured = flight.orbit.rewardAwarded = true;
         flight.landing.altitude = flight_landing::departureAltitude;
+        flight.landing.verticalVelocity = 8.0;
+        flight.landing.lateralVelocity = 3.0;
+        const double ascentSpeed = std::hypot(
+            flight.landing.verticalVelocity, flight.landing.lateralVelocity);
         leaveLocalLanding(flight);
         check(!flight.orbit.captured && flight.orbit.rewardAwarded,
             "Ascent must permit a new wedge capture without resetting its reward latch");
+        check(std::abs(
+            std::hypot(flight.velocityX, flight.velocityY) *
+                flight_geometry::velocityToMetersPerSecond -
+            ascentSpeed) < 1e-9,
+            "Ascent handoff must preserve the displayed local flight speed");
         auto landingModel = expeditionFlightModel(state, catalog);
         landingModel.orbitRequired = true;
         landingModel.heatEnabled = landingModel.asteroidsEnabled = false;
@@ -164,10 +272,6 @@ void persistentExpeditionTests()
         check(restored.valid && restored.miningTemplate.terrain.cells[0].material==MiningCellMaterial::Empty &&
             restored.miningTemplate.artifact.state==MiningArtifactState::Delivered && restored.miningTemplate.cargo==0,
             "Revisit must retain excavation and delivered artifacts without restoring carried cargo");
-        auto legacy = serializeExpedition(expedition);
-        legacy.erase(legacy.find(" wedges1 "));
-        const auto old = deserializeExpedition(legacy);
-        check(old.has_value(), "Older v21 expedition extensions must remain readable");
     }
     {
         const auto& solar = solarSystemDefinition();
@@ -307,6 +411,31 @@ void persistentExpeditionTests()
         check(f.positionX>earthLaunchPosition().x && f.active && f.hullRemaining==f.hullMaximum,"Launch climbs away from Earth without immediate impact");
         const auto g=expeditionGuidance(opening);
         check(g.targetName=="Moon" && g.orbitBodyId=="moon" && g.targetDistance>0,"Guidance supplies target and approach bands");
+        auto dockApproach = opening;
+        auto& dockExpedition = dockApproach.run.expedition;
+        auto& dockFlight = dockApproach.run.flight;
+        dockExpedition.location = {"solar", "earth", CoordinateFrame::Body,
+            {.30, 0.0}, {}, 0.0, {}};
+        dockExpedition.course.targetBodyId = "earth";
+        restoreSystemLocation(dockExpedition.location, dockFlight);
+        dockFlight.active = dockFlight.physicalFlight = true;
+        dockFlight.courseNoticeSeconds = 0.0;
+        dockFlight.predictedImpact = false;
+        const auto dockGuidance = expeditionGuidance(dockApproach);
+        const auto* earth = systemBody(solarSystemDefinition(), "earth");
+        check(earth && dockGuidance.targetName == "Earth Dock",
+            "Earth waypoint labels must name the orbital dock");
+        check(std::abs(dockGuidance.targetPosition.x-earth->dockOffset.x) < 1e-12 &&
+            std::abs(dockGuidance.targetPosition.y-earth->dockOffset.y) < 1e-12,
+            "Earth waypoint geometry must lead to the dock instead of the collision body");
+        check(dockGuidance.nextAction.find("dock marker") != std::string::npos,
+            "Earth waypoint instructions must direct the player to the dock marker");
+        dockExpedition.location.position = earth->dockOffset;
+        restoreSystemLocation(dockExpedition.location, dockFlight);
+        const auto dockCourse = previewSystemCourse(
+            dockExpedition.location, dockFlight, solarSystemDefinition(), "earth", "earth", &model);
+        check(dockCourse.estimateValid && dockCourse.approachFuel < 1e-9,
+            "A ship already at the Earth dock must not receive a route back into Earth");
         auto coastExpedition=e;
         auto coastFlight=f;
         auto coastModel=model;
@@ -327,24 +456,6 @@ void persistentExpeditionTests()
         initializeLiveExpedition(spent,catalog);
         spent.run.flight.fuelRemaining-=1;
         check(!beginEarthOpening(spent,catalog),"Unexplained resource use must preserve an uncertain save");
-    }
-    {
-        const auto catalog = createDefaultContent();
-        GameState legacy;
-        legacy.screen = Screen::Flight;
-        legacy.run.flight.physicalFlight = true;
-        legacy.run.flight.destinationId = "moon";
-        legacy.run.flight.positionX = 2.25;
-        legacy.run.flight.fuelRemaining = 4.25;
-        legacy.run.flight.hullRemaining = 71;
-        check(initializeLiveExpedition(legacy,catalog), "Recorded v21 physical flight must initialize continuous travel");
-        check(legacy.run.expedition.rigFuel.current == tuning::research::expeditionRigPackFuel+4.25,
-              "Pre-deployment v21 flight retains its existing landing Rig allocation once");
-        check(legacy.run.flight.fuelRemaining==4.25 && legacy.run.flight.hullRemaining==71 && legacy.run.flight.positionX==2.25,
-              "Compatibility initialization cannot refill or relocate the recorded ship");
-        legacy.run.expedition.rigFuel.current=1;
-        initializeLiveExpedition(legacy,catalog);
-        check(legacy.run.expedition.rigFuel.current==1,"Repeated initialization cannot refill the Rig");
     }
     auto system = solarSystemDefinition();
     system.bodies[3].velocity = {.125, -.375};
@@ -436,6 +547,12 @@ void persistentExpeditionTests()
     check(recoverSiteBattery(e, "moon") == ExpeditionResult::AlreadyApplied,
           "Repeated delivery must not duplicate battery");
     e.cargo.materials.common = 7;
+    e.progression.expeditionLevel = 4;
+    e.progression.expeditionExperience = 9.0;
+    e.progression.pendingRunUpgradeChoices = 1;
+    e.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::highTorqueMotor, 2}};
+    e.progression.selectedSynergyIds = {"recovered_synergy"};
+    e.progression.droneModuleAssignments = {{0, "recovered_drone", DroneModuleKind::CombatDrill}};
     e.location = {"solar", "", CoordinateFrame::System, systemBody(system,"sun")->position, {2, 0}, 0, ""};
     restoreSystemLocation(e.location, flight);
     check(loseExpedition(e, flight, system) == ExpeditionResult::Applied && e.wrecks.size() == 1,
@@ -450,10 +567,43 @@ void persistentExpeditionTests()
     check(persisted.has_value() && validBatteryOwnership(*persisted),
           "Wreck ownership must survive save/load");
     e = *persisted;
+    e.progression.expeditionLevel = 3;
+    e.progression.expeditionExperience = 12.0;
+    e.progression.pendingRunUpgradeChoices = 2;
+    e.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::highTorqueMotor, 1}, {content::surfaceUpgrade::wideDrillHead, 1}};
+    e.progression.droneModuleAssignments = {{0, "active_drone", DroneModuleKind::SpectrumFilter}};
     e.location = e.wrecks[0].location;
-    check(salvageWreck(e, 1, system) == ExpeditionResult::Applied &&
-              e.batteries[0].owner == BatteryOwner::Ship && e.cargo.materials.common == 7,
-          "Physical rendezvous must restore carried cargo once");
+    e.location.position.x += expeditionSalvageRadius - 0.001;
+    e.location.velocity = e.wrecks[0].location.velocity;
+    restoreSystemLocation(e.location, flight);
+    flight.active = flight.physicalFlight = true;
+    flight.mode = FlightMode::Travel;
+    check(canSalvageWreck(e, flight, system, 1),
+          "Wreck salvage must include the tripled radius boundary");
+    e.location.position.x += 0.002;
+    restoreSystemLocation(e.location, flight);
+    check(!canSalvageWreck(e, flight, system, 1),
+          "Wreck salvage must remain unavailable just beyond the tripled radius");
+    e.location = e.wrecks[0].location;
+    e.cargo.materials.common = 24;
+    check(salvageWreck(e, 1, system, 24) == ExpeditionResult::Applied &&
+              e.batteries[0].owner == BatteryOwner::Ship && e.cargo.materials.common == 24 &&
+              e.progression.expeditionLevel == 4 && e.progression.expeditionExperience == 9.0 &&
+              e.progression.pendingRunUpgradeChoices == 3 && e.progression.runRigUpgradeRanks.size() == 2 &&
+              e.progression.runRigUpgradeRanks.front().rank == 2 &&
+              e.progression.selectedSynergyIds == std::vector<std::string>{"recovered_synergy"} &&
+              e.progression.pendingGraftConflicts.size() == 1 && e.wrecks.size() == 1,
+          "Full-hold salvage must restore the build once while leaving ore in the wreck");
+    check(resolveRecoveredGraftConflict(e, 0, true) == ExpeditionResult::Applied &&
+              e.progression.pendingGraftConflicts.empty() &&
+              e.progression.droneModuleAssignments.front().primaryDroneId == "recovered_drone" &&
+              e.progression.droneModuleAssignments.front().module == DroneModuleKind::CombatDrill,
+          "Conflicting recovered grafts must wait for and obey an explicit installed-graft choice");
+    const int recoveredChoices = e.progression.pendingRunUpgradeChoices;
+    e.cargo.materials = {};
+    check(salvageWreck(e, 1, system, 24) == ExpeditionResult::Applied && e.cargo.materials.common == 7 &&
+              e.progression.pendingRunUpgradeChoices == recoveredChoices,
+          "Later cargo salvage must not grant the recovered build twice");
     check(salvageWreck(e, 1, system) == ExpeditionResult::AlreadyApplied && e.cargo.materials.common == 7,
           "Salvage must be idempotent");
     e.location = {"solar", "earth", CoordinateFrame::Body, {.5, 0}, {}, 0, ""};
@@ -506,6 +656,34 @@ void persistentExpeditionTests()
           "Full save must round trip registry and expedition build together");
     check(saved->expedition.location.position.x == local.position.x,
           "Persistent location must serialize at round-trip precision");
+    {
+        auto boundary = createNewGame(catalog, 71);
+        check(initializeLiveExpedition(boundary, catalog),
+              "Boundary fixture must initialize live travel");
+        auto& expedition = boundary.run.expedition;
+        auto& ship = boundary.run.flight;
+        expedition.active = true;
+        expedition.location = {"solar", "moon", CoordinateFrame::Body,
+            {1.80, 0.0}, {0.08, 0.0}, 0.0, "moon.beacon:zone_2"};
+        expedition.progression.expeditionLevel = 3;
+        expedition.cargo.materials.common = 7;
+        restoreSystemLocation(expedition.location, ship);
+        ship.active = ship.physicalFlight = true;
+        ship.mode = FlightMode::Travel;
+        ship.phase = FlightPhase::Transfer;
+        ship.orbit.enteredInfluence = true;
+        const double speedBefore = std::hypot(ship.velocityX, ship.velocityY);
+        const auto step = advanceExpeditionFlight(
+            expedition, ship, expeditionFlightModel(boundary, catalog),
+            expeditionEnvironment(boundary, catalog), solarSystemDefinition(), {}, .01);
+        check(!step.flyby && ship.active && ship.phase != FlightPhase::Flyby,
+              "Leaving a live body influence must keep physical Flight active");
+        check(expedition.location.frame == CoordinateFrame::System && expedition.location.bodyId.empty(),
+              "Influence exit must convert the same pose into system space");
+        check(std::abs(std::hypot(ship.velocityX, ship.velocityY) - speedBefore) < .01 &&
+                  expedition.progression.expeditionLevel == 3 && expedition.cargo.materials.common == 7,
+              "Influence exit must preserve perceived speed, cargo, and expedition progression");
+    }
     {
         auto journey = createNewGame(catalog, 72);
         check(initializeLiveExpedition(journey, catalog), "New campaign must initialize at Earth dock");
@@ -595,11 +773,11 @@ void persistentExpeditionTests()
               "Home docking must bank exactly the carried manifest");
         check(dockExpedition(journey,solar) == ExpeditionResult::AlreadyApplied && journey.meta.materials.common == bankBefore+9,
               "Repeated docking must be idempotent");
-        check(expedition.progression.expeditionLevel == 1, "Home docking must reset temporary progression");
+        check(expedition.progression.expeditionLevel == 4, "Home docking must preserve the expedition build");
         check(journey.run.credits==100+payout && expedition.cargo.credits==0,"Arrival payout banks exactly once at home");
         auto persistedJourney = deserializeSaveData(serializeSaveData(captureSaveData(journey)));
         check(persistedJourney && persistedJourney->expedition.travelInitialized && persistedJourney->expedition.rigFuel.capacity > 0,
-              "Live expedition initialization and Rig allotment must persist in v21");
+              "Live expedition initialization and Rig allotment must persist in v23");
         check(departHome(journey,catalog)==ExpeditionResult::Applied,"Banked expedition can depart again");
         advanceExpeditionFlight(expedition,ship,model,expeditionEnvironment(journey,catalog),solar,{0,1,false,true},.05);
         const int bankedMaterials=journey.meta.materials.common;

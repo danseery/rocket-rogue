@@ -31,7 +31,7 @@ Packing does not teleport the ship to orbit. Pilot the ascent through the same t
 
 ## Campaign connection
 
-The lunar 20-Common-Ore delivery activates the anomaly during the expedition. Scanner discovery, EVA access, physical artifact recovery and explicit claim establish the Mars lead. Mars currently requires 8 Common Ore. After a significant objective and ascent, a saved compact decision offers home, the next lead, or the map. Docking banks and services once; continuing preserves resource pressure and XP. See [Persistent Expeditions](PERSISTENT_EXPEDITIONS.md). Battery missions and flexible-order story reconciliation remain TBD S3. Ark and endgame integration are TBD S4.
+The lunar 20-Common-Ore delivery activates the anomaly during the expedition. Scanner discovery, EVA access, physical artifact recovery and explicit claim establish the Mars lead. Mars requires 8 Common Ore. Each later main mission recovers the artifact from the named landing moon. After claim and ascent, Earth service is recommended while manual onward travel remains available. Docking banks and services once; continuing preserves resource pressure and XP. Claiming the Triton artifact reveals Straylight. See [Persistent Expeditions](PERSISTENT_EXPEDITIONS.md).
 
 ## Detailed references
 

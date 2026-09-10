@@ -3668,7 +3668,10 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         if (!chunk.active) {
             continue;
         }
-        const Vec2 position = cellCenter(chunk.x, chunk.y);
+        // Loose objects store continuous world coordinates, like the Rig and
+        // EVA. Adding the terrain-cell half offset makes stopped ore appear
+        // inside the solid cell below and to the right of its real position.
+        const Vec2 position = gridPoint(chunk.x, chunk.y);
         const Color chunkColor = miningRewardGlowColor(static_cast<int>(chunk.material));
         const float pulse = 0.80F + 0.20F * std::sin(
             static_cast<float>(snapshot.animationTime) * 5.2F + static_cast<float>(index) * 1.37F);
@@ -5179,7 +5182,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         snapshot.miningRigPresent &&
         textureReady(DrillBitAsset)) {
         float drillH = cellSize * kMiningRigIdleDrillCells;
-        const float drillW = drillH * 0.88F;
+        const float drillW = drillH * 0.88F * static_cast<float>(snapshot.miningDrillHeadWidthScale);
         const Vec2 bitCenter {
             drillOrigin.x + drillDirection.x * drillH * 0.5F,
             drillOrigin.y + drillDirection.y * drillH * 0.5F
@@ -5201,13 +5204,33 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             DrillBitAsset,
             drillFrame,
             6);
+        if (snapshot.miningSideCutterReach > 0.01) {
+            const Vec2 lateral {-drillDirection.y, drillDirection.x};
+            const float cutterOffset = drillW * 0.50F + cellSize * static_cast<float>(snapshot.miningSideCutterReach) * 0.50F;
+            const float cutterLength = drillH * 0.58F;
+            const float cutterWidth = std::max(2.0F, cellSize * static_cast<float>(snapshot.miningSideCutterReach));
+            for (float side : {-1.0F, 1.0F}) {
+                drawSpriteRotated(
+                    drillOrigin.x + drillDirection.x * cutterLength * 0.62F + lateral.x * cutterOffset * side,
+                    drillOrigin.y + drillDirection.y * cutterLength * 0.62F + lateral.y * cutterOffset * side,
+                    cutterWidth,
+                    cutterLength,
+                    -drillDirection.x,
+                    -drillDirection.y,
+                    heatTint,
+                    DrillBitAsset,
+                    drillFrame,
+                    6);
+            }
+        }
     }
     if ((rigCollisionDebug_ || snapshot.debugSessionActive) && snapshot.miningRigPresent && !snapshot.miningExtractionActive) {
         const auto center=gridPoint(snapshot.miningDroneX,snapshot.miningDroneY);
         drawEllipseLine(center.x,center.y,cellW*rig_geometry::bodyRadius,cellH*rig_geometry::bodyRadius,
             {1,.85F,.15F,.95F},48,0,2*kPi);
         const auto triangle=rig_geometry::triangle(snapshot.miningDroneX,snapshot.miningDroneY,
-            snapshot.miningHullDirX,snapshot.miningHullDirY);
+            snapshot.miningHullDirX,snapshot.miningHullDirY,
+            {snapshot.miningDrillHeadWidthScale,snapshot.miningSideCutterReach});
         for(int i=0;i<3;++i) {
             const auto a=gridPoint(triangle[i].x,triangle[i].y),b=gridPoint(triangle[(i+1)%3].x,triangle[(i+1)%3].y);
             drawLine(a.x,a.y,b.x,b.y,{1,.85F,.15F,.95F},2);
@@ -6923,7 +6946,8 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         }
 
         if (snapshot.orbitalOverlay > 0.001 ||
-            (snapshot.orbitalZoneSurveyed && !snapshot.launchLandingLocalFrame)) {
+            ((snapshot.orbitalZoneSurveyed || !snapshot.orbitalExistingShafts.empty()) &&
+                !snapshot.launchLandingLocalFrame)) {
             const float alpha = static_cast<float>(snapshot.orbitalOverlay);
             const float radius = destinationSize * 0.46F;
             const Vec2 c = destinationCenter;
@@ -7057,6 +7081,24 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                     drawEllipseLine(ship.x, ship.y, pulseRadius, pulseRadius,
                         {0.18F, 0.96F, 1.0F, opacity * 0.96F}, 96, 0, 2*kPi);
                 }
+            }
+            // Previously drilled wedges remain readable when another slice is
+            // selected or the player returns to this body. Render them as dark
+            // permanent cuts with a quiet cyan rim so active drill guidance
+            // remains the brightest element.
+            for (const auto& existing : snapshot.orbitalExistingShafts) {
+                const Vec2 mouth = zonePoint(existing.bearing, radius);
+                const float endR = radius *
+                    (1.0F - static_cast<float>(std::clamp(existing.depth, 0.08, 5.0)) / 5.5F);
+                const Vec2 frontier = zonePoint(existing.bearing, endR);
+                drawLine(mouth.x,mouth.y,frontier.x,frontier.y,
+                    {0.01F,0.025F,0.035F,0.92F*destinationAlpha},10.0F);
+                drawLine(mouth.x,mouth.y,frontier.x,frontier.y,
+                    {0.12F,0.58F,0.62F,0.72F*destinationAlpha},2.0F);
+                drawCircle(mouth.x,mouth.y,0.012F,
+                    {0.02F,0.04F,0.05F,0.95F*destinationAlpha},18);
+                drawCircle(mouth.x,mouth.y,0.008F,
+                    {0.18F,0.76F,0.74F,0.78F*destinationAlpha},18);
             }
             const Vec2 pad = zonePoint(zone.centerBearing, radius);
             const Vec2 shaft = zonePoint(snapshot.orbitalShaftBearing, radius);
@@ -7363,25 +7405,6 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                 : 0.0F;
             const float bodyPulse = snapshot.screen == Screen::ArrivalFanfare ? 1.0F + arrivalBeat * 0.08F : 1.0F;
             const float bodyRadius = radius * 1.12F * bodyPulse;
-            if (snapshot.destinationTier == 6 && !arkVisible(snapshot.arkCondition)) {
-                // Let Straylight register as a distant, unexplained silhouette
-                // at Neptune without advancing or rewriting the reveal. Draw
-                // it first so the planet occludes its near edge and remains
-                // the foreground destination.
-                const Vec2 endpointTangent = routeTangent(snapshot, 1.0F);
-                const Vec2 endpointRight {endpointTangent.y, -endpointTangent.x};
-                const Vec2 distantArk {
-                    endpoint.x + endpointTangent.x * 0.22F + endpointRight.x * 0.06F,
-                    endpoint.y + endpointTangent.y * 0.22F + endpointRight.y * 0.06F
-                };
-                drawRadialGlow(
-                    distantArk.x,
-                    distantArk.y,
-                    0.16F,
-                    {0.20F, 0.68F, 0.92F, 0.06F},
-                    48);
-                drawArkSprite(distantArk, 0.22F, 0.62F);
-            }
             if (snapshot.screen == Screen::ArrivalFanfare) {
                 drawCircle(endpoint.x, endpoint.y, radius * (1.72F + arrivalBeat * 0.28F), {1.0F, 0.78F, 0.24F, 0.12F}, 72);
             }

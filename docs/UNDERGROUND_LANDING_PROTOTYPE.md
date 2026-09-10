@@ -26,10 +26,10 @@ use the parked layer. Support Drone deliveries follow a terrain path through
 cached layers; their manifests are not banked by an elapsed transit timer.
 Unopened seam lips cannot be crossed by Mining actors.
 
-Saves are v21 only. Local pose, fixed surface origin, mothership location,
+Saves are v23 only. Local pose, fixed surface origin, mothership location,
 departure/support state, drone transit depth, and exact cached terrain persist.
 Prepared sector terrain and excavation persist independently. Arrival and packing save only at their
-completed handoffs. Version 21 saves use safe defaults for missing optional fields. Unsupported save versions are preserved.
+completed handoffs. Version 22 saves use safe defaults for missing optional fields. Unsupported save versions are preserved.
 
 ## Restartable browser presets
 

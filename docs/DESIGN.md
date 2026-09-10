@@ -34,13 +34,13 @@ FlightSystem and LaunchSimulation own physical movement and forecasts. MiningSys
 
 ## Persistence
 
-Version 21 is the only accepted campaign schema. Incompatible or malformed data is rejected and preserved until explicit New Campaign confirmation. Preferences are independent. Validated stable states support checkpoint recovery.
+Version 23 is the only accepted campaign schema. Older and malformed campaign data is rejected and routed to New Campaign. Preferences are independent. Validated stable states support checkpoint recovery.
 
 Persist local flight pose, fixed surface origin, parked ship layer/position, departure/support state, exact cached terrain, physical objects, actor tanks, drone transit and progression. Each system/body/sector retains survey, excavation, cached layers and objective state, including sites scanned or drilled without landing. Revisit generation never restores consumed resources or artifacts. Touchdown commits in memory. Packing settles and saves at its completed handoff. SaveSchema and SaveData define field names and validation.
 
 ## Expedition state ownership
 
-`ExpeditionProgressionState` owns XP, pending drafts, Rig/drone ranks, graft assignments/runtime and synergies outside `PlanetaryExpeditionState`. Site replacement cannot reset these fields. The XP thresholds, reward amounts and effects are unchanged. `SystemContent`, `ExpeditionSystem` and `ExpeditionPersistence` provide core contracts and v21 registry serialization. The application connects the spatial map, course/cruise actions, Earth docking, carried salvage, Rank I shipyard, wreck recovery, and saved return-or-continue decisions. Physical battery missions and Ark/post-solar campaign integration remain TBD. See [Persistent Expeditions](PERSISTENT_EXPEDITIONS.md) for operations, compatibility boundaries, and validation scope.
+`ExpeditionProgressionState` owns XP, pending drafts, Rig/drone ranks, graft assignments/runtime and synergies outside `PlanetaryExpeditionState`. Site replacement, Rig loss, and Earth service cannot reset these fields. Main-ship loss stores the build in its wreck; recovery merges it once. `SolarMissionDefinition` is the canonical Moon-to-Triton route, including optional Mercury and Venus recoveries. `SystemContent`, `ExpeditionSystem` and `ExpeditionPersistence` provide continuous flight, physical battery ownership, Earth service, wreck recovery, explicit waypoints, and strict v23 serialization. Triton reveals the reachable Straylight derelict; installation and activation remain later work. See [Persistent Expeditions](PERSISTENT_EXPEDITIONS.md).
 
 ## Current recovery and interaction rules
 
@@ -50,6 +50,4 @@ Earth's dock is a separate marker. Dock within 0.32 system units at no more than
 
 ## Retired activity migration
 
-The separate Flyby, Orbit, pulse-timing Scan and Push Deeper activities are removed from simulation, rendering, input, debug and scenario routing. Orbital work uses physical Flight; surface preparation leads directly to Rig/EVA mining without a survey or dig timing gate. The outer-system course is explicitly confirmed after its artifact prerequisite, with no Perfect slingshot challenge.
-
-Version-21 activity screen IDs 11 and 12 restore into physical Flight. Only records without a physical pose receive a safe approach position; existing position, velocity, fuel, hull, cargo, terrain and earned progress remain intact. Old transfer-assist fields remain readable but grant no fuel discount, velocity boost or instability penalty. Saved scenario step identifiers remain stable to preserve completed rewards.
+The separate Flyby, Orbit, pulse-timing Scan and Push Deeper activities are removed from simulation, rendering, input, debug and scenario routing. Orbital work uses physical Flight; surface preparation leads directly to Rig/EVA mining without a survey or dig timing gate. Solar progression advances through explicit artifact mission claims and ordinary physical travel.

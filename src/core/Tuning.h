@@ -492,7 +492,8 @@ inline constexpr int drillAimDirections = 8;
 inline constexpr double visualHeadingSlerpPerSecond = 5.0;
 inline constexpr double visualRecoilSmoothingPerSecond = 12.0;
 inline constexpr double upgradedVisualRecoilSmoothingPerSecond = 9.0;
-inline constexpr double baseDrillPower = 4.2;
+inline constexpr double baseDrillPower = 5.04;
+inline constexpr double operatorBaseDrillPower = 4.2;
 inline constexpr double denseMaterialDrillPowerScale = 1.45;
 inline constexpr double contactDrillPowerScale = 1.20;
 inline constexpr double trainingDrillPowerScale = 0.10;
@@ -518,7 +519,6 @@ inline constexpr double depthHazardRisk = 0.030;
 inline constexpr double maxMiningHazardDelta = 0.26;
 inline constexpr double returnZoneHorizontalFraction = 0.29;
 inline constexpr double returnZoneRadiusCells = 3.0;
-inline constexpr double baseCarryBufferCargo = 3.0;
 inline constexpr int rigCargoCapacityMass = 24;
 inline constexpr double tetheredArtifactCargoWeight = 4.0;
 inline constexpr double rigTetherPullAccelerationCellsPerSecondSquared = 11.0;
@@ -681,7 +681,9 @@ inline constexpr double defenseDroneTrackingSlerpPerSecond(int upgradeLevel)
     return defenseDroneBaseTrackingSlerpPerSecond +
         static_cast<double>(std::clamp(upgradeLevel, 1, 3) - 1) * defenseDroneTrackingSlerpPerUpgrade;
 }
-inline constexpr double rigOreAttractionRadiusCells = 2.15;
+// Reach the end of the mounted Rig drill so ore broken by the Rig starts
+// inside its base collection field. Upgrades extend this field farther.
+inline constexpr double rigOreAttractionRadiusCells = drillRangeCells + 0.70;
 inline constexpr double resourceDroneCollectionRadiusCells = 2.05;
 inline constexpr double resourceDroneMinimumSpacingCells = 1.60;
 inline constexpr double resourceDroneCollectionEnterToleranceCells = 0.82;

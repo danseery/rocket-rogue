@@ -97,7 +97,7 @@ The following belongs in content and presentation, not in reusable mechanics:
 | Moon: Lunar Prospector Contract | Physically return 20 Moon Common Ore to complete the industrial contract; the twentieth ore activates the anomaly; pulse the scanner, enter the suit-only crevice in EVA, and recover the Artifact. | Ore grants Prospector Mk I; the recovered and explicitly claimed Artifact records the Mars exploration lead. |
 | Mars: Bay Expansion | Safely deliver 8 Mars Common Ore; explicitly claim empty Slot 2. | Records the Io/Jupiter exploration lead and preserves the existing reward. |
 | Io: Volcanic Descent | Commission Hazard Support Drone; launch the Thermal layered-recovery site; complete its cocoon, tether its protected Artifact, and extract safely; full return grants 75 Artifact XP plus the 10-XP authored-objective award. | Grants the slingshot scenario's availability key. |
-| Jupiter gravity assist | Physical trajectory efficiency; no required grade or movement lock in initialized expeditions. | Further battery/story acknowledgement integration remains TBD S3. |
+| Jupiter system | Io artifact recovery with commissioned Hazard support. | Claim reveals Saturn and Titan. |
 
 The Io mining-site configuration uses a Thermal biome, a protected artifact and a site-specific oxygen budget. Its detailed seal configuration belongs to the typed site definition. Those facts are configuration for this site, not invariants for every cocoon, artifact, or destination.
 
@@ -107,13 +107,13 @@ The Io mining-site configuration uses a Thermal biome, a protected artifact and 
 
 Native RmlUi and WebAssembly use the same `assets/ui` templates and RCSS. A scenario action is emitted with semantic scenario-instance ID, step ID, and `ScenarioActionKind` attributes. Templates may choose layout and visual family, but must not infer a claim, route gate, or mandatory-modal behavior from text, a route name, or a markup query. See [RmlUi Template and Component System](RMLUI_TEMPLATE_COMPONENT_SYSTEM.md) for the shared template/focus rules.
 
-## Save version 21 boundary and recovery
+## Save version 23 boundary and recovery
 
-Save version 21 is the only accepted schema. It persists scenario instances, unified Flight state, planetary-expedition state, physical Mining objects, independent fuel and oxygen tanks, cargo ownership, crew identity/status, and current progression.
+Save version 23 is the only accepted schema. It persists scenario instances, unified Flight state, planetary-expedition state, physical Mining objects, independent fuel and oxygen tanks, cargo ownership, crew identity/status, solar mission state, batteries, waypoints, messages, and discovered bodies. Older campaigns start through the new-game flow; no progression migration runs.
 
-Every non-v21 or malformed payload is rejected before any field is restored and remains untouched until the player confirms New Campaign. Preferences remain intact. Validated hub states additionally write a v21 sidecar checkpoint. If a v21 campaign fails the runtime progression audit, the title presents `ROUTE CONTROL // RECOVERY REQUIRED` with explicit checkpoint restoration or a confirmed new campaign; neither path grants progress.
+Every non-v23 or malformed payload is rejected before any field is restored and remains untouched until the player confirms New Campaign. Preferences remain intact. Validated hub states additionally write a v23 sidecar checkpoint. If a v23 campaign fails the runtime progression audit, the title presents `ROUTE CONTROL // RECOVERY REQUIRED` with explicit checkpoint restoration or a confirmed new campaign; neither path grants progress.
 
-`SaveSchema.h` and `SaveData.*` are authoritative for wire keys and defaults. Test strict version rejection plus v21 round trips, native/web checkpoint parity, active Flight, Mining, protected-objective, and open post-extraction Level Up states whenever scenario, site, flight, expedition-fuel, or Expedition XP fields change.
+`SaveSchema.h` and `SaveData.*` are authoritative for wire keys and defaults. Test strict version rejection plus v23 round trips, native/web checkpoint parity, active Flight, Mining, protected-objective, and open post-extraction Level Up states whenever scenario, site, flight, expedition-fuel, or Expedition XP fields change.
 
 ## Authoring checklist
 
@@ -124,14 +124,14 @@ Every non-v21 or malformed payload is rejected before any field is restored and 
 5. Use a `MiningSiteDefinition` and `MiningCocoonDefinition` for protected mining rather than adding encounter flags to generic terrain or drone code.
 6. Route every player action through the scenario dispatcher and every result through a typed event.
 7. Render from `ScenarioObjectivePresentation` on native and web; keep semantic action and focus IDs stable.
-8. Add authored, procedural, event/claim, route, cocoon-layer, strict-v21 save/checkpoint, and native/web presentation coverage as applicable.
+8. Add authored, procedural, event/claim, route, cocoon-layer, strict-v23 save/checkpoint, and native/web presentation coverage as applicable.
 9. Run catalog validation, `node tools/check-scenario-boundaries.mjs`, relevant core/mining/UI tests, and `git diff --check`.
 
 If a proposed feature requires a code comparison against a campaign ID, destination ID, title, or reward copy outside content code, stop and express the needed capability in a typed definition instead.
 
 ## Incoming Messages
 
-Incoming Messages separate speaker identity and portrait, message content and variants, persistent delivery occurrences, and shared modal presentation. Mission systems enqueue stable occurrence IDs and consume typed acknowledgements; the renderer never owns mission eligibility or rewards. Campaign-once definitions suppress subsequent occurrences after acknowledgement. Repeatable definitions require a new occurrence ID for every delivery. Pending order and acknowledged IDs persist in v21 saves; missing fields default to empty without resetting a campaign.
+Incoming Messages separate speaker identity and portrait, message content and variants, persistent delivery occurrences, and shared modal presentation. Mission systems enqueue stable occurrence IDs and consume typed acknowledgements; the renderer never owns mission eligibility or rewards. Campaign-once definitions suppress subsequent occurrences after acknowledgement. Repeatable definitions require a new occurrence ID for every delivery. Pending order and acknowledged IDs persist in v23 saves; missing fields default to empty without resetting a campaign.
 
 The lunar 20-ore delivery queues Mission Control's scanner instruction, including completion by hauling drones. A successful surface scanner discovery queues the EVA recovery instruction after the reveal animation. Already-revealed undelivered anomalies receive recovery instructions directly; delivered anomalies receive neither message. Contextual EVA copy and keyboard/controller hints accompany the same reusable card. The unnamed fennec operator is distinct from Vela Fox.
 

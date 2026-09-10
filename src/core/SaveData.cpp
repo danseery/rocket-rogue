@@ -1190,6 +1190,8 @@ std::string serializeRunRigUpgradeRanks(const std::vector<RunRigUpgradeRank>& ra
 std::vector<RunRigUpgradeRank> parseRunRigUpgradeRanks(std::string_view text);
 std::string serializeRunDroneRanks(const std::vector<RunDroneRank>& ranks);
 std::vector<RunDroneRank> parseRunDroneRanks(std::string_view text);
+std::string serializeGraftConflicts(const std::vector<ExpeditionProgressionState::GraftConflict>& conflicts);
+std::vector<ExpeditionProgressionState::GraftConflict> parseGraftConflicts(std::string_view text);
 std::array<std::string, 3> vectorToOfferArray(const std::vector<std::string>& values);
 
 bool parseRunProgressionSaveField(SaveData& save, std::string_view key, std::string_view value)
@@ -1205,6 +1207,10 @@ bool parseRunProgressionSaveField(SaveData& save, std::string_view key, std::str
     else if (key == save_schema::field::runRigUpgradeRanks) expedition.runRigUpgradeRanks = parseRunRigUpgradeRanks(value);
     else if (key == save_schema::field::runDroneRanks) expedition.runDroneRanks = parseRunDroneRanks(value);
     else if (key == save_schema::field::selectedSynergyIds) expedition.selectedSynergyIds = split(value, save_schema::listDelimiter);
+    else if (key == save_schema::field::runUpgradeDraftCount) expedition.runUpgradeDraftCount = std::max(0, parseInt(value, 0));
+    else if (key == save_schema::field::wideDrillHeadOffered) expedition.wideDrillHeadOffered = parseInt(value, 0) != 0;
+    else if (key == save_schema::field::sideCuttersOffered) expedition.sideCuttersOffered = parseInt(value, 0) != 0;
+    else if (key == save_schema::field::pendingGraftConflicts) expedition.pendingGraftConflicts = parseGraftConflicts(value);
     else return false;
     return true;
 }
@@ -1650,6 +1656,39 @@ std::vector<RunRigUpgradeRank> parseRunRigUpgradeRanks(std::string_view text)
         ranks.push_back({upgradeId, std::clamp(parseInt(fields[1], 0), 0, 3)});
     }
     return ranks;
+}
+
+std::string serializeGraftConflicts(const std::vector<ExpeditionProgressionState::GraftConflict>& conflicts)
+{
+    std::ostringstream out;
+    for (std::size_t i=0;i<conflicts.size();++i) {
+        if (i) out << save_schema::textListDelimiter;
+        const auto& c=conflicts[i];
+        out << c.equippedFrame << save_schema::crewFieldDelimiter
+            << static_cast<int>(c.current.module) << save_schema::crewFieldDelimiter
+            << static_cast<int>(c.recovered.module) << save_schema::crewFieldDelimiter
+            << encodeSaveBlob(c.current.primaryDroneId) << save_schema::crewFieldDelimiter
+            << encodeSaveBlob(c.recovered.primaryDroneId);
+    }
+    return out.str();
+}
+
+std::vector<ExpeditionProgressionState::GraftConflict> parseGraftConflicts(std::string_view text)
+{
+    std::vector<ExpeditionProgressionState::GraftConflict> result;
+    for (const std::string& record : split(text, save_schema::textListDelimiter)) {
+        const auto fields=split(record,save_schema::crewFieldDelimiter);
+        if (fields.size()!=5) continue;
+        ExpeditionProgressionState::GraftConflict c;
+        c.equippedFrame=parseInt(fields[0],-1);
+        const int current=parseInt(fields[1],0), recovered=parseInt(fields[2],0);
+        if (c.equippedFrame<0 || current<0 || recovered<0 ||
+            current>static_cast<int>(DroneModuleKind::HazardScreen) || recovered>static_cast<int>(DroneModuleKind::HazardScreen)) continue;
+        c.current={c.equippedFrame,decodeSaveBlob(fields[3]),static_cast<DroneModuleKind>(current)};
+        c.recovered={c.equippedFrame,decodeSaveBlob(fields[4]),static_cast<DroneModuleKind>(recovered)};
+        result.push_back(std::move(c));
+    }
+    return result;
 }
 
 std::string serializeRunDroneRanks(const std::vector<RunDroneRank>& ranks)
@@ -3392,13 +3431,6 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         }
     }
     syncLaunchConfig(state, catalog);
-    // v21 activity IDs 11/12 had no persistent physical pose. Resume at a
-    // safe approach without changing cargo, terrain, upgrades, or earned rewards.
-    if ((save.screen == Screen::Flight || state.screen == Screen::ArrivalOps)
-        && !state.run.flight.physicalFlight) {
-        (void)resumePhysicalApproach(state, catalog);
-    }
-
 }
 
 std::string serializeSaveData(const SaveData& save)
@@ -3504,6 +3536,10 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::runRigUpgradeRanks, serializeRunRigUpgradeRanks(save.expedition.progression.runRigUpgradeRanks));
     writeField(out, save_schema::field::runDroneRanks, serializeRunDroneRanks(save.expedition.progression.runDroneRanks));
     writeField(out, save_schema::field::selectedSynergyIds, join(save.expedition.progression.selectedSynergyIds, save_schema::listDelimiter));
+    writeField(out, save_schema::field::runUpgradeDraftCount, save.expedition.progression.runUpgradeDraftCount);
+    writeField(out, save_schema::field::wideDrillHeadOffered, save.expedition.progression.wideDrillHeadOffered ? 1 : 0);
+    writeField(out, save_schema::field::sideCuttersOffered, save.expedition.progression.sideCuttersOffered ? 1 : 0);
+    writeField(out, save_schema::field::pendingGraftConflicts, serializeGraftConflicts(save.expedition.progression.pendingGraftConflicts));
     writeField(out, save_schema::field::droneModuleAssignments, serializeDroneModuleAssignments(save.droneModuleAssignments));
     writeField(out, save_schema::field::droneModuleRuntime, serializeDroneModuleRuntime(save.droneModuleRuntime));
     writeField(out, save_schema::field::scannerCooldownSeconds, save.scannerCooldownSeconds);

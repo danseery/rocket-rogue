@@ -25,6 +25,16 @@ void incomingMessageTests() {
                                         false,
                                         {{"default", "Repairs are complete.", {}}}});
     check(validateIncomingMessages(catalog), "Multiple speakers and repeatable messages must validate");
+    const auto shipFullMessage = incomingMessage(catalog, "ship_full_tip");
+    check(shipFullMessage != nullptr && shipFullMessage->concerned &&
+              shipFullMessage->title == "Easy there, space squirrel" &&
+              shipFullMessage->variants.front().body.find("Hoarding is frowned upon") != std::string::npos,
+          "Ship overflow must use the concerned anti-hoarding warning");
+    const auto moonReturnMessage = incomingMessage(catalog, "moon_mission_complete");
+    check(moonReturnMessage != nullptr && moonReturnMessage->campaignOnce &&
+              moonReturnMessage->context == MessageDeliveryContext::Any &&
+              moonReturnMessage->variants.front().body.find("Mars, Mercury, and Venus are now charted") != std::string::npos,
+          "Moon completion guidance must report its reward and newly charted worlds");
     auto invalid = catalog;
     invalid.incomingMessages.back().speakerId = "missing";
     check(!validateIncomingMessages(invalid), "Missing speaker references must fail validation");
@@ -54,16 +64,9 @@ void incomingMessageTests() {
           "Message state must round trip exactly");
     check(!deserializeIncomingMessages("999999", restored), "Malformed counts must be rejected");
     auto game = createNewGame(catalog, 991);
-    auto oldPayload = serializeSaveData(captureSaveData(game));
-    const auto messageField = oldPayload.find("incomingMessages=");
-    check(messageField != std::string::npos, "Current saves must include message state");
-    oldPayload.erase(messageField, oldPayload.find('\n', messageField) - messageField + 1);
-    const auto oldSave = deserializeSaveData(oldPayload);
-    check(oldSave && oldSave->version == 21 && oldSave->incomingMessages.pending.empty(),
-          "Existing v21 payloads without message fields must remain compatible");
     game.incomingMessages = queue;
     const auto save = deserializeSaveData(serializeSaveData(captureSaveData(game)));
-    check(save.has_value(), "v21 save with messages must load");
+    check(save && save->version == 23, "v23 save with messages must load");
     restoreSaveData(game, catalog, *save);
     check(serializeIncomingMessages(game.incomingMessages) == serializeIncomingMessages(queue),
           "Full save must retain queue and acknowledgements");

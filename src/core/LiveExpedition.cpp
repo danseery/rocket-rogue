@@ -2,6 +2,7 @@
 #include "core/ContentIds.h"
 #include "core/ScenarioSystem.h"
 #include "core/ResearchSystem.h"
+#include "core/SolarProgression.h"
 #include <algorithm>
 #include <cmath>
 
@@ -15,8 +16,10 @@ FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool la
     const auto* target = systemBody(system,e.course.targetBodyId);
     const SystemVector offset = frame ? frame->position : SystemVector{};
     if (target) {
-        g.targetId = target->id; g.targetName = target->name;
-        g.targetPosition = {target->position.x-offset.x,target->position.y-offset.y};
+        const SystemVector destination = systemNavigationPosition(*target);
+        g.targetId = target->id;
+        g.targetName = target->dock ? target->name + " Dock" : target->name;
+        g.targetPosition = {destination.x-offset.x,destination.y-offset.y};
         const double dx=g.targetPosition.x-f.positionX,dy=g.targetPosition.y-f.positionY;
         g.targetDistance=std::hypot(dx,dy); g.targetBearing=std::atan2(dy,dx);
     }
@@ -28,7 +31,7 @@ FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool la
     g.predictedImpact = f.predictedImpact;
     if (earthLaunchReady(e)) g.nextAction = "Launch from Earth / " + g.targetName + " ahead";
     else if (e.undockReady) g.nextAction = "Thrust to undock";
-    else if (f.courseNoticeSeconds > 0) g.nextAction = e.cruise.active ? "Course plotted / CRUISE ACTIVE" : "Course plotted / manual flight";
+    else if (f.courseNoticeSeconds > 0) g.nextAction = e.cruise.active ? "Waypoint set / CRUISE ACTIVE" : "Waypoint set / manual flight";
     else if (f.mode == FlightMode::Landing) g.nextAction = f.landing.departureActive ? "Climb clear of the surface" : "Control descent and touch down";
     else if (frame && frame->id == "earth" && f.positionX*f.velocityX+f.positionY*f.velocityY > 0)
         g.nextAction = "Climb away from Earth / follow your " + g.targetName + " marker";
@@ -105,7 +108,7 @@ bool openingMissionRetryEligible(const GameState& state) {
         e.sites.empty() && !state.run.mining.active && !state.meta.lunarProspectorClaimed &&
         state.meta.prospectorCommonOreRecovered==0 && empty(e.cargo) &&
         std::all_of(state.meta.destinationLandings.begin(),state.meta.destinationLandings.end(),[](int n){return n==0;}) &&
-        std::all_of(e.wrecks.begin(),e.wrecks.end(),[&](const auto& w){return empty(w.cargo);}) &&
+        std::all_of(e.wrecks.begin(),e.wrecks.end(),[&](const auto& w){return empty(w.cargo) && !w.buildRecoverable;}) &&
         std::all_of(e.batteries.begin(),e.batteries.end(),[](const auto& b){return b.owner==BatteryOwner::Site && !b.researchEarned;});
 }
 static std::string_view openingRetrySequenceVariant(const GameState& state) {
@@ -202,14 +205,6 @@ bool initializeLiveExpedition(GameState& state, const ContentCatalog& catalog) {
         captureSystemLocation(e.location, f);
         e.active = true;
         e.rigFuel = state.run.mining.rigFuel;
-        if (!surface && e.rigFuel.capacity <= 0) {
-            // A pre-deployment v21 flight has no Mining tank yet. Preserve its
-            // existing landing allocation once without changing ship propellant.
-            const auto& prepared = state.run.planetaryExpedition;
-            e.rigFuel.capacity = prepared.rigFuelCapacity > 0 ? prepared.rigFuelCapacity :
-                tuning::research::expeditionRigPackFuel + std::max(0.0, f.fuelRemaining);
-            e.rigFuel.current = prepared.rigFuelCapacity > 0 ? prepared.rigFuel : e.rigFuel.capacity;
-        }
         if (surface) storeVisitedSite(state, e.location.siteId);
     } else if (state.screen == Screen::Hangar && !state.run.planetaryExpedition.active && currentDestination(state, catalog).hiddenFromProgression) {
         const auto* earth = systemBody(solarSystemDefinition(), "earth");
@@ -273,18 +268,18 @@ ExpeditionResult recoverExpedition(GameState& state, const SystemDefinition& sys
     e.decision.pendingId.clear();
     e.decision.awaitingAscent = false;
     state.screen = Screen::Hangar;
-    state.statusLine = "Replacement ready at Earth. Carried salvage remains at your wreck.";
+    state.statusLine = "Replacement ready at Earth. Upgrades survive docking. Recover your wreck to reclaim lost upgrades.";
     return result;
 }
-std::string recommendedExpeditionLead(const GameState& state, const ContentCatalog&) {
-    if (!hasUnlock(state.meta, content::unlock::routeMars)) return "moon";
-    if (!hasUnlock(state.meta, content::unlock::routeJupiter)) return "mars";
-    return "io";
+std::string recommendedExpeditionLead(const GameState& state, const ContentCatalog& catalog) {
+    if (const auto* mission = nextSolarMission(state, catalog)) return mission->bodyId;
+    return arkDiscovered(state) ? "straylight" : "moon";
 }
 void queueExpeditionDecision(GameState& state, const ContentCatalog& catalog) {
     auto& e = state.run.expedition;
     const auto& m = state.run.mining;
     if (!e.travelInitialized || !e.active) return;
+    if (solarMissionForBody(catalog, e.location.bodyId) != nullptr) return;
     const bool artifact = m.artifact.present && m.artifact.state == MiningArtifactState::Delivered;
     const auto* body = systemBody(solarSystemDefinition(), e.location.bodyId);
     if (!body || !body->authoredObjectives) return;

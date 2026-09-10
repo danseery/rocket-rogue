@@ -1,6 +1,8 @@
 #include "core/ExpeditionSystem.h"
+#include "core/ContentIds.h"
 #include "core/ResearchSystem.h"
 #include "core/PayloadTransfer.h"
+#include "core/SolarProgression.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -19,6 +21,92 @@ SystemLocation absolute(const SystemLocation &p, const SystemDefinition &s)
 bool atDock(const PersistentExpeditionState &e, std::string_view body)
 {
     return e.location.bodyId == body && e.location.siteId == std::string(body) + ".dock";
+}
+
+void mergeRecoveredBuild(ExpeditionProgressionState& active, ExpeditionProgressionState recovered)
+{
+    if (recovered.expeditionLevel > active.expeditionLevel ||
+        (recovered.expeditionLevel == active.expeditionLevel &&
+         recovered.expeditionExperience > active.expeditionExperience)) {
+        active.expeditionLevel = recovered.expeditionLevel;
+        active.expeditionExperience = recovered.expeditionExperience;
+    }
+    active.pendingRunUpgradeChoices += std::max(0, recovered.pendingRunUpgradeChoices);
+    active.runUpgradeDraftCount = std::max(active.runUpgradeDraftCount, recovered.runUpgradeDraftCount);
+    active.wideDrillHeadOffered = active.wideDrillHeadOffered || recovered.wideDrillHeadOffered;
+    active.sideCuttersOffered = active.sideCuttersOffered || recovered.sideCuttersOffered;
+    for (const auto& recoveredRank : recovered.runRigUpgradeRanks) {
+        auto found = std::find_if(active.runRigUpgradeRanks.begin(), active.runRigUpgradeRanks.end(),
+            [&](const auto& rank) { return rank.upgradeId == recoveredRank.upgradeId; });
+        if (found == active.runRigUpgradeRanks.end()) active.runRigUpgradeRanks.push_back(recoveredRank);
+        else found->rank = std::clamp(std::max(found->rank, recoveredRank.rank), 0, 3);
+    }
+    for (const auto& recoveredRank : recovered.runDroneRanks) {
+        auto found = std::find_if(active.runDroneRanks.begin(), active.runDroneRanks.end(),
+            [&](const auto& rank) { return rank.droneId == recoveredRank.droneId; });
+        if (found == active.runDroneRanks.end()) active.runDroneRanks.push_back(recoveredRank);
+        else found->rank = std::clamp(std::max(found->rank, recoveredRank.rank), 1, 3);
+    }
+    for (const std::string& synergy : recovered.selectedSynergyIds)
+        if (std::find(active.selectedSynergyIds.begin(), active.selectedSynergyIds.end(), synergy) == active.selectedSynergyIds.end())
+            active.selectedSynergyIds.push_back(synergy);
+    for (const auto& recoveredGraft : recovered.droneModuleAssignments) {
+        auto current = std::find_if(active.droneModuleAssignments.begin(), active.droneModuleAssignments.end(),
+            [&](const auto& graft) { return graft.equippedFrame == recoveredGraft.equippedFrame; });
+        if (current == active.droneModuleAssignments.end()) {
+            active.droneModuleAssignments.push_back(recoveredGraft);
+        } else if (current->module != recoveredGraft.module ||
+                   current->primaryDroneId != recoveredGraft.primaryDroneId) {
+            active.pendingGraftConflicts.push_back({recoveredGraft.equippedFrame, *current, recoveredGraft});
+        }
+    }
+    active.droneModuleRuntime.clear();
+    active.runUpgradeOffers = {};
+    active.runUpgradeOfferCount = 0;
+    active.runUpgradeOfferPending = false;
+}
+
+bool validRecoveredBuild(const ExpeditionProgressionState& build)
+{
+    if (build.expeditionLevel < 1 || !std::isfinite(build.expeditionExperience) ||
+        build.expeditionExperience < 0.0 || build.pendingRunUpgradeChoices < 0 ||
+        build.runUpgradeDraftCount < 0) return false;
+    for (std::size_t i = 0; i < build.runRigUpgradeRanks.size(); ++i) {
+        const auto& rank = build.runRigUpgradeRanks[i];
+        if (rank.upgradeId.empty() || rank.rank < 1 || rank.rank > 3) return false;
+        if (std::any_of(build.runRigUpgradeRanks.begin(), build.runRigUpgradeRanks.begin() + static_cast<std::ptrdiff_t>(i),
+            [&](const auto& prior) { return prior.upgradeId == rank.upgradeId; })) return false;
+    }
+    for (std::size_t i = 0; i < build.runDroneRanks.size(); ++i) {
+        const auto& rank = build.runDroneRanks[i];
+        if (rank.droneId.empty() || rank.rank < 1 || rank.rank > 3) return false;
+        if (std::any_of(build.runDroneRanks.begin(), build.runDroneRanks.begin() + static_cast<std::ptrdiff_t>(i),
+            [&](const auto& prior) { return prior.droneId == rank.droneId; })) return false;
+    }
+    for (std::size_t i = 0; i < build.selectedSynergyIds.size(); ++i) {
+        if (build.selectedSynergyIds[i].empty() ||
+            std::find(build.selectedSynergyIds.begin(), build.selectedSynergyIds.begin() + static_cast<std::ptrdiff_t>(i),
+                build.selectedSynergyIds[i]) != build.selectedSynergyIds.begin() + static_cast<std::ptrdiff_t>(i)) return false;
+    }
+    return std::all_of(build.droneModuleAssignments.begin(), build.droneModuleAssignments.end(), [](const auto& graft) {
+        return graft.equippedFrame >= 0 && !graft.primaryDroneId.empty() &&
+            static_cast<int>(graft.module) >= 0 && static_cast<int>(graft.module) <= static_cast<int>(DroneModuleKind::HazardScreen);
+    });
+}
+
+bool routeRevealed(const MetaProgress &meta, std::string_view bodyId)
+{
+    if (bodyId == "mercury" || bodyId == "venus") return hasUnlock(meta, content::unlock::routeMars);
+    if (bodyId == "mars") return hasUnlock(meta, content::unlock::routeMars);
+    if (bodyId == "jupiter" || bodyId == "io")
+        return hasUnlock(meta, content::unlock::routeJupiter);
+    if (bodyId == "saturn" || bodyId == "titan")
+        return hasUnlock(meta, content::unlock::routeSaturn);
+    if (bodyId == "uranus" || bodyId == "titania")
+        return hasUnlock(meta, content::unlock::routeUranus);
+    if (bodyId == "neptune" || bodyId == "triton")
+        return hasUnlock(meta, content::unlock::routeNeptune);
+    return false;
 }
 BeaconBatteryState *battery(PersistentExpeditionState &e, std::string_view id)
 {
@@ -43,6 +131,15 @@ void addCargo(ExpeditionCargo &to, const ExpeditionCargo &from)
     to.credits += from.credits;
 }
 } // namespace
+bool expeditionMapBodyRevealed(const GameState &state, const SystemBodyDefinition &body)
+{
+    const auto &expedition = state.run.expedition;
+    if (body.id == "sun" || body.id == "earth" || body.id == "moon") return true;
+    if (body.id == "straylight") return arkDiscovered(state);
+    if (routeRevealed(state.meta, body.id)) return true;
+    return std::find(expedition.discoveredBodies.begin(), expedition.discoveredBodies.end(), body.id) !=
+        expedition.discoveredBodies.end();
+}
 SystemLocation convertSystemFrame(const SystemLocation &source, CoordinateFrame frame,
                                   std::string_view bodyId, const SystemDefinition &system)
 {
@@ -164,11 +261,13 @@ CoursePlan previewSystemCourse(const SystemLocation &location, const FlightRunSt
         ship.mode = start.frame == CoordinateFrame::System ? FlightMode::Travel : FlightMode::Orbit;
         // Hypothetical capacity measures required fuel; it never modifies the live ship.
         const double initialFuel = ship.fuelRemaining = 10000.0;
+        const SystemVector goalPosition = systemNavigationPosition(goal);
+        const double arrivalRadius = goal.dock ? expeditionDockRadius : goal.influenceRadius;
         for (int i = 0; i < 3600; ++i) {
             captureSystemLocation(estimate.location, ship);
             const auto current = absolute(estimate.location, system);
-            if (distance(current.position, goal.position) <= goal.influenceRadius) return initialFuel-ship.fuelRemaining;
-            const double desired = std::atan2(goal.position.y-current.position.y, goal.position.x-current.position.x);
+            if (distance(current.position, goalPosition) <= arrivalRadius) return initialFuel-ship.fuelRemaining;
+            const double desired = std::atan2(goalPosition.y-current.position.y, goalPosition.x-current.position.x);
             const double error = flightWrappedAngleDelta(ship.heading, desired);
             FlightInput input{std::clamp(-error*2.0,-1.0,1.0), std::abs(error)<.35 && ship.heat<.45 ? .6 : 0.0, false, true};
             if (advanceExpeditionFlight(estimate,ship,model,environment,system,input,.05).failed) return -1.0;
@@ -186,8 +285,9 @@ CoursePlan previewSystemCourse(const SystemLocation &location, const FlightRunSt
     restoreSystemLocation(returnStart, returnShip);
     const double returning = target->id == home->id ? 0 : fuelEstimate(returnStart,returnShip,*home);
     plan.estimateValid = approach >= 0 && returning >= 0;
-    plan.approachFuel = std::max(0.0, approach) + plan.manualCaptureAllowance;
-    plan.returnMargin = flight.fuelRemaining - plan.approachFuel - std::max(0.0, returning) - plan.manualCaptureAllowance;
+    plan.approachFuel = std::max(0.0, approach) + (target->dock ? 0.0 : plan.manualCaptureAllowance);
+    plan.returnMargin = flight.fuelRemaining - plan.approachFuel - std::max(0.0, returning) -
+        (home->dock ? 0.0 : plan.manualCaptureAllowance);
     plan.trajectory.push_back(p.position);
     for (int i = 0; i < 1800; ++i)
     {
@@ -244,7 +344,8 @@ FlightInput cruiseInput(PersistentExpeditionState &e, const FlightRunState &flig
     auto p = e.location;
     captureSystemLocation(p, flight);
     p = absolute(p, s);
-    const double desired = std::atan2(target->position.y - p.position.y, target->position.x - p.position.x);
+    const SystemVector destination = systemNavigationPosition(*target);
+    const double desired = std::atan2(destination.y - p.position.y, destination.x - p.position.x);
     return {std::clamp(-flightWrappedAngleDelta(flight.heading, desired) * 2.0, -1.0, 1.0), 1.0, false, true};
 }
 int batteryResearchRank(const PersistentExpeditionState &e)
@@ -268,6 +369,7 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
         if (departDock(e,flight) != ExpeditionResult::Applied) return {};
         e.undockReady = false;
         const auto *body = encounteredBody(e.location, system);
+        if (body && body->id == "straylight" && !e.straylightRevealed) body = nullptr;
         e.location = convertSystemFrame(e.location, body ? CoordinateFrame::Body : CoordinateFrame::System,
                                         body ? body->id : "", system);
         restoreSystemLocation(e.location, flight);
@@ -281,6 +383,7 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
     if (result.failed)
         return result;
     const auto *encounter = encounteredBody(e.location, system);
+    if (encounter && encounter->id == "straylight" && !e.straylightRevealed) encounter = nullptr;
     const auto frame = encounter ? CoordinateFrame::Body : CoordinateFrame::System;
     const std::string bodyId = encounter ? encounter->id : "";
     if (e.location.frame != frame || e.location.bodyId != bodyId)
@@ -353,6 +456,8 @@ bool validBatteryOwnership(const PersistentExpeditionState &e)
     {
         if (!e.wrecks[i].id || e.wrecks[i].id >= e.nextWreckId)
             return false;
+        if (!validRecoveredBuild(e.wrecks[i].build))
+            return false;
         for (std::size_t j = 0; j < i; ++j)
             if (e.wrecks[i].id == e.wrecks[j].id)
                 return false;
@@ -367,7 +472,8 @@ ExpeditionResult recoverSiteBattery(PersistentExpeditionState &e, std::string_vi
         return ExpeditionResult::InvalidTarget;
     if (b->owner != BatteryOwner::Site)
         return ExpeditionResult::AlreadyApplied;
-    if (e.location.siteId != b->sourceSiteId && e.location.siteId != b->sourceSiteId + ":zone_1")
+    if (e.location.bodyId != id && e.location.siteId != b->sourceSiteId &&
+        !e.location.siteId.starts_with(b->sourceSiteId + ":"))
         return ExpeditionResult::NotAtSite;
     b->owner = BatteryOwner::Ship;
     b->discovered = true;
@@ -411,7 +517,6 @@ ExpeditionResult dockExpedition(PersistentExpeditionState &e, FlightRunState &f,
     if (dock->id == "straylight" && !e.arkActivated)
         return ExpeditionResult::Applied;
     e.active = false;
-    e.progression = {};
     e.rigFuel.current = e.rigFuel.capacity;
     f.fuelRemaining = f.fuelCapacity;
     f.hullRemaining = f.hullMaximum;
@@ -435,12 +540,23 @@ ExpeditionResult dockExpedition(GameState &state, const SystemDefinition &system
     return result;
 }
 bool canDockExpedition(const PersistentExpeditionState& e, const FlightRunState& f, const SystemDefinition& s) {
+    if (!expeditionDockInRange(e, f, s)) return false;
+    auto p = e.location;
+    captureSystemLocation(p, f);
+    p = absolute(p, s);
+    for (const auto& b : s.bodies)
+        if (b.dock && distance(p.position, systemDockPosition(b)) <= expeditionDockRadius &&
+            distance(p.velocity, b.velocity) <= rendezvousSpeed) return true;
+    return false;
+}
+bool expeditionDockInRange(const PersistentExpeditionState& e, const FlightRunState& f, const SystemDefinition& s, std::string_view dockBodyId) {
     if (!f.active || f.mode == FlightMode::Landing) return false;
     auto p = e.location;
     captureSystemLocation(p, f);
     p = absolute(p, s);
     for (const auto& b : s.bodies)
-        if (b.dock && distance(p.position, systemDockPosition(b)) <= expeditionDockRadius && distance(p.velocity, b.velocity) <= rendezvousSpeed) return true;
+        if (b.dock && (dockBodyId.empty() || b.id == dockBodyId) &&
+            distance(p.position, systemDockPosition(b)) <= expeditionDockRadius) return true;
     return false;
 }
 bool canSalvageWreck(const PersistentExpeditionState& e, const FlightRunState& f, const SystemDefinition& s, std::uint64_t id, bool requireMatchedSpeed) {
@@ -450,7 +566,7 @@ bool canSalvageWreck(const PersistentExpeditionState& e, const FlightRunState& f
     p = absolute(p, s);
     for (const auto& w : e.wrecks) if (w.id == id) {
         const auto point = absolute(w.location, s);
-        return distance(p.position, point.position) <= dockRange &&
+        return distance(p.position, point.position) <= expeditionSalvageRadius &&
             (!requireMatchedSpeed || distance(p.velocity, point.velocity) <= rendezvousSpeed);
     }
     return false;
@@ -517,7 +633,7 @@ ExpeditionResult salvageWreck(PersistentExpeditionState &e, std::uint64_t id, co
     if (it == e.wrecks.end())
         return ExpeditionResult::AlreadyApplied;
     const auto p = absolute(e.location, s), w = absolute(it->location, s);
-    if (distance(p.position, w.position) > dockRange || distance(p.velocity, w.velocity) > rendezvousSpeed)
+    if (distance(p.position, w.position) > expeditionSalvageRadius || distance(p.velocity, w.velocity) > rendezvousSpeed)
         return ExpeditionResult::OutOfRange;
     for (auto &b : e.batteries)
         if (b.owner == BatteryOwner::Wreck && b.wreckId == id)
@@ -531,7 +647,28 @@ ExpeditionResult salvageWreck(PersistentExpeditionState &e, std::uint64_t id, co
     addCargo(e.cargo, recovered);
     it->cargo = {};
     it->cargo.materials = transfer.remainingAtSource;
-    if (materialCargoMass(it->cargo.materials) == 0) e.wrecks.erase(it);
+    if (it->buildRecoverable) {
+        mergeRecoveredBuild(e.progression, std::move(it->build));
+        it->build = {};
+        it->buildRecoverable = false;
+    }
+    if (materialCargoMass(it->cargo.materials) == 0 && !it->buildRecoverable) e.wrecks.erase(it);
+    return ExpeditionResult::Applied;
+}
+
+ExpeditionResult resolveRecoveredGraftConflict(PersistentExpeditionState& e, int conflictIndex, bool useRecovered)
+{
+    auto& conflicts = e.progression.pendingGraftConflicts;
+    if (conflictIndex < 0 || conflictIndex >= static_cast<int>(conflicts.size())) return ExpeditionResult::InvalidTarget;
+    const auto conflict = conflicts[static_cast<std::size_t>(conflictIndex)];
+    auto current = std::find_if(e.progression.droneModuleAssignments.begin(), e.progression.droneModuleAssignments.end(),
+        [&](const auto& graft) { return graft.equippedFrame == conflict.equippedFrame; });
+    if (useRecovered) {
+        if (current == e.progression.droneModuleAssignments.end()) e.progression.droneModuleAssignments.push_back(conflict.recovered);
+        else *current = conflict.recovered;
+    }
+    conflicts.erase(conflicts.begin() + conflictIndex);
+    e.progression.droneModuleRuntime.clear();
     return ExpeditionResult::Applied;
 }
 ExpeditionResult loseExpedition(PersistentExpeditionState &e, FlightRunState &f, const SystemDefinition &s)
@@ -556,7 +693,18 @@ ExpeditionResult loseExpedition(PersistentExpeditionState &e, FlightRunState &f,
     p.velocity = {};
     p.siteId.clear();
     const auto id = e.nextWreckId++;
-    e.wrecks.push_back({id, p, e.cargo});
+    WreckState wreck;
+    wreck.id = id;
+    wreck.location = p;
+    wreck.cargo = e.cargo;
+    wreck.build = e.progression;
+    wreck.build.droneModuleRuntime.clear();
+    wreck.build.runUpgradeOffers = {};
+    wreck.build.runUpgradeOfferCount = 0;
+    wreck.build.runUpgradeOfferPending = false;
+    wreck.build.pendingGraftConflicts.clear();
+    wreck.buildRecoverable = true;
+    e.wrecks.push_back(std::move(wreck));
     e.cargo = {};
     for (auto &b : e.batteries)
         if (b.owner == BatteryOwner::Ship)

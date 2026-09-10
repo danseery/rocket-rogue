@@ -298,9 +298,16 @@ void lunarContractActivatesScannerLedEvaArtifactInSameRun()
         mining.arenaMetadata.difficulty,
         mining.arenaMetadata.seed});
     require(firstMoonRules.mechanics.oxygenAndFuel &&
+            firstMoonRules.mechanics.fogAndScanner &&
             !firstMoonRules.mechanics.drillHeat &&
             std::abs(mining.rigFuel.capacity - tuning::research::expeditionRigPackFuel) < 0.000001,
-        "the first Moon expedition should start with its three-fuel allotment and live oxygen, without heat");
+        "the first Moon expedition should start with scanner visibility, its three-fuel allotment, and live oxygen, without heat");
+    const int initiallyRevealedCells = static_cast<int>(std::count_if(
+        mining.terrain.cells.begin(),
+        mining.terrain.cells.end(),
+        [](const MiningCell& cell) { return cell.revealed; }));
+    require(initiallyRevealedCells > 0 && initiallyRevealedCells < static_cast<int>(mining.terrain.cells.size()),
+        "the first Moon expedition should illuminate only the local starting area");
     const int availableCommonOre = static_cast<int>(std::count_if(
         mining.terrain.cells.begin(),
         mining.terrain.cells.end(),
@@ -329,13 +336,36 @@ void lunarContractActivatesScannerLedEvaArtifactInSameRun()
     }
     require(suitOnlyCells >= 6 && !mining.artifact.revealed,
         "the lunar artifact should begin behind a persistent suit-only crevice");
-    const MiningScannerResult discovery = pulseMiningScanner(state, catalog);
-    require(discovery.pulsed && discovery.discoveredObjectiveId == content::protectedObjective::lunarSignalArtifact,
-        "a successful scanner pulse should report its newly discovered protected objective");
+    const std::array<std::pair<double, double>, 4> scanTestCorners {{
+        {0.5, 0.5},
+        {static_cast<double>(mining.terrain.width) - 0.5, 0.5},
+        {0.5, static_cast<double>(mining.terrain.height) - 0.5},
+        {static_cast<double>(mining.terrain.width) - 0.5,
+         static_cast<double>(mining.terrain.height) - 0.5}
+    }};
+    const auto farthestCorner = std::max_element(
+        scanTestCorners.begin(),
+        scanTestCorners.end(),
+        [&](const auto& lhs, const auto& rhs) {
+            return std::hypot(lhs.first - mining.artifact.x, lhs.second - mining.artifact.y) <
+                std::hypot(rhs.first - mining.artifact.x, rhs.second - mining.artifact.y);
+        });
+    mining.droneX = farthestCorner->first;
+    mining.droneY = farthestCorner->second;
+    const MiningScannerResult distantPulse = pulseMiningScanner(state, catalog);
+    require(distantPulse.pulsed && distantPulse.discoveredObjectiveId.empty() && !mining.artifact.revealed,
+        "a scanner pulse that does not reach the lunar artifact must leave it hidden");
     require(!pulseMiningScanner(state, catalog).pulsed,
         "a cooldown-rejected pulse must not report a discovery");
+
+    state.run.planetaryExpedition.scannerCooldownSeconds = 0.0;
+    mining.droneX = mining.artifact.x - tuning::mining::scannerRevealRadius * 0.5;
+    mining.droneY = mining.artifact.y;
+    const MiningScannerResult discovery = pulseMiningScanner(state, catalog);
+    require(discovery.pulsed && discovery.discoveredObjectiveId == content::protectedObjective::lunarSignalArtifact,
+        "a scanner pulse that reaches the lunar artifact should report its discovery");
     require(mining.artifact.revealed,
-        "one contextual scanner pulse should reveal the lunar artifact bearing");
+        "the lunar artifact should reveal when the pulse reaches it");
 
     // Input routing must obey the same EVA restriction as the visible action.
     mining.droneX = mining.artifact.x + 2.0;
@@ -364,7 +394,23 @@ void lunarContractActivatesScannerLedEvaArtifactInSameRun()
     require(mining.artifact.y <= passageTop + 0.5 && mining.artifact.tethered,
         "a tethered anomaly must physically fit back through the excavated EVA passage");
 
+    toggleMiningTether(state);
+    require(!mining.artifact.tethered,
+        "EVA must be able to drop the freed anomaly before returning to the Rig");
+    mining.droneX = mining.operatorX;
+    mining.droneY = mining.operatorY;
+    require(toggleMiningOperator(state),
+        "the operator beside the Rig should be able to board after dropping the anomaly");
+    require(resolveMiningTetherTarget(mining).blocker == MiningTetherBlocker::None,
+        "a loose artifact from a suit-only tunnel must be tetherable from the Rig");
+    toggleMiningTether(state);
+    require(mining.artifact.tethered,
+        "the Rig must reacquire a loose artifact after the operator boards");
+
     mining.depthZone = mining.entryDepthZone;
+    mining.rigDepthZone = mining.entryDepthZone;
+    mining.droneX = mining.returnZoneX;
+    mining.droneY = mining.returnZoneY;
     mining.operatorX = mining.returnZoneX;
     mining.operatorY = mining.returnZoneY;
     mining.artifact.state = MiningArtifactState::Loose;
@@ -447,6 +493,18 @@ void rigLoadBandsAndHardCapacityAreImmediate()
             !mining.looseObjects.empty() &&
             mining.looseObjects.front().active,
         "ore beside a full rig must remain a persistent physical object instead of being deleted or converted");
+
+    state.run.expedition.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::cargoSkids, 1}};
+    require(miningRigCargoCapacityMass(state, catalog) == 26,
+        "Cargo Skids I must immediately increase the real Rig capacity from 24 to 26");
+    updateMiningRun(state, catalog, 0.08);
+    require(mining.cargo == 25 && std::none_of(mining.looseObjects.begin(), mining.looseObjects.end(),
+                [](const MiningLooseObject& object) { return object.active; }),
+        "the upgraded Rig must accept cargo that the old 24-unit hold rejected");
+    const MiningLoadStats scaledLoad = miningLoadStats(state, catalog);
+    require(scaledLoad.capacity == 26.0 && scaledLoad.band == RigLoadBand::Packrat,
+        "load bands must retain their quarter-capacity proportions after capacity changes");
+
 }
 
 void supportDroneXpWaitsForAuthoritativeShipDelivery()

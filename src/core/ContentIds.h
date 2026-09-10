@@ -34,6 +34,8 @@ inline constexpr const char* outerTransfer = "outer_transfer";
 inline constexpr const char* saturnDeparture = "saturn_departure";
 inline constexpr const char* uranusDeparture = "uranus_departure";
 inline constexpr const char* neptuneDiscovery = "neptune_straylight_discovery";
+inline constexpr const char* mercuryArtifact = "mercury_artifact_recovery";
+inline constexpr const char* venusArtifact = "venus_artifact_recovery";
 inline constexpr const char* generatedTemplate = "generated_mining_template";
 } // namespace scenario
 
@@ -64,6 +66,12 @@ inline constexpr const char* riftBelt = "rift_belt";
 namespace protectedObjective {
 inline constexpr const char* lunarSignalArtifact = "lunar_signal_artifact";
 inline constexpr const char* ioMinorArtifact = "io_minor_artifact";
+inline constexpr const char* marsSignalArtifact = "mars_signal_artifact";
+inline constexpr const char* titanSignalArtifact = "titan_signal_artifact";
+inline constexpr const char* titaniaSignalArtifact = "titania_signal_artifact";
+inline constexpr const char* tritonSignalArtifact = "triton_signal_artifact";
+inline constexpr const char* mercurySignalArtifact = "mercury_signal_artifact";
+inline constexpr const char* venusSignalArtifact = "venus_signal_artifact";
 } // namespace protectedObjective
 
 namespace module {
@@ -152,7 +160,10 @@ inline constexpr const char* droneBayProgram = "drone_bay_program";
 
 namespace surfaceUpgrade {
 inline constexpr const char* resonantDischarge = "resonant_discharge";
-inline constexpr const char* thermalDrillJackets = "thermal_drill_jackets";
+inline constexpr const char* highTorqueMotor = "high_torque_motor";
+inline constexpr const char* wideDrillHead = "wide_drill_head";
+inline constexpr const char* sideCutters = "side_cutters";
+inline constexpr const char* hardRockTeeth = "hard_rock_teeth";
 inline constexpr const char* widebandPulse = "wideband_pulse";
 inline constexpr const char* cargoSkids = "cargo_skids";
 inline constexpr const char* shockMounts = "shock_mounts";

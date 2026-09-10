@@ -3,9 +3,11 @@
 #include "core/GameUi.h"
 #include "core/ResearchSystem.h"
 #include "core/ScenarioSystem.h"
+#include "core/SolarProgression.h"
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 
 namespace rocket {
@@ -29,9 +31,46 @@ void mapLine(std::ostream& out, std::string_view style, double ax, double ay, do
         out << "<div class=\"" << style << "\" style=\"left:" << x << "dp;top:" << y << "dp;\"></div>";
     }
 }
-std::string button(std::string_view label, std::string_view id, bool enabled = true) {
+struct SolarMapPlacement {
+    double x = 352, y = 175;
+    double labelX = 320, labelY = 210, labelWidth = 64;
+    double orbitX = 0, orbitY = 0;
+};
+std::optional<SolarMapPlacement> solarMapPlacement(std::string_view id) {
+    if (id == "sun") return SolarMapPlacement{352,175,322,211,60};
+    if (id == "mercury") return SolarMapPlacement{382,155,346,124,72,50,25};
+    if (id == "venus") return SolarMapPlacement{282,160,247,181,70,78,39};
+    if (id == "earth") return SolarMapPlacement{455,191,423,215,64,108,54};
+    if (id == "moon") return SolarMapPlacement{485,177,472,146,58};
+    if (id == "mars") return SolarMapPlacement{254,128,222,97,64,140,70};
+    if (id == "jupiter") return SolarMapPlacement{502,129,465,88,74,176,88};
+    if (id == "io") return SolarMapPlacement{538,146,528,165,44};
+    if (id == "saturn") return SolarMapPlacement{166,125,129,84,74,212,106};
+    if (id == "titan") return SolarMapPlacement{199,142,187,162,58};
+    if (id == "uranus") return SolarMapPlacement{132,225,95,249,74,250,125};
+    if (id == "titania") return SolarMapPlacement{165,239,151,260,68};
+    if (id == "neptune") return SolarMapPlacement{596,247,555,270,82,288,144};
+    if (id == "triton") return SolarMapPlacement{629,232,616,201,62};
+    if (id == "straylight") return SolarMapPlacement{654,304,585,321,112};
+    return std::nullopt;
+}
+double solarMapDiameter(const SystemBodyDefinition& body) {
+    if (body.kind == SystemBodyKind::Star) return 60;
+    if (body.id == "jupiter") return 48;
+    if (body.id == "saturn") return 42;
+    if (body.id == "uranus" || body.id == "neptune") return 36;
+    if (body.id == "earth") return 32;
+    if (body.id == "venus") return 28;
+    if (body.id == "mars") return 25;
+    if (body.kind == SystemBodyKind::Moon) return 18;
+    if (body.kind == SystemBodyKind::Station) return 34;
+    return 21;
+}
+std::string button(std::string_view label, std::string_view id, bool enabled = true, std::string_view cssClass = {}) {
     return "<button type=\"button\" data-rr-action=\"" + esc(id) + "\"" +
-        (enabled ? " data-ui-focus-id=\"action:" + esc(id) + "\"" : " class=\"disabled\" disabled") + ">" + esc(label) + "</button>";
+        (enabled ? (cssClass.empty() ? "" : " class=\"" + esc(cssClass) + "\"") +
+                       " data-ui-focus-id=\"action:" + esc(id) + "\""
+                 : " class=\"disabled\" disabled") + ">" + esc(label) + "</button>";
 }
 void replaceModal(PanelDocumentPresentation& panel, ModalPresentation value) {
     std::erase_if(panel.modals, [&](const auto& item) { return item.id == value.id; });
@@ -47,6 +86,43 @@ std::string benefit(const ShipModule& m) {
     case LaunchUpgradeKind::Hull: return num(tuning::launch::hullBaseIntegrity + m.launchUpgradeRank*tuning::launch::hullIntegrityPerRank) + " maximum hull integrity.";
     default: return "";
     }
+}
+std::string solarMissionChecklist(
+    const GameState& state, const ContentCatalog& catalog, std::string_view bodyId)
+{
+    const SolarMissionDefinition* mission = solarMissionForBody(catalog, bodyId);
+    if (mission == nullptr || !solarMissionAvailable(state, *mission) ||
+        solarMissionClaimed(state, catalog, *mission)) return {};
+    const ScenarioInstance* instance = findScenarioInstance(state.meta, mission->scenarioId);
+    const ScenarioDefinition* definition = catalog.findScenario(mission->scenarioId);
+    if (instance == nullptr || definition == nullptr) return {};
+    bool recovered = false;
+    std::ostringstream out;
+    out << "<p class=\"solar-mission-checklist\">MISSION";
+    for (const ScenarioStepDefinition& step : definition->steps) {
+        if (step.id == "briefing") continue;
+        const ScenarioStepProgress* progress = findScenarioStepProgress(*instance, step.id);
+        if (progress == nullptr) continue;
+        const bool done = progress->completed;
+        if (step.id == mission->claimStepId) {
+            recovered = done;
+            continue;
+        }
+        out << " / " << (done ? "[x] " : "[ ] ") << esc(step.goalText.empty() ? step.title : step.goalText);
+        if (step.requiredProgress > 1)
+            out << " " << std::min(progress->progress, step.requiredProgress) << "/" << step.requiredProgress;
+    }
+    bool revealed = recovered;
+    const auto artifactVisible = [&](const MiningRunState& mining) {
+        return mining.bodyId == mission->bodyId &&
+            (mining.artifact.revealed || mining.artifact.state == MiningArtifactState::Loose);
+    };
+    if (artifactVisible(state.run.mining)) revealed = true;
+    for (const PersistentSiteState& site : state.run.expedition.sites)
+        if (site.bodyId == mission->bodyId && artifactVisible(site.mining)) revealed = true;
+    out << " / " << (revealed ? "[x] " : "[ ] ") << "Reveal artifact"
+        << " / " << (recovered ? "[x] " : "[ ] ") << "Recover artifact</p>";
+    return out.str();
 }
 }
 void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPresentation& panel) {
@@ -72,88 +148,176 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     captureSystemLocation(location, flight);
     const auto absolute = convertSystemFrame(location, CoordinateFrame::System, "", system);
     const auto* target = systemBody(system, e.course.targetBodyId);
+    const CoursePlan& mapCourse = c.waypointPreviewCourse ? *c.waypointPreviewCourse : e.course;
+    const auto* proposedMapTarget = systemBody(system, mapCourse.targetBodyId);
+    const auto revealed = [&](const SystemBodyDefinition& body) {
+        return solarBodyRevealed(state, c.catalog, body.id);
+    };
+    const auto* mapTarget = proposedMapTarget && revealed(*proposedMapTarget)
+        ? proposedMapTarget : nullptr;
     const auto* region = systemBody(system, e.location.bodyId);
-    const auto objective = scenarioObjectiveForDestination(state, c.catalog, expeditionEnvironment(state, c.catalog).id);
+    const bool atOperationalDock = state.screen == Screen::Hangar && operationalHomeDocked(e);
+    const auto objective = [&] {
+        const auto solar = solarMissionObjectiveForBody(state, c.catalog, e.location.bodyId);
+        return solar.available
+            ? solar
+            : scenarioObjectiveForDestination(state, c.catalog, expeditionEnvironment(state, c.catalog).id);
+    }();
     const auto action = [&](std::string_view label, std::string_view suffix, bool enabled = true) { return button(label, "expedition:" + std::string(suffix), enabled); };
     std::ostringstream map;
-    map << "<section class=\"expedition-map\"><p>" << (e.cruise.active ? "PAUSED / CRUISE WILL RESUME" : "PAUSED / MANUAL FLIGHT") << "</p><div class=\"solar-map-scroll\"><div class=\"solar-map\">";
-    double minX = 0, maxX = 0, minY = 0, maxY = 0;
+    map << "<section class=\"expedition-map\"><div class=\"solar-map-heading\"><span>SOLAR SYSTEM</span><strong>"
+        << (atOperationalDock ? "DOCKED / CHOOSE NEXT DESTINATION" :
+            e.cruise.active ? "PAUSED / CRUISE WILL RESUME" : "PAUSED / MANUAL FLIGHT")
+        << "</strong></div><div class=\"solar-map-scroll\"><div class=\"solar-map\">";
+
+    double outerRevealedOrbit = 108;
     for (const auto& b : system.bodies) {
-        minX = std::min(minX,b.position.x); maxX = std::max(maxX,b.position.x);
-        minY = std::min(minY,b.position.y); maxY = std::max(maxY,b.position.y);
+        const auto placement = solarMapPlacement(b.id);
+        if (placement && b.kind != SystemBodyKind::Moon && b.kind != SystemBodyKind::Station &&
+            revealed(b))
+            outerRevealedOrbit = std::max(outerRevealedOrbit, placement->orbitX);
     }
-    const double mapScale = std::min(576.0/std::max(1.0,maxX-minX),222.0/std::max(1.0,maxY-minY));
-    const auto x = [&](double v) { return 352.0+(v-(minX+maxX)*.5)*mapScale; };
-    const auto y = [&](double v) { return 175.0-(v-(minY+maxY)*.5)*mapScale; };
-    const auto diameter = [](const auto& b) { return std::clamp(systemBodyDisplayRadius(b)*64.0,16.0,64.0); };
-    for (std::size_t i = 1; i < e.course.trajectory.size(); ++i) {
-        const auto a = e.course.trajectory[i-1], b = e.course.trajectory[i];
-        mapLine(map, "solar-course", x(a.x), y(a.y), x(b.x), y(b.y));
-    }
-    struct LabelBox { double x,y,w,h; };
-    std::vector<LabelBox> labels;
+    const double chartScale = std::clamp(288.0/outerRevealedOrbit, 1.0, 2.1);
+    const auto displayPlacement = [&](std::string_view id) -> std::optional<SolarMapPlacement> {
+        auto placement = solarMapPlacement(id);
+        const auto* body = systemBody(system, id);
+        if (!placement || !body || body->kind == SystemBodyKind::Star || body->kind == SystemBodyKind::Station)
+            return placement;
+        const auto anchor = body->kind == SystemBodyKind::Moon ? solarMapPlacement(body->parentId) : placement;
+        if (!anchor) return placement;
+        const double dx = (anchor->x-352)*(chartScale-1);
+        const double dy = (anchor->y-175)*(chartScale-1);
+        placement->x += dx; placement->labelX += dx;
+        placement->y += dy; placement->labelY += dy;
+        placement->orbitX *= chartScale; placement->orbitY *= chartScale;
+        return placement;
+    };
+
     for (const auto& b : system.bodies) {
-        const double size = diameter(b);
-        labels.push_back({x(b.position.x)-size*.5,y(b.position.y)-size*.5,size,size});
+        const auto placement = displayPlacement(b.id);
+        if (!placement || placement->orbitX <= 0 || !revealed(b) || b.kind == SystemBodyKind::Moon)
+            continue;
+        map << "<div class=\"solar-orbit\" style=\"left:" << 352-placement->orbitX << "dp;top:"
+            << 175-placement->orbitY << "dp;width:" << placement->orbitX*2 << "dp;height:"
+            << placement->orbitY*2 << "dp;\"></div>";
     }
-    for (const auto& b : system.bodies) {
-        const bool hazard = std::find(e.course.intersectedHazards.begin(), e.course.intersectedHazards.end(), b.id) != e.course.intersectedHazards.end();
-        const double width = 18 + b.name.size()*8.0;
-        LabelBox label{x(b.position.x)-12, y(b.position.y)-30, width, 26};
-        for (int attempt=0;attempt<32;++attempt) {
-            const double angle = (attempt%8)*.7853981633974483;
-            const double radius = 25+(attempt/8)*28;
-            label.x = std::clamp(x(b.position.x)+std::cos(angle)*radius-width*.5, 0.0, 704.0-width);
-            label.y = std::clamp(y(b.position.y)+std::sin(angle)*radius-13, 0.0, 324.0);
-            if (std::none_of(labels.begin(),labels.end(),[&](const auto& other) {
-                return label.x<other.x+other.w+8 && label.x+label.w+8>other.x && label.y<other.y+other.h+8 && label.y+label.h+8>other.y;
-            })) break;
+
+    const SystemBodyDefinition* currentBody = nullptr;
+    if (!e.location.bodyId.empty()) currentBody = systemBody(system, e.location.bodyId);
+    if (!currentBody || !revealed(*currentBody)) {
+        double nearestDistance = 1e12;
+        for (const auto& b : system.bodies) {
+            if (!revealed(b) || b.kind == SystemBodyKind::Station) continue;
+            const double candidate = std::hypot(absolute.position.x-b.position.x, absolute.position.y-b.position.y);
+            if (candidate < nearestDistance) { nearestDistance = candidate; currentBody = &b; }
         }
-        labels.push_back(label);
-        mapLine(map, "solar-leader", x(b.position.x), y(b.position.y), label.x+label.w*.5, label.y+13);
-        const double size = diameter(b);
+    }
+    if (currentBody && mapTarget) {
+        const auto from = displayPlacement(currentBody->id);
+        const auto to = displayPlacement(mapTarget->id);
+        if (from && to && currentBody->id != mapTarget->id)
+            mapLine(map, "solar-course", from->x, from->y, to->x, to->y);
+    }
+
+    for (const auto& b : system.bodies) {
+        if (b.kind != SystemBodyKind::Moon || !revealed(b)) continue;
+        const auto child = displayPlacement(b.id);
+        const auto parent = displayPlacement(b.parentId);
+        const auto* parentBody = systemBody(system, b.parentId);
+        if (child && parent && parentBody && revealed(*parentBody))
+            mapLine(map, "solar-moon-link", parent->x, parent->y, child->x, child->y);
+    }
+
+    for (const auto& b : system.bodies) {
+        if (!revealed(b)) continue;
+        const auto placement = displayPlacement(b.id);
+        if (!placement) continue;
+        const bool hazard = std::find(mapCourse.intersectedHazards.begin(), mapCourse.intersectedHazards.end(), b.id) != mapCourse.intersectedHazards.end();
+        const double size = solarMapDiameter(b);
         const std::string art = b.kind == SystemBodyKind::Station ? "straylight-ark-damaged"
             : b.kind == SystemBodyKind::Moon ? "moon" : b.id;
-        map << "<button class=\"solar-planet" << (b.id == e.course.targetBodyId ? " solar-planet-selected" : "")
+        map << "<button class=\"solar-planet" << (b.kind == SystemBodyKind::Star ? " solar-planet-sun" : "")
+            << (b.id == mapCourse.targetBodyId ? " solar-planet-selected" : "")
             << "\" data-rr-action=\"expedition:preview:" << esc(b.id)
-            << "\" data-ui-focus-id=\"planet:" << esc(b.id) << "\" style=\"left:" << x(b.position.x)-size*.5
-            << "dp;top:" << y(b.position.y)-size*.5 << "dp;width:" << size << "dp;height:" << size << "dp;\">";
+            << "\" data-ui-focus-id=\"planet:" << esc(b.id) << "\" style=\"left:" << placement->x-size*.5
+            << "dp;top:" << placement->y-size*.5 << "dp;width:" << size << "dp;height:" << size << "dp;\">";
         if (b.kind == SystemBodyKind::Star) map << "<div class=\"solar-sun\"></div>";
         else map << "<img src=\"planets/" << art << ".png\" />";
         map << "</button>";
-        map << "<div class=\"solar-body" << (b.id == e.course.targetBodyId ? " solar-selected" : "") << (hazard ? " solar-hazard" : "")
-            << "\" style=\"left:" << label.x << "dp;top:" << label.y << "dp;width:" << width << "dp;\">" << action(b.name, "preview:" + b.id) << "</div>";
-        if (b.dock) {
-            const auto dock = systemDockPosition(b);
-            map << "<div class=\"solar-dock\" style=\"left:" << x(dock.x) << "dp;top:" << y(dock.y) << "dp;\">+</div>";
-        }
+        map << "<div class=\"solar-body" << (b.id == mapCourse.targetBodyId ? " solar-selected" : "") << (hazard ? " solar-hazard" : "")
+            << (b.kind == SystemBodyKind::Moon ? " solar-moon-label" : "")
+            << "\" style=\"left:" << placement->labelX << "dp;top:" << placement->labelY << "dp;width:"
+            << placement->labelWidth << "dp;\">" << action(b.name, "preview:" + b.id) << "</div>";
     }
     for (const auto& w : e.wrecks) {
         const auto p = convertSystemFrame(w.location, CoordinateFrame::System, "", system);
-        map << "<div class=\"solar-wreck\" style=\"left:" << x(p.position.x) << "dp;top:" << y(p.position.y) << "dp;\">W" << w.id << "</div>";
+        const SystemBodyDefinition* nearest = nullptr;
+        double nearestDistance = 1e12;
+        for (const auto& b : system.bodies) {
+            if (!revealed(b)) continue;
+            const double candidate = std::hypot(p.position.x-b.position.x,p.position.y-b.position.y);
+            if (candidate < nearestDistance) { nearestDistance = candidate; nearest = &b; }
+        }
+        const auto placement = nearest ? displayPlacement(nearest->id) : std::nullopt;
+        if (placement) map << "<div class=\"solar-wreck\" style=\"left:" << placement->x+16
+            << "dp;top:" << placement->y+15 << "dp;\">W" << w.id << "</div>";
     }
-    map << "<div class=\"solar-ship\" style=\"left:" << x(absolute.position.x) << "dp;top:" << y(absolute.position.y) << "dp;\"></div></div></div><p>Green marker: ship / +: dock / W: wreck</p>";
-    if (target) map << "<h3>" << esc(target->name) << "</h3><p>" << (target->dock ? "Rendezvous and dock" : target->siteId.empty() ? "Orbital exploration" : "Surface expedition")
-        << (e.course.estimateValid ? " / Approach: " + num(e.course.approachFuel) + " fuel / Return margin: " + num(e.course.returnMargin) : " / Fuel estimate unavailable: inspect approach hazards") << "</p><p class=\"expedition-warning\">" << esc(target->hazard)
-        << "</p><p>Fuel estimate assumes burn-and-coast piloting plus " << num(e.course.manualCaptureAllowance) << " fuel per manual approach. Line: unattended cruise forecast. Cruise does not brake or avoid collisions.</p>" << action("Plot " + target->name, "plot:" + target->id);
-    for (const auto& site : e.sites) {
-        const auto* body = systemBody(system, site.bodyId);
-        map << "<p>Visited site: " << esc(body ? body->name : "Remote site") << " / excavation retained</p>";
+    map << "</div></div><p class=\"solar-map-help\">"
+        << (atOperationalDock
+            ? "SELECT A WORLD / CONFIRM BELOW / RETURN TO THE DOCK SCREEN TO DEPART"
+            : "SELECT A WORLD / SETTING A WAYPOINT UPDATES THE MARKER AND FORECAST / FLIGHT STAYS MANUAL")
+        << "</p>";
+    if (mapTarget) {
+        const bool alreadyDockedHere = atOperationalDock && e.location.bodyId == mapTarget->id;
+        const std::string mapTargetName = mapTarget->dock ? mapTarget->name + " Orbital Dock" : mapTarget->name;
+        map << "<section class=\"solar-selection\"><div class=\"solar-selection-copy\"><h3>" << esc(mapTargetName)
+            << "</h3><p>" << (alreadyDockedHere ? "Currently docked here. The planet surface is not landable; choose another revealed world" :
+                mapTarget->dock ? "Rendezvous with the service dock; the planet surface is not landable" :
+                mapTarget->siteId.empty() ? "Orbital exploration" : "Surface expedition")
+            << (mapCourse.estimateValid ? " / Approach " + num(mapCourse.approachFuel) + " fuel / Return " + num(mapCourse.returnMargin) : " / Fuel estimate unavailable")
+            << "</p><p class=\"expedition-warning\">" << esc(mapTarget->hazard) << "</p></div><div class=\"solar-selection-action\">"
+            << action(alreadyDockedHere ? "Already docked at " + mapTarget->name : "Set waypoint: " + mapTargetName,
+                "plot:" + mapTarget->id, !alreadyDockedHere) << "</div></section>";
+    } else {
+        map << "<section class=\"solar-selection\"><div class=\"solar-selection-copy\"><h3>SELECT DESTINATION</h3><p>Choose a revealed world to preview its route.</p></div></section>";
     }
-    map << "<p>Home: Earth orbital dock / Ship fuel: " << num(flight.fuelRemaining) << " / " << num(flight.fuelCapacity) << "</p><p>Carried: " << e.cargo.materials.common << " common, " << e.cargo.materials.rare << " rare, " << e.cargo.materials.exotic << " exotic / " << num(e.cargo.credits) << " unbanked credits</p>";
-    for (const auto& w : e.wrecks) map << "<p>Wreck " << w.id << " - " << action("Recover cargo", "recover:" + std::to_string(w.id), canSalvageWreck(e, flight, system, w.id)) << "</p>";
-    map << action("Resume", "close");
+    map << "<p class=\"solar-map-manifest\">FUEL " << num(flight.fuelRemaining) << " / " << num(flight.fuelCapacity)
+        << " / CARGO " << e.cargo.materials.common << "C " << e.cargo.materials.rare << "R " << e.cargo.materials.exotic
+        << "X / " << num(e.cargo.credits) << " UNBANKED</p>";
+    for (const auto& w : e.wrecks) map << "<p>Wreck " << w.id << " - " << action(w.buildRecoverable ? "Recover upgrades and cargo" : "Recover cargo", "recover:" + std::to_string(w.id), canSalvageWreck(e, flight, system, w.id)) << "</p>";
+    map << action(atOperationalDock ? "Back to dock" : "Resume flight", "close");
     if (e.active) map << action("Abandon ship", "abandon");
     map << "</section>";
-    replaceModal(panel, {"map", "SOLAR SYSTEM", map.str(), "expedition:close", false, true, true, ModalTone::Neutral});
-    replaceModal(panel, {"expedition_abandon", "ABANDON SHIP", "<p>Return in a replacement ship. Temporary XP and build end; carried salvage stays at a recoverable wreck.</p><div class=\"action-row\">" + action("Keep flying", "close") + action("Abandon and recover", "confirm_abandon") + "</div>", "expedition:close", false, true, true, ModalTone::Warning});
-    if (state.screen == Screen::Hangar) {
+    replaceModal(panel, {"map", "SET WAYPOINT", map.str(), "expedition:close", false, true, true, ModalTone::Neutral});
+    replaceModal(panel, {"expedition_abandon", "ABANDON SHIP", "<p>Return in a replacement ship. Cargo and upgrades remain in a recoverable wreck.</p><div class=\"action-row\">" + action("Keep flying", "close") + action("Abandon and recover", "confirm_abandon") + "</div>", "expedition:close", false, true, true, ModalTone::Warning});
+    if (!e.progression.pendingGraftConflicts.empty()) {
+        const auto& conflict = e.progression.pendingGraftConflicts.front();
+        const auto moduleName = [&](DroneModuleKind kind) {
+            const auto found = std::find_if(c.catalog.droneModules.begin(), c.catalog.droneModules.end(),
+                [&](const auto& module) { return module.kind == kind; });
+            return found == c.catalog.droneModules.end() ? std::string("Unknown graft") : found->name;
+        };
+        const std::string copy = "<p>Slot " + std::to_string(conflict.equippedFrame + 1) +
+            " has two grafts. Choose the installed module.</p><div class=\"action-row\">" +
+            action("Keep " + moduleName(conflict.current.module), "graft_conflict:keep") +
+            action("Install " + moduleName(conflict.recovered.module), "graft_conflict:recovered") + "</div>";
+        replaceModal(panel, {"graft_conflict", "RECOVERED GRAFT", copy, {}, true, false, false, ModalTone::Neutral});
+    }
+    if (atOperationalDock) {
         for (auto& item : panel.modals)
             if (item.id != "incoming_message") item.autoOpen = false;
         std::ostringstream home;
+        const std::string waypointName = target ? target->name : "None";
+        const auto* nextMission = nextSolarMission(state, c.catalog);
+        const auto* nextBody = nextMission ? systemBody(system, nextMission->bodyId) : nullptr;
+        const std::string departLabel = target && target->id != e.location.bodyId
+            ? "DEPART FOR " + target->name : "DEPART DOCK";
         home << "<section class=\"expedition-home\"><h2>" << esc(region ? region->name : "Home") << " / ORBITAL DOCK</h2><p>" << esc(state.statusLine)
-            << "</p><p>Ship fuel " << num(flight.fuelRemaining) << " / " << num(flight.fuelCapacity) << " / Hull " << num(flight.hullRemaining) << " / Credits " << num(state.run.credits)
-            << "</p><div class=\"action-row\">" << action("Plot course", "map") << action("Depart dock", "depart");
+            << "</p><p>Upgrades survive docking. Recover your wreck to reclaim lost upgrades.</p><p>Ship fuel " << num(flight.fuelRemaining) << " / " << num(flight.fuelCapacity) << " / Hull " << num(flight.hullRemaining) << " / Credits " << num(state.run.credits)
+            << "</p><section class=\"expedition-dock-departure\"><p>NEXT MISSION: "
+            << esc(nextBody ? nextBody->name : (arkDiscovered(state) ? "Straylight" : "Complete"))
+            << "</p><p>WAYPOINT: " << esc(waypointName)
+            << "</p>" << action(departLabel, "depart") << "</section><div class=\"action-row\">" << action("Change waypoint", "map");
         if (operationalHomeDocked(e) && droneBayUnlocked(state))
             home << button("Drone Ops", ui::actions::droneOps);
         home << "</div>";
@@ -178,10 +342,14 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         panel.runtime.responsiveViewport = true;
     }
     if (state.screen == Screen::Flight && !c.surfaceArrivalActive) {
+        const bool dockInRange = expeditionDockInRange(e, flight, system);
+        const bool dockReady = canDockExpedition(e, flight, system);
         panel.contentMarkup += "<div class=\"expedition-flight-bar\"><p>" + esc(region ? region->name : "Solar space") +
         " / Target: " + esc(target ? target->name : "None") + " / " + (e.cruise.active ? "CRUISE ACTIVE" : "MANUAL") + "</p><p>" + esc(objective.available ? objective.goal : "Explore, mine, and return to Earth") + "</p>" +
+        solarMissionChecklist(state, c.catalog, e.location.bodyId) +
         action(e.cruise.active ? "Cruise off [C / L3]" : "Cruise [C / L3]", "cruise", flight.active && flight.mode != FlightMode::Landing && !e.undockReady) +
-        action("Dock", "dock", canDockExpedition(e, flight, system));
+        (dockInRange ? "<div class=\"expedition-dock-action\">" + button("DOCK", "expedition:dock", true, "ok") + "</div>"
+                     : action("Dock", "dock", false));
         if (flight.active && flight.mode != FlightMode::Landing) {
             auto position = e.location;
             captureSystemLocation(position, flight);
@@ -191,10 +359,9 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
                 const auto dock = systemDockPosition(body);
                 const double range = std::hypot(position.position.x-dock.x,position.position.y-dock.y);
                 if (range > expeditionDockRadius) continue;
-                panel.contentMarkup += canDockExpedition(e,flight,system)
+                panel.contentMarkup += dockReady
                     ? "<p>In range — press Dock.</p>"
-                    : (range > expeditionDockRadius ? "<p>Approach the DOCK marker, not Earth's surface.</p>"
-                                   : "<p>Slow down to enable Dock.</p>");
+                    : "<p>In range — slow below 0.20 relative speed, then press Dock.</p>";
                 break;
             }
         }
@@ -211,6 +378,6 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     if (!d.pendingId.empty() && !d.awaitingAscent && state.screen == Screen::Flight && flight.mode != FlightMode::Landing && c.incomingMessageDeliveryAllowed && e.progression.pendingRunUpgradeChoices == 0 &&
         std::none_of(panel.modals.begin(), panel.modals.end(), [](const auto& item) { return item.autoOpen; }))
         replaceModal(panel, {"expedition_decision", "NEXT COURSE", "<p>Objective secured. Return to bank salvage, or continue with your current fuel and build.</p><div class=\"action-row\">" +
-            action("Plot Earth", "decision:home:" + d.pendingId) + action("Plot " + recommendedExpeditionLead(state, c.catalog), "decision:lead:" + d.pendingId) + action("Inspect map", "decision:map:" + d.pendingId) + "</div>", "expedition:decision:map:" + d.pendingId, true, false, false, ModalTone::Neutral});
+            action("Set Earth waypoint", "decision:home:" + d.pendingId) + action("Set " + recommendedExpeditionLead(state, c.catalog) + " waypoint", "decision:lead:" + d.pendingId) + action("Inspect map", "decision:map:" + d.pendingId) + "</div>", "expedition:decision:map:" + d.pendingId, true, false, false, ModalTone::Neutral});
 }
 } // namespace rocket

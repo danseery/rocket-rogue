@@ -52,6 +52,6 @@ Typed phase cues are connected to Web Audio and optional SDL3 audio. Supply appr
 
 ## Persistence and acceptance
 
-Version 21 is the only accepted save schema. Persist local mode/pose, fixed surface origin, parked ship, cached layers, departure/support state and drone transit. Per-sector orbital findings and excavation persist, including unlanded sites; incompatible campaigns stay untouched until explicit New Campaign. See [Flight and Surface Flow](POST_ARRIVAL_PHASES.md) for save timing.
+Version 22 is the only accepted save schema. Persist local mode/pose, fixed surface origin, parked ship, cached layers, departure/support state and drone transit. Per-sector orbital findings and excavation persist, including unlanded sites; older campaigns restart through New Campaign. See [Flight and Surface Flow](POST_ARRIVAL_PHASES.md) for save timing.
 
 Verify camera alignment, staging, input buffering, sequence ownership, resource-clock freeze, collision feedback and manual ascent on web and native. Debug presets provide inspection starts, not release certification.
