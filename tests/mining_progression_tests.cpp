@@ -1016,9 +1016,45 @@ void solarCampaignClaimsAdvanceToStraylight()
 
 } // namespace
 
+void drillFeedbackUsesTheCuttingFootprint()
+{
+    MiningRunState mining;
+    mining.terrain.width = mining.terrain.height = 40;
+    mining.terrain.cells.resize(1600);
+    mining.droneX = mining.droneY = 20.0;
+    MiningDrillStats stats;
+    stats.sideCutterReach = 1.5;
+    for (int heading = 0; heading < 8; ++heading) {
+        const double angle = heading * 3.141592653589793 / 4.0;
+        mining.hullDirX = std::cos(angle);
+        mining.hullDirY = std::sin(angle);
+        for (auto& cell : mining.terrain.cells) cell.material = MiningCellMaterial::HardRock;
+        const auto contacts = miningDrillFootprintCells(mining, stats);
+        for (int side : {-1, 1}) {
+            const auto hit = std::find_if(contacts.begin(), contacts.end(),
+                [side](const auto& cell) { return cell.cutter == side; });
+            require(hit != contacts.end(), "both side cutters must report contact at every heading");
+            for (auto& cell : mining.terrain.cells) cell.material = MiningCellMaterial::Empty;
+            auto& rock = mining.terrain.cells[hit->y * 40 + hit->x];
+            rock.material = MiningCellMaterial::HardRock;
+            const auto sideOnly = miningDrillFootprintCells(mining, stats);
+            require(sideOnly.size() == 1 && sideOnly.front().cutter == side,
+                "side-only cutting must produce its own feedback contact");
+            auto mainOnlyStats = stats;
+            mainOnlyStats.sideCutterReach = 0.0;
+            require(miningDrillFootprintCells(mining, mainOnlyStats).empty(),
+                "side feedback must not depend on the main head touching rock");
+            rock.material = MiningCellMaterial::Bedrock;
+            require(miningDrillFootprintCells(mining, stats).empty(),
+                "protected rock must not emit cutting feedback");
+        }
+    }
+}
+
 int main()
 {
     allActLevelContractsResolve();
+    drillFeedbackUsesTheCuttingFootprint();
     campaignMappingMatchesChapterPace();
     deterministicSeedsAndRewardProgressAreStable();
     enemyThemesFollowProgressionAndRemainDeterministic();

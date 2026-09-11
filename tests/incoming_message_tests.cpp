@@ -5,6 +5,7 @@
 #include "core/IncomingMessages.h"
 #include "core/SaveData.h"
 #include "core/ScenarioSystem.h"
+#include "core/SolarProgression.h"
 #include "game/GamePanel.h"
 #include <algorithm>
 #include <stdexcept>
@@ -120,4 +121,122 @@ void incomingMessageTests() {
     check(find(panel) != panel.modals.end() &&
               find(panel)->bodyMarkup.find("An Engineer With A Long Display Name") != std::string::npos,
           "Other speakers and contexts must use the identical card");
+
+    auto campaign = createNewGame(catalog, 992);
+    campaign.run.expedition.travelInitialized = true;
+    campaign.run.expedition.active = true;
+    campaign.run.expedition.location.bodyId = "moon";
+    campaign.screen = Screen::Flight;
+    campaign.run.flight.mode = FlightMode::Orbit;
+    check(reconcileSolarMissionMessages(campaign, catalog), "First approach should queue the mission briefing");
+    const auto completeMission = [&](std::string_view bodyId) {
+        const auto* mission = solarMissionForBody(catalog, bodyId);
+        check(mission != nullptr, "Mission fixture must exist");
+        const auto* scenario = catalog.findScenario(mission->scenarioId);
+        check(scenario != nullptr, "Mission scenario must exist");
+        for (const auto& step : scenario->steps) {
+            if (step.mandatoryBriefing)
+                check(performScenarioAction(campaign, catalog, scenario->id, step.id,
+                    ScenarioActionKind::AcknowledgeBriefing).applied, "Mission briefing must acknowledge");
+            if (step.completionEvent == ScenarioEventKind::ManualAction)
+                check(performScenarioAction(campaign, catalog, scenario->id, step.id,
+                    ScenarioActionKind::BeginActivity).applied, "Mission setup action must apply");
+            else if (step.completionEvent != ScenarioEventKind::None)
+                check(recordScenarioEvent(campaign, catalog,
+                    {step.completionEvent, scenario->id, step.id, step.eventOriginId,
+                     step.eventTargetId, step.requiredProgress, step.requiredGrade}),
+                    "Mission objective event must apply");
+            if (!step.claimRequired) continue;
+            auto* instance = findScenarioInstance(campaign.meta, scenario->id);
+            auto* progress = findScenarioStepProgress(*instance, step.id);
+            progress->failureSeen = true;
+            progress->failureAcknowledged = false;
+            const auto ready = scenarioObjectivePresentation(campaign, catalog, scenario->id, step.id);
+            check(ready.state == ScenarioStepState::ReadyToClaim &&
+                      ready.action == ScenarioActionKind::ClaimReward && !ready.firstFailurePending,
+                  "An earned reward must supersede an old failure acknowledgement");
+            const auto claimed = performScenarioAction(campaign, catalog, scenario->id, step.id,
+                ScenarioActionKind::ClaimReward);
+            check(claimed.applied && claimed.transition.kind == ScenarioTransitionKind::None,
+                  "Claim must grant rewards in place");
+            check(!performScenarioAction(campaign, catalog, scenario->id, step.id,
+                      ScenarioActionKind::ClaimReward).applied &&
+                      !performScenarioAction(campaign, catalog, scenario->id, step.id,
+                      ScenarioActionKind::BeginActivity).applied &&
+                      !performScenarioAction(campaign, catalog, scenario->id, step.id,
+                      ScenarioActionKind::AcknowledgeFailure).applied,
+                  "A completed mission must reject duplicate claims and stale activity or failure actions");
+        }
+        const auto complete = solarMissionObjectiveForBody(campaign, catalog, bodyId);
+        check(complete.state == ScenarioStepState::Complete && complete.action == ScenarioActionKind::None &&
+                  complete.detail == "MISSION COMPLETE" && !complete.mandatoryBriefing &&
+                  !complete.firstFailurePending,
+              "A claimed mission must explicitly show completion without replaying its briefing or failure");
+    };
+    completeMission("moon");
+    campaign.screen = Screen::Mining;
+    check(reconcileSolarMissionMessages(campaign, catalog) &&
+              campaign.incomingMessages.pending.empty(),
+          "Claiming during mining should retire the briefing without a duplicate reward introduction; travel guidance waits for ascent");
+    campaign.screen = Screen::Hangar;
+    campaign.run.expedition.active = false;
+    campaign.run.expedition.location.bodyId = "earth";
+    campaign.run.expedition.location.siteId = "earth.dock";
+    campaign.run.expedition.course.targetBodyId = "mars";
+    campaign.run.expedition.coursePlayerSelected = true;
+    for (const auto* staleMessage : {"lunar_scan", "lunar_recovery", "rig_full_tip", "ship_full_tip"})
+        check(enqueueIncomingMessage(campaign.incomingMessages, catalog,
+                  {std::string("lost_ship.") + staleMessage, staleMessage, "default"}),
+              "Loss fixture should contain pending mining guidance");
+    check(reconcileSolarMissionMessages(campaign, catalog) &&
+              campaign.incomingMessages.pending.size() == 1 &&
+              campaign.incomingMessages.pending.front().messageId == "moon_mission_complete",
+          "Respawn must retire abandoned mining instructions and deliver the earned completion once");
+    check(campaign.run.expedition.course.targetBodyId == "mars" &&
+              !reconcileSolarMissionMessages(campaign, catalog),
+          "Completion reconciliation must preserve deliberate waypoints and remain idempotent");
+    check(acknowledgeIncomingMessage(campaign.incomingMessages,
+              campaign.incomingMessages.pending.front().id).has_value(), "Completion must acknowledge");
+    const auto savedCampaign = deserializeSaveData(serializeSaveData(captureSaveData(campaign)));
+    check(savedCampaign.has_value(), "Mission boundary save must deserialize");
+    restoreSaveData(campaign, catalog, *savedCampaign);
+    check(!reconcileSolarMissionMessages(campaign, catalog) && campaign.incomingMessages.pending.empty(),
+          "Reloading at the dock must not replay acknowledged completion");
+
+    completeMission("mars");
+    completeMission("mercury");
+    campaign.run.destinationIndex = static_cast<int>(std::distance(catalog.destinations.begin(),
+        std::find_if(catalog.destinations.begin(), catalog.destinations.end(),
+            [](const Destination& destination) { return destination.id == "mars"; })));
+    campaign.run.expedition.location.bodyId = "earth";
+    campaign.run.expedition.location.siteId = "earth.dock";
+    check(nextSolarMission(campaign, catalog)->bodyId == "io" &&
+              campaignNextStep(campaign, catalog).destinationId == "io",
+          "After Mars, dock guidance must recommend Io independently of stale geology or the selected waypoint");
+    check(reconcileSolarMissionMessages(campaign, catalog) && campaign.incomingMessages.pending.size() == 2,
+          "Both main and optional mission completions must survive returning or respawning away from their body");
+    while (!campaign.incomingMessages.pending.empty())
+        check(acknowledgeIncomingMessage(campaign.incomingMessages,
+                  campaign.incomingMessages.pending.front().id).has_value(), "Pending completions must acknowledge");
+    campaign.screen = Screen::Flight;
+    campaign.run.expedition.active = true;
+    campaign.run.expedition.location.bodyId = "mars";
+    campaign.run.expedition.location.siteId.clear();
+    check(!reconcileSolarMissionMessages(campaign, catalog) && campaign.incomingMessages.pending.empty() &&
+              campaign.run.expedition.course.targetBodyId == "mars",
+          "A deliberate revisit must not reopen completed mission instructions or replace its waypoint");
+
+    auto badMissionCatalog = catalog;
+    badMissionCatalog.solarMissions.front().completionMessageId = "missing_completion";
+    check(!validateSolarMissionCatalog(badMissionCatalog),
+          "Campaign guardrails must reject missing mission completion messages");
+    badMissionCatalog = catalog;
+    auto* badScenario = const_cast<ScenarioDefinition*>(badMissionCatalog.findScenario(
+        badMissionCatalog.solarMissions.front().scenarioId));
+    auto* badClaim = const_cast<ScenarioStepDefinition*>(findScenarioStepDefinition(
+        *badScenario, badMissionCatalog.solarMissions.front().claimStepId));
+    badClaim->transition.kind = ScenarioTransitionKind::OpenScreen;
+    badClaim->transition.screen = Screen::Hangar;
+    check(!validateSolarMissionCatalog(badMissionCatalog),
+          "Campaign guardrails must reject mission claims that redirect into a legacy menu");
 }

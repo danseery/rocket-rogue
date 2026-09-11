@@ -3672,7 +3672,10 @@ void GameRmlUi::closeModal()
 
 void GameRmlUi::dispatchAction(const std::string& action)
 {
-    const bool closesModal = !openModalId_.empty() && !action.starts_with("expedition:preview:");
+    // Expedition and scenario actions own their success/failure lifecycle.
+    // Rejected selections must leave their feedback and choices on screen.
+    const bool closesModal = !openModalId_.empty() &&
+        !action.starts_with("expedition:") && !action.starts_with("scenario_action:");
     if (closesModal) {
         clearFocusTargets();
         openModalId_.clear();
@@ -4015,7 +4018,7 @@ bool GameRmlUi::rebuildModalHost()
         modalHost->SetInnerRML(
             "<template src=\"rr-modal-shell\">" + modalContent + "</template>");
         if (auto* scrim = g_document->GetElementById("rr-modal-scrim")) {
-            scrim->SetClass("incoming-message-scrim", activeModal->id == "incoming_message");
+            scrim->SetClass("incoming-message-scrim", activeModal->id == "incoming_message" || activeModal->id == "solar_mission_claim");
         }
         Rml::Element* modalElement = g_document->GetElementById("rr-modal");
         if (!modalElement) {

@@ -126,8 +126,9 @@ std::string_view openingRetryMessageVariant(const GameState& state) {
 }
 ExpeditionResult retryOpeningMission(GameState& state, const ContentCatalog& catalog) {
     auto& e=state.run.expedition;
-    if (!openingMissionRetryEligible(state) || state.screen!=Screen::Hangar ||
-        (e.decision.pendingId!="opening_retry" && (!operationalHomeDocked(e) || e.wrecks.empty()))) return ExpeditionResult::InvalidState;
+    if (!openingMissionRetryEligible(state) || state.screen != Screen::Flight ||
+        e.active || state.run.flight.active || e.decision.pendingId != "opening_retry")
+        return ExpeditionResult::InvalidState;
     const std::string acknowledgement="opening_retry:"+std::string(openingRetrySequenceVariant(state));
     if (std::find(e.decision.acknowledgedIds.begin(),e.decision.acknowledgedIds.end(),acknowledgement)==e.decision.acknowledgedIds.end())
         e.decision.acknowledgedIds.push_back(acknowledgement);
@@ -138,7 +139,7 @@ ExpeditionResult retryOpeningMission(GameState& state, const ContentCatalog& cat
     state.run.shipDamage=0;
     state.run.planetaryExpedition={};
     prepareEarthOpening(state,catalog);
-    return ExpeditionResult::Applied;
+    return launchEarthOpening(state,catalog);
 }
 bool earthLaunchReady(const PersistentExpeditionState& e) {
     return e.travelInitialized && e.openingInitialized && !e.active && e.departureCount == 0 &&
@@ -233,7 +234,11 @@ void recordExpeditionArrival(GameState& state, const ContentCatalog& catalog, co
 ExpeditionResult departHome(GameState& state, const ContentCatalog&) {
     auto& e = state.run.expedition;
     auto& f = state.run.flight;
-    if (!e.location.siteId.ends_with(".dock") || f.active) return ExpeditionResult::NotDocked;
+    if (!e.travelInitialized || !operationalHomeDocked(e) || f.active)
+        return ExpeditionResult::NotDocked;
+    if (e.undockReady) return ExpeditionResult::AlreadyApplied;
+    if (f.fuelRemaining <= 0 || f.hullRemaining <= 0)
+        return ExpeditionResult::InvalidState;
     e.undockReady = true;
     f.physicalFlight = true;
     f.mode = FlightMode::Orbit;
@@ -247,23 +252,31 @@ ExpeditionResult departHome(GameState& state, const ContentCatalog&) {
 }
 ExpeditionResult recoverExpedition(GameState& state, const SystemDefinition& system) {
     auto& e = state.run.expedition;
-    if (e.active && openingMissionRetryEligible(state)) {
+    if (!e.active) return ExpeditionResult::AlreadyApplied;
+    if (openingMissionRetryEligible(state)) {
         e.active=false;
         e.cruise.active=false;
+        e.undockReady=false;
         state.run.flight.active=false;
+        state.run.flight.selectedThrottle=state.run.flight.angularVelocity=state.run.flight.burnRatePerSecond=0;
         e.decision.pendingId="opening_retry";
         e.decision.awaitingAscent=false;
-        state.screen=Screen::Hangar;
+        state.screen=Screen::Flight;
         state.statusLine="Launch attempt ended. Try the Moon approach again.";
         return ExpeditionResult::Applied;
     }
     if (!e.location.siteId.empty() && !e.location.siteId.ends_with(".dock")) storeVisitedSite(state, e.location.siteId);
     const auto result = loseExpedition(e, state.run.flight, system);
     if (result != ExpeditionResult::Applied) return result;
+    ++state.meta.shipsLost;
     state.run.flight.landing = {};
     state.run.flight.orbit = {};
     state.run.mining = {};
     state.run.planetaryExpedition = {};
+    state.run.approach = {};
+    state.run.routeTransit = {};
+    state.run.pendingTransferAssist = {};
+    state.run.nextLaunchFuelBoost = state.run.nextLaunchSpeedBoost = state.run.nextLaunchInstabilityPenalty = 0;
     state.run.shipDamage = 0;
     e.decision.pendingId.clear();
     e.decision.awaitingAscent = false;

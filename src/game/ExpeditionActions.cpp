@@ -58,12 +58,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
     };
     if (action == "expedition:retry_opening") {
         if (retryOpeningMission(state_,catalog_) == ExpeditionResult::Applied) {
-            session_.preparedLaunch=expeditionFlightModel(state_,catalog_);
-            session_.flightArmed=false;
-            session_.preflightElapsed=tuning::session::preflightBoardingSeconds;
-            session_.orbitalWork={};
-            surfaceArrival_.reset();
-            landingSiteView_.reset();
+            resetExpeditionSessionAfterRecovery();
             close();
             beginSceneFadeFromBlack(1.0);
             save();
@@ -131,9 +126,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
                 state_.run.planetaryExpedition = {};
                 session_.flightArmed = false;
                 std::string nextWaypoint;
-                const auto* selectedMission = solarMissionForBody(catalog_, e.course.targetBodyId);
-                const bool stale = selectedMission && solarMissionClaimed(state_, catalog_, *selectedMission);
-                if (!e.coursePlayerSelected || e.course.targetBodyId.empty() || e.course.targetBodyId == e.homeBodyId || stale) {
+                if (!e.coursePlayerSelected || e.course.targetBodyId.empty() || e.course.targetBodyId == e.homeBodyId) {
                     const std::string lead = recommendedExpeditionLead(state_, catalog_);
                     const auto* body = systemBody(solarSystemDefinition(), lead);
                     if (body && body->id != e.homeBodyId && solarBodyRevealed(state_, catalog_, body->id) &&
@@ -154,6 +147,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
             }
         } else state_.statusLine = "Match the dock marker and slow below 0.20 relative speed.";
     } else if (action == "expedition:abandon") {
+        if (!e.active) return true;
         refreshPanel();
         services_.ui.openModal("expedition_abandon");
         release();
@@ -161,10 +155,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
     } else if (action == "expedition:confirm_abandon") {
         close();
         if (recoverExpedition(state_, solarSystemDefinition()) == ExpeditionResult::Applied) {
-            session_.flightArmed = false;
-            session_.orbitalWork = {};
-            surfaceArrival_.reset();
-            landingSiteView_.reset();
+            resetExpeditionSessionAfterRecovery();
         }
     } else if (action.starts_with("expedition:recover:")) {
         std::uint64_t id = 0;

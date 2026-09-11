@@ -1342,6 +1342,31 @@ void testExistingOrbitalShaftsRemainVisibleOutsideTheirActiveWedge()
     // A stored shaft contributes two radial strokes and two mouth rings even
     // while a different wedge owns the active survey and landing guidance.
     assert(withShaft.instances.size() >= baseline.instances.size() + 4U);
+
+    snapshot.orbitalExistingShafts.clear();
+    snapshot.orbitalOverlay = 0.0;
+    snapshot.orbitalZoneSurveyed = false;
+    snapshot.orbitalArtifactHint = true;
+    snapshot.orbitalArtifactBearing = snapshot.landingZones[0].centerBearing;
+    const auto artifactGlows = [](const ScenePacket& packet) {
+        std::vector<SceneInstance> result;
+        for (const auto& packed : packet.instances) {
+            const auto instance = rocket::unpackSceneInstance(packed);
+            if (instance.shape == SceneInstanceShape::RadialGlow && instance.color.r > 0.70F &&
+                instance.color.r < 0.85F && instance.color.g < 0.65F && instance.color.b > 0.98F)
+                result.push_back(instance);
+        }
+        return result;
+    };
+    const auto hint = artifactGlows(shaftComposer.compose(snapshot));
+    assert(hint.size() == 2);
+    snapshot.orbitalZone = snapshot.landingZones[2];
+    const auto changedSlice = artifactGlows(shaftComposer.compose(snapshot));
+    assert(changedSlice.size() == hint.size());
+    assert(std::abs(changedSlice[0].centerX - hint[0].centerX) < 0.0001F);
+    assert(std::abs(changedSlice[0].centerY - hint[0].centerY) < 0.0001F);
+    snapshot.orbitalArtifactHint = false;
+    assert(artifactGlows(shaftComposer.compose(snapshot)).empty());
 }
 
 
@@ -2539,6 +2564,66 @@ void testMiningDepartureFlameTracksShip()
     assert(flameLift > 0.0F);
 }
 
+void testCuttingFeedbackComesFromEveryActiveHead()
+{
+    auto mining = miningState(20.0, 20.0);
+    auto snapshot = miningSnapshot(mining);
+    snapshot.miningSideCutterReach = 1.5;
+    snapshot.miningDrilling = true;
+    snapshot.miningTargetDrillable = true;
+    snapshot.miningContactIntensity = 0.8;
+    snapshot.miningDrillContacts = {{17.0, 22.0}, {23.0, 22.0}};
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const auto sparkCounts = [&](const ScenePacket& packet) {
+        std::array<int, 2> counts {};
+        for (const auto& packed : packet.instances) {
+            const auto instance = rocket::unpackSceneInstance(packed);
+            if (instance.textured || instance.shape != SceneInstanceShape::Rectangle ||
+                instance.color.r < 0.70F || instance.color.g < 0.45F || instance.color.b > 0.40F) continue;
+            for (std::size_t i = 0; i < counts.size(); ++i) {
+                const auto& contact = snapshot.miningDrillContacts[i];
+                const float x = packet.surfaceCamera.left + contact[0] * packet.surfaceCamera.cellWidth;
+                const float y = packet.surfaceCamera.top - contact[1] * packet.surfaceCamera.cellHeight;
+                if (std::hypot((instance.centerX - x) / packet.surfaceCamera.cellWidth,
+                        (instance.centerY - y) / packet.surfaceCamera.cellHeight) < 2.0F) ++counts[i];
+            }
+        }
+        return counts;
+    };
+    const auto cutting = sparkCounts(composer.compose(snapshot));
+    assert(cutting[0] >= 20 && cutting[1] >= 20);
+    snapshot.miningDrilling = false;
+    snapshot.miningContactIntensity = 0.0;
+    const auto idle = sparkCounts(composer.compose(snapshot));
+    assert(idle[0] == 0 && idle[1] == 0);
+}
+
+void testReturnRingIsCenteredOnTheShip()
+{
+    auto mining = miningState(20.0, 20.0);
+    auto snapshot = miningSnapshot(mining);
+    snapshot.miningShipPresent = true;
+    snapshot.miningAtReturnZone = false;
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::RocketClosed, true);
+    const auto& packet = composer.compose(snapshot);
+    const auto ship = spriteInstance(packet, TextureId::RocketClosed, 0, 0, 1, 1);
+    bool found = false;
+    for (const auto& packed : packet.instances) {
+        const auto glow = rocket::unpackSceneInstance(packed);
+        if (glow.shape != SceneInstanceShape::RadialGlow ||
+            std::abs(glow.color.a - 0.026F) > 1.0F / 255.0F ||
+            std::abs(glow.color.r - 0.28F) > 1.0F / 255.0F) continue;
+        assert(std::abs(glow.centerX - ship.centerX) < 0.0001F);
+        assert(std::abs(glow.centerY - ship.centerY) < 0.0001F);
+        found = true;
+    }
+    assert(found);
+    assert(rocket::tuning::mining::returnZoneRadiusCells == 6.0);
+}
+
 void testMiningRigStaysVisibleAndTracksHeading()
 {
     rocket::MiningRunState mining = miningState(20.0, 20.0);
@@ -3661,6 +3746,8 @@ int main()
     testMiningRigSlerpsVerticalDuringExtraction();
     testMiningDepartureFlameTracksShip();
     testMiningRigStaysVisibleAndTracksHeading();
+    testCuttingFeedbackComesFromEveryActiveHead();
+    testReturnRingIsCenteredOnTheShip();
     testMiningCollisionIndicatorMarksTheContactedEdge();
     testMiningSurveyPulseRechargeRingPersistsWhenReady();
     testMiningSurveyPulseWaveReachesItsRealRadiusThenFades();

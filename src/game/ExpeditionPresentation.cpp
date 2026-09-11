@@ -91,8 +91,9 @@ std::string solarMissionChecklist(
     const GameState& state, const ContentCatalog& catalog, std::string_view bodyId)
 {
     const SolarMissionDefinition* mission = solarMissionForBody(catalog, bodyId);
-    if (mission == nullptr || !solarMissionAvailable(state, *mission) ||
-        solarMissionClaimed(state, catalog, *mission)) return {};
+    if (mission == nullptr || !solarMissionAvailable(state, *mission)) return {};
+    if (solarMissionClaimed(state, catalog, *mission))
+        return "<p class=\"solar-mission-checklist\">MISSION COMPLETE</p>";
     const ScenarioInstance* instance = findScenarioInstance(state.meta, mission->scenarioId);
     const ScenarioDefinition* definition = catalog.findScenario(mission->scenarioId);
     if (instance == nullptr || definition == nullptr) return {};
@@ -128,9 +129,9 @@ std::string solarMissionChecklist(
 void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPresentation& panel) {
     const auto& state = c.state;
     const auto& e = state.run.expedition;
-    if (!e.travelInitialized || c.titleScreenActive) return;
-    if (state.screen==Screen::Hangar && openingMissionRetryEligible(state) &&
-        (e.decision.pendingId=="opening_retry" || (operationalHomeDocked(e) && !e.wrecks.empty()))) {
+    if (!e.travelInitialized || c.titleScreenActive || c.sceneFadeToBlack > 0.0) return;
+    if (state.screen==Screen::Flight && openingMissionRetryEligible(state) &&
+        e.decision.pendingId=="opening_retry") {
         panel.modals.clear();
         panel.contentMarkup.clear();
         // The saved retry decision owns this repeatable transmission. Its
@@ -157,6 +158,13 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         ? proposedMapTarget : nullptr;
     const auto* region = systemBody(system, e.location.bodyId);
     const bool atOperationalDock = state.screen == Screen::Hangar && operationalHomeDocked(e);
+    if (atOperationalDock) {
+        // The live dock has one departure surface. Legacy launch, crew intake,
+        // route gates and refit modals must never compete with it.
+        std::erase_if(panel.modals, [](const auto& item) {
+            return item.id != "settings" && item.id != "inventory" && item.id != "incoming_message";
+        });
+    }
     const auto objective = [&] {
         const auto solar = solarMissionObjectiveForBody(state, c.catalog, e.location.bodyId);
         return solar.available
@@ -264,8 +272,8 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     }
     map << "</div></div><p class=\"solar-map-help\">"
         << (atOperationalDock
-            ? "SELECT A WORLD / CONFIRM BELOW / RETURN TO THE DOCK SCREEN TO DEPART"
-            : "SELECT A WORLD / SETTING A WAYPOINT UPDATES THE MARKER AND FORECAST / FLIGHT STAYS MANUAL")
+            ? "Select a world, then confirm. Depart from the dock."
+            : "Sets the marker and route forecast. Flight stays manual.")
         << "</p>";
     if (mapTarget) {
         const bool alreadyDockedHere = atOperationalDock && e.location.bodyId == mapTarget->id;
@@ -289,7 +297,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     if (e.active) map << action("Abandon ship", "abandon");
     map << "</section>";
     replaceModal(panel, {"map", "SET WAYPOINT", map.str(), "expedition:close", false, true, true, ModalTone::Neutral});
-    replaceModal(panel, {"expedition_abandon", "ABANDON SHIP", "<p>Return in a replacement ship. Cargo and upgrades remain in a recoverable wreck.</p><div class=\"action-row\">" + action("Keep flying", "close") + action("Abandon and recover", "confirm_abandon") + "</div>", "expedition:close", false, true, true, ModalTone::Warning});
+    if (e.active) replaceModal(panel, {"expedition_abandon", "ABANDON SHIP", "<p>Return to Earth in a replacement ship. Cargo and upgrades remain in your wreck.</p><div class=\"action-row\">" + action("Cancel", "close") + action("Abandon ship", "confirm_abandon") + "</div>", "expedition:close", false, true, true, ModalTone::Warning});
     if (!e.progression.pendingGraftConflicts.empty()) {
         const auto& conflict = e.progression.pendingGraftConflicts.front();
         const auto moduleName = [&](DroneModuleKind kind) {
@@ -304,17 +312,23 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         replaceModal(panel, {"graft_conflict", "RECOVERED GRAFT", copy, {}, true, false, false, ModalTone::Neutral});
     }
     if (atOperationalDock) {
-        for (auto& item : panel.modals)
-            if (item.id != "incoming_message") item.autoOpen = false;
         std::ostringstream home;
         const std::string waypointName = target ? target->name : "None";
         const auto* nextMission = nextSolarMission(state, c.catalog);
         const auto* nextBody = nextMission ? systemBody(system, nextMission->bodyId) : nullptr;
+        const SolarMissionDefinition* lastCompleted = nullptr;
+        for (const auto& mission : c.catalog.solarMissions)
+            if (!mission.optional && solarMissionClaimed(state, c.catalog, mission)) lastCompleted = &mission;
         const std::string departLabel = target && target->id != e.location.bodyId
             ? "DEPART FOR " + target->name : "DEPART DOCK";
         home << "<section class=\"expedition-home\"><h2>" << esc(region ? region->name : "Home") << " / ORBITAL DOCK</h2><p>" << esc(state.statusLine)
             << "</p><p>Upgrades survive docking. Recover your wreck to reclaim lost upgrades.</p><p>Ship fuel " << num(flight.fuelRemaining) << " / " << num(flight.fuelCapacity) << " / Hull " << num(flight.hullRemaining) << " / Credits " << num(state.run.credits)
-            << "</p><section class=\"expedition-dock-departure\"><p>NEXT MISSION: "
+            << "</p><section class=\"expedition-dock-departure\">";
+        if (lastCompleted) {
+            const auto* completedBody = systemBody(system, lastCompleted->bodyId);
+            home << "<p>MISSION COMPLETE: " << esc(completedBody ? completedBody->name : lastCompleted->bodyId) << "</p>";
+        }
+        home << "<p>NEXT MISSION: "
             << esc(nextBody ? nextBody->name : (arkDiscovered(state) ? "Straylight" : "Complete"))
             << "</p><p>WAYPOINT: " << esc(waypointName)
             << "</p>" << action(departLabel, "depart") << "</section><div class=\"action-row\">" << action("Change waypoint", "map");
@@ -340,6 +354,31 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         panel.templateKind = PanelTemplateKind::LegacyRaw;
         panel.metadata.legacyContentOwnsLaneGeometry = false;
         panel.runtime.responsiveViewport = true;
+    }
+    const bool stableMissionContext = c.incomingMessageDeliveryAllowed && !c.miningExtractionActive &&
+        e.progression.pendingRunUpgradeChoices == 0 &&
+        ((state.screen == Screen::Mining && !state.run.mining.failurePending) ||
+         (state.screen == Screen::Flight && !c.surfaceArrivalActive && flight.mode != FlightMode::Landing) || atOperationalDock);
+    if (stableMissionContext) {
+        for (const auto& mission : c.catalog.solarMissions) {
+            const auto claim = solarMissionObjectiveForBody(state, c.catalog, mission.bodyId);
+            if (claim.state != ScenarioStepState::ReadyToClaim || claim.action != ScenarioActionKind::ClaimReward) continue;
+            const auto* body = systemBody(system, mission.bodyId);
+            const std::string title = (body ? body->name : mission.bodyId) + " mission ready";
+            const std::string claimAction = ui::actions::scenarioAction(claim.scenarioId, claim.stepId, static_cast<int>(claim.action));
+            const bool autoOpen = std::none_of(panel.modals.begin(), panel.modals.end(), [](const auto& item) { return item.autoOpen; });
+            std::string copy = "Objectives complete. " + claim.rewardPreview;
+            if (mission.bodyId == "moon") {
+                copy += " The Prospector mines revealed ore pockets while you explore. Manage it in Drone Ops.";
+            }
+            if (auto card = buildIncomingMessageCard(c, mission.briefingMessageId, "default", claimAction,
+                    title, copy, "Claim mission reward")) {
+                card->id = "solar_mission_claim";
+                card->autoOpen = autoOpen;
+                replaceModal(panel, std::move(*card));
+            }
+            break;
+        }
     }
     if (state.screen == Screen::Flight && !c.surfaceArrivalActive) {
         const bool dockInRange = expeditionDockInRange(e, flight, system);

@@ -335,7 +335,7 @@ MiningViewTransform miningViewTransform(
 
 float miningShuttleSize(const RenderSnapshot&, const MiningViewTransform& view)
 {
-    return std::min(view.cellWidth, view.cellHeight) * 8.50F;
+    return std::min(view.cellWidth, view.cellHeight) * static_cast<float>(tuning::mining::surfaceShipSpriteCells);
 }
 
 struct RouteCurve {
@@ -3296,9 +3296,11 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
 
     submitMiningTerrainInstanceRange(0, miningBackdropFogInstanceCount_);
 
-    // Rendering and gameplay share this anchor so the visible loading pad is the
-    // exact place that enables banking, repair, and departure.
+    // Keep the landing anchor while centering service on the ship above it.
     const Vec2 shipBay = returnZone;
+    const Vec2 serviceCenter = gridPoint(
+        snapshot.miningReturnZoneX + tuning::mining::returnZoneCenterOffsetX,
+        snapshot.miningReturnZoneY - tuning::mining::returnZoneCenterHeightCells);
     const float shipGroundY = gridPoint(snapshot.miningReturnZoneX, snapshot.miningReturnZoneY).y;
     const float servicePulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 2.8F);
     const float serviceRadiusX = cellW * static_cast<float>(tuning::mining::returnZoneRadiusCells);
@@ -3308,15 +3310,15 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         : Color {0.28F, 0.82F, 1.0F, 0.20F + servicePulse * 0.07F};
     if (snapshot.miningShipPresent) {
         drawRadialGlow(
-            shipBay.x,
-            shipBay.y,
+            serviceCenter.x,
+            serviceCenter.y,
             std::max(serviceRadiusX, serviceRadiusY) * 1.15F,
             {serviceColor.r, serviceColor.g, serviceColor.b, snapshot.miningAtReturnZone ? 0.055F : 0.026F},
             36);
-        drawEllipseLine(shipBay.x, shipBay.y, serviceRadiusX, serviceRadiusY, serviceColor, 56, 0.0F, kPi * 2.0F);
+        drawEllipseLine(serviceCenter.x, serviceCenter.y, serviceRadiusX, serviceRadiusY, serviceColor, 56, 0.0F, kPi * 2.0F);
         drawEllipseLine(
-            shipBay.x,
-            shipBay.y,
+            serviceCenter.x,
+            serviceCenter.y,
             serviceRadiusX * 0.82F,
             serviceRadiusY * 0.82F,
             {serviceColor.r, serviceColor.g, serviceColor.b, serviceColor.a * 0.42F},
@@ -3325,12 +3327,12 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             kPi * 2.0F);
         for (const Vec2 marker : std::array<Vec2, 4> {{{-1.0F, 0.0F}, {1.0F, 0.0F}, {0.0F, -1.0F}, {0.0F, 1.0F}}}) {
             const Vec2 inner {
-                shipBay.x + marker.x * serviceRadiusX * 0.88F,
-                shipBay.y + marker.y * serviceRadiusY * 0.88F
+                serviceCenter.x + marker.x * serviceRadiusX * 0.88F,
+                serviceCenter.y + marker.y * serviceRadiusY * 0.88F
             };
             const Vec2 outer {
-                shipBay.x + marker.x * serviceRadiusX * 1.08F,
-                shipBay.y + marker.y * serviceRadiusY * 1.08F
+                serviceCenter.x + marker.x * serviceRadiusX * 1.08F,
+                serviceCenter.y + marker.y * serviceRadiusY * 1.08F
             };
             drawLine(inner.x, inner.y, outer.x, outer.y, serviceColor, snapshot.miningAtReturnZone ? 2.4F : 1.5F);
         }
@@ -3348,7 +3350,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         : 0.0F;
     // The packed bay sprites leave a little transparent margin below the exhaust,
     // so their visible foot sits well below the texture center.
-    const float shipVisibleFootShare = 0.455F;
+    const float shipVisibleFootShare = static_cast<float>(tuning::mining::surfaceShipVisibleFootShare);
     const float shipSpriteSize = miningShuttleSize(snapshot, view);
     const float shipVisibleFootOffset = shipSpriteSize * shipVisibleFootShare;
     const float shipSpriteY = shipGroundY + shipVisibleFootOffset +
@@ -5284,41 +5286,55 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             12);
     }
 
-    if (snapshot.miningTargetDrillable && (snapshot.miningDrilling || snapshot.miningContactIntensity > 0.12)) {
-        const float contact = static_cast<float>(std::clamp(snapshot.miningContactIntensity, 0.0, 1.0));
-        const float crackAlpha = 0.20F + contact * 0.46F;
-        std::vector<SceneVertex>& crackVertices = scratchVertices(96);
-        for (int i = 0; i < 8; ++i) {
-            const float seed = miningCellNoise(static_cast<int>(snapshot.miningTargetX), static_cast<int>(snapshot.miningTargetY), i + 61);
-            const float angle = static_cast<float>(i) * 0.78F + seed * 0.38F + static_cast<float>(snapshot.animationTime) * 0.10F;
-            const float inner = cellSize * (0.13F + seed * 0.08F);
-            const float outer = cellSize * (0.45F + contact * 0.44F + seed * 0.34F);
-            appendLine(
-                crackVertices,
-                particleAnchor.x + std::cos(angle) * inner,
-                particleAnchor.y + std::sin(angle) * inner,
-                particleAnchor.x + std::cos(angle) * outer,
-                particleAnchor.y + std::sin(angle) * outer,
-                {1.0F, 0.74F, 0.32F, crackAlpha * (0.55F + seed * 0.45F)});
+    const auto drawCuttingFeedback = [&](Vec2 particleAnchor) {
+        if (snapshot.miningTargetDrillable && (snapshot.miningDrilling || snapshot.miningContactIntensity > 0.12)) {
+            const float contact = static_cast<float>(std::clamp(snapshot.miningContactIntensity, 0.0, 1.0));
+            const float crackAlpha = 0.20F + contact * 0.46F;
+            std::vector<SceneVertex>& crackVertices = scratchVertices(96);
+            for (int i = 0; i < 8; ++i) {
+                const float seed = miningCellNoise(static_cast<int>(snapshot.miningTargetX), static_cast<int>(snapshot.miningTargetY), i + 61);
+                const float angle = static_cast<float>(i) * 0.78F + seed * 0.38F + static_cast<float>(snapshot.animationTime) * 0.10F;
+                const float inner = cellSize * (0.13F + seed * 0.08F);
+                const float outer = cellSize * (0.45F + contact * 0.44F + seed * 0.34F);
+                appendLine(
+                    crackVertices,
+                    particleAnchor.x + std::cos(angle) * inner,
+                    particleAnchor.y + std::sin(angle) * inner,
+                    particleAnchor.x + std::cos(angle) * outer,
+                    particleAnchor.y + std::sin(angle) * outer,
+                    {1.0F, 0.74F, 0.32F, crackAlpha * (0.55F + seed * 0.45F)});
+            }
+            submitLines(crackVertices, 1.5F + contact * 1.2F);
         }
-        submitLines(crackVertices, 1.5F + contact * 1.2F);
-    }
 
-    if (snapshot.miningDrilling || snapshot.miningFailurePulse > 0.0) {
-        const int failureBurst = snapshot.miningFailurePulse > 0.0 ? 18 : 0;
-        const int particleCount = 12 + failureBurst + static_cast<int>(std::round(snapshot.miningContactIntensity * 18.0));
-        for (int i = 0; i < particleCount; ++i) {
-            const float t = static_cast<float>(std::fmod(snapshot.animationTime * 9.0 + static_cast<double>(i) * 0.37, 1.0));
-            const float angle = static_cast<float>(i) * 1.73F + t * kPi * 2.0F;
-            const float failureScale = static_cast<float>(snapshot.miningFailurePulse);
-            const float radius = (0.2F + t * (0.9F + static_cast<float>(snapshot.miningContactIntensity) * 0.7F + failureScale * 1.3F)) * std::min(cellW, cellH);
-            const float px = particleAnchor.x + std::cos(angle) * radius + miningVisualRecoilX_ * cellW * t * .15F;
-            const float py = particleAnchor.y + std::sin(angle) * radius - miningVisualRecoilY_ * cellH * t * .15F;
-            const Color spark = snapshot.miningFailurePulse > 0.0
-                ? mix({1.0F, 0.18F, 0.08F, 0.95F}, {1.0F, 0.78F, 0.22F, 0.20F}, t)
-                : mix({1.0F, 0.82F, 0.28F, 0.95F}, {0.72F, 0.48F, 0.34F, 0.15F}, t);
-            const float size = cellSize * (0.16F + miningCellNoise(i, static_cast<int>(snapshot.animationTime * 10.0), 73) * 0.15F);
-            drawRect(px, py, size, size, spark);
+        if (snapshot.miningDrilling || snapshot.miningFailurePulse > 0.0) {
+            const int failureBurst = snapshot.miningFailurePulse > 0.0 ? 18 : 0;
+            const int particleCount = 12 + failureBurst + static_cast<int>(std::round(snapshot.miningContactIntensity * 18.0));
+            for (int i = 0; i < particleCount; ++i) {
+                const float t = static_cast<float>(std::fmod(snapshot.animationTime * 9.0 + static_cast<double>(i) * 0.37 +
+                    std::abs(particleAnchor.x * 3.7F + particleAnchor.y * 5.3F), 1.0));
+                const float angle = static_cast<float>(i) * 1.73F + t * kPi * 2.0F;
+                const float failureScale = static_cast<float>(snapshot.miningFailurePulse);
+                const float radius = (0.2F + t * (0.9F + static_cast<float>(snapshot.miningContactIntensity) * 0.7F + failureScale * 1.3F)) * std::min(cellW, cellH);
+                const float px = particleAnchor.x + std::cos(angle) * radius + miningVisualRecoilX_ * cellW * t * .15F;
+                const float py = particleAnchor.y + std::sin(angle) * radius - miningVisualRecoilY_ * cellH * t * .15F;
+                const Color spark = snapshot.miningFailurePulse > 0.0
+                    ? mix({1.0F, 0.18F, 0.08F, 0.95F}, {1.0F, 0.78F, 0.22F, 0.20F}, t)
+                    : mix({1.0F, 0.82F, 0.28F, 0.95F}, {0.72F, 0.48F, 0.34F, 0.15F}, t);
+                const float size = cellSize * (0.16F + miningCellNoise(i, static_cast<int>(snapshot.animationTime * 10.0), 73) * 0.15F);
+                drawRect(px, py, size, size, spark);
+            }
+        }
+
+    };
+    if (!snapshot.miningExtractionActive) {
+        if (!snapshot.miningOperatorActive && snapshot.miningFailurePulse <= 0.0 &&
+            !snapshot.miningDrillContacts.empty()) {
+            for (const auto& contact : snapshot.miningDrillContacts) {
+                drawCuttingFeedback(gridPoint(contact[0], contact[1]));
+            }
+        } else {
+            drawCuttingFeedback(particleAnchor);
         }
     }
 
@@ -6948,7 +6964,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         }
 
         if (snapshot.orbitalOverlay > 0.001 ||
-            ((snapshot.orbitalZoneSurveyed || !snapshot.orbitalExistingShafts.empty()) &&
+            ((snapshot.orbitalZoneSurveyed || snapshot.orbitalArtifactHint || !snapshot.orbitalExistingShafts.empty()) &&
                 !snapshot.launchLandingLocalFrame)) {
             const float alpha = static_cast<float>(snapshot.orbitalOverlay);
             const float radius = destinationSize * 0.46F;
@@ -7101,6 +7117,14 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                     {0.02F,0.04F,0.05F,0.95F*destinationAlpha},18);
                 drawCircle(mouth.x,mouth.y,0.008F,
                     {0.18F,0.76F,0.74F,0.78F*destinationAlpha},18);
+            }
+            if (snapshot.orbitalArtifactHint && !snapshot.launchLandingLocalFrame) {
+                const Vec2 signal = zonePoint(snapshot.orbitalArtifactBearing, radius * 0.95F);
+                const float pulse = 0.85F + 0.15F * std::sin(static_cast<float>(snapshot.animationTime) * 2.0F);
+                drawRadialGlow(signal.x, signal.y, radius * 0.28F,
+                    {0.74F, 0.28F, 1.0F, 0.34F * pulse * destinationAlpha}, 32);
+                drawRadialGlow(signal.x, signal.y, radius * 0.11F,
+                    {0.82F, 0.58F, 1.0F, 0.46F * pulse * destinationAlpha}, 24);
             }
             const Vec2 pad = zonePoint(zone.centerBearing, radius);
             const Vec2 shaft = zonePoint(snapshot.orbitalShaftBearing, radius);

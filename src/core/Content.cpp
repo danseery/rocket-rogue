@@ -277,8 +277,6 @@ ContentCatalog createDefaultContent()
              {"eva", "There it is - an anomalous signal. Your suit can fit through that crevice. Clear the seal with your hand drill, then tether the artifact and bring it back to the ship.", {MessageHint::Drill, MessageHint::Tether}}}}
     };
     for (auto& message : catalog.incomingMessages) message.context = MessageDeliveryContext::Mining;
-    catalog.incomingMessages.push_back({"prospector_unlocked", "mission_control_fennec", "Meet your Prospector", "Understood", true,
-        {{"default", "First artifact recovered! You've earned a Prospector Support Drone and your first drone slot. I've assigned it to your Rig. The little helper mines revealed ore pockets while you keep exploring. Manage it in Drone Ops.", {}}}});
     catalog.incomingMessages.push_back({"lunar_approach", "mission_control_fennec", "Earth launch clearance", "Ready to launch", true,
         {{"default", "You're cleared for launch. The Moon is above and to your right. Use thrust to climb away, then steer toward its orbit bands. Your trajectory shows where you will coast; adjust it to establish orbit before surveying a landing site.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
 

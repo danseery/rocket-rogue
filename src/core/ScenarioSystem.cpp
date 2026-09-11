@@ -5,6 +5,7 @@
 #include "core/ResearchSystem.h"
 #include "core/IncomingMessages.h"
 #include "core/SolarProgression.h"
+#include "core/SystemContent.h"
 
 #include <algorithm>
 #include <charconv>
@@ -150,7 +151,8 @@ bool protectedObjectiveAwaitingReturn(
     const ContentCatalog& catalog,
     const ScenarioStepDefinition& step)
 {
-    if (step.completionEvent != ScenarioEventKind::ProtectedObjectiveExtracted ||
+    if (state.run.expedition.travelInitialized ||
+        step.completionEvent != ScenarioEventKind::ProtectedObjectiveExtracted ||
         step.miningSiteDefinitionId.empty()) {
         return false;
     }
@@ -488,9 +490,6 @@ void applyReward(
             state.meta.equippedDroneIds.size() < static_cast<std::size_t>(state.meta.droneBaySlots)) {
             state.meta.equippedDroneIds.emplace_back(reward.id);
         }
-        if (reward.id == content::drone::miningDrone && !alreadyOwned)
-            enqueueIncomingMessage(state.incomingMessages, catalog,
-                {"campaign.prospector_unlocked", "prospector_unlocked", "default"});
         break;
     }
     case ScenarioRewardKind::FrontierReadiness:
@@ -1124,8 +1123,12 @@ ScenarioActionOutcome performScenarioAction(
     const ScenarioDefinition resolved = resolveScenarioDefinition(*definition, *instance);
     const ScenarioStepDefinition* step = findScenarioStepDefinition(resolved, stepId);
     ScenarioStepProgress* progress = findScenarioStepProgress(*instance, stepId);
-    if (step == nullptr || progress == nullptr ||
-        scenarioStepState(state, catalog, scenarioId, stepId) == ScenarioStepState::Locked) {
+    const ScenarioStepState currentState = scenarioStepState(state, catalog, scenarioId, stepId);
+    if (step == nullptr || progress == nullptr || currentState == ScenarioStepState::Locked) {
+        return outcome;
+    }
+    if (currentState == ScenarioStepState::Complete) {
+        outcome.message = "Objective already complete.";
         return outcome;
     }
 
@@ -1148,7 +1151,8 @@ ScenarioActionOutcome performScenarioAction(
         return outcome;
     }
     if (action == ScenarioActionKind::AcknowledgeFailure) {
-        if (!progress->failureSeen || progress->failureAcknowledged) {
+        if (currentState != ScenarioStepState::Active ||
+            !progress->failureSeen || progress->failureAcknowledged) {
             return outcome;
         }
         progress->failureAcknowledged = true;
@@ -1411,15 +1415,30 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
     }
     presentation.mandatoryBriefing = step->mandatoryBriefing;
     presentation.briefingAcknowledged = progress->briefingAcknowledged;
-    presentation.firstFailurePending = progress->failureSeen && !progress->failureAcknowledged;
+    presentation.firstFailurePending = presentation.state == ScenarioStepState::Active &&
+        progress->failureSeen && !progress->failureAcknowledged;
     presentation.activityStarted = progress->activityStarted;
     presentation.activity = step->activity;
     presentation.transition = step->transition;
     presentation.retryPolicy = step->retryPolicy;
     presentation.presentationMode = step->presentationMode;
     presentation.miningSiteDefinitionId = step->miningSiteDefinitionId;
-    if (presentation.returnPending) {
+    if (presentation.state == ScenarioStepState::Complete) {
         presentation.action = ScenarioActionKind::None;
+        presentation.actionLabel.clear();
+        presentation.returnPending = false;
+        presentation.mandatoryBriefing = false;
+        const bool missionClaim = std::any_of(catalog.solarMissions.begin(), catalog.solarMissions.end(),
+            [&](const SolarMissionDefinition& mission) {
+                return mission.scenarioId == definition->id && mission.claimStepId == step->id;
+            });
+        presentation.detail = missionClaim ? "MISSION COMPLETE" : "OBJECTIVE COMPLETE";
+        presentation.gate.clear();
+        presentation.nextStep.clear();
+    } else if (presentation.returnPending) {
+        presentation.action = ScenarioActionKind::None;
+    } else if (presentation.state == ScenarioStepState::ReadyToClaim) {
+        presentation.action = ScenarioActionKind::ClaimReward;
     } else if (presentation.firstFailurePending) {
         presentation.action = ScenarioActionKind::AcknowledgeFailure;
     } else if (step->mandatoryBriefing && !progress->briefingAcknowledged) {
@@ -1428,8 +1447,6 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
                  step->action == ScenarioActionKind::RetryActivity)
             ? step->action
             : ScenarioActionKind::AcknowledgeBriefing;
-    } else if (presentation.state == ScenarioStepState::ReadyToClaim) {
-        presentation.action = ScenarioActionKind::ClaimReward;
     } else if (presentation.state == ScenarioStepState::Active &&
                (step->action == ScenarioActionKind::BeginActivity ||
                 step->action == ScenarioActionKind::RetryActivity)) {
@@ -1538,6 +1555,33 @@ ScenarioObjectivePresentation scenarioObjectiveForMining(
 CampaignNextStep campaignNextStep(const GameState& state, const ContentCatalog& catalog)
 {
     CampaignNextStep result;
+    if (state.run.expedition.travelInitialized) {
+        const auto* mission = solarMissionForBody(catalog, state.run.expedition.location.bodyId);
+        if (mission == nullptr || !solarMissionAvailable(state, *mission) ||
+            solarMissionClaimed(state, catalog, *mission)) {
+            mission = nextSolarMission(state, catalog);
+        }
+        if (mission != nullptr) {
+            const auto* body = systemBody(solarSystemDefinition(), mission->bodyId);
+            result.available = true;
+            result.location = body == nullptr ? mission->bodyId : body->name;
+            result.destinationId = mission->bodyId;
+            result.objective = solarMissionObjectiveForBody(state, catalog, mission->bodyId);
+            result.goal = result.objective.goal;
+            result.gate = result.objective.gate;
+            result.nextStep = result.objective.state == ScenarioStepState::ReadyToClaim
+                ? "Claim the mission reward." : "Set a waypoint for " + result.location + ".";
+            return result;
+        }
+        result.terminal = arkDiscovered(state);
+        result.available = result.terminal;
+        result.location = "STRAYLIGHT";
+        result.destinationId = "straylight";
+        result.goal = result.terminal ? "Approach Straylight." : "No mission is available.";
+        result.gate = result.terminal ? "Solar missions complete." : "Progression data is incomplete.";
+        result.nextStep = result.terminal ? "Set waypoint: Straylight." : "Return to Earth.";
+        return result;
+    }
     if (!state.run.expedition.travelInitialized && state.run.routeTransit.active()) {
         const Destination* target = catalog.findDestination(state.run.routeTransit.targetDestinationId);
         result.available = target != nullptr;

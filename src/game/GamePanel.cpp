@@ -19,6 +19,7 @@
 #include "core/ResearchPresentation.h"
 #include "core/ResearchSystem.h"
 #include "core/ScenarioSystem.h"
+#include "core/SolarProgression.h"
 #include "core/ShipPresentation.h"
 #include "core/Tuning.h"
 #include "core/GameUi.h"
@@ -1348,6 +1349,13 @@ std::string miningCocoonLayerValue(const MiningGateRuntime& gate, std::size_t la
 std::string compactMiningScenarioObjective(const GameState& state, const ContentCatalog& catalog)
 {
     const ScenarioObjectivePresentation presentation = scenarioObjectiveForMining(state, catalog);
+    if (state.run.expedition.travelInitialized) {
+        const auto mission = solarMissionObjectiveForBody(state, catalog, state.run.mining.bodyId);
+        if (mission.available && mission.state == ScenarioStepState::Complete)
+            return mission.location + " // MISSION COMPLETE";
+        if (mission.available && mission.state == ScenarioStepState::ReadyToClaim)
+            return mission.location + " // READY TO CLAIM";
+    }
     const MiningGateRuntime& gate = state.run.mining.gate;
     if (!gate.cocoonLayers.empty()) {
         std::ostringstream out;
@@ -3241,7 +3249,7 @@ std::string buildGamePanelMarkup(
             failureBody << "<div class=\"phase-advisory danger mining-failure-callout\"><strong>" << htmlEscape(miningHud.failureTitle)
                 << "</strong><span>" << htmlEscape(miningHud.failureBody) << "</span></div>";
             failureBody << "<div class=\"modal-actions actions action-row\">"
-                << panelButton(panelActionButton("Return to Surface Ops", ui::actions::miningFailureAck, "danger"), true)
+                << panelButton(panelActionButton(state.run.expedition.travelInitialized ? "Return to ship" : "Return to Surface Ops", ui::actions::miningFailureAck, "danger"), true)
                 << "</div>";
             out << autoModalTemplate(ui::modals::miningFailure, miningHud.failureTitle, failureBody.str(), false);
         }
@@ -4027,7 +4035,9 @@ bool usesGameplayInputHelper(const PanelRenderContext& context)
 
 std::optional<ModalPresentation> buildIncomingMessageCard(
     const PanelRenderContext& context, std::string_view messageId,
-    std::string_view variantId, const std::string& action)
+    std::string_view variantId, const std::string& action,
+    std::string_view titleOverride, std::string_view bodyOverride,
+    std::string_view buttonOverride)
 {
     const auto* message = incomingMessage(context.catalog, messageId);
     const auto* speaker = message ? messageSpeaker(context.catalog, message->speakerId) : nullptr;
@@ -4038,9 +4048,10 @@ std::optional<ModalPresentation> buildIncomingMessageCard(
                  << "<div class=\"incoming-message-portrait\"><img src=\"" << htmlEscape(message->concerned ? speaker->concernedPortrait : speaker->portrait)
                  << "\" alt=\"" << htmlEscape(speaker->name) << "\" /></div>"
                  << "<div class=\"incoming-message-copy\"><div class=\"incoming-message-channel\">" << htmlEscape(speaker->channel)
-                 << "</div><h2>" << htmlEscape(speaker->name) << "</h2><h3>" << htmlEscape(message->title)
-                 << "</h3><p>" << htmlEscape(variant->body) << "</p><div class=\"incoming-message-hints\">";
+                 << "</div><h2>" << htmlEscape(speaker->name) << "</h2><h3>" << htmlEscape(titleOverride.empty() ? message->title : titleOverride)
+                 << "</h3><p>" << htmlEscape(bodyOverride.empty() ? variant->body : bodyOverride) << "</p><div class=\"incoming-message-hints\">";
             for (const auto hint : variant->hints) {
+                if (!bodyOverride.empty()) break;
                 const bool pad = context.controllerFlightControls;
                 const char* label = "";
                 switch (hint) {
@@ -4054,7 +4065,7 @@ std::optional<ModalPresentation> buildIncomingMessageCard(
                 body << "<p>" << label << "</p>";
             }
             body << "</div></div></div><div class=\"modal-actions action-row rr-action-footer\">"
-                 << button(message->acknowledgement, action, "ok", true) << "</div></section>";
+                 << button(buttonOverride.empty() ? message->acknowledgement : buttonOverride, action, "ok", true) << "</div></section>";
     return ModalPresentation{"incoming_message", "INCOMING MESSAGE", body.str(), action, true, false, false, ModalTone::Neutral};
 }
 
@@ -4141,7 +4152,15 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
         result.contentMarkup.clear();
         result.modals.clear();
     }
+    if (context.state.run.expedition.travelInitialized && !context.titleScreenActive) {
+        // Live missions use incoming briefings and one explicit claim, never
+        // the old activity retry/route/refit gates collected by shared panels.
+        std::erase_if(result.modals, [](const auto& modal) {
+            return modal.id.starts_with("scenario_");
+        });
+    }
     const bool canReviewResearchBreakthrough = !context.titleScreenActive
+        && !context.state.run.expedition.travelInitialized
         && (context.state.screen == Screen::ArrivalOps
             || context.state.screen == Screen::Hangar
             || context.state.screen == Screen::Navigation

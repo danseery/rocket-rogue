@@ -50,16 +50,25 @@ void mergeRecoveredBuild(ExpeditionProgressionState& active, ExpeditionProgressi
     for (const std::string& synergy : recovered.selectedSynergyIds)
         if (std::find(active.selectedSynergyIds.begin(), active.selectedSynergyIds.end(), synergy) == active.selectedSynergyIds.end())
             active.selectedSynergyIds.push_back(synergy);
-    for (const auto& recoveredGraft : recovered.droneModuleAssignments) {
+    const auto restoreGraft = [&](const auto& recoveredGraft) {
         auto current = std::find_if(active.droneModuleAssignments.begin(), active.droneModuleAssignments.end(),
             [&](const auto& graft) { return graft.equippedFrame == recoveredGraft.equippedFrame; });
         if (current == active.droneModuleAssignments.end()) {
             active.droneModuleAssignments.push_back(recoveredGraft);
         } else if (current->module != recoveredGraft.module ||
                    current->primaryDroneId != recoveredGraft.primaryDroneId) {
-            active.pendingGraftConflicts.push_back({recoveredGraft.equippedFrame, *current, recoveredGraft});
+            const bool alreadyPending = std::any_of(active.pendingGraftConflicts.begin(), active.pendingGraftConflicts.end(),
+                [&](const auto& conflict) {
+                    return conflict.equippedFrame == recoveredGraft.equippedFrame &&
+                        conflict.recovered.module == recoveredGraft.module &&
+                        conflict.recovered.primaryDroneId == recoveredGraft.primaryDroneId;
+                });
+            if (!alreadyPending)
+                active.pendingGraftConflicts.push_back({recoveredGraft.equippedFrame, *current, recoveredGraft});
         }
-    }
+    };
+    for (const auto& graft : recovered.droneModuleAssignments) restoreGraft(graft);
+    for (const auto& conflict : recovered.pendingGraftConflicts) restoreGraft(conflict.recovered);
     active.droneModuleRuntime.clear();
     active.runUpgradeOffers = {};
     active.runUpgradeOfferCount = 0;
@@ -359,6 +368,7 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
                                          const SystemDefinition &system, FlightInput input, double dt,
                                          const MiningRunState *site)
 {
+    if (!flight.active && !e.undockReady) return {};
     if (e.undockReady) {
         e.cruise.active = false;
         if (input.throttle <= 0.001) {
@@ -481,12 +491,17 @@ ExpeditionResult recoverSiteBattery(PersistentExpeditionState &e, std::string_vi
 }
 ExpeditionResult dockExpedition(PersistentExpeditionState &e, FlightRunState &f, const SystemDefinition &s)
 {
+    if (e.travelInitialized && (f.hullRemaining <= 0 || f.mode == FlightMode::Landing))
+        return ExpeditionResult::InvalidState;
+    if (e.travelInitialized && !f.active && !atDock(e, "earth") && !atDock(e, "straylight"))
+        return ExpeditionResult::InvalidState;
     auto p = e.location;
     captureSystemLocation(p, f);
     p = absolute(p, s);
     const SystemBodyDefinition *dock = nullptr;
     for (const auto &b : s.bodies)
-        if (b.dock && distance(p.position, e.travelInitialized ? systemDockPosition(b) : b.position) <= (e.travelInitialized ? expeditionDockRadius : dockRange) &&
+        if (b.dock && (!e.travelInitialized || b.id != "straylight" || e.straylightRevealed) &&
+            distance(p.position, e.travelInitialized ? systemDockPosition(b) : b.position) <= (e.travelInitialized ? expeditionDockRadius : dockRange) &&
             distance(p.velocity, b.velocity) <= rendezvousSpeed)
         {
             dock = &b;
@@ -545,7 +560,8 @@ bool canDockExpedition(const PersistentExpeditionState& e, const FlightRunState&
     captureSystemLocation(p, f);
     p = absolute(p, s);
     for (const auto& b : s.bodies)
-        if (b.dock && distance(p.position, systemDockPosition(b)) <= expeditionDockRadius &&
+        if (b.dock && (!e.travelInitialized || b.id != "straylight" || e.straylightRevealed) &&
+            distance(p.position, systemDockPosition(b)) <= expeditionDockRadius &&
             distance(p.velocity, b.velocity) <= rendezvousSpeed) return true;
     return false;
 }
@@ -555,7 +571,8 @@ bool expeditionDockInRange(const PersistentExpeditionState& e, const FlightRunSt
     captureSystemLocation(p, f);
     p = absolute(p, s);
     for (const auto& b : s.bodies)
-        if (b.dock && (dockBodyId.empty() || b.id == dockBodyId) &&
+        if (b.dock && (!e.travelInitialized || b.id != "straylight" || e.straylightRevealed) &&
+            (dockBodyId.empty() || b.id == dockBodyId) &&
             distance(p.position, systemDockPosition(b)) <= expeditionDockRadius) return true;
     return false;
 }
@@ -575,6 +592,10 @@ ExpeditionResult departDock(PersistentExpeditionState &e, FlightRunState &f)
 {
     if (!atDock(e, "earth") && !atDock(e, "straylight"))
         return ExpeditionResult::NotDocked;
+    if (f.active || (e.active && !(atDock(e, "straylight") && !e.arkActivated)))
+        return ExpeditionResult::InvalidState;
+    if (e.travelInitialized && atDock(e, "straylight") && !e.straylightRevealed)
+        return ExpeditionResult::InvalidTarget;
     if (f.fuelRemaining <= 0 || f.hullRemaining <= 0)
         return ExpeditionResult::InvalidState;
     e.active = true;
@@ -676,7 +697,7 @@ ExpeditionResult loseExpedition(PersistentExpeditionState &e, FlightRunState &f,
     if (!e.active)
         return ExpeditionResult::AlreadyApplied;
     const auto *home = systemBody(s, e.homeBodyId);
-    if (!home || !home->dock)
+    if (!home || !home->dock || (home->id != "earth" && !e.arkActivated))
         return ExpeditionResult::InvalidState;
     auto p = e.location;
     captureSystemLocation(p, f);
@@ -702,6 +723,18 @@ ExpeditionResult loseExpedition(PersistentExpeditionState &e, FlightRunState &f,
     wreck.build.runUpgradeOffers = {};
     wreck.build.runUpgradeOfferCount = 0;
     wreck.build.runUpgradeOfferPending = false;
+    // The wreck payload already stores graft alternatives as assignments. Keep
+    // unresolved choices there so a second loss and reload cannot discard them;
+    // merging the recovered same-slot assignments recreates the explicit choice.
+    for (const auto& conflict : wreck.build.pendingGraftConflicts) {
+        const auto& graft = conflict.recovered;
+        const bool stored = std::any_of(wreck.build.droneModuleAssignments.begin(), wreck.build.droneModuleAssignments.end(),
+            [&](const auto& candidate) {
+                return candidate.equippedFrame == graft.equippedFrame && candidate.module == graft.module &&
+                    candidate.primaryDroneId == graft.primaryDroneId;
+            });
+        if (!stored) wreck.build.droneModuleAssignments.push_back(graft);
+    }
     wreck.build.pendingGraftConflicts.clear();
     wreck.buildRecoverable = true;
     e.wrecks.push_back(std::move(wreck));
@@ -714,13 +747,27 @@ ExpeditionResult loseExpedition(PersistentExpeditionState &e, FlightRunState &f,
         }
     e.active = false;
     e.cruise.active = false;
+    e.undockReady = false;
     e.progression = {};
+    e.selectedOrbitBody.clear();
+    e.selectedOrbitZone = "zone_1";
+    e.course.trajectory.clear();
+    e.course.intersectedHazards.clear();
+    e.course.estimateValid = false;
+    e.course.approachFuel = e.course.returnMargin = 0;
     e.rigFuel.current = e.rigFuel.capacity;
     e.location = {s.id, home->id, CoordinateFrame::Body, {e.travelInitialized ? systemDockPosition(*home).x-home->position.x : dockRange * .8, e.travelInitialized ? systemDockPosition(*home).y-home->position.y : 0}, {}, 0, home->siteId};
+    const double fuelCapacity = std::max(10.0, f.fuelCapacity);
+    const double hullMaximum = std::max(100.0, f.hullMaximum);
+    f = {};
     restoreSystemLocation(e.location, f);
     f.active = false;
-    f.fuelCapacity = std::max(10.0, f.fuelCapacity);
-    f.hullMaximum = std::max(100.0, f.hullMaximum);
+    f.physicalFlight = e.travelInitialized;
+    f.phase = FlightPhase::Transfer;
+    f.mode = FlightMode::Orbit;
+    f.selectedThrottle = 0;
+    f.fuelCapacity = fuelCapacity;
+    f.hullMaximum = hullMaximum;
     f.fuelRemaining = f.fuelCapacity;
     f.hullRemaining = f.hullMaximum;
     f.heat = 0;

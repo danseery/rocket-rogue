@@ -62,7 +62,9 @@ struct PanelRenderContext {
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);
 std::optional<ModalPresentation> buildIncomingMessageCard(
     const PanelRenderContext& context, std::string_view messageId,
-    std::string_view variantId, const std::string& action);
+    std::string_view variantId, const std::string& action,
+    std::string_view titleOverride = {}, std::string_view bodyOverride = {},
+    std::string_view buttonOverride = {});
 void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& result);
 std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context);
 

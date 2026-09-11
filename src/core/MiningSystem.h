@@ -44,6 +44,16 @@ struct MiningDrillStats {
     int terrainHeight = 0;
 };
 
+// Actual terrain contacts, shared by cutting and its presentation.
+struct DrillFootprintCell {
+    int x = 0;
+    int y = 0;
+    double powerScale = 1.0;
+    int cutter = 0; // Main head: 0; side cutters: -1 / +1.
+};
+std::vector<DrillFootprintCell> miningDrillFootprintCells(
+    const MiningRunState& mining, const MiningDrillStats& stats);
+
 enum class RigLoadBand {
     Light,
     Standard,

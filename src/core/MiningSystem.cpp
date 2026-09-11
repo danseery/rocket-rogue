@@ -166,7 +166,7 @@ double unitHash(std::uint64_t seed, int x, int y, int depthZone, std::uint64_t l
 
 double miningShipStartX(const MiningRunState& mining)
 {
-    const double leftClearance = tuning::mining::returnZoneRadiusCells + 0.5;
+    const double leftClearance = 3.5; // Landing placement is independent of service reach.
     const double rightClearance = std::max(leftClearance, static_cast<double>(mining.terrain.width) - leftClearance);
     return std::clamp(
         static_cast<double>(mining.terrain.width) * tuning::mining::returnZoneHorizontalFraction,
@@ -249,15 +249,20 @@ double controlledDrillOriginOffset(const MiningRunState& mining)
         : rig_geometry::drillBase;
 }
 
+bool withinShipReturnRadius(const MiningRunState& mining, double x, double y)
+{
+    const double dx = x - (mining.returnZoneX + tuning::mining::returnZoneCenterOffsetX);
+    const double dy = y - (mining.returnZoneY - tuning::mining::returnZoneCenterHeightCells);
+    return dx * dx + dy * dy <=
+        tuning::mining::returnZoneRadiusCells * tuning::mining::returnZoneRadiusCells;
+}
+
 bool controlledActorAtReturnZone(const MiningRunState& mining)
 {
     if (!mining.active || mining.depthZone != mining.shipDepthZone) {
         return false;
     }
-    const double dx = controlledActorX(mining) - mining.returnZoneX;
-    const double dy = controlledActorY(mining) - mining.returnZoneY;
-    return dx * dx + dy * dy <=
-        tuning::mining::returnZoneRadiusCells * tuning::mining::returnZoneRadiusCells;
+    return withinShipReturnRadius(mining, controlledActorX(mining), controlledActorY(mining));
 }
 
 bool rigAtReturnZone(const MiningRunState& mining)
@@ -265,10 +270,7 @@ bool rigAtReturnZone(const MiningRunState& mining)
     if (!mining.active || mining.rigDepthZone != mining.shipDepthZone) {
         return false;
     }
-    const double dx = mining.droneX - mining.returnZoneX;
-    const double dy = mining.droneY - mining.returnZoneY;
-    return dx * dx + dy * dy <=
-        tuning::mining::returnZoneRadiusCells * tuning::mining::returnZoneRadiusCells;
+    return withinShipReturnRadius(mining, mining.droneX, mining.droneY);
 }
 
 bool operatorAtReturnZone(const MiningRunState& mining)
@@ -277,10 +279,7 @@ bool operatorAtReturnZone(const MiningRunState& mining)
         mining.depthZone != mining.shipDepthZone) {
         return false;
     }
-    const double dx = mining.operatorX - mining.returnZoneX;
-    const double dy = mining.operatorY - mining.returnZoneY;
-    return dx * dx + dy * dy <=
-        tuning::mining::returnZoneRadiusCells * tuning::mining::returnZoneRadiusCells;
+    return withinShipReturnRadius(mining, mining.operatorX, mining.operatorY);
 }
 
 bool tetheredRigRecoverableAtShip(const MiningRunState& mining)
@@ -2785,12 +2784,6 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
     }
 }
 
-struct DrillFootprintCell {
-    int x = 0;
-    int y = 0;
-    double powerScale = 1.0;
-};
-
 void recordRigContact(MiningRunState& mining, const rig_geometry::Contact& contact);
 void recordMiningMovementCollision(MiningRunState& mining, double attemptedX, double attemptedY);
 
@@ -2845,7 +2838,9 @@ std::vector<DrillFootprintCell> drillFootprintCells(
                 const double mainPower = rig_geometry::triangleContact(mainTriangle,x,y,.025).depth > rig_geometry::skin
                     ? .48+centerBias*.52 : 0.0;
                 const double cutterPower = cross <= damageHalfWidth ? 0.60 : 0.0;
-                cells.push_back({x,y,std::max(mainPower,cutterPower)});
+                const double lateral = (x + .5 - originX) * -dirY + (y + .5 - originY) * dirX;
+                cells.push_back({x,y,std::max(mainPower,cutterPower),
+                    mainPower > 0.0 ? 0 : (lateral < 0.0 ? -1 : 1)});
                 continue;
             }
             const double cellX = static_cast<double>(x) + 0.5;
@@ -7080,6 +7075,12 @@ const MiningCell* miningCellAt(const MiningTerrain& terrain, int x, int y)
     return &terrain.cells[index];
 }
 
+std::vector<DrillFootprintCell> miningDrillFootprintCells(
+    const MiningRunState& mining, const MiningDrillStats& stats)
+{
+    return drillFootprintCells(mining, stats, mining.hullDirX, mining.hullDirY);
+}
+
 MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& catalog)
 {
     MiningDrillStats stats;
@@ -9716,12 +9717,8 @@ void updateMiningArtifact(GameState& state, const ContentCatalog& catalog, doubl
     }
 
     const auto deliverAtShip = [&]() {
-        const double bayDx = artifact.x - mining.returnZoneX;
-        const double bayDy = artifact.y - mining.returnZoneY;
         if (mining.depthZone != mining.shipDepthZone || !artifact.tethered ||
-            bayDx * bayDx + bayDy * bayDy >
-                tuning::mining::artifactDeliveryRadiusCells *
-                    tuning::mining::artifactDeliveryRadiusCells) {
+            !withinShipReturnRadius(mining, artifact.x, artifact.y)) {
             return false;
         }
         artifact.state = MiningArtifactState::Delivered;
@@ -10191,6 +10188,82 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
     MiningRunState& mining = state.run.mining;
     PlanetaryExpeditionState& expedition = state.run.planetaryExpedition;
     if (!mining.active || !expedition.active) {
+        return outcome;
+    }
+
+    if (abort && state.run.expedition.travelInitialized && state.run.flight.landing.siteCommitted) {
+        if (!mining.failurePending && miningAtReturnZone(mining)) {
+            outcome.message = "Already at the ship. Continue mining or leave when ready.";
+            return outcome;
+        }
+        if (mining.depthZone != mining.shipDepthZone &&
+            std::none_of(mining.depthLayers.begin(), mining.depthLayers.end(),
+                [&](const auto& layer) { return layer.depthZone == mining.shipDepthZone; })) {
+            outcome.message = "Ship recovery unavailable. The mining site has been preserved.";
+            return outcome;
+        }
+
+        // Recall ends the deployment, not the expedition or its physical site.
+        // Loose payload and the artifact stay where their carriers were lost.
+        outcome.materialLost = mining.temporaryMaterials;
+        addMiningMaterials(outcome.materialLost, miniDroneCargoManifest(mining));
+        const int activeDepth = mining.depthZone;
+        (void)activateLandingLayer(mining, mining.rigDepthZone);
+        spawnLooseMaterialChunks(mining, mining.temporaryMaterials, mining.droneX, mining.droneY);
+        (void)activateLandingLayer(mining, activeDepth);
+        for (const auto& drone : mining.miniDrones) {
+            const int droneDepth = drone.transitDepthZone >= 0 ? drone.transitDepthZone : activeDepth;
+            (void)activateLandingLayer(mining, droneDepth);
+            spawnLooseMaterialChunks(mining, drone.haulMaterials, drone.x, drone.y);
+        }
+        const auto releaseCarriers = [](auto& objects) {
+            for (auto& object : objects) { object.carrierFrame = -1; object.tethered = false; }
+        };
+        releaseCarriers(mining.looseObjects);
+        mining.artifact.tethered = false;
+        for (auto& layer : mining.depthLayers) {
+            releaseCarriers(layer.looseObjects);
+            layer.artifact.tethered = false;
+        }
+        (void)activateLandingLayer(mining, mining.shipDepthZone);
+        mining.cargo = 0;
+        mining.temporaryMaterials = {};
+        mining.temporaryArtifacts.clear();
+        mining.failurePending = mining.rigDisabled = mining.drilling = mining.firing = mining.drillThermalLock = false;
+        mining.failureMessage.clear();
+        mining.failureSeconds = mining.drillHeat = mining.moveX = mining.moveY = 0;
+        mining.droneHealth = mining.drillIntegrity = mining.operatorIntegrity = 1;
+        mining.operatorPresent = mining.operatorRigTethered = mining.rigTethered = false;
+        mining.operatorMode = MiningOperatorMode::Rig;
+        mining.rigDepthZone = mining.shipDepthZone;
+        mining.droneX = mining.operatorX = mining.returnZoneX;
+        mining.droneY = mining.operatorY = mining.returnZoneY;
+        mining.rigVelocityX = mining.rigVelocityY = mining.operatorVelocityX = mining.operatorVelocityY = 0;
+        mining.aimX = mining.droneX; mining.aimY = mining.droneY + 1;
+        mining.aimDirX = mining.hullDirX = 0; mining.aimDirY = mining.hullDirY = 1;
+        mining.operatorToggleProgress = mining.operatorFireCooldownSeconds = mining.operatorFirePulseSeconds = 0;
+        mining.recoilX = mining.recoilY = mining.contactBounce = mining.contactBounceVelocity = mining.contactBounceCooldown = 0;
+        mining.contactIntensity = mining.contactIndicatorSeconds = mining.scannerPulseSeconds = 0;
+        mining.movementSlowSeconds = 0; mining.movementSlowScale = mining.contactSpeedRecovery = 1;
+        mining.drillBreakNotified = mining.oxygenDepletedNotified = mining.operatorOxygenDepletedNotified = false;
+        mining.rigGeometryValidated = false;
+        mining.rigOxygen.current = mining.rigOxygen.capacity;
+        mining.suitOxygen.current = mining.suitOxygen.capacity;
+        mining.combatProjectiles.clear(); mining.damageNumbers.clear(); mining.pickupEvents.clear();
+        mining.miniDrones.clear();
+        state.run.expedition.progression.droneModuleRuntime.clear();
+        state.run.expedition.rigFuel = mining.rigFuel;
+        ensureMiningMiniDroneAgents(state, catalog);
+        refreshTargetCell(mining);
+        outcome.applied = true;
+        outcome.materialDelta = mining.stowedMaterials;
+        outcome.cargoDelta = mining.stowedCargo;
+        outcome.hazardDelta = tuning::mining::emergencyRecallHazardPenalty;
+        expedition.hazard = std::clamp(expedition.hazard + outcome.hazardDelta, 0.0, 1.0);
+        outcome.message = "Recovered at your ship. Cargo and upgrades aboard are safe. Unreturned ore remains at the site.";
+        appendSurfaceLog(expedition, surfaceActionSummary(outcome));
+        state.screen = Screen::Mining;
+        storeVisitedSite(state, state.run.expedition.location.siteId);
         return outcome;
     }
 

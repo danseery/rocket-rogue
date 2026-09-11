@@ -95,8 +95,17 @@ bool validateSolarMissionCatalog(const ContentCatalog& catalog, std::string* err
              claim->completionEvent != ScenarioEventKind::ProtectedObjectiveExtracted)) {
             return fail("solar mission has no explicit artifact claim action: " + mission.bodyId);
         }
-        if (mission.briefingMessageId.empty() || mission.completionMessageId.empty()) {
+        const auto* briefingMessage = incomingMessage(catalog, mission.briefingMessageId);
+        const auto* completionMessage = incomingMessage(catalog, mission.completionMessageId);
+        if (briefingMessage == nullptr || completionMessage == nullptr ||
+            !briefingMessage->campaignOnce || !completionMessage->campaignOnce ||
+            messageVariant(*briefingMessage, "default") == nullptr ||
+            messageVariant(*completionMessage, "default") == nullptr ||
+            mission.briefingMessageId == mission.completionMessageId) {
             return fail("solar mission guidance is missing: " + mission.bodyId);
+        }
+        if (claim->transition.kind != ScenarioTransitionKind::None) {
+            return fail("solar mission claim must preserve the current gameplay screen: " + mission.bodyId);
         }
         if (!mission.optional) {
             if (mission.progressionOrdinal != expectedOrdinal++) {
@@ -132,40 +141,59 @@ bool validateSolarMissionCatalog(const ContentCatalog& catalog, std::string* err
 
 bool reconcileSolarMissionMessages(GameState& state, const ContentCatalog& catalog)
 {
-    if (!state.run.expedition.travelInitialized || state.screen != Screen::Flight ||
-        state.run.flight.mode == FlightMode::Landing) return false;
-    const std::string& bodyId = state.run.expedition.location.bodyId;
-    const SolarMissionDefinition* mission = solarMissionForBody(catalog, bodyId);
-    if (mission == nullptr) {
-        // A body-to-system handoff may happen before the completion message is
-        // displayed. Keep the newest completed main mission as the stable
-        // occurrence source so crossing that seam cannot lose guidance.
-        for (auto it = catalog.solarMissions.rbegin(); it != catalog.solarMissions.rend(); ++it) {
-            if (!it->optional && solarMissionClaimed(state, catalog, *it)) {
-                mission = &*it;
-                break;
-            }
+    auto& expedition = state.run.expedition;
+    if (!expedition.travelInitialized) return false;
+    auto& messages = state.incomingMessages;
+    const auto pendingCount = messages.pending.size();
+    std::erase_if(messages.pending, [&](const IncomingMessageOccurrence& occurrence) {
+        const auto* message = incomingMessage(catalog, occurrence.messageId);
+        if (message == nullptr) return true;
+        if (!state.run.mining.active && !state.run.planetaryExpedition.miningSitePrepared &&
+            message != nullptr && message->context == MessageDeliveryContext::Mining) {
+            return true;
         }
+        return std::any_of(catalog.solarMissions.begin(), catalog.solarMissions.end(),
+            [&](const SolarMissionDefinition& mission) {
+                return occurrence.messageId == mission.briefingMessageId &&
+                    solarMissionClaimed(state, catalog, mission);
+            });
+    });
+    bool changed = messages.pending.size() != pendingCount;
+    const bool inFlight = state.screen == Screen::Flight && state.run.flight.mode != FlightMode::Landing;
+    const bool atDock = state.screen == Screen::Hangar && operationalHomeDocked(expedition);
+    if (!inFlight && !atDock) return changed;
+
+    // Mission ownership survives body transitions and ship loss. Deliver any
+    // earned completion from that ledger even if the player reached a new
+    // body or respawned at Earth before its first safe presentation point.
+    const SolarMissionDefinition* newlyCompletedMain = nullptr;
+    for (const auto& mission : catalog.solarMissions) {
+        if (!solarMissionClaimed(state, catalog, mission)) continue;
+        const bool queued = enqueueIncomingMessage(messages, catalog,
+            {"campaign.solar." + mission.bodyId + ".complete", mission.completionMessageId, "default"});
+        changed |= queued;
+        if (queued && !mission.optional) newlyCompletedMain = &mission;
     }
-    if (mission == nullptr || !solarMissionAvailable(state, *mission)) return false;
-    if (solarMissionClaimed(state, catalog, *mission)) {
-        bool changed = enqueueIncomingMessage(state.incomingMessages, catalog,
-            {"campaign.solar." + mission->bodyId + ".complete", mission->completionMessageId, "default"});
+    if (inFlight && newlyCompletedMain != nullptr) {
         const bool staleAutomaticCourse =
-            !state.run.expedition.coursePlayerSelected &&
-            (state.run.expedition.course.targetBodyId.empty() ||
-             state.run.expedition.course.targetBodyId == mission->bodyId);
-        if (!mission->optional && staleAutomaticCourse) {
+            !expedition.coursePlayerSelected &&
+            (expedition.course.targetBodyId.empty() ||
+             expedition.course.targetBodyId == newlyCompletedMain->bodyId);
+        if (staleAutomaticCourse) {
             const ExpeditionResult result = plotSystemCourse(
-                state.run.expedition, state.run.flight, solarSystemDefinition(), "earth");
+                expedition, state.run.flight, solarSystemDefinition(), "earth");
             changed |= result == ExpeditionResult::Applied;
-            state.run.expedition.coursePlayerSelected = false;
-            state.run.expedition.cruise.active = false;
+            expedition.coursePlayerSelected = false;
+            expedition.cruise.active = false;
         }
-        return changed;
     }
-    return enqueueIncomingMessage(state.incomingMessages, catalog,
-        {"campaign.solar." + mission->bodyId + ".briefing", mission->briefingMessageId, "default"});
+    const auto* mission = solarMissionForBody(catalog, expedition.location.bodyId);
+    if (inFlight && mission != nullptr && solarMissionAvailable(state, *mission) &&
+        !solarMissionClaimed(state, catalog, *mission)) {
+        changed |= enqueueIncomingMessage(messages, catalog,
+            {"campaign.solar." + mission->bodyId + ".briefing", mission->briefingMessageId, "default"});
+    }
+    return changed;
 }
 
 ScenarioObjectivePresentation solarMissionObjectiveForBody(
@@ -176,6 +204,9 @@ ScenarioObjectivePresentation solarMissionObjectiveForBody(
     const ScenarioInstance* instance = findScenarioInstance(state.meta, mission->scenarioId);
     const ScenarioDefinition* definition = catalog.findScenario(mission->scenarioId);
     if (instance == nullptr || definition == nullptr) return {};
+    if (solarMissionClaimed(state, catalog, *mission)) {
+        return scenarioObjectivePresentation(state, catalog, instance->id, mission->claimStepId);
+    }
     ScenarioObjectivePresentation best;
     int bestRank = 100;
     for (const ScenarioStepDefinition& step : definition->steps) {

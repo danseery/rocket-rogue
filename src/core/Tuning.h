@@ -518,7 +518,12 @@ inline constexpr double overheatIntegrityDamagePerSecond = 0.055;
 inline constexpr double depthHazardRisk = 0.030;
 inline constexpr double maxMiningHazardDelta = 0.26;
 inline constexpr double returnZoneHorizontalFraction = 0.29;
-inline constexpr double returnZoneRadiusCells = 3.0;
+inline constexpr double returnZoneRadiusCells = 6.0;
+inline constexpr double surfaceShipSpriteCells = 8.5;
+inline constexpr double surfaceShipVisibleFootShare = 0.455;
+// The saved return zone is the ground/bay anchor; the ship artwork sits above it.
+inline constexpr double returnZoneCenterOffsetX = 0.5;
+inline constexpr double returnZoneCenterHeightCells = surfaceShipSpriteCells * surfaceShipVisibleFootShare;
 inline constexpr int rigCargoCapacityMass = 24;
 inline constexpr double tetheredArtifactCargoWeight = 4.0;
 inline constexpr double rigTetherPullAccelerationCellsPerSecondSquared = 11.0;
@@ -577,7 +582,6 @@ inline constexpr double artifactImpactDamageThreshold = 5.5;
 inline constexpr double artifactDropDamageThreshold = 2.20;
 // Match the visible ship service field. A tethered artifact that reaches the
 // pad should be captured, not bounce around inside a smaller invisible ring.
-inline constexpr double artifactDeliveryRadiusCells = returnZoneRadiusCells;
 inline constexpr double artifactShipBayY = 2.65;
 inline constexpr int artifactStoryArkRepair = 1;
 inline constexpr int artifactStoryHullRepair = 8;

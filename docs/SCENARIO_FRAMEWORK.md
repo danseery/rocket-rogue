@@ -43,7 +43,7 @@ Each step owns:
 - whether a briefing is mandatory, whether the reward requires an explicit claim, and the next typed action; and
 - typed `ScenarioReward` records.
 
-The valid actions are acknowledgement, claim, begin activity, retry activity, and first-failure acknowledgement. Activities emit `ScenarioEvent` records such as safe material delivery, protected-objective extraction, Flyby completion, destination arrival, a manual action, equipment assignment, or an abort. `performScenarioAction()` and `recordScenarioEvent()` are the authoritative mutation path. A threshold becomes `READY TO CLAIM`; it does not award anything until the authored claim action is pressed. `ScenarioActionOutcome` carries the transition to one generic application dispatcher; actions, result screens, and retries never auto-dispatch a follow-up.
+The valid actions are acknowledgement, claim, begin activity, retry activity, and first-failure acknowledgement. Activities emit `ScenarioEvent` records such as safe material delivery, protected-objective extraction, destination arrival, a manual action, equipment assignment, or an abort. `performScenarioAction()` and `recordScenarioEvent()` are the authoritative mutation path. A threshold becomes `READY TO CLAIM`; it does not award anything until the authored claim action is pressed. `ScenarioActionOutcome` carries the transition to one generic application dispatcher; actions, result screens, and retries never auto-dispatch a follow-up.
 
 ### Rewards and route requirements
 
@@ -86,7 +86,7 @@ The first protected-objective adapter is an Artifact payload. New objective adap
 
 ## Solar expedition boundary
 
-In initialized solar expeditions, scenario claims and acknowledgements retain their rewards but never relocate the ship, queue a fresh flight, or open retired Flyby activities. Home/continue decisions are saved expedition occurrences in the existing modal coordinator. Incoming Messages remain single-button transmissions. Legacy route adapters remain compatibility code; they do not define current travel. See [Persistent Expeditions](PERSISTENT_EXPEDITIONS.md).
+In initialized solar expeditions, scenario claims and acknowledgements retain their rewards but never relocate the ship, queue a fresh flight, or open retired activities. Mining, Flight, and the dock expose ready mission claims through the same semantic action. Delivery to the ship satisfies artifact custody; a legacy return-to-Earth adapter cannot hide a live solar claim. Incoming Messages remain single-button transmissions. Current solar recommendations use `SolarMissionDefinition` and the physical landing body, independent of a selected waypoint or reused geology. See [Persistent Expeditions](PERSISTENT_EXPEDITIONS.md).
 
 ## Current authored campaign configuration
 
@@ -94,16 +94,19 @@ The following belongs in content and presentation, not in reusable mechanics:
 
 | Scenario content | Steps and explicit reward | Progression effect |
 | --- | --- | --- |
-| Moon: Lunar Prospector Contract | Physically return 20 Moon Common Ore to complete the industrial contract; the twentieth ore activates the anomaly; pulse the scanner, enter the suit-only crevice in EVA, and recover the Artifact. | Ore grants Prospector Mk I; the recovered and explicitly claimed Artifact records the Mars exploration lead. |
-| Mars: Bay Expansion | Safely deliver 8 Mars Common Ore; explicitly claim empty Slot 2. | Records the Io/Jupiter exploration lead and preserves the existing reward. |
-| Io: Volcanic Descent | Commission Hazard Support Drone; launch the Thermal layered-recovery site; complete its cocoon, tether its protected Artifact, and extract safely; full return grants 75 Artifact XP plus the 10-XP authored-objective award. | Grants the slingshot scenario's availability key. |
-| Jupiter system | Io artifact recovery with commissioned Hazard support. | Claim reveals Saturn and Titan. |
+| Moon: Lunar Prospector Contract | Deliver 20 Moon Common Ore, pulse the anomaly, recover the artifact, and explicitly claim the mission. | Grants Prospector Mk I and Slot 1; reveals Mars and optional Mercury/Venus. |
+| Mars: Bay Expansion | Deliver 8 Mars Common Ore, recover the artifact, and explicitly claim the mission. | Opens Slot 2; reveals Jupiter and the next mission on Io. |
+| Io: Volcanic Descent | Commission Hazard support, cool and excavate the thermal cocoon, recover its artifact, and claim. | Reveals Saturn and Titan. |
+| Titan, Titania, Triton | Survey, recover each world's artifact, and explicitly claim its mission. | Respectively reveal Uranus/Titania, Neptune/Triton, and Straylight. |
+| Mercury and Venus | Recover and claim each optional artifact. | Optional rewards; no main-route or battery progress. |
 
 The Io mining-site configuration uses a Thermal biome, a protected artifact and a site-specific oxygen budget. Its detailed seal configuration belongs to the typed site definition. Those facts are configuration for this site, not invariants for every cocoon, artifact, or destination.
 
 ## UI and action contract
 
 `ScenarioObjectivePresentation` is the only state-derived source for objective strips, modal content, activity HUDs, map checklists, Drone Ops status, and claim affordances. It exposes `LOCKED`, `ACTIVE`, `READY TO CLAIM`, and `COMPLETE` with text, progress, reward preview, action, modal flags, and any pending first-failure explanation.
+
+Ready claims supersede old failure prompts. Completed missions show **MISSION COMPLETE**, have no retry or briefing action, and reject repeated mutations. Catalog validation requires resolvable campaign-once briefing/completion messages and forbids mission-claim screen transitions. Progression audits reject completed automatic recommendations and invalid scenario ownership.
 
 Native RmlUi and WebAssembly use the same `assets/ui` templates and RCSS. A scenario action is emitted with semantic scenario-instance ID, step ID, and `ScenarioActionKind` attributes. Templates may choose layout and visual family, but must not infer a claim, route gate, or mandatory-modal behavior from text, a route name, or a markup query. See [RmlUi Template and Component System](RMLUI_TEMPLATE_COMPONENT_SYSTEM.md) for the shared template/focus rules.
 
@@ -136,5 +139,7 @@ Incoming Messages separate speaker identity and portrait, message content and va
 The lunar 20-ore delivery queues Mission Control's scanner instruction, including completion by hauling drones. A successful surface scanner discovery queues the EVA recovery instruction after the reveal animation. Already-revealed undelivered anomalies receive recovery instructions directly; delivered anomalies receive neither message. Contextual EVA copy and keyboard/controller hints accompany the same reusable card. The unnamed fennec operator is distinct from Vela Fox.
 
 Messages pause gameplay clocks, oxygen, resource use and damage. They queue behind XP choices, deployment, depth changes, collision/failure resolution and other modal presentation. Acknowledgement is explicit; Escape does not dismiss or acknowledge. Held movement, drilling and firing require release before gameplay resumes. Acknowledgements neither collect cargo nor grant rewards. Orbital Pulse Survey remains a separate flight action.
+
+Solar completion occurrences are derived from saved claims, so leaving the source body or respawning cannot lose them. They first appear after ascent or at a valid dock and cannot replay after acknowledgement/reload. Reconciliation removes completed-mission briefings and mining-context instructions when no active or prepared deployment remains, preventing an ineligible queue head from blocking current guidance.
 
 For isolated visual verification, use the web debug Incoming Message button or native `--benchmark-scenario message`. Debug presentation does not write the player campaign.

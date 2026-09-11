@@ -354,7 +354,9 @@ private:
     bool levelUpActivationLocked() const;
     void observeExpeditionExperience();
     void loadSavedGameOrDefault(bool showTitleScreen);
-    bool restoreContinuousExpeditionScreen();
+    Screen liveExpeditionScreen() const;
+    bool enforceLiveExpeditionFlow();
+    void resetExpeditionSessionAfterRecovery();
     void beginDebugSandbox(const std::string& statusLine);
     void seedDebugDroneLoadout();
     void captureDebugDroneLoadout();

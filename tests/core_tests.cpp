@@ -30,6 +30,10 @@
 #include "core/ShipPresentation.h"
 #include "core/Tuning.h"
 #include "core/GameUi.h"
+
+#ifdef _MSC_VER
+#include <crtdbg.h>
+#endif
 #include "game/GamePanel.h"
 #include "render/RenderSnapshot.h"
 
@@ -2071,13 +2075,13 @@ void physicalMiningArtifactsAreSingleAndDeliveryGated()
     state.run.mining.artifact.state = MiningArtifactState::Loose;
     state.run.mining.artifact.tethered = true;
     state.run.mining.artifact.x = state.run.mining.returnZoneX +
-        tuning::mining::returnZoneRadiusCells - 0.05;
-    state.run.mining.artifact.y = state.run.mining.returnZoneY;
+        tuning::mining::returnZoneCenterOffsetX + tuning::mining::returnZoneRadiusCells - 0.05;
+    state.run.mining.artifact.y = state.run.mining.returnZoneY - tuning::mining::returnZoneCenterHeightCells;
     state.run.mining.shipDepthZone = state.run.mining.depthZone;
     // The artifact can reach the ship bay before the rig reaches the pad.
     // Its ownership must still become Ship manifest immediately.
-    state.run.mining.droneX = state.run.mining.returnZoneX + 5.0;
-    state.run.mining.droneY = state.run.mining.returnZoneY;
+    state.run.mining.droneX = state.run.mining.returnZoneX + tuning::mining::returnZoneRadiusCells + 1.0;
+    state.run.mining.droneY = state.run.mining.artifact.y;
     updateMiningRun(state, catalog, 0.08);
     require(state.run.mining.artifact.state == MiningArtifactState::Delivered,
         "a tethered artifact should deliver anywhere inside the visible ship service zone");
@@ -5318,8 +5322,8 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
         return action.actionId == ui::actions::miningAbort;
     }), "Emergency recall should not appear inside the ship radius");
 
-    state.run.mining.droneX = state.run.mining.returnZoneX + tuning::mining::returnZoneRadiusCells * 0.95;
-    state.run.mining.droneY = state.run.mining.returnZoneY;
+    state.run.mining.droneX = state.run.mining.returnZoneX + tuning::mining::returnZoneCenterOffsetX + tuning::mining::returnZoneRadiusCells * 0.95;
+    state.run.mining.droneY = state.run.mining.returnZoneY - tuning::mining::returnZoneCenterHeightCells;
     require(miningAtReturnZone(state.run.mining),
         "the visible loading radius should accept a mining rig near the outer service ring");
 
@@ -8952,6 +8956,13 @@ void rigCompoundCollisionSweepsAndRecovery()
 
 int main(int argc, char** argv)
 {
+#ifdef _MSC_VER
+    // A failed guard must fail CI visibly, not wait on a native assertion dialog.
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
     if (argc > 1 && std::string_view(argv[1]) == "--expedition-only") {
         persistentExpeditionTests();
         std::cout << "Expedition checks passed\n";
@@ -8959,7 +8970,8 @@ int main(int argc, char** argv)
     }
     try { persistentExpeditionTests(); }
     catch (const std::exception& error) { std::cerr << "Expedition: " << error.what() << '\n'; return 1; }
-    incomingMessageTests();
+    try { incomingMessageTests(); }
+    catch (const std::exception& error) { std::cerr << "Incoming messages: " << error.what() << '\n'; return 1; }
     launchThermalManagementIsPlayerDriven();
     launchAsteroidsAreDeterministicFairAndHullScaled();
     sharedFlightInstrumentPresentationMatchesEachMode();

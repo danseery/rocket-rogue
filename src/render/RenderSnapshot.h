@@ -222,6 +222,8 @@ struct RenderSnapshot {
     std::array<PlanetLandingZone, 6> landingZones;
     PlanetLandingZone orbitalZone;
     double orbitalShaftBearing = 0.0;
+    bool orbitalArtifactHint = false;
+    double orbitalArtifactBearing = 0.0;
     bool orbitalInsideZone = false;
     bool orbitalZoneSurveyed = false;
     std::string orbitalZoneLabel = "Orbit Here";
@@ -330,6 +332,8 @@ struct RenderSnapshot {
     double miningDrillIntegrity = 1.0;
     double miningDrillHeadWidthScale = 1.0;
     double miningSideCutterReach = 0.0;
+    // One continuous world-space effect origin for each head touching rock.
+    std::vector<std::array<double, 2>> miningDrillContacts;
     double miningDroneHealth = 1.0;
     double miningReturnZoneX = 0.0;
     double miningReturnZoneY = 0.0;

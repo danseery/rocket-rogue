@@ -62,8 +62,9 @@ void persistentExpeditionTests()
         performScenarioAction(state,catalog,content::scenario::lunarProspector,"anomaly",ScenarioActionKind::ClaimReward);
         check(state.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
             "First artifact recovery must grant and equip the Prospector");
-        check(!state.incomingMessages.pending.empty() && state.incomingMessages.pending.back().messageId=="prospector_unlocked",
-            "Prospector reward must introduce the helper with an incoming message");
+        check(std::none_of(state.incomingMessages.pending.begin(), state.incomingMessages.pending.end(),
+                [](const auto& message) { return message.messageId == "prospector_unlocked"; }),
+            "The claim card introduces the Prospector without a duplicate reward popup");
         performScenarioAction(state,catalog,content::scenario::lunarProspector,"anomaly",ScenarioActionKind::ClaimReward);
         check(state.meta.equippedDroneIds.size()==1,"Repeated recovery must not duplicate the Prospector");
         performScenarioAction(state,catalog,content::scenario::marsBayExpansion,"briefing",ScenarioActionKind::AcknowledgeBriefing);
@@ -375,18 +376,26 @@ void persistentExpeditionTests()
             auto failed=opening;
             failed.run.flight.hullRemaining=0;
             check(recoverExpedition(failed,solarSystemDefinition())==ExpeditionResult::Applied &&
-                failed.run.expedition.decision.pendingId=="opening_retry" && failed.run.expedition.wrecks.empty(),
+                failed.run.expedition.decision.pendingId=="opening_retry" && failed.run.expedition.wrecks.empty() &&
+                failed.screen == Screen::Flight && !failed.run.flight.active,
                 "An opening failure offers retry without creating a wreck or a dock visit");
+            const auto retryPose = failed.run.expedition.location;
+            check(recoverExpedition(failed,solarSystemDefinition())==ExpeditionResult::AlreadyApplied &&
+                failed.run.expedition.sites.empty() && failed.run.expedition.wrecks.empty() &&
+                failed.run.expedition.location.position.x == retryPose.position.x,
+                "Repeated opening loss callbacks must preserve the one retry without creating a saved site");
             const auto retrySave=deserializeSaveData(serializeSaveData(captureSaveData(failed)));
             check(retrySave.has_value(),"Pending opening retry remains saveable");
             restoreSaveData(failed,catalog,*retrySave);
-            check(retryOpeningMission(failed,catalog)==ExpeditionResult::Applied && earthLaunchReady(failed.run.expedition) &&
+            check(retryOpeningMission(failed,catalog)==ExpeditionResult::Applied && failed.run.expedition.active &&
+                failed.run.flight.active && failed.screen == Screen::Flight &&
+                failed.run.expedition.departureCount == 1 && failed.run.flight.velocityX == earthLaunchSpeed &&
                 failed.run.flight.hullRemaining==failed.run.flight.hullMaximum &&
                 failed.run.flight.fuelRemaining==failed.run.flight.fuelCapacity && failed.incomingMessages.pending.empty(),
-                "Retry restores the original launch and retains the instruction acknowledgement");
+                "The single retry action must relaunch directly with the original resources and acknowledged guidance");
             check(retryOpeningMission(failed,catalog)==ExpeditionResult::InvalidState,"Retry cannot grant resources twice");
             for (const auto variant : {"tips", "crater", "tips", "tips"}) {
-                check(launchEarthOpening(failed,catalog)==ExpeditionResult::Applied,"Retry launches remain available");
+                check(failed.run.flight.active,"Retry must already be in live flight without a second Launch screen");
                 recoverExpedition(failed,solarSystemDefinition());
                 const auto repeatedSave=deserializeSaveData(serializeSaveData(captureSaveData(failed)));
                 check(repeatedSave.has_value(),"Repeated crash dialogue remains saveable");
@@ -594,6 +603,22 @@ void persistentExpeditionTests()
               e.progression.selectedSynergyIds == std::vector<std::string>{"recovered_synergy"} &&
               e.progression.pendingGraftConflicts.size() == 1 && e.wrecks.size() == 1,
           "Full-hold salvage must restore the build once while leaving ore in the wreck");
+    {
+        auto secondLoss = e;
+        auto secondFlight = flight;
+        secondLoss.active = true;
+        restoreSystemLocation(secondLoss.location, secondFlight);
+        check(loseExpedition(secondLoss, secondFlight, system) == ExpeditionResult::Applied,
+            "An unresolved recovered build must remain recoverable after a second ship loss");
+        const auto savedAgain = deserializeExpedition(serializeExpedition(secondLoss));
+        check(savedAgain.has_value(), "A second wreck with conflicting graft alternatives must survive reload");
+        secondLoss = *savedAgain;
+        secondLoss.location = secondLoss.wrecks.back().location;
+        check(salvageWreck(secondLoss, secondLoss.wrecks.back().id, system) == ExpeditionResult::Applied &&
+            secondLoss.progression.pendingGraftConflicts.size() == 1 &&
+            secondLoss.progression.pendingRunUpgradeChoices == 3,
+            "Wreck recovery must restore unresolved graft choices without duplicating earned choices");
+    }
     check(resolveRecoveredGraftConflict(e, 0, true) == ExpeditionResult::Applied &&
               e.progression.pendingGraftConflicts.empty() &&
               e.progression.droneModuleAssignments.front().primaryDroneId == "recovered_drone" &&
@@ -640,6 +665,154 @@ void persistentExpeditionTests()
     corrupt.batteries[0].wreckId = 99;
     check(!deserializeExpedition(serializeExpedition(corrupt)),
           "Orphaned battery ownership must be rejected");
+
+    {
+        auto failure = createNewGame(catalog, 0xD1EULL);
+        check(initializeLiveExpedition(failure, catalog), "Recovery guard fixture must initialize live travel");
+        auto& expedition = failure.run.expedition;
+        auto& ship = failure.run.flight;
+        expedition.active = true;
+        expedition.location = {"solar", "mars", CoordinateFrame::Body, {1.0, 0}, {.2, .1}, .4,
+            "mars.beacon:zone_2"};
+        restoreSystemLocation(expedition.location, ship);
+        expedition.cruise.active = true;
+        expedition.undockReady = true;
+        expedition.cargo.materials.common = 8;
+        expedition.progression.pendingRunUpgradeChoices = 2;
+        expedition.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::highTorqueMotor, 2}};
+        failure.run.mining.geologySeed = 9123;
+        ship.active = ship.physicalFlight = true;
+        ship.phase = FlightPhase::Impact;
+        ship.mode = FlightMode::Landing;
+        ship.failureCause = LaunchFailureCause::ThermalRunaway;
+        ship.heatFailureSeconds = 99;
+        ship.fuelFailureSeconds = ship.courseFailureSeconds = 99;
+        ship.hullRemaining = 0;
+        ship.hullDamageTaken = 100;
+        ship.selectedThrottle = ship.angularVelocity = ship.burnRatePerSecond = 1;
+        ship.contactEpisode = ship.predictedImpact = true;
+        ship.landing.siteCommitted = ship.landing.departureActive = true;
+        ship.orbit.captured = true;
+        failure.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+        const auto unlocks = failure.meta.unlockKeys;
+        const auto lossesBefore = failure.meta.shipsLost;
+        check(recoverExpedition(failure, solarSystemDefinition()) == ExpeditionResult::Applied &&
+            failure.screen == Screen::Hangar && operationalHomeDocked(expedition),
+            "Ordinary ship loss must recover directly to a real service dock");
+        check(failure.meta.shipsLost == lossesBefore + 1 && failure.meta.unlockKeys == unlocks &&
+            expedition.wrecks.size() == 1 && expedition.wrecks.front().cargo.materials.common == 8 &&
+            expedition.wrecks.front().build.pendingRunUpgradeChoices == 2 &&
+            expedition.wrecks.front().build.runRigUpgradeRanks.front().rank == 2,
+            "Loss must record one replacement, preserve campaign unlocks and escrow cargo and the earned build");
+        check(!ship.active && !expedition.undockReady && !expedition.cruise.active &&
+            ship.phase == FlightPhase::Transfer && ship.failureCause == LaunchFailureCause::None &&
+            ship.heatFailureSeconds == 0 && ship.fuelFailureSeconds == 0 && ship.courseFailureSeconds == 0 &&
+            ship.selectedThrottle == 0 && ship.angularVelocity == 0 && ship.burnRatePerSecond == 0 &&
+            !ship.contactEpisode && !ship.predictedImpact && !ship.landing.siteCommitted && !ship.orbit.captured &&
+            ship.fuelRemaining == ship.fuelCapacity && ship.hullRemaining == ship.hullMaximum &&
+            failure.run.mining.geologySeed == 0,
+            "A replacement must clear failed-flight and surface runtime before the player resumes");
+        check(expedition.sites.size() == 1 && expedition.sites.front().mining.geologySeed == 9123,
+            "Death must preserve the departed terrain before clearing the live site");
+        const auto stableReplacement = serializeSaveData(captureSaveData(failure));
+        check(recoverExpedition(failure, solarSystemDefinition()) == ExpeditionResult::AlreadyApplied &&
+            serializeSaveData(captureSaveData(failure)) == stableReplacement,
+            "Repeated recovery or Abandon callbacks at the replacement dock cannot mutate state or duplicate wrecks");
+        const auto dockLocation = expedition.location;
+        advanceExpeditionFlight(expedition, ship, expeditionFlightModel(failure, catalog),
+            expeditionEnvironment(failure, catalog), solarSystemDefinition(), {1, 1, false, true}, .25);
+        check(expedition.location.siteId == dockLocation.siteId && ship.positionX == dockLocation.position.x &&
+            ship.positionY == dockLocation.position.y && !ship.active,
+            "Inactive docked or failure flight cannot advance or convert its frame before an explicit departure");
+        check(departHome(failure, catalog) == ExpeditionResult::Applied &&
+            departHome(failure, catalog) == ExpeditionResult::AlreadyApplied,
+            "Service departure may arm once and must not restart on repeated clicks");
+        expedition.undockReady = false;
+        expedition.location.bodyId = "mars";
+        expedition.location.siteId = "mars.dock";
+        check(departHome(failure, catalog) == ExpeditionResult::NotDocked && !expedition.undockReady,
+            "A remote body cannot enter a fake service departure through a dock-looking site id");
+        expedition.location.bodyId = "straylight";
+        expedition.location.siteId = "straylight.dock";
+        expedition.active = true;
+        expedition.straylightRevealed = true;
+        check(departHome(failure, catalog) == ExpeditionResult::NotDocked &&
+            departDock(expedition, ship) == ExpeditionResult::Applied,
+            "The revealed derelict permits physical release without becoming a service Hangar");
+    }
+
+    {
+        auto recalled = createNewGame(catalog, 0xCA11ULL);
+        check(initializeLiveExpedition(recalled, catalog), "Live recall fixture must initialize travel");
+        recalled.run.expedition.active = true;
+        recalled.run.expedition.location = {"solar", "moon", CoordinateFrame::Body,
+            {.5, 0}, {}, 0, "moon.beacon:zone_1"};
+        SurfaceLandingBuildRequest request;
+        request.destinationId = request.bodyId = "moon";
+        request.siteSeed = 0xCA11ULL;
+        request.landingOrdinal = 1;
+        auto preparedSite = prepareSurfaceLanding(recalled, catalog, request);
+        check(preparedSite.valid && commitPreparedSurfaceLanding(recalled, std::move(preparedSite), 5.0),
+            "Live recall fixture requires a committed physical mining site");
+        auto& mining = recalled.run.mining;
+        auto& ship = recalled.run.flight;
+        ship.landing.siteCommitted = true;
+        ship.mode = FlightMode::Landing;
+        ship.phase = FlightPhase::Landed;
+        ship.fuelRemaining = 6;
+        ship.hullRemaining = 82;
+        mining.active = true;
+        recalled.screen = Screen::Mining;
+        mining.shipDepthZone = 0;
+        check(prepareLandingLayers(recalled, catalog, mining, 1) && activateLandingLayer(mining, 1),
+            "Live recall fixture must allow mining below the surviving ship");
+        mining.rigDepthZone = 1;
+        mining.droneX = 12.5; mining.droneY = 15.5;
+        mining.operatorPresent = mining.rigDisabled = mining.failurePending = true;
+        mining.operatorMode = MiningOperatorMode::Jetpack;
+        mining.operatorIntegrity = mining.droneHealth = 0;
+        mining.temporaryMaterials.common = mining.cargo = 3;
+        mining.stowedMaterials.common = mining.stowedCargo = 5;
+        recalled.run.expedition.cargo.materials.common = 5;
+        recalled.run.expedition.progression.expeditionLevel = 4;
+        recalled.run.expedition.progression.pendingRunUpgradeChoices = 2;
+        recalled.run.expedition.progression.runRigUpgradeRanks = {{content::surfaceUpgrade::wideDrillHead, 2}};
+        mining.artifact.present = true;
+        mining.artifact.id = "recall_test_artifact";
+        mining.artifact.state = MiningArtifactState::Loose;
+        mining.artifact.x = 14.5; mining.artifact.y = 15.5;
+        mining.artifact.tethered = true;
+        const auto geologySeed = mining.geologySeed;
+        const double fuelBefore = mining.rigFuel.current;
+        const auto recalledResult = finishMiningRun(recalled, catalog, true);
+        check(recalledResult.applied && recalled.screen == Screen::Mining && mining.active &&
+            mining.depthZone == mining.shipDepthZone && miningAtReturnZone(mining) &&
+            !mining.failurePending && !mining.rigDisabled && mining.operatorMode == MiningOperatorMode::Rig,
+            "EVA death or live emergency recall must return directly to the surviving ship without legacy menus");
+        check(ship.landing.siteCommitted && ship.fuelRemaining == 6 && ship.hullRemaining == 82 &&
+            recalled.run.expedition.wrecks.empty() && recalled.meta.shipsLost == 0 &&
+            recalled.run.expedition.progression.expeditionLevel == 4 &&
+            recalled.run.expedition.progression.pendingRunUpgradeChoices == 2 &&
+            recalled.run.expedition.cargo.materials.common == 5 && mining.stowedMaterials.common == 5 &&
+            mining.temporaryMaterials.common == 0 && mining.rigFuel.current == fuelBefore && mining.geologySeed == geologySeed,
+            "Local recovery must preserve the ship, fuel, banked payload, terrain and entire expedition build");
+        const auto lostLayer = std::find_if(mining.depthLayers.begin(), mining.depthLayers.end(),
+            [](const auto& layer) { return layer.depthZone == 1; });
+        check(lostLayer != mining.depthLayers.end() && lostLayer->artifact.present &&
+            lostLayer->artifact.id == "recall_test_artifact" && !lostLayer->artifact.tethered &&
+            lostLayer->artifact.x == 14.5 && !lostLayer->looseObjects.empty(),
+            "Recall must leave the dropped artifact and unbanked ore in the excavated layer for recovery");
+        const auto stableRecall = serializeSaveData(captureSaveData(recalled));
+        check(!finishMiningRun(recalled, catalog, true).applied &&
+            serializeSaveData(captureSaveData(recalled)) == stableRecall,
+            "A repeated recovery action at the ship must not reset actors or settle payload again");
+        const auto recallSave = deserializeSaveData(stableRecall);
+        check(recallSave.has_value(), "Direct ship recovery must remain saveable");
+        restoreSaveData(recalled, catalog, *recallSave);
+        check(recalled.screen == Screen::Mining && mining.active && miningAtReturnZone(mining) &&
+            finishMiningRun(recalled, catalog, false).applied,
+            "After recall and reload, the surviving ship must offer immediate physical departure");
+    }
 
     game.run.expedition = e;
     game.run.expedition.progression.expeditionLevel = 4;
