@@ -280,6 +280,11 @@ if(EMSCRIPTEN)
     foreach(test_target IN LISTS ROCKET_TEST_TARGETS)
         target_link_options(${test_target} PRIVATE -sSTACK_SIZE=2097152 -sALLOW_MEMORY_GROWTH=1)
     endforeach()
+    # Shared UI tests load real documents and fonts. Node's WebAssembly
+    # filesystem cannot read the checkout without explicitly packaged assets.
+    target_link_options(rocket_app_services_tests PRIVATE
+        "SHELL:--embed-file \"${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts@/assets/fonts\""
+        "SHELL:--embed-file \"${CMAKE_CURRENT_SOURCE_DIR}/assets/ui@/assets/ui\"")
     if(DEFINED ENV{EMSDK_NODE})
         set(ROCKET_TEST_NODE "$ENV{EMSDK_NODE}")
     else()
