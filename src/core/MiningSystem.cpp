@@ -8754,6 +8754,14 @@ bool prepareOrbitalSurvey(const GameState& state, const ContentCatalog& catalog,
     preview.run.mining = prepared.miningTemplate;
     auto& mining = preview.run.mining;
     const int entry = mining.depthZone;
+    // The orbit manifest must describe the authored objective even if its
+    // target layer has not been activated from the depth cache yet.
+    const auto artifactOpportunity = unresolvedProgressionArtifactOpportunity(
+        state, catalog, prepared.expeditionTemplate.destinationId, prepared.expeditionTemplate.bodyId);
+    const auto artifactPlacement = artifactOpportunity.has_value()
+        ? std::optional<ProgressionArtifactPlacement>(resolveProgressionArtifactPlacement(
+            state, catalog, *destination, 0, artifactOpportunity->siteIdentity))
+        : std::nullopt;
     prepared.surveyLayers.clear();
     for (int d = entry; d <= entry + depth; ++d) {
         if (mining.depthZone != d) {
@@ -8771,8 +8779,8 @@ bool prepareOrbitalSurvey(const GameState& state, const ContentCatalog& catalog,
             summary.radiation |= cell.hazardAffinity == MiningElementalAffinity::Radiation;
             summary.toxic |= cell.hazardAffinity == MiningElementalAffinity::Toxic;
         }
-        // Orbital recon never spoils the Moon's bank-ore-then-scan revelation.
-        summary.artifact = mining.artifact.present && destination->id != "moon";
+        summary.artifact = mining.artifact.present ||
+            (artifactPlacement.has_value() && d == artifactPlacement->targetDepth);
         prepared.surveyLayers.push_back(summary);
     }
     if (mining.depthZone != entry) {

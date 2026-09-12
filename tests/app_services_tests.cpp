@@ -1476,6 +1476,8 @@ int main()
         fixture.runner.app().debugStartExpedition();
         assert(fixture.ui.html.find("ORBITAL DOCK") != std::string::npos);
         assert(fixture.ui.html.find("expedition-dock-departure") != std::string::npos);
+        assert(fixture.ui.html.find("expedition-dock-status") != std::string::npos);
+        assert(fixture.ui.html.find("dock-status-credits") != std::string::npos);
         assert(fixture.ui.html.find("DEPART FOR Moon") != std::string::npos);
         assert(fixture.ui.html.find("Change waypoint") != std::string::npos);
         fixture.runner.app().tick(.01);

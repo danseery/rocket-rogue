@@ -322,8 +322,12 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         const std::string departLabel = target && target->id != e.location.bodyId
             ? "DEPART FOR " + target->name : "DEPART DOCK";
         home << "<section class=\"expedition-home\"><h2>" << esc(region ? region->name : "Home") << " / ORBITAL DOCK</h2><p>" << esc(state.statusLine)
-            << "</p><p>Upgrades survive docking. Recover your wreck to reclaim lost upgrades.</p><p>Ship fuel " << num(flight.fuelRemaining) << " / " << num(flight.fuelCapacity) << " / Hull " << num(flight.hullRemaining) << " / Credits " << num(state.run.credits)
-            << "</p><section class=\"expedition-dock-departure\">";
+            << "</p><p>Upgrades survive docking. Recover your wreck to reclaim lost upgrades.</p>"
+            << "<section class=\"expedition-dock-status\">"
+            << "<div class=\"dock-status-segment\"><span>SHIP FUEL</span><strong>" << num(flight.fuelRemaining) << " / " << num(flight.fuelCapacity) << "</strong></div>"
+            << "<div class=\"dock-status-segment\"><span>HULL</span><strong>" << num(flight.hullRemaining) << "</strong></div>"
+            << "<div class=\"dock-status-segment dock-status-credits\"><span>CREDITS</span><strong>" << num(state.run.credits) << "</strong></div>"
+            << "</section><section class=\"expedition-dock-departure\">";
         if (lastCompleted) {
             const auto* completedBody = systemBody(system, lastCompleted->bodyId);
             home << "<p>MISSION COMPLETE: " << esc(completedBody ? completedBody->name : lastCompleted->bodyId) << "</p>";

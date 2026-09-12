@@ -10226,6 +10226,14 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 .expedition-home { width: 704dp; max-width: 96%; margin: 12dp auto; padding: 16dp; background-color: #0b1118; border: 1dp #407382; overflow-y: auto; max-height: 94%; }
 .expedition-home h2, .expedition-home h3 { color: #62dbe8; margin: 10dp 0; }
 .expedition-home p, .expedition-map p { color: #d5e5eb; margin: 8dp 0; font-size: 13dp; }
+.expedition-dock-status { display: flex; flex-wrap: wrap; margin: 12dp 0dp; border: 1dp #284856; background-color: #071019; }
+.dock-status-segment { min-width: 132dp; flex: 1; padding: 8dp 10dp; border-right: 1dp #284856; }
+.dock-status-segment:last-child { border-right-width: 0dp; }
+.dock-status-segment span { display: block; color: #66859a; font-size: 10dp; letter-spacing: 1dp; }
+.dock-status-segment strong { display: block; margin-top: 3dp; color: #d5e5eb; font-size: 15dp; }
+.dock-status-credits { min-width: 118dp; background-color: #102a2b; }
+.dock-status-credits span { color: #6ee6e8; }
+.dock-status-credits strong { color: #9df6f1; }
 .expedition-shipyard { display: flex; flex-wrap: wrap; }
 .shipyard-track { width: 46%; padding: 10dp; margin: 5dp; border: 1dp #284856; }
 .shipyard-track h4 { color: #ffbd67; margin: 4dp 0; }
@@ -10292,7 +10300,7 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 .solar-map-manifest { margin: 5dp 0dp 8dp; color: #8297a3; font-size: 10dp; text-align: center; }
 .expedition-warning { color: #ffbd67; }
 #rr-modal.modal-map { width: 760dp; max-width: 88%; min-width: 0dp; box-sizing: border-box; }
-@media (max-width: 560dp) { .shipyard-track { width: 94%; } .expedition-home { max-width: 88%; } }
+@media (max-width: 560dp) { .shipyard-track { width: 94%; } .expedition-home { max-width: 88%; } .dock-status-segment { min-width: 42%; border-bottom: 1dp #284856; } .dock-status-segment:nth-child(even) { border-right-width: 0dp; } }
 #rr-modal.modal-incoming_message, #rr-modal.modal-solar_mission_claim { width: 704dp; max-width: 94%; height: auto; max-height: 90%; }
 #rr-modal-scrim.incoming-message-scrim { background-color: #05070ab8; }
 #rr-modal.modal-incoming_message .modal-scroll-body, #rr-modal.modal-solar_mission_claim .modal-scroll-body { flex: 0 1 auto; padding-right: 0dp; }

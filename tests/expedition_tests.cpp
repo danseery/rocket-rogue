@@ -242,7 +242,10 @@ void persistentExpeditionTests()
         request.destinationId = "moon"; request.zoneId = "zone_3";
         request.siteSeed = 8421; request.landingOrdinal = 1; request.allowScenarioObjectives = false;
         auto first = prepareSurfaceLanding(state, catalog, request);
+        first.miningTemplate.artifact.present = true;
         check(first.valid && prepareOrbitalSurvey(state,catalog,first,1), "Wedge survey must prepare normally");
+        check(!first.surveyLayers.empty() && first.surveyLayers.front().artifact,
+            "A prepared artifact must appear in the orbital scan manifest");
         excavateOrbitalShaft(first,1,.7);
         first.surveyElapsed = 1.2;
         const auto seed = first.miningTemplate.arenaMetadata.seed;

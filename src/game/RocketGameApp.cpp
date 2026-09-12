@@ -1,5 +1,6 @@
 #include "core/SurfacePresentation.h"
 #include "core/LunarDiscoveryMessages.h"
+#include "core/ArtifactProgression.h"
 #include "game/RocketGameApp.h"
 #include "core/ExpeditionSystem.h"
 
@@ -6156,13 +6157,11 @@ RenderSnapshot RocketGameApp::snapshot() const
                 prepared.miningTemplate.terrain.width);
         }
         const auto& activeExpedition = state_.run.expedition;
-        const auto* hintMission = solarMissionForBody(catalog_, activeExpedition.location.bodyId);
-        const bool artifactRecovered = std::any_of(state_.meta.artifacts.begin(), state_.meta.artifacts.end(),
-            [&](const ArtifactRecord& artifact) { return artifact.originDestinationId == activeExpedition.location.bodyId; });
-        if (hintMission && solarMissionAvailable(state_, *hintMission) &&
-            !solarMissionClaimed(state_, catalog_, *hintMission) && !artifactRecovered) {
+        const auto artifactOpportunity = unresolvedProgressionArtifactOpportunity(
+            state_, catalog_, currentDestination(state_, catalog_).id, activeExpedition.location.bodyId);
+        if (artifactOpportunity.has_value()) {
             // Match the authored mission-site selection used by surface preparation.
-            const std::string hintZone = hintMission->bodyId == "moon"
+            const std::string hintZone = activeExpedition.location.bodyId == "moon"
                 ? (activeExpedition.moonTutorialZone.empty() ? surfaceArrival_.selectedZoneId : activeExpedition.moonTutorialZone)
                 : "zone_1";
             if (const auto* zone = planetLandingZone(hintZone)) {
