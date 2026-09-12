@@ -2593,6 +2593,7 @@ void RocketGameApp::tick(double deltaSeconds)
         const FlightInput flightInput {
             session_.steerInput, pilotingThrottle, session_.controls.actions.cutEnginesActive,
             departureThrustHeld_ || activeInputSource_ == InputSource::Controller};
+        const bool wasCruiseCooling = state_.run.expedition.cruise.cooling;
         const LaunchFlightStep step = liveExpedition ? advanceExpeditionFlight(
             state_.run.expedition, session_.flight, session_.preparedLaunch, destination,
             solarSystemDefinition(), flightInput, clampedDelta,
@@ -2608,6 +2609,8 @@ void RocketGameApp::tick(double deltaSeconds)
             },
             clampedDelta,
             landingSiteView_ ? &landingSiteView_->world : nullptr);
+        if (liveExpedition && wasCruiseCooling != state_.run.expedition.cruise.cooling)
+            panelDirty_ = true;
         if (liveExpedition && previousBody != state_.run.expedition.location.bodyId) {
             storeOrbitalSite();
             if (departingCommittedSite) {
@@ -2623,6 +2626,13 @@ void RocketGameApp::tick(double deltaSeconds)
             session_.preparedLaunch = expeditionFlightModel(state_, catalog_);
             panelDirty_ = true;
             save();
+        }
+        if (step.crossedAsteroidBelt && !step.failed && enqueueIncomingMessage(state_.incomingMessages, catalog_,
+            {"campaign.asteroid_belt_intro", "asteroid_belt_intro", "default"})) {
+            state_.run.expedition.cruise.active = false;
+            releaseRealtimeInputs(true);
+            save();
+            refreshPanel();
         }
         if (!step.landingZoneId.empty()) {
             // The crossed gate, not survey selection, owns this landing.
@@ -4264,6 +4274,29 @@ int RocketGameApp::debugActOneCheckpoint() const
 
 void RocketGameApp::debugStartLaunchLesson(int lessonIndex)
 {
+    if (lessonIndex == 4) {
+        debugStartLaunchLesson(3);
+        state_.incomingMessages = {};
+        auto& expedition = state_.run.expedition;
+        expedition.travelInitialized = expedition.active = true;
+        expedition.openingInitialized = true;
+        expedition.departureCount = 2;
+        expedition.location = {"solar","",CoordinateFrame::System,{}, {},0.0,""};
+        expedition.course.targetBodyId = "io";
+        expedition.cruise.active = false;
+        session_.preparedLaunch = expeditionFlightModel(state_,catalog_);
+        session_.flight = beginLaunchFlight(session_.preparedLaunch,expeditionEnvironment(state_,catalog_));
+        auto& flight = session_.flight;
+        flight.mode = FlightMode::Travel;
+        flight.heading = std::atan2(9.0,30.0);
+        flight.positionX = (solarBeltInnerRadius-.15)*std::cos(flight.heading);
+        flight.positionY = (solarBeltInnerRadius-.15)*std::sin(flight.heading);
+        flight.velocityX = .7*std::cos(flight.heading);
+        flight.velocityY = .7*std::sin(flight.heading);
+        captureSystemLocation(expedition.location,flight);
+        state_.statusLine = "Debug main asteroid belt crossing. Real save remains untouched.";
+        return;
+    }
     if (lessonIndex < 0 || lessonIndex > 3) {
         return;
     }
@@ -4328,7 +4361,8 @@ void RocketGameApp::debugStartLaunchLesson(int lessonIndex)
 void RocketGameApp::debugStartSurfaceArrival(int destinationIndex, int phaseIndex)
 {
     const bool mars = destinationIndex == 1;
-    if ((destinationIndex != 0 && !mars) || phaseIndex < 0 || phaseIndex > 28) {
+    const bool io = destinationIndex == 2;
+    if ((destinationIndex != 0 && !mars && !io) || phaseIndex < 0 || phaseIndex > 28) {
         return;
     }
 
@@ -4344,7 +4378,17 @@ void RocketGameApp::debugStartSurfaceArrival(int destinationIndex, int phaseInde
         content::drone::surveyDrone
     };
     ensureDroneBayState(state_, catalog_);
-    state_.launchConfig.destinationId = mars ? content::destination::mars : content::destination::moon;
+    state_.launchConfig.destinationId = io ? content::destination::jupiter : mars ? content::destination::mars : content::destination::moon;
+    state_.run.destinationIndex = destinationIndexForId(catalog_, state_.launchConfig.destinationId);
+    if (io) {
+        auto& expedition=state_.run.expedition;
+        expedition.travelInitialized=true;
+        expedition.location={"solar","io",CoordinateFrame::Body,{}, {},0.0,""};
+        expedition.selectedOrbitBody="io";
+        expedition.selectedOrbitZone="zone_1";
+        expedition.course.targetBodyId="io";
+        addDebugUnlock(state_,content::unlock::routeJupiter);
+    }
     state_.launchConfig.routeTransit = {};
     state_.launchConfig.frontierTransfer = true;
     state_.launchConfig.missionKind = LaunchMissionKind::Standard;
@@ -4409,7 +4453,11 @@ void RocketGameApp::debugStartSurfaceArrival(int destinationIndex, int phaseInde
         flight.landing.heading=phaseIndex==10 ? -1.5707963267948966 : 1.5707963267948966;
     }
     if (phaseIndex==12) {flight.landing.altitude=2.0;flight.landing.verticalVelocity=-2.0;}
-    if (phaseIndex==13) {flight.landing.altitude=flight_landing::departureAltitude-4.0;flight.landing.verticalVelocity=8.0;}
+    if (phaseIndex==13) {
+        flight.landing.altitude=flight_landing::departureAltitude-4.0;
+        flight.landing.verticalVelocity=8.0;
+        flight.landing.departureActive=true;
+    }
     if (phaseIndex>=16 && phaseIndex<=20) {
         flight.hullRemaining=phaseIndex==17 ? 40.0 : 85.0;
         flight.landing.altitude=0.001;
@@ -6157,18 +6205,12 @@ RenderSnapshot RocketGameApp::snapshot() const
                 prepared.miningTemplate.terrain.width);
         }
         const auto& activeExpedition = state_.run.expedition;
-        const auto artifactOpportunity = unresolvedProgressionArtifactOpportunity(
-            state_, catalog_, currentDestination(state_, catalog_).id, activeExpedition.location.bodyId);
-        if (artifactOpportunity.has_value()) {
-            // Match the authored mission-site selection used by surface preparation.
-            const std::string hintZone = activeExpedition.location.bodyId == "moon"
-                ? (activeExpedition.moonTutorialZone.empty() ? surfaceArrival_.selectedZoneId : activeExpedition.moonTutorialZone)
-                : "zone_1";
-            if (const auto* zone = planetLandingZone(hintZone)) {
-                result.orbitalArtifactHint = true;
-                result.orbitalArtifactBearing = zone->centerBearing;
-            }
-        }
+        const auto signal = orbitalArtifactSignal(state_, catalog_,
+            surfaceArrival_.prepared ? &*surfaceArrival_.prepared : nullptr);
+        result.orbitalArtifactHint = signal.detected;
+        result.orbitalArtifactBearing = signal.bearing;
+        result.orbitalArtifactLocalized = signal.localized;
+        result.orbitalArtifactDepth = signal.depth;
         for (const auto& site : activeExpedition.sites) {
             if (site.systemId != activeExpedition.location.systemId ||
                 site.bodyId != activeExpedition.location.bodyId ||
@@ -6216,6 +6258,17 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.launchHandoffY=session_.flight.handoff.sourceY;
         result.launchLandingBasisAngle=session_.flight.landing.basisAngle;
         result.launchLandingHorizontalPosition=session_.flight.landing.horizontalPosition;
+        if (!result.launchLandingLocalFrame && session_.flight.handoff.from == FlightMode::Landing &&
+            result.launchHandoffProgress < 1.0) {
+            // Orbit telemetry updates LandingState. Reconstruct the outgoing
+            // surface pose from the saved handoff, not those live orbit values.
+            const double nx = std::cos(result.launchLandingBasisAngle);
+            const double ny = std::sin(result.launchLandingBasisAngle);
+            result.launchLandingAltitude = (nx*result.launchHandoffX+ny*result.launchHandoffY-
+                flight_geometry::bodyRadius)*flight_landing::metersPerOrbitUnit;
+            result.launchLandingHorizontalPosition = (ny*result.launchHandoffX-nx*result.launchHandoffY)*
+                flight_landing::metersPerOrbitUnit;
+        }
         result.launchLandingPadX=session_.flight.landing.padGridX;
         result.launchLandingPadY=session_.flight.landing.padGridY;
         result.launchDescentGateArmed=session_.flight.landing.gateArmed;

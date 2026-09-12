@@ -332,22 +332,25 @@ ExpeditionResult toggleCruise(PersistentExpeditionState &e)
     if (e.course.targetBodyId.empty())
         return ExpeditionResult::InvalidTarget;
     e.cruise.active = !e.cruise.active;
+    e.cruise.cooling = false;
     return ExpeditionResult::Applied;
 }
 FlightInput cruiseInput(PersistentExpeditionState &e, const FlightRunState &flight, const SystemDefinition &s,
-                        FlightInput manual)
+                        FlightInput manual, bool heatEnabled)
 {
     if (std::abs(manual.steer) > .01 || std::abs(manual.throttle) > .01 || manual.enginesCut)
     {
-        e.cruise.active = false;
+        e.cruise = {};
         return manual;
     }
-    if (!e.cruise.active)
+    if (!e.cruise.active) {
+        e.cruise.cooling = false;
         return manual;
+    }
     const auto *target = systemBody(s, e.course.targetBodyId);
     if (!target)
     {
-        e.cruise.active = false;
+        e.cruise = {};
         return manual;
     }
     auto p = e.location;
@@ -355,7 +358,14 @@ FlightInput cruiseInput(PersistentExpeditionState &e, const FlightRunState &flig
     p = absolute(p, s);
     const SystemVector destination = systemNavigationPosition(*target);
     const double desired = std::atan2(destination.y - p.position.y, destination.x - p.position.x);
-    return {std::clamp(-flightWrappedAngleDelta(flight.heading, desired) * 2.0, -1.0, 1.0), 1.0, false, true};
+    // Hysteresis keeps engines fully off until there is room for another
+    // useful burn. Steering and normal coast physics remain responsive.
+    if (!heatEnabled || flight.heat <= tuning::launch::cruiseCoolingResume)
+        e.cruise.cooling = false;
+    else if (flight.heat >= tuning::launch::cruiseCoolingStart)
+        e.cruise.cooling = true;
+    return {std::clamp(-flightWrappedAngleDelta(flight.heading, desired) * 2.0, -1.0, 1.0),
+        e.cruise.cooling ? 0.0 : 1.0, e.cruise.cooling, true};
 }
 int batteryResearchRank(const PersistentExpeditionState &e)
 {
@@ -385,7 +395,7 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
         restoreSystemLocation(e.location, flight);
         flight.mode = body ? FlightMode::Orbit : FlightMode::Travel;
     }
-    input = cruiseInput(e, flight, system, input);
+    input = cruiseInput(e, flight, system, input, launch.heatEnabled);
     auto result = updateLaunchFlight(flight, launch, destination, input, dt, site, &system, &e.location);
     if (flight.mode == FlightMode::Landing)
         return result;
@@ -436,8 +446,8 @@ void refreshExpeditionTrajectory(PersistentExpeditionState& e, FlightRunState& f
         auto p = forecast.location;
         captureSystemLocation(p,predicted);
         p = convertSystemFrame(p,e.location.frame,e.location.bodyId,system);
-        if (i%4==3 || result.failed) flight.predictedTrajectory.push_back({p.position.x,p.position.y});
-        if (result.failed) { flight.predictedImpact = true; break; }
+        if (i%4==3 || result.failed || result.asteroidHit) flight.predictedTrajectory.push_back({p.position.x,p.position.y});
+        if (result.failed || result.asteroidHit) { flight.predictedImpact = true; break; }
         if (predicted.mode == FlightMode::Landing) break;
     }
 }

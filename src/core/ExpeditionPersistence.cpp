@@ -167,6 +167,7 @@ std::string serializeExpedition(const PersistentExpeditionState &e)
                 << ' ' << layer.artifact << ' ' << layer.thermal << ' ' << layer.cryo
                 << ' ' << layer.radiation << ' ' << layer.toxic;
     }
+    out << " cruise1 " << e.cruise.cooling;
     return out.str();
 }
 std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view input)
@@ -289,6 +290,11 @@ std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view 
                 p.surveyLayers.push_back(layer);
             }
         }
+        in >> std::ws;
+    }
+    if (!in.eof()) {
+        std::string extension;
+        if (!(in >> extension >> e.cruise.cooling) || extension != "cruise1") return std::nullopt;
         in >> std::ws;
     }
     if (e.undockReady && (e.active || !e.location.siteId.ends_with(".dock"))) return std::nullopt;

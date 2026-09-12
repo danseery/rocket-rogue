@@ -17,6 +17,23 @@ void incomingMessageTests() {
             throw std::runtime_error(message);
     };
     auto catalog = createDefaultContent();
+    {
+        IncomingMessageState belt;
+        check(enqueueIncomingMessage(belt,catalog,{"campaign.asteroid_belt_intro","asteroid_belt_intro","default"}),
+            "First belt entry must queue its tutorial");
+        IncomingMessageState reloaded;
+        check(deserializeIncomingMessages(serializeIncomingMessages(belt),reloaded) && reloaded.pending.size()==1,
+            "Reload before acknowledgement must retain the belt tutorial");
+        check(acknowledgeIncomingMessage(reloaded,"campaign.asteroid_belt_intro").has_value(),
+            "Belt tutorial acknowledgement must succeed");
+        check(deserializeIncomingMessages(serializeIncomingMessages(reloaded),belt) &&
+            !enqueueIncomingMessage(belt,catalog,{"return.belt","asteroid_belt_intro","default"}),
+            "Belt tutorial must not replay on return or after reload");
+        const auto* message = incomingMessage(catalog,"asteroid_belt_intro");
+        check(message && message->variants.front().body.find("Flight Controls")!=std::string::npos &&
+            message->variants.front().body.find("Hull Plating")!=std::string::npos,
+            "Belt tutorial must name the actual ship upgrades");
+    }
     catalog.messageSpeakers.push_back({"engineer", "An Engineer With A Long Display Name", "ENGINEERING",
                                        "portraits/mission-control-fennec.png"});
     catalog.incomingMessages.push_back({"repair_report",

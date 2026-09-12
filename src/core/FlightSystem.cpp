@@ -224,7 +224,8 @@ FlightScaleProfile flightScaleProfile(const FlightRunState& flight)
         result.timeScale = result.controlScale = 1.0;
         result.landingBlend = flight.handoff.from == FlightMode::Orbit ? handoff : 1.0;
     } else if (flight.handoff.from == FlightMode::Landing) {
-        result.landingBlend = 1.0-handoff;
+        result.landingBlend = 1.0-departureCameraProgress(
+            flight.handoff.elapsed / flight_landing::handoffSeconds);
     }
     result.landingLinear = result.landingBlend;
     return result;
@@ -254,6 +255,7 @@ void enterLocalLanding(FlightRunState& flight)
 
 void leaveLocalLanding(FlightRunState& flight)
 {
+    flight.landing.gateArmed = false;
     const auto& land = flight.landing;
     const double nx = std::cos(land.basisAngle), ny = std::sin(land.basisAngle);
     const double radial = flight_geometry::bodyRadius+land.altitude/flight_landing::metersPerOrbitUnit;
@@ -272,6 +274,19 @@ void leaveLocalLanding(FlightRunState& flight)
     flight.phase = flight.orbit.captured ? FlightPhase::Orbiting : FlightPhase::TargetApproach;
     flight.orbit.previousAngle = std::atan2(flight.positionY, flight.positionX);
     flight.landing.departureActive = false;
+}
+
+bool landingGateCanRearm(double radius, double handoffElapsed)
+{
+    return radius > flight_landing::gateRearmRadius &&
+        handoffElapsed >= flight_landing::handoffSeconds;
+}
+
+double departureCameraProgress(double handoffProgress)
+{
+    const double t = std::clamp((handoffProgress-flight_landing::departureFadeFraction) /
+        (1.0-flight_landing::departureFadeFraction), 0.0, 1.0);
+    return t*t*t*(t*(t*6.0-15.0)+10.0);
 }
 
 void bindLandingSite(FlightRunState& flight, const MiningRunState& mining)

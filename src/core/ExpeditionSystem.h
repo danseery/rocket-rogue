@@ -34,7 +34,7 @@ ExpeditionResult plotSystemCourse(PersistentExpeditionState &, const FlightRunSt
                                   const SystemDefinition &, std::string_view target, const PreparedLaunch* model = nullptr);
 ExpeditionResult toggleCruise(PersistentExpeditionState &);
 FlightInput cruiseInput(PersistentExpeditionState &, const FlightRunState &, const SystemDefinition &,
-                        FlightInput manual);
+                        FlightInput manual, bool heatEnabled = true);
 LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &, FlightRunState &,
                                          const PreparedLaunch &, const Destination &,
                                          const SystemDefinition &, FlightInput, double deltaSeconds,

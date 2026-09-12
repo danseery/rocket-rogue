@@ -969,7 +969,7 @@ void testFlightInstrumentClusterUsesAtlasNeedlesAndBlinkingWarning()
     assert(compactCenterPixelsY <= static_cast<float>(rocket::uiRectBottom(compactPacket.logicalSceneClip)));
 }
 
-void testLaunchUsesAttachedFlameAndSideSteeringTriangleOnly()
+void testLaunchUsesAttachedAnimatedSideFlames()
 {
     SceneComposer composer;
     composer.setViewport({1280, 800, 1280, 800, 1.0F});
@@ -1003,28 +1003,39 @@ void testLaunchUsesAttachedFlameAndSideSteeringTriangleOnly()
         return draw.texture == TextureId::Thrust;
     }));
 
-    snapshot.launchSteerInput = 1.0;
-    const ScenePacket steering = rocket::SceneComposerTestAccess::rocketPacket(composer, snapshot);
-    const std::vector<SceneVertex> booster = orangeVertices(steering);
-    assert(booster.size() == 3U);
-
-    // The rocket is the final textured instance submitted after the steering
-    // triangle. Its X axis is the ship's screen-right axis. A positive launch
-    // steer must put the exhaust on the negative (left) side, at the same
-    // inset proportion used by Orbit so the triangle touches the visible hull.
-    assert(!steering.instances.empty());
-    const SceneInstance rocket = rocket::unpackSceneInstance(steering.instances.back());
-    const float rocketHalfWidth = std::hypot(rocket.axisXx, rocket.axisXy);
-    assert(rocketHalfWidth > 0.0F);
-    const float rightX = rocket.axisXx / rocketHalfWidth;
-    const float rightY = rocket.axisXy / rocketHalfWidth;
-    const float nozzleX = (booster[0].x + booster[1].x) * 0.5F;
-    const float nozzleY = (booster[0].y + booster[1].y) * 0.5F;
-    const float nozzleSide =
-        (nozzleX - rocket.centerX) * rightX +
-        (nozzleY - rocket.centerY) * rightY;
-    assert(nozzleSide < 0.0F);
-    assert(std::abs((-nozzleSide / rocketHalfWidth) - (2.0F * 0.028F / 0.11F)) < 0.03F);
+    snapshot.launchPhysicalFlight = true;
+    snapshot.launchLandingBlend = 0;
+    for (double heading : {0.0,1.57,3.14}) for (double steer : {-1.0,1.0}) {
+        snapshot.launchHeading = heading;
+        snapshot.launchSteerInput = steer;
+        float previousU = -1, previousV = -1;
+        for (int frame=0;frame<6;++frame) {
+            snapshot.animationTime = (frame+.1)/18.0;
+            const auto steering = rocket::SceneComposerTestAccess::rocketPacket(composer,snapshot);
+            assert(orangeVertices(steering).empty());
+            assert(steering.instances.size()==3); // Main flame, side flame, ship.
+            const auto main = rocket::unpackSceneInstance(steering.instances[0]);
+            const auto flame = rocket::unpackSceneInstance(steering.instances[1]);
+            const auto ship = rocket::unpackSceneInstance(steering.instances[2]);
+            assert(flame.textured && (flame.u0!=previousU || flame.v0!=previousV));
+            previousU=flame.u0; previousV=flame.v0;
+            assert(flame.v0>main.v0); // Leading transparent rows were cropped.
+            const float shipHalfWidth=std::hypot(ship.axisXx,ship.axisXy);
+            const float rightX=ship.axisXx/shipHalfWidth,rightY=ship.axisXy/shipHalfWidth;
+            const float rootX=flame.centerX+flame.axisYx;
+            const float rootY=flame.centerY+flame.axisYy;
+            const float rootSide=(rootX-ship.centerX)*rightX+(rootY-ship.centerY)*rightY;
+            assert(rootSide*steer<0); // Exhaust is opposite the steering direction.
+            assert(std::abs(std::abs(rootSide)/shipHalfWidth-.28F)<.015F);
+            assert(std::hypot(flame.axisYx,flame.axisYy)<std::hypot(main.axisYx,main.axisYy));
+        }
+    }
+    snapshot.poweredFlight=false;
+    auto coasting=rocket::SceneComposerTestAccess::rocketPacket(composer,snapshot);
+    assert(coasting.instances.size()==2); // Steering works without the main engine.
+    snapshot.launchSteerInput=0;
+    auto neutral=rocket::SceneComposerTestAccess::rocketPacket(composer,snapshot);
+    assert(neutral.instances.size()==1);
 }
 
 void testPhysicalMoonFlightStartsOnScreenAtEarthDeparture()
@@ -1369,6 +1380,50 @@ void testExistingOrbitalShaftsRemainVisibleOutsideTheirActiveWedge()
     assert(artifactGlows(shaftComposer.compose(snapshot)).empty());
 }
 
+
+void testIoScanAndOrbitShareArtAndArtifactSignal()
+{
+    const auto hasTexture=[](const ScenePacket& packet,TextureId texture) {
+        return std::any_of(packet.draws.begin(),packet.draws.end(),[&](const auto& draw){return draw.texture==texture;});
+    };
+    for (int width : {800,1600}) {
+        RenderSnapshot snapshot;
+        snapshot.screen=rocket::Screen::Flight;
+        snapshot.launchPhysicalFlight=true;
+        snapshot.systemTravel=true;
+        snapshot.system=rocket::solarSystemDefinition();
+        std::erase_if(snapshot.system.bodies,[](const auto& body){return body.id!="io";});
+        snapshot.systemLocation.bodyId="io";
+        snapshot.systemLocation.frame=rocket::CoordinateFrame::Body;
+        snapshot.destinationTier=3; // Io deliberately shares Jupiter's environment.
+        snapshot.launchPositionX=.7;
+        snapshot.launchOrbitCaptured=true;
+        snapshot.launchApproachBlend=1.0;
+        snapshot.orbitalArtifactHint=true;
+        snapshot.orbitalArtifactBearing=rocket::planetLandingZones()[0].centerBearing;
+        snapshot.landingZones=rocket::planetLandingZones();
+        for (const auto& zone:snapshot.landingZones) {
+            snapshot.orbitalZone=zone;
+            for (double overlay : {0.0,1.0}) {
+                snapshot.orbitalOverlay=overlay;
+                SceneComposer composer;
+                composer.setViewport({width,900,width,900,1.0F});
+                composer.setTextureReady(TextureId::Moon,true);
+                composer.setTextureReady(TextureId::Jupiter,true);
+                const auto& packet=composer.compose(snapshot);
+                assert(hasTexture(packet,TextureId::Moon));
+                assert(!hasTexture(packet,TextureId::Jupiter));
+                int glows=0;
+                for(const auto& packed:packet.instances) {
+                    const auto instance=rocket::unpackSceneInstance(packed);
+                    if(instance.shape==SceneInstanceShape::RadialGlow && instance.color.r>.70F &&
+                        instance.color.r<.85F && instance.color.g<.65F && instance.color.b>.98F) ++glows;
+                }
+                assert(glows==2);
+            }
+        }
+    }
+}
 
 void testUndiscoveredStraylightIsForeshadowedBehindNeptuneOnly()
 {
@@ -3701,6 +3756,123 @@ void testFlightDestructionCinematicUsesExplosionFramesAndAccessibleShake()
     assert(explosionFrame(genericDestroyed) >= 0);
 }
 
+void testSolarBeltRendering()
+{
+    using namespace rocket;
+    SceneComposer composer;
+    composer.setViewport({1600,900,1600,900,1.0F});
+    composer.setTextureReady(TextureId::Asteroid,true);
+    RenderSnapshot snapshot;
+    snapshot.screen=Screen::Flight;
+    snapshot.launchPhysicalFlight=snapshot.systemTravel=true;
+    snapshot.system=solarSystemDefinition();
+    snapshot.systemLocation.frame=CoordinateFrame::System;
+    snapshot.launchPositionX=solarAsteroidBelt().front().position.x;
+    snapshot.launchPositionY=0;
+    snapshot.launchLandingBlend=0;
+    snapshot.flightGuidance.targetPosition={30,9};
+    // This path must not depend on the disabled legacy corridor asteroid flag.
+    snapshot.launchAsteroidsEnabled=false;
+    const auto asteroid=spriteInstance(composer.compose(snapshot),TextureId::Asteroid,0,0,1,1);
+    assert(std::hypot(asteroid.axisXx,asteroid.axisXy)>0);
+}
+
+void testCommittedDepartureRendering()
+{
+    using namespace rocket;
+    std::vector<MiningCell> cells(64*40);
+    for (int y=16;y<40;++y) for (int x=0;x<64;++x) {
+        auto& cell=cells[y*64+x];
+        cell.material=MiningCellMaterial::Regolith;
+        cell.revealed=true;
+    }
+    for (const auto& zone : planetLandingZones()) for (int width : {800,1600}) {
+        SceneComposer composer;
+        composer.setViewport({width,900,width,900,1.0F});
+        composer.setTextureReady(TextureId::RocketClosed,true);
+        RenderSnapshot snapshot;
+        snapshot.screen=Screen::Flight;
+        snapshot.launchPhysicalFlight=true;
+        snapshot.surfaceArrivalPrepared=true;
+        snapshot.launchApproachBlend=1.0;
+        snapshot.launchLandingLocalFrame=true;
+        snapshot.launchLandingBlend=1.0;
+        snapshot.surfaceFramingProgress=1.0;
+        snapshot.launchLandingAltitude=flight_landing::departureAltitude;
+        snapshot.launchLandingBasisAngle=zone.centerBearing;
+        snapshot.launchHeading=zone.centerBearing;
+        snapshot.launchOrbitTargetRadius=.7;
+        snapshot.launchOrbitGoodBand=.1;
+        snapshot.miningWidth=64; snapshot.miningHeight=40;
+        snapshot.miningCells=cells;
+        snapshot.miningReturnZoneX=snapshot.launchLandingPadX=32;
+        snapshot.miningReturnZoneY=snapshot.launchLandingPadY=16;
+        const double radius=flight_geometry::bodyRadius+flight_landing::departureAltitude/flight_landing::metersPerOrbitUnit;
+        snapshot.launchPositionX=snapshot.launchHandoffX=radius*std::cos(zone.centerBearing);
+        snapshot.launchPositionY=snapshot.launchHandoffY=radius*std::sin(zone.centerBearing);
+        auto ship=spriteInstance(composer.compose(snapshot),TextureId::RocketClosed,0,0,1,1);
+        const auto local=ship;
+        snapshot.launchLandingLocalFrame=false;
+        snapshot.launchHandoffFrom=static_cast<int>(FlightMode::Landing);
+        for (int sample=0;sample<=100;++sample) {
+            snapshot.launchHandoffProgress=sample/100.0;
+            snapshot.launchLandingBlend=1.0-departureCameraProgress(snapshot.launchHandoffProgress);
+            snapshot.surfaceFramingProgress=snapshot.launchLandingBlend;
+            const auto& packet=composer.compose(snapshot);
+            const auto next=spriteInstance(packet,TextureId::RocketClosed,0,0,1,1);
+            assert(std::hypot(next.centerX-ship.centerX,next.centerY-ship.centerY)<.06F);
+            assert(std::abs(std::hypot(next.axisYx,next.axisYy)-std::hypot(ship.axisYx,ship.axisYy))<.025F);
+            const double turn=flightWrappedAngleDelta(std::atan2(ship.axisYy,ship.axisYx),
+                std::atan2(next.axisYy,next.axisYx));
+            assert(std::abs(turn)<.16);
+            if (sample<=40) {
+                assert(std::hypot(next.centerX-local.centerX,next.centerY-local.centerY)<.002F);
+                assert(std::abs(flightWrappedAngleDelta(std::atan2(local.axisYy,local.axisYx),
+                    std::atan2(next.axisYy,next.axisYx)))<.002);
+            }
+            if (sample>=40) assert(packet.miningTerrainInstances.empty());
+            ship=next;
+        }
+        // Rebuilding presentation at a saved mid-handoff pose must agree with
+        // a running renderer; no hidden camera history is needed after reload.
+        snapshot.launchHandoffProgress=.7;
+        snapshot.launchLandingBlend=1.0-departureCameraProgress(.7);
+        snapshot.surfaceFramingProgress=snapshot.launchLandingBlend;
+        const auto continued=spriteInstance(composer.compose(snapshot),TextureId::RocketClosed,0,0,1,1);
+        SceneComposer reloaded;
+        reloaded.setViewport({width,900,width,900,1.0F});
+        reloaded.setTextureReady(TextureId::RocketClosed,true);
+        const auto restored=spriteInstance(reloaded.compose(snapshot),TextureId::RocketClosed,0,0,1,1);
+        assert(std::hypot(continued.centerX-restored.centerX,continued.centerY-restored.centerY)<.002F);
+    }
+    // Io uses the existing moon artwork in the system scene, not the Jupiter
+    // environment artwork. The handoff must not swap either art or scale.
+    SceneComposer bodyComposer;
+    bodyComposer.setViewport({1600,900,1600,900,1.0F});
+    bodyComposer.setTextureReady(TextureId::Moon,true);
+    bodyComposer.setTextureReady(TextureId::Jupiter,true);
+    RenderSnapshot bodySnapshot;
+    bodySnapshot.screen=Screen::Flight;
+    bodySnapshot.launchPhysicalFlight=true;
+    bodySnapshot.systemTravel=true;
+    bodySnapshot.systemLocation.frame=CoordinateFrame::Body;
+    bodySnapshot.systemLocation.bodyId="io";
+    SystemBodyDefinition io;
+    io.id="io"; io.name="Io"; io.displayRadius=.13;
+    bodySnapshot.system.bodies.push_back(io);
+    bodySnapshot.destinationTier=3;
+    bodySnapshot.surfaceArrivalPrepared=true;
+    bodySnapshot.launchHandoffFrom=static_cast<int>(FlightMode::Landing);
+    bodySnapshot.launchPositionY=.4;
+    bodySnapshot.launchHandoffProgress=.90;
+    bodySnapshot.launchLandingBlend=1.0-departureCameraProgress(.90);
+    const auto outgoing=spriteInstance(bodyComposer.compose(bodySnapshot),TextureId::Moon,0,0,1,1);
+    bodySnapshot.launchHandoffProgress=1.0;
+    bodySnapshot.launchLandingBlend=0.0;
+    const auto orbital=spriteInstance(bodyComposer.compose(bodySnapshot),TextureId::Moon,0,0,1,1);
+    assert(std::abs(outgoing.axisXx-orbital.axisXx)<.02F);
+}
+
 } // namespace
 
 int main()
@@ -3710,6 +3882,8 @@ int main()
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
 #endif
     testUiViewportLayoutGeometry();
+    testSolarBeltRendering();
+    testCommittedDepartureRendering();
     testMiningViewportReservesBothHudLanes();
     testScreenSurfaceMapping();
     testSceneComposerUsesResolvedSceneRect();
@@ -3721,13 +3895,14 @@ int main()
     testManifestAndLogicalTextureMapping();
     testEnemyThemesAndAnimationPriorityUseTheSharedSpriteContract();
     testFlightInstrumentClusterUsesAtlasNeedlesAndBlinkingWarning();
-    testLaunchUsesAttachedFlameAndSideSteeringTriangleOnly();
+    testLaunchUsesAttachedAnimatedSideFlames();
     testPhysicalMoonFlightStartsOnScreenAtEarthDeparture();
     testPhysicalApproachZoomBeginsContinuouslyAtThreeQuarters();
     testPhysicalApproachCameraAppliesToMarsAndLaterDestinations();
     testPhysicalLandingCameraBlendsWithoutTeleportingUnauthorizedImpacts();
     testPhysicalLandingCameraDoesNotRetainTransferBodies();
     testExistingOrbitalShaftsRemainVisibleOutsideTheirActiveWedge();
+    testIoScanAndOrbitShareArtAndArtifactSignal();
     testUndiscoveredStraylightIsForeshadowedBehindNeptuneOnly();
     testPolygonInstanceMatchesTriangleFan();
     testOrderedBatchingAndWideLineInstancing();

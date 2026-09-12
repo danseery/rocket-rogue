@@ -388,7 +388,8 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         const bool dockInRange = expeditionDockInRange(e, flight, system);
         const bool dockReady = canDockExpedition(e, flight, system);
         panel.contentMarkup += "<div class=\"expedition-flight-bar\"><p>" + esc(region ? region->name : "Solar space") +
-        " / Target: " + esc(target ? target->name : "None") + " / " + (e.cruise.active ? "CRUISE ACTIVE" : "MANUAL") + "</p><p>" + esc(objective.available ? objective.goal : "Explore, mine, and return to Earth") + "</p>" +
+        " / Target: " + esc(target ? target->name : "None") + " / " + (e.cruise.active ?
+            (e.cruise.cooling ? "CRUISE COOLING" : "CRUISE ACTIVE") : "MANUAL") + "</p><p>" + esc(objective.available ? objective.goal : "Explore, mine, and return to Earth") + "</p>" +
         solarMissionChecklist(state, c.catalog, e.location.bodyId) +
         action(e.cruise.active ? "Cruise off [C / L3]" : "Cruise [C / L3]", "cruise", flight.active && flight.mode != FlightMode::Landing && !e.undockReady) +
         (dockInRange ? "<div class=\"expedition-dock-action\">" + button("DOCK", "expedition:dock", true, "ok") + "</div>"

@@ -1,4 +1,5 @@
 #include "core/Content.h"
+#include "core/ArtifactProgression.h"
 #include "core/ScenarioSystem.h"
 #include "core/ExpeditionPersistence.h"
 #include "core/ExpeditionSystem.h"
@@ -8,6 +9,7 @@
 #include "core/PayloadTransfer.h"
 #include "core/MiningSystem.h"
 #include "core/FlightSystem.h"
+#include "core/SurfacePresentation.h"
 #include "core/SolarProgression.h"
 #include <cmath>
 #include <stdexcept>
@@ -26,6 +28,199 @@ void check(bool condition, const char *message)
 void persistentExpeditionTests()
 {
     using namespace rocket;
+    {
+        const auto catalog = createDefaultContent();
+        const auto& system = solarSystemDefinition();
+        PersistentExpeditionState expedition;
+        expedition.location={"solar","",CoordinateFrame::System,{}, {},0.0,""};
+        expedition.course.targetBodyId="io";
+        expedition.cruise.active=true;
+        FlightRunState ship;
+        ship.heading=1.5;
+        ship.heat=.97;
+        auto input=cruiseInput(expedition,ship,system,{});
+        check(expedition.cruise.active && expedition.cruise.cooling && input.throttle==0 && input.enginesCut,
+            "Enabling cruise while hot must cut engines immediately, not cancel cruise");
+        ship.heat=.55;
+        input=cruiseInput(expedition,ship,system,{});
+        check(input.throttle==0 && input.steer!=0,"Cruise must coast through cooldown while tracking the target");
+        const auto encoded=serializeExpedition(expedition);
+        const auto restored=deserializeExpedition(encoded);
+        check(restored && restored->cruise.cooling && restored->cruise.active,
+            "Reload during cooldown must preserve the engine-off latch");
+        expedition=*restored;
+        check(cruiseInput(expedition,ship,system,{}).throttle==0,"Reload must not restart a warm engine");
+        const auto legacy=deserializeExpedition(encoded.substr(0,encoded.rfind(" cruise1 ")));
+        check(legacy && legacy->cruise.active,"Pre-cooldown saves must still load");
+        ship.heat=tuning::launch::cruiseCoolingResume;
+        input=cruiseInput(expedition,ship,system,{});
+        check(input.throttle==1 && !input.enginesCut && !expedition.cruise.cooling && input.steer!=0,
+            "Cooled cruise must resume thrust and course correction automatically");
+        ship.heat=tuning::launch::cruiseCoolingStart;
+        check(cruiseInput(expedition,ship,system,{}).throttle==0,"Cutoff threshold must be inclusive");
+        check(cruiseInput(expedition,ship,system,{},false).throttle==1 && !expedition.cruise.cooling,
+            "Heat-disabled flight must not inherit a stale cooldown");
+        for(const FlightInput manual : {FlightInput{.2,0,false,false}, FlightInput{0,-.5,false,true}, FlightInput{0,0,true,false}}) {
+            expedition.cruise={true,true};
+            input=cruiseInput(expedition,ship,system,manual);
+            check(!expedition.cruise.active && !expedition.cruise.cooling && input.steer==manual.steer &&
+                input.throttle==manual.throttle && input.enginesCut==manual.enginesCut,
+                "Manual steering, braking, and engine cut must override cooldown immediately");
+        }
+        // Real heat/fuel integration across frame rates and cooling upgrades.
+        // A remote target isolates thermal behavior without hiding collisions.
+        SystemDefinition openSpace;
+        openSpace.id="thermal-test";
+        SystemBodyDefinition target;
+        target.id="target"; target.position={10000,20};
+        openSpace.bodies.push_back(target);
+        for(int rank : {0,1,3}) for(double dt : {.016,.08,.5}) {
+            auto game=createNewGame(catalog,702);
+            auto model=expeditionFlightModel(game,catalog);
+            model.heatEnabled=true; model.coolingRank=rank;
+            model.asteroidsEnabled=false; model.trajectoryPreview=true;
+            auto flight=beginLaunchFlight(model,catalog.destinations[1]);
+            flight.active=flight.physicalFlight=true;
+            flight.mode=FlightMode::Travel;
+            flight.positionX=0; flight.positionY=20;
+            flight.velocityX=flight.velocityY=flight.heading=flight.heat=0;
+            flight.fuelRemaining=10000;
+            PersistentExpeditionState e;
+            e.active=true; e.cruise.active=true;
+            e.location={openSpace.id,"",CoordinateFrame::System,{}, {},0,""};
+            e.course.targetBodyId="target";
+            int pauses=0, resumes=0;
+            for(int tick=0;tick<2400;++tick) {
+                const bool cooling=e.cruise.cooling;
+                const double fuel=flight.fuelRemaining, heat=flight.heat;
+                const auto step=advanceExpeditionFlight(e,flight,model,catalog.destinations[1],openSpace,{},dt);
+                check(!step.failed && flight.heat<tuning::launch::temperatureCriticalThreshold && flight.heatFailureSeconds==0,
+                    "Automatic cruise must never enter critical heat across repeated burn/cool cycles");
+                if(e.cruise.cooling) check(flight.selectedThrottle==0 && flight.fuelRemaining==fuel && flight.heat<=heat,
+                    "Cooldown must really stop fuel use and cool the engine");
+                pauses+=!cooling && e.cruise.cooling;
+                resumes+=cooling && !e.cruise.cooling;
+            }
+            check(pauses>=2 && resumes>=2 && e.cruise.active && flight.positionX>0,
+                "Cruise must repeatedly cool and resume forward progress without user input");
+        }
+    }
+    {
+        const auto catalog = createDefaultContent();
+        auto state = createNewGame(catalog, 0x105CA);
+        state.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+        state.run.expedition.travelInitialized = true;
+        state.run.expedition.location.systemId = "solar";
+        state.run.expedition.location.bodyId = "io";
+        check(!unresolvedProgressionArtifactOpportunity(state,catalog,"jupiter","io"),
+            "Fixture must precede Io mission commissioning");
+        SurfaceLandingBuildRequest request;
+        request.destinationId="jupiter"; request.bodyId="io"; request.siteSeed=319;
+        auto objective = prepareSurfaceLanding(state,catalog,request);
+        check(objective.valid, "Io objective site must prepare before mission commissioning");
+        check(std::any_of(objective.miningTemplate.depthLayers.begin(),objective.miningTemplate.depthLayers.end(),
+            [](const auto& layer){return layer.depthZone==2 && layer.artifact.present && layer.gate.active;}),
+            "Io must physically contain its protected artifact before the first scan");
+        check(prepareOrbitalSurvey(state,catalog,objective,0), "Correct slice scan must succeed");
+        check(std::any_of(objective.surveyLayers.begin(),objective.surveyLayers.end(),
+            [](const auto& layer){return layer.artifact && layer.depth==2;}),
+            "Io scan must list its real depth-two artifact even with a shallow scanner");
+        check(objective.surveyedDepth==0,"Objective localization must not grant deeper drilling reach");
+        check(!orbitalArtifactSignal(state,catalog,&objective).detected,
+            "An unfinished first scan must not reveal the signal");
+        objective.surveyComplete=true;
+        const auto exact = orbitalArtifactSignal(state,catalog,&objective);
+        check(exact.detected && exact.localized && exact.depth>=2 && exact.depth<3,
+            "A correctly guessed first slice must immediately localize the physical artifact");
+        for (const auto& zone : planetLandingZones()) {
+            if (zone.id=="zone_1") continue;
+            request.zoneId=zone.id; request.allowScenarioObjectives=false;
+            auto other=prepareSurfaceLanding(state,catalog,request);
+            check(prepareOrbitalSurvey(state,catalog,other,2),"Every Io slice must be scannable");
+            check(std::none_of(other.surveyLayers.begin(),other.surveyLayers.end(),
+                [](const auto& layer){return layer.artifact;}),
+                "Wrong slices must not invent an artifact or leak its depth");
+            other.surveyComplete=true;
+            const auto coarse=orbitalArtifactSignal(state,catalog,&other);
+            check(coarse.detected && !coarse.localized && coarse.depth==0 &&
+                coarse.bearing==planetLandingZones()[0].centerBearing,
+                "A first scan anywhere must reveal only the persistent purple sector signal");
+        }
+        state.run.expedition.sites.push_back({"solar","io","io.beacon:zone_1",
+            objective.expeditionTemplate,objective.miningTemplate,static_cast<const OrbitalSiteProgress&>(objective)});
+        const auto saved=deserializeExpedition(serializeExpedition(state.run.expedition));
+        check(saved.has_value(),"Artifact scan progress must serialize");
+        state.run.expedition=*saved;
+        const auto reloaded=orbitalArtifactSignal(state,catalog);
+        check(reloaded.localized && std::abs(reloaded.depth-exact.depth)<.000001 &&
+            std::abs(reloaded.bearing-exact.bearing)<.000001,"Exact artifact localization must survive reload");
+        state.run.expedition.location.bodyId="moon";
+        check(!orbitalArtifactSignal(state,catalog).detected,"Io scans must not reveal artifacts on another moon");
+        state.run.expedition.location.bodyId="io";
+        auto legacy=state.run.expedition.sites.front();
+        legacy.mining.artifact={};
+        for(auto& layer:legacy.mining.depthLayers) layer.artifact={};
+        legacy.mining.terrain.cells[0].material=MiningCellMaterial::Empty;
+        request.zoneId="zone_1"; request.allowScenarioObjectives=true;
+        auto repaired=restoreSurfaceLanding(state,catalog,request,legacy);
+        check(repaired.valid && repaired.miningTemplate.terrain.cells[0].material==MiningCellMaterial::Empty &&
+            orbitalArtifactSignal(state,catalog,&repaired).localized,
+            "Previously scanned empty sites must repair their objective without resetting excavation");
+        for(auto& layer:repaired.miningTemplate.depthLayers)
+            if(layer.artifact.present) layer.artifact.state=MiningArtifactState::Delivered;
+        auto delivered=legacy;
+        delivered.mining=repaired.miningTemplate;
+        const auto revisit=restoreSurfaceLanding(state,catalog,request,delivered);
+        check(!orbitalArtifactSignal(state,catalog,&revisit).detected,
+            "Recovery must remove the signal and must not respawn the objective on revisit");
+        check(!unresolvedProgressionArtifactOpportunity(state,catalog,"jupiter","io"),
+            "Scanning and repairing must not accept or claim the mission");
+    }
+    {
+        const auto catalog = createDefaultContent();
+        const auto& system = solarSystemDefinition();
+        const auto* mars = systemBody(system,"mars");
+        const auto* jupiter = systemBody(system,"jupiter");
+        check(std::hypot(mars->position.x,mars->position.y)<solarBeltInnerRadius &&
+            std::hypot(jupiter->position.x,jupiter->position.y)>solarBeltOuterRadius,
+            "Main belt must sit between Mars and Jupiter");
+        check(!crossesSolarAsteroidBelt({9,3},{13,3}) &&
+            crossesSolarAsteroidBelt({22,0},{30,0}) &&
+            crossesSolarAsteroidBelt({30,0},{22,0}) &&
+            crossesSolarAsteroidBelt({25,0},{25,0}),
+            "Belt entry must handle both directions, swept crossings, and reload inside");
+        auto state = createNewGame(catalog,0xB317);
+        auto model = expeditionFlightModel(state,catalog);
+        model.heatEnabled = false;
+        model.trajectoryPreview = true;
+        const auto& destination = *catalog.findDestination("moon");
+        const auto rock = solarAsteroidBelt().front();
+        double unarmoredDamage = 0;
+        for (int rank : {0,3}) {
+            model.hullRank = rank;
+            auto flight = beginLaunchFlight(model,destination);
+            flight.mode = FlightMode::Travel;
+            flight.positionX = rock.position.x-.5;
+            flight.positionY = rock.position.y;
+            flight.velocityX = 20; flight.velocityY = 0;
+            SystemLocation location{"solar","",CoordinateFrame::System,{}, {},0,""};
+            const auto impact = updateLaunchFlight(flight,model,destination,{},.02,nullptr,&system,&location);
+            check(impact.crossedAsteroidBelt && impact.asteroidHit && flight.hullRemaining<flight.hullMaximum,
+                "Swept world-space belt collisions must damage the ship even with legacy asteroids disabled");
+            const double damage = flight.hullMaximum-flight.hullRemaining;
+            if (rank == 0) unarmoredDamage = damage;
+            else check(damage<unarmoredDamage,"Hull Plating must reduce belt collision damage");
+        }
+        model.hullRank = 0;
+        auto predicted = beginLaunchFlight(model,destination);
+        predicted.mode = FlightMode::Travel;
+        predicted.positionX = rock.position.x-.5; predicted.positionY = rock.position.y;
+        predicted.velocityX = .7; predicted.velocityY = 0;
+        PersistentExpeditionState expedition;
+        expedition.location = {"solar","",CoordinateFrame::System,{}, {},0,""};
+        refreshExpeditionTrajectory(expedition,predicted,model,destination,system);
+        check(predicted.predictedImpact,"Trajectory must warn about nonfatal asteroid impacts too");
+    }
     {
         const auto catalog = createDefaultContent();
         auto state = createNewGame(catalog, 0x5A17ULL);
@@ -222,6 +417,69 @@ void persistentExpeditionTests()
         landingModel.orbitRequired = true;
         landingModel.heatEnabled = landingModel.asteroidsEnabled = false;
         const auto& moon = *catalog.findDestination("moon");
+        check(!flight.landing.gateArmed, "Departure must explicitly disarm a previously armed landing gate");
+        check(!landingGateCanRearm(.56,1.24) && !landingGateCanRearm(.54,1.25) &&
+            landingGateCanRearm(.56,1.25), "Landing requires both spatial clearance and a completed handoff");
+        SaveData departureSave;
+        departureSave.flight=flight;
+        departureSave.flight.handoff.elapsed=.3;
+        const auto departureReload=deserializeSaveData(serializeSaveData(departureSave));
+        check(departureReload && !departureReload->flight.landing.gateArmed &&
+            departureReload->flight.handoff.from==FlightMode::Landing &&
+            std::abs(departureReload->flight.handoff.elapsed-.3)<1e-8,
+            "Reload must retain the committed departure and landing lock");
+        for (double throttle : {-1.0,0.0,1.0}) {
+            auto departing=beginLaunchFlight(landingModel,moon);
+            departing.mode=FlightMode::Landing;
+            departing.landing.altitude=flight_landing::departureAltitude;
+            departing.landing.verticalVelocity=8.0;
+            departing.landing.departureActive=true;
+            departing.landing.gateArmed=true;
+            check(surfacePresentationProgress(departing,false)==1.0,
+                "Ascent framing must hold until the departure threshold commits");
+            departing.landing.verticalVelocity=-.01;
+            check(surfacePresentationProgress(departing,false)==1.0,
+                "Braking must not reverse surface framing");
+            departing.landing.verticalVelocity=8.0;
+            leaveLocalLanding(departing);
+            departing.orbit.captured=true; // Even an eligible landing cannot bypass the departure lock.
+            for (int frame=0;frame<24 && departing.active;++frame) {
+                const auto step=updateLaunchFlight(departing,landingModel,moon,{1.0,throttle,false,true},.05);
+                check(departing.mode!=FlightMode::Landing && step.landingZoneId.empty(),
+                    "Braking or turning during departure must never restart landing");
+            }
+        }
+        double previousFraming=1.0;
+        for (int sample=0;sample<=100;++sample) {
+            flight.handoff.elapsed=flight_landing::handoffSeconds*sample/100.0;
+            const double framing=surfacePresentationProgress(flight,false);
+            check(framing<=previousFraming && (sample>40 || framing==1.0),
+                "Departure framing must hold during terrain fade, then move only toward orbit");
+            previousFraming=framing;
+        }
+        auto reentry=beginLaunchFlight(landingModel,moon);
+        reentry.mode=FlightMode::Orbit;
+        reentry.orbit.captured=true;
+        reentry.landing.gateArmed=false;
+        reentry.handoff={FlightMode::Landing,FlightMode::Orbit,flight_landing::handoffSeconds,0,.344,0};
+        const double gateBearing=planetLandingZones()[0].centerBearing;
+        for (int pass=0;pass<8;++pass) {
+            const double r=pass%2 ? .405 : .395;
+            reentry.positionX=r*std::cos(gateBearing); reentry.positionY=r*std::sin(gateBearing);
+            reentry.velocityX=-.5*std::cos(gateBearing); reentry.velocityY=-.5*std::sin(gateBearing);
+            const auto step=updateLaunchFlight(reentry,landingModel,moon,{},.05);
+            check(reentry.mode==FlightMode::Orbit && step.landingZoneId.empty() && !reentry.landing.gateArmed,
+                "Repeated boundary crossings without outer clearance must stay in orbit");
+        }
+        reentry.positionX=.56*std::cos(gateBearing); reentry.positionY=.56*std::sin(gateBearing);
+        reentry.velocityX=reentry.velocityY=0;
+        updateLaunchFlight(reentry,landingModel,moon,{},.001);
+        check(reentry.landing.gateArmed,"Clearing the outer boundary after the handoff must rearm landing");
+        reentry.positionX=.401*std::cos(gateBearing); reentry.positionY=.401*std::sin(gateBearing);
+        reentry.velocityX=-.5*std::cos(gateBearing); reentry.velocityY=-.5*std::sin(gateBearing);
+        const auto entered=updateLaunchFlight(reentry,landingModel,moon,{},.05);
+        check(reentry.mode==FlightMode::Landing && entered.landingZoneId==planetLandingZones()[0].id,
+            "A fresh eligible inward crossing after outer clearance must permit landing");
         for (const auto& zone : planetLandingZones()) {
             auto descending = beginLaunchFlight(landingModel, moon);
             descending.active = descending.physicalFlight = true;

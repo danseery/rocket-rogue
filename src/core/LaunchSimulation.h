@@ -66,6 +66,7 @@ struct LaunchFlightStep {
     bool reachedHome = false;
     bool failed = false;
     bool asteroidHit = false;
+    bool crossedAsteroidBelt = false;
     bool trainingRescue = false;
     int hullDamageTaken = 0;
     LaunchFailureCause failureCause = LaunchFailureCause::None;

@@ -9,6 +9,8 @@
 
 namespace rocket {
 
+struct PreparedSurfaceLanding;
+
 struct ProgressionArtifactOpportunity {
     std::string destinationId;
     std::string bodyId;
@@ -39,7 +41,17 @@ std::optional<ProgressionArtifactOpportunity> unresolvedProgressionArtifactOppor
     const GameState& state,
     const ContentCatalog& catalog,
     std::string_view destinationId,
-    std::string_view bodyId = {});
+    std::string_view bodyId = {},
+    bool requireActiveStep = true);
+
+struct OrbitalArtifactSignal {
+    bool detected = false;
+    bool localized = false;
+    double bearing = 0.0;
+    double depth = 0.0;
+};
+OrbitalArtifactSignal orbitalArtifactSignal(const GameState& state, const ContentCatalog& catalog,
+    const PreparedSurfaceLanding* prepared = nullptr);
 ProgressionArtifactPlacement resolveProgressionArtifactPlacement(
     const GameState& state,
     const ContentCatalog& catalog,

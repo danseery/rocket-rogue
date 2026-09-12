@@ -5,6 +5,33 @@
 
 namespace rocket
 {
+const std::vector<SystemAsteroid>& solarAsteroidBelt()
+{
+    static const auto rocks = [] {
+        std::vector<SystemAsteroid> result;
+        constexpr int perRing = 160;
+        for (int row = 0; row < 4; ++row) for (int index = 0; index < perRing; ++index) {
+            const double angle = (index + row*.37)*6.283185307179586/perRing;
+            const double radius = 24.35 + row*.85 + .12*std::sin(index*2.31+row);
+            const double scale = .75 + .5*(.5+.5*std::sin(index*4.17+row*1.9));
+            result.push_back({{radius*std::cos(angle),radius*std::sin(angle)}, .12*scale, scale});
+        }
+        return result;
+    }();
+    return rocks;
+}
+
+bool crossesSolarAsteroidBelt(SystemVector from, SystemVector to)
+{
+    const double dx = to.x-from.x, dy = to.y-from.y;
+    const double lengthSquared = dx*dx+dy*dy;
+    const double t = lengthSquared > 1e-12
+        ? std::clamp(-(from.x*dx+from.y*dy)/lengthSquared,0.0,1.0) : 0.0;
+    const double nearest = std::hypot(from.x+dx*t,from.y+dy*t);
+    const double farthest = std::max(std::hypot(from.x,from.y),std::hypot(to.x,to.y));
+    return nearest <= solarBeltOuterRadius && farthest >= solarBeltInnerRadius;
+}
+
 double systemBodyApproachBlend(const SystemBodyDefinition &body, double radius)
 {
     const double nearRadius = std::max(.52, body.radius * 2.0);

@@ -36,6 +36,7 @@ FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool la
     else if (frame && frame->id == "earth" && f.positionX*f.velocityX+f.positionY*f.velocityY > 0)
         g.nextAction = "Climb away from Earth / follow your " + g.targetName + " marker";
     else if (f.predictedImpact) g.nextAction = "Brake or turn: predicted impact";
+    else if (e.cruise.active && e.cruise.cooling) g.nextAction = "Cruise cooling / engines off until 40%";
     else if (frame && f.orbit.captured && g.orbitBodyId == frame->id) g.nextAction = laserComplete ? "Align with the landing gate, then Land" : surveyed ? "Use the orbital laser to prepare your landing" : "Use Pulse Survey to inspect a landing site";
     else if (frame && g.orbitBodyId == frame->id) g.nextAction = "Shape your trajectory into the orbit bands";
     else if (target && target->dock) g.nextAction = "Approach the dock marker and slow to dock";

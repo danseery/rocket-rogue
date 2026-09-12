@@ -2298,7 +2298,7 @@ struct FlightGuidance {
     double targetDistance = 0, targetBearing = 0;
     bool predictedImpact = false;
 };
-struct CruiseState { bool active = false; };
+struct CruiseState { bool active = false; bool cooling = false; };
 enum class BatteryOwner { Site, Ship, EarthStorage, Wreck, ArkSlot };
 struct BeaconBatteryState {
     std::string id;

@@ -701,7 +701,7 @@
 
     function requestedDebugLaunchLesson() {
       const rawValue = new URLSearchParams(window.location.search).get("debug_launch_lesson");
-      if (rawValue === null || !/^[0-3]$/.test(rawValue)) return null;
+      if (rawValue === null || !/^[0-4]$/.test(rawValue)) return null;
       return Number(rawValue);
     }
 
@@ -740,7 +740,7 @@
         shaftascent: 27,
         shaftwall: 28
       };
-      const destination = query.get("debug_surface_destination") === "mars" ? 1 : 0;
+      const destination = { moon: 0, mars: 1, io: 2 }[query.get("debug_surface_destination")] ?? 0;
       const phase = phases[rawValue];
       return phase === undefined ? null : { destination, phase };
     }

@@ -669,8 +669,8 @@ void updatePhysicalTrajectoryPrediction(FlightRunState& flight, bool landingAuth
         }
         pose = next;
         flight.predictedTrajectory.push_back({pose.x,pose.y});
-        if (std::hypot(pose.x,pose.y) > flight_landing::gateRearmRadius &&
-            flight.handoff.elapsed + (index+1)*predictionStep >= flight_landing::handoffSeconds)
+        if (landingGateCanRearm(std::hypot(pose.x,pose.y),
+            flight.handoff.elapsed + (index+1)*predictionStep))
             gateArmed = true;
     }
 }
@@ -796,6 +796,30 @@ LaunchFlightStep updateSpaceFlight(
         moved.position = {next.x, next.y}; moved.velocity = {next.vx, next.vy};
         moved = convertSystemFrame(moved, location->frame, location->bodyId, *system);
         restoreSystemLocation(moved, flight);
+        result.crossedAsteroidBelt = system->id == "solar" &&
+            crossesSolarAsteroidBelt(global.position, {next.x,next.y});
+        if (result.crossedAsteroidBelt && flight.asteroidInvulnerabilitySeconds <= 0.0) {
+            for (const auto& asteroid : solarAsteroidBelt()) {
+                if (pointToSegmentDistance(asteroid.position.x,asteroid.position.y,
+                    global.position.x,global.position.y,next.x,next.y) > asteroid.radius+.075) continue;
+                const double damage = launchAsteroidImpactDamage(launch.hullRank,asteroid.scale);
+                flight.hullRemaining = std::max(0.0,flight.hullRemaining-damage);
+                flight.hullDamageTaken = std::min(tuning::damage::destroyedShipDamage,
+                    flight.hullDamageTaken+static_cast<int>(std::round(damage)));
+                flight.asteroidInvulnerabilitySeconds = tuning::launch::asteroidInvulnerabilitySeconds;
+                result.asteroidHit = true;
+                result.hullDamageTaken = static_cast<int>(std::round(damage));
+                if (flight.hullRemaining <= 0.0) {
+                    flight.active = false;
+                    flight.phase = FlightPhase::Impact;
+                    flight.failureCause = LaunchFailureCause::HullBreach;
+                    result.failed = true;
+                    result.failureCause = flight.failureCause;
+                    return result;
+                }
+                break;
+            }
+        }
         // Swept collisions include bodies which are not the navigation target.
         for (const auto& obstacle : system->bodies) {
             if (body && obstacle.id == body->id) continue;
@@ -819,7 +843,7 @@ LaunchFlightStep updateSpaceFlight(
         flight.positionY += flight.velocityY * worldDt;
     }
 
-    if (launch.asteroidsEnabled && flight.asteroidInvulnerabilitySeconds <= 0.0) {
+    if (!system && launch.asteroidsEnabled && flight.asteroidInvulnerabilitySeconds <= 0.0) {
         for (int index = 0; index < launch.asteroidCount; ++index) {
             if (flight.asteroidHit[static_cast<std::size_t>(index)]) {
                 continue;
@@ -916,8 +940,8 @@ LaunchFlightStep updateSpaceFlight(
         flight.phase = flight.orbit.captured ? FlightPhase::Orbiting : FlightPhase::TargetApproach;
         flight.handoff = {FlightMode::Travel,FlightMode::Orbit,0.0,flight.positionX,flight.positionY,flight.heading};
     }
-    if (!flight.landing.gateArmed && radius > flight_landing::gateRearmRadius &&
-        flight.handoff.elapsed >= flight_landing::handoffSeconds) flight.landing.gateArmed = true;
+    if (!flight.landing.gateArmed && landingGateCanRearm(radius, flight.handoff.elapsed))
+        flight.landing.gateArmed = true;
     // Swept segment-circle entry: fast approaches cannot skip the gate.
     const double dx=flight.positionX-previousX, dy=flight.positionY-previousY;
     const double a=dx*dx+dy*dy, b=2.0*(previousX*dx+previousY*dy);

@@ -3069,9 +3069,19 @@ int main()
         assert(fixture.saves.value == originalSave);
 
         const std::uint64_t stateBeforeInvalidLesson = fixture.runner.app().deterministicStateHash();
-        fixture.runner.app().debugStartLaunchLesson(4);
+        fixture.runner.app().debugStartLaunchLesson(5);
         assert(fixture.runner.app().deterministicStateHash() == stateBeforeInvalidLesson);
         assert(fixture.saves.value == originalSave);
+        fixture.runner.app().debugStartLaunchLesson(4);
+        for (int frame=0;frame<48;++frame) {
+            fixture.host.now += 1.0/60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.ui.html.find("Asteroid belt ahead")!=std::string::npos);
+        assert(fixture.ui.html.find("Hull Plating")!=std::string::npos);
+        assert(fixture.ui.html.find("Flight Controls")!=std::string::npos);
+        assert(fixture.saves.value == originalSave);
+        assert(fixture.saves.storeCount == originalStoreCount);
         fixture.runner.shutdown();
     }
 

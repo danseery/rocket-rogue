@@ -3,6 +3,8 @@
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
 #include "core/Tuning.h"
+#include "core/FlightSystem.h"
+#include "core/MiningSystem.h"
 
 #include <algorithm>
 #include <cmath>
@@ -115,7 +117,8 @@ std::optional<ProgressionArtifactOpportunity> unresolvedProgressionArtifactOppor
     const GameState& state,
     const ContentCatalog& catalog,
     std::string_view destinationId,
-    std::string_view bodyId)
+    std::string_view bodyId,
+    bool requireActiveStep)
 {
     const std::string_view physicalBody = bodyId.empty() ? destinationId : bodyId;
     if (destinationId.empty() || hasPermanentArtifactFrom(state, physicalBody)) {
@@ -133,7 +136,7 @@ std::optional<ProgressionArtifactOpportunity> unresolvedProgressionArtifactOppor
         const ScenarioStepState stepState = scenarioStepState(
             state, catalog, mission->scenarioId, mission->claimStepId);
         if (step == nullptr ||
-            (stepState != ScenarioStepState::Active && stepState != ScenarioStepState::ReadyToClaim)) {
+            (requireActiveStep && stepState != ScenarioStepState::Active && stepState != ScenarioStepState::ReadyToClaim)) {
             return std::nullopt;
         }
         return ProgressionArtifactOpportunity {
@@ -219,6 +222,48 @@ std::optional<ProgressionArtifactOpportunity> unresolvedProgressionArtifactOppor
         }
     }
     return std::nullopt;
+}
+
+OrbitalArtifactSignal orbitalArtifactSignal(const GameState& state, const ContentCatalog& catalog,
+    const PreparedSurfaceLanding* prepared)
+{
+    OrbitalArtifactSignal signal;
+    const auto& expedition = state.run.expedition;
+    const auto* body = systemBody(solarSystemDefinition(), expedition.location.bodyId);
+    if (!body || !unresolvedProgressionArtifactOpportunity(state, catalog,
+            body->environmentId, body->id, false)) return signal;
+    const std::string zoneId = body->id == "moon" && !expedition.moonTutorialZone.empty()
+        ? expedition.moonTutorialZone : "zone_1";
+    const auto* zone = planetLandingZone(zoneId);
+    if (!zone) return signal;
+    signal.bearing = zone->centerBearing;
+    bool delivered = false;
+    const auto inspect = [&](std::string_view siteZone, const MiningRunState& mining, bool scanned) {
+        signal.detected |= scanned;
+        if (siteZone != zoneId) return;
+        const auto inspectArtifact = [&](const MiningArtifactObject& artifact, int depth, int height) {
+            if (!artifact.present) return;
+            delivered |= artifact.state == MiningArtifactState::Delivered;
+            if (!scanned || delivered) return;
+            signal.localized = true;
+            signal.bearing = landingZoneSiteBearing(*zone, artifact.x, mining.returnZoneX, mining.terrain.width);
+            signal.depth = depth - mining.entryDepthZone + artifact.y / std::max(1, height);
+        };
+        inspectArtifact(mining.artifact, mining.depthZone, mining.terrain.height);
+        for (const auto& layer : mining.depthLayers)
+            inspectArtifact(layer.artifact, layer.depthZone, layer.terrain.height);
+    };
+    for (const auto& site : expedition.sites) {
+        if (site.systemId != expedition.location.systemId || site.bodyId != body->id ||
+            (prepared && site.siteId == prepared->persistentSiteId)) continue;
+        const auto separator = site.siteId.rfind(':');
+        if (separator != std::string::npos)
+            inspect(std::string_view(site.siteId).substr(separator+1), site.mining, site.orbital.surveyComplete);
+    }
+    if (prepared && prepared->expeditionTemplate.bodyId == body->id)
+        inspect(prepared->request.zoneId, prepared->miningTemplate, prepared->surveyComplete);
+    if (delivered) return {};
+    return signal;
 }
 
 ProgressionArtifactPlacement resolveProgressionArtifactPlacement(

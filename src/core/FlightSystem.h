@@ -54,6 +54,7 @@ inline constexpr double touchdownSettleSeconds = 0.60;
 inline constexpr double takeoffClearanceMeters = 0.50;
 inline constexpr double takeoffClearSeconds = 0.20;
 inline constexpr double handoffSeconds = 1.25;
+inline constexpr double departureFadeFraction = 0.40;
 inline constexpr double hullHalfWidth = 5.2;
 inline constexpr double hullHalfHeight = 15.47;
 inline constexpr double gateHalfAngle = 0.5235987755982988;
@@ -112,6 +113,8 @@ FlightScaleProfile flightScaleProfile(
 FlightScaleProfile flightScaleProfile(const FlightRunState& flight);
 void enterLocalLanding(FlightRunState& flight);
 void leaveLocalLanding(FlightRunState& flight);
+bool landingGateCanRearm(double radius, double handoffElapsed);
+double departureCameraProgress(double handoffProgress);
 void bindLandingSite(FlightRunState& flight, const MiningRunState& mining);
 // Contact returns false in clear air; suitable is true only with real support
 // under both feet and room for the deployed rig beside the shuttle.

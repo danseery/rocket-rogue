@@ -8188,7 +8188,8 @@ SurfaceActionOutcome startMiningRun(
             state,
             catalog,
             expedition.destinationId,
-            expedition.bodyId)
+            expedition.bodyId,
+            !state.run.expedition.travelInitialized)
         : std::nullopt;
     const std::optional<ProgressionArtifactPlacement> progressionPlacement =
         progressionOpportunity.has_value()
@@ -8416,6 +8417,18 @@ SurfaceLandingBuildRequest resolvedSurfaceLandingRequest(
     if (request.landingOrdinal <= 0) {
         request.landingOrdinal = miningDestinationHistoryValue(
             state.meta.destinationLandings, catalog, request.destinationId) + 1;
+    }
+    if (request.allowScenarioObjectives && request.miningSiteDefinitionId.empty()) {
+        // Physical mission sites exist before accepting/commissioning their
+        // recovery step. Scanning must not permanently save an empty site.
+        if (state.run.expedition.travelInitialized) {
+            if (const auto objective = unresolvedProgressionArtifactOpportunity(
+                    state, catalog, request.destinationId, request.bodyId, false)) {
+                request.scenarioId = objective->scenarioId;
+                request.scenarioStepId = objective->stepId;
+                request.miningSiteDefinitionId = objective->miningSiteDefinitionId;
+            }
+        }
     }
     if (request.allowScenarioObjectives && request.miningSiteDefinitionId.empty()) {
         if (const auto binding = activeAuthoredMiningSiteForDestination(
@@ -8742,26 +8755,54 @@ LandingSiteView buildLandingSiteView(const MiningRunState& mining)
     return result;
 }
 
+// Repair only the absent objective in older persisted mission sites; do not
+// regenerate their terrain or restore already delivered artifacts.
+static void ensureOrbitalMissionArtifact(const GameState& state, const ContentCatalog& catalog,
+    PreparedSurfaceLanding& prepared)
+{
+    if (!prepared.valid || !prepared.request.allowScenarioObjectives ||
+        !state.run.expedition.travelInitialized) return;
+    const auto opportunity = unresolvedProgressionArtifactOpportunity(state, catalog,
+        prepared.request.destinationId, prepared.request.bodyId, false);
+    auto& mining = prepared.miningTemplate;
+    if (!opportunity || mining.artifact.present ||
+        std::any_of(mining.depthLayers.begin(), mining.depthLayers.end(),
+            [](const auto& layer) { return layer.artifact.present; })) return;
+    const auto* destination = catalog.findDestination(prepared.request.destinationId);
+    if (!destination) return;
+    GameState preview = state;
+    preview.run.planetaryExpedition = prepared.expeditionTemplate;
+    const auto placement = resolveProgressionArtifactPlacement(preview, catalog, *destination,
+        0, opportunity->siteIdentity);
+    const int active = mining.depthZone;
+    if (!prepareLandingLayers(preview, catalog, mining, placement.targetDepth) ||
+        !activateLandingLayer(mining, placement.targetDepth)) return;
+    const auto* site = catalog.findMiningSite(opportunity->miningSiteDefinitionId);
+    const auto rules = site ? resolveMiningSiteArenaRules(site->arena, *site) : activeMiningArenaRules(mining);
+    configureProgressionArtifactOnActiveLayer(preview, mining, *destination, rules, site, placement);
+    mining.scenarioId = opportunity->scenarioId;
+    mining.scenarioStepId = opportunity->stepId;
+    mining.miningSiteDefinitionId = opportunity->miningSiteDefinitionId;
+    auto& expedition = prepared.expeditionTemplate;
+    expedition.pendingScenarioId = opportunity->scenarioId;
+    expedition.pendingScenarioStepId = opportunity->stepId;
+    expedition.pendingMiningSiteDefinitionId = opportunity->miningSiteDefinitionId;
+    (void)activateLandingLayer(mining, active);
+}
+
 bool prepareOrbitalSurvey(const GameState& state, const ContentCatalog& catalog,
     PreparedSurfaceLanding& prepared, int depth)
 {
     if (!prepared.valid) return false;
     const auto* destination = catalog.findDestination(prepared.request.destinationId);
     if (!destination) return false;
+    ensureOrbitalMissionArtifact(state, catalog, prepared);
     depth = std::clamp(depth, 0, tuning::surfaceDepthProgression::maximumDepthRating);
     GameState preview = state;
     preview.run.planetaryExpedition = prepared.expeditionTemplate;
     preview.run.mining = prepared.miningTemplate;
     auto& mining = preview.run.mining;
     const int entry = mining.depthZone;
-    // The orbit manifest must describe the authored objective even if its
-    // target layer has not been activated from the depth cache yet.
-    const auto artifactOpportunity = unresolvedProgressionArtifactOpportunity(
-        state, catalog, prepared.expeditionTemplate.destinationId, prepared.expeditionTemplate.bodyId);
-    const auto artifactPlacement = artifactOpportunity.has_value()
-        ? std::optional<ProgressionArtifactPlacement>(resolveProgressionArtifactPlacement(
-            state, catalog, *destination, 0, artifactOpportunity->siteIdentity))
-        : std::nullopt;
     prepared.surveyLayers.clear();
     for (int d = entry; d <= entry + depth; ++d) {
         if (mining.depthZone != d) {
@@ -8779,13 +8820,22 @@ bool prepareOrbitalSurvey(const GameState& state, const ContentCatalog& catalog,
             summary.radiation |= cell.hazardAffinity == MiningElementalAffinity::Radiation;
             summary.toxic |= cell.hazardAffinity == MiningElementalAffinity::Toxic;
         }
-        summary.artifact = mining.artifact.present ||
-            (artifactPlacement.has_value() && d == artifactPlacement->targetDepth);
+        summary.artifact = mining.artifact.present && mining.artifact.state != MiningArtifactState::Delivered;
         prepared.surveyLayers.push_back(summary);
     }
     if (mining.depthZone != entry) {
         storeActiveDepthLayer(mining);
         (void)restoreDepthLayer(mining, entry);
+    }
+    // Exact objective localization does not grant deeper resource knowledge
+    // or increase the laser's surveyed-depth allowance.
+    for (const auto& layer : mining.depthLayers) {
+        if (layer.depthZone <= entry+depth || !layer.artifact.present ||
+            layer.artifact.state == MiningArtifactState::Delivered) continue;
+        OrbitalSurveyLayer objective;
+        objective.depth = layer.depthZone-entry;
+        objective.artifact = true;
+        prepared.surveyLayers.push_back(objective);
     }
     prepared.miningTemplate = std::move(mining);
     prepared.surveyedDepth = depth;
@@ -9017,6 +9067,10 @@ PreparedSurfaceLanding restoreSurfaceLanding(const GameState& state, const Conte
         p.laserDepth = m.entryDepthZone; p.laserRow = 4;
     }
     p.valid = p.destinationIndex >= 0 && !m.terrain.cells.empty();
+    if (p.valid) {
+        ensureOrbitalMissionArtifact(state, catalog, p);
+        if (p.surveyComplete) (void)prepareOrbitalSurvey(state, catalog, p, std::max(0, p.surveyedDepth));
+    }
     if (p.valid) {
         GameState crew = state;
         crew.run.mining = std::move(m);

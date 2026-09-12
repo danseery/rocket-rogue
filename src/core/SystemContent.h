@@ -47,6 +47,17 @@ struct SystemDefinition
     std::vector<SystemBodyDefinition> bodies;
 };
 const SystemDefinition &solarSystemDefinition();
+// Persistent world-space obstacles between Mars and Jupiter. The outer
+// margins provide warning space before the first physical rocks.
+inline constexpr double solarBeltInnerRadius = 23.5;
+inline constexpr double solarBeltOuterRadius = 28.0;
+struct SystemAsteroid {
+    SystemVector position;
+    double radius = .12;
+    double scale = 1.0;
+};
+const std::vector<SystemAsteroid>& solarAsteroidBelt();
+bool crossesSolarAsteroidBelt(SystemVector from, SystemVector to);
 const SystemBodyDefinition *systemBody(const SystemDefinition &, std::string_view id);
 const SystemBodyDefinition *bodyForEnvironment(const SystemDefinition &, std::string_view id);
 // Authored opening launch berth and departure impulse in Earth-relative units.

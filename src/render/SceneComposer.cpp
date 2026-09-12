@@ -41,14 +41,10 @@ constexpr Color kFlightPathTrailColor {1.0F, 0.18F, 0.16F, 1.0F};
 constexpr float kFlightPathTrailAlphaStart = 0.18F;
 constexpr float kFlightPathTrailAlphaRange = 0.34F;
 constexpr float kFlightPathTrailWidth = 2.4F;
-constexpr float kManeuverBoosterHalfWidth = 0.007F;
-constexpr float kManeuverBoosterBaseLength = 0.013F;
-constexpr float kManeuverBoosterLengthRange = 0.016F;
-// Orbit's side-burn nozzle sits inside the transparent edge of the square
-// rocket frame, where the flame visibly meets the hull. Launch uses this same
-// authored proportion even though its rocket is scaled dynamically.
-constexpr float kManeuverBoosterNozzleOffset = 0.028F;
-constexpr float kOrbitRocketSize = 0.11F;
+// The mid-hull sides are at roughly x=368/656 in the 1024px rocket sheet.
+// Anchor slightly inside that silhouette; the ship draws over the flame root.
+constexpr float kSideThrustNozzleShare = 0.14F;
+constexpr float kSideThrustWidthShare = 0.12F;
 constexpr float kFlightThrustWidth = 0.054F;
 constexpr float kFlightThrustHeight = 0.104F;
 // Keep the leading edge of the animated sheet at the nozzle while letting the
@@ -502,6 +498,19 @@ float shortestAngleDelta(float from, float to)
     return std::remainder(to - from, 2.0F * kPi);
 }
 
+bool departingSurface(const RenderSnapshot& snapshot)
+{
+    return snapshot.screen == Screen::Flight && !snapshot.launchLandingLocalFrame &&
+        snapshot.launchHandoffFrom == static_cast<int>(FlightMode::Landing) &&
+        snapshot.launchHandoffProgress < 1.0;
+}
+
+float departureTerrainOpacity(const RenderSnapshot& snapshot)
+{
+    return 1.0F-smootherstep(static_cast<float>(snapshot.launchHandoffProgress /
+        flight_landing::departureFadeFraction));
+}
+
 Camera2D blendCamera(const Camera2D& from, const Camera2D& to, float amount)
 {
     const float t = std::clamp(amount, 0.0F, 1.0F);
@@ -782,6 +791,14 @@ Color mix(Color a, Color b, float t)
         a.b + (b.b - a.b) * clamped,
         a.a + (b.a - a.a) * clamped
     };
+}
+
+int systemBodyAsset(const SystemBodyDefinition& body)
+{
+    return body.id == "earth" ? EarthAsset : body.id == "mars" ? MarsAsset :
+        body.id == "mercury" ? MercuryAsset : body.id == "venus" ? VenusAsset :
+        body.id == "jupiter" ? JupiterAsset : body.id == "saturn" ? SaturnAsset :
+        body.id == "uranus" ? UranusAsset : body.id == "neptune" ? NeptuneAsset : MoonAsset;
 }
 
 int destinationBodyAsset(int destinationTier)
@@ -1740,7 +1757,7 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
     sceneWorldUnitY_ = sceneWorldUnit_;
     sceneAspect_ = std::max(0.10F, sceneWidthPixels / sceneHeightPixels);
     const bool surfaceActive = snapshot.screen == Screen::Mining ||
-        (snapshot.surfaceArrivalPrepared && snapshot.launchLandingLocalFrame);
+        (snapshot.surfaceArrivalPrepared && (snapshot.launchLandingLocalFrame || departingSurface(snapshot)));
     if (surfaceActive && snapshot.miningWidth > 0 && snapshot.miningHeight > 0) {
         const bool wasActive = surfaceCamera_.active;
         const double now = presentationTimeSeconds_ >= 0.0 ? presentationTimeSeconds_ : snapshot.animationTime;
@@ -1750,7 +1767,8 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
         surfaceCamera_.lastTime = now;
         surfaceCamera_.active = true;
         surfaceCamera_.viewport = layout.sceneRect;
-        surfaceCamera_.progress = snapshot.screen == Screen::Mining ? 1.0F : miningLayoutBlend;
+        surfaceCamera_.progress = snapshot.screen == Screen::Mining || departingSurface(snapshot)
+            ? 1.0F : miningLayoutBlend;
         const auto normal = miningViewTransform(snapshot, sceneAspect_, 1.0F);
         float cw = std::min(normal.cellWidth, normal.cellHeight) * 1.25F, ch = cw;
         const double shipGridX = snapshot.launchLandingPadX + .5 +
@@ -2742,6 +2760,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         const float approachBlend = flightCameraPresentation_.approachBlend;
         const FlightCameraView flightView = physicalFlightCamera(snapshot, approachBlend);
         arrivalOpacity = smootherstep((flightView.landingBlend - 0.02F) / 0.58F);
+        if (departingSurface(snapshot)) arrivalOpacity = departureTerrainOpacity(snapshot);
         if (snapshot.surfaceArrivalActive) {
             arrivalOpacity = 1.0F;
         }
@@ -2764,7 +2783,12 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         if (surfaceCamera_.active) miningViewOffsetX = miningViewOffsetY = 0.0F;
     }
     drawOpacity_ = previousOpacity * arrivalOpacity;
-    drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.0F, 0.0F, 0.0F, 1.0F}, false);
+    if (!arrivalComposite)
+        drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.0F, 0.0F, 0.0F, 1.0F}, false);
+    if (arrivalOpacity <= 0.001F) {
+        drawOpacity_ = previousOpacity;
+        return;
+    }
     if (snapshot.miningWidth <= 0 || snapshot.miningHeight <= 0) {
         drawOpacity_ = previousOpacity;
         return;
@@ -3079,6 +3103,13 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
                                            float u1 = 1.0F, float v1 = 1.0F,
                                            bool textured = false) {
             color.a *= drawOpacity_;
+            if (arrivalComposite) {
+                // Soften finite site edges without changing physical barriers.
+                const float sideCells = std::min(cx-left-miningViewOffsetX,
+                    right+miningViewOffsetX-cx)/cellW;
+                const float edgeCells = std::min(sideCells, (cy-bottom-miningViewOffsetY)/cellH);
+                color.a *= smootherstep(edgeCells/3.0F);
+            }
             packedMiningTerrainInstances_.push_back(packSceneInstance({
                 cx, cy,
                 width * 0.5F, 0.0F,
@@ -3090,7 +3121,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
                 textured
             }));
         };
-        appendTerrainRect(
+        if (!arrivalComposite) appendTerrainRect(
             (left + right) * 0.5F + miningViewOffsetX,
             (top + bottom) * 0.5F + miningViewOffsetY,
             right - left + 0.035F,
@@ -3109,6 +3140,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
                 cell.hazard,
                 cell.suitOnlyPassage
             };
+            if (arrivalComposite) continue; // No rectangular exploration fog in the sky.
             const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
             const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
             const float revealFraction = cell.revealed ? pulseRevealFraction(index, x, y) : 0.0F;
@@ -3137,7 +3169,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         const int visibleTop = std::max(0, static_cast<int>(std::floor((top+miningViewOffsetY-1.0F)/cellH))-1);
         const int visibleBottom = std::min(snapshot.miningHeight-1,
             static_cast<int>(std::ceil((top+miningViewOffsetY+1.0F)/cellH))+1);
-        for (int y=visibleTop; y<=visibleBottom; ++y) {
+        for (int y=visibleTop; !arrivalComposite && y<=visibleBottom; ++y) {
             for (int x=visibleLeft; x<=visibleRight; ++x) {
                 if (x>=0 && x<snapshot.miningWidth) continue;
                 const int edgeX=x<0 ? 0 : snapshot.miningWidth-1;
@@ -6116,7 +6148,7 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
             drawPoiLabel(labelAnchor.x,labelAnchor.y,0.0036F,snapshot.orbitalZoneLabel,PoiGuidanceKind::Ship);
             }
           }
-        } else if (snapshot.launchLandingLocalFrame) {
+        } else if (snapshot.launchLandingLocalFrame && !snapshot.surfaceArrivalPrepared) {
             const double n= snapshot.launchLandingBasisAngle;
             const double r=flight_geometry::bodyRadius+flight_landing::departureAltitude/flight_landing::metersPerOrbitUnit;
             const Vec2 left=physicalFlightPoint(snapshot,std::cos(n)*r-std::sin(n)*2.0,
@@ -6500,6 +6532,27 @@ void SceneComposer::resetFlightTrajectoryPresentation() noexcept
 
 void SceneComposer::drawLaunchAsteroids(const RenderSnapshot& snapshot)
 {
+    if (snapshot.systemTravel && snapshot.system.id == "solar" && !snapshot.launchLandingLocalFrame) {
+        const auto* body = snapshot.systemLocation.frame == CoordinateFrame::Body
+            ? systemBody(snapshot.system,snapshot.systemLocation.bodyId) : nullptr;
+        const SystemVector offset = body ? body->position : SystemVector{};
+        const auto view = physicalFlightCamera(snapshot,flightCameraPresentation_.approachBlend);
+        int index = 0;
+        for (const auto& asteroid : solarAsteroidBelt()) {
+            const auto p = view.camera.point(asteroid.position.x-offset.x,asteroid.position.y-offset.y);
+            const float size = static_cast<float>(asteroid.radius*2.0)*view.camera.scale;
+            ++index;
+            if (std::abs(p.x)>sceneAspect_+size || std::abs(p.y)>1.2F+size) continue;
+            const float angle = static_cast<float>(index*2.31+snapshot.animationTime*.16);
+            if (textureReady(AsteroidAsset))
+                drawSpriteRotated(p.x,p.y,size,size,std::sin(angle),std::cos(angle),{1,1,1,1},AsteroidAsset);
+            else drawCircle(p.x,p.y,size*.5F,{.58F,.50F,.46F,1},12);
+        }
+        const double radius = std::hypot(snapshot.launchPositionX+offset.x,snapshot.launchPositionY+offset.y);
+        if (radius>=solarBeltInnerRadius-1.5 && radius<=solarBeltOuterRadius+1.5)
+            drawPoiLabel(0,.82F,.004F,"ASTEROID BELT",PoiGuidanceKind::Ship);
+        return;
+    }
     if (snapshot.launchLandingLocalFrame || !snapshot.launchAsteroidsEnabled || snapshot.launchAsteroidCount <= 0) {
         return;
     }
@@ -6586,6 +6639,7 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         forward = {static_cast<float>(std::cos(settled)), static_cast<float>(std::sin(settled))};
     }
     float ascentSpriteSize=0.0F;
+    const Vec2 orbitRoute = route;
     if (surfaceCamera_.active || (snapshot.surfaceArrivalPrepared && snapshot.manualAscentCameraProgress<1.0)) {
         const float normalBlend=1.0F-smootherstep(static_cast<float>(snapshot.manualAscentCameraProgress));
         const auto view=miningViewTransform(snapshot,sceneAspect_,normalBlend,&surfaceCamera_);
@@ -6594,9 +6648,22 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         const auto anchor=physicalSurfaceContactPoint(snapshot,flightCameraPresentation_.approachBlend);
         const Vec2 offset{surfaceCamera_.active ? 0.0F : (anchor.x-parked.x)*(1.0F-normalBlend),
             surfaceCamera_.active ? 0.0F : (anchor.y-parked.y-ascentSpriteSize*0.455F)*(1.0F-normalBlend)};
-        route=view.gridPoint(snapshot.launchLandingPadX+snapshot.launchLandingHorizontalPosition/4.0+0.5,
-            snapshot.launchLandingPadY-snapshot.launchLandingAltitude/4.0,offset);
+        double horizontal = snapshot.launchLandingHorizontalPosition;
+        double altitude = snapshot.launchLandingAltitude;
+        if (departingSurface(snapshot)) {
+            const double nx=std::cos(snapshot.launchLandingBasisAngle), ny=std::sin(snapshot.launchLandingBasisAngle);
+            const double dx=snapshot.launchPositionX-snapshot.launchHandoffX;
+            const double dy=snapshot.launchPositionY-snapshot.launchHandoffY;
+            horizontal+=(ny*dx-nx*dy)*flight_geometry::velocityToMetersPerSecond;
+            altitude+=(nx*dx+ny*dy)*flight_geometry::velocityToMetersPerSecond;
+        }
+        route=view.gridPoint(snapshot.launchLandingPadX+horizontal/4.0+0.5,
+            snapshot.launchLandingPadY-altitude/4.0,offset);
         route.y+=ascentSpriteSize*0.455F;
+        if (departingSurface(snapshot)) {
+            const float blend=static_cast<float>(departureCameraProgress(snapshot.launchHandoffProgress));
+            route={std::lerp(route.x,orbitRoute.x,blend),std::lerp(route.y,orbitRoute.y,blend)};
+        }
     }
     const Vec2 right {forward.y, -forward.x};
     const float hangarLift = snapshot.screen == Screen::Hangar ? 0.02F : 0.0F;
@@ -6614,7 +6681,9 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
             miningShuttleSize(snapshot, miningViewTransform(snapshot, sceneAspect_, 0.0F, &surfaceCamera_)),
             landingBlend);
     }
-    if (ascentSpriteSize>0.0F) scale=ascentSpriteSize;
+    if (ascentSpriteSize>0.0F) scale=departingSurface(snapshot)
+        ? std::lerp(ascentSpriteSize,0.17F*1.35F,
+            static_cast<float>(departureCameraProgress(snapshot.launchHandoffProgress))) : ascentSpriteSize;
     auto world = [&](float localX, float localY) {
         return Vec2 {
             cx + right.x * localX * scale + forward.x * localY * scale,
@@ -6739,7 +6808,8 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         std::clamp(snapshot.launchSteerInput, -1.0, 1.0));
     if (snapshot.screen == Screen::Flight
         && !snapshot.preflightActive
-        && std::abs(launchSteering) > 0.05F) {
+        && std::abs(launchSteering) > 0.05F
+        && textureReady(ThrustAsset)) {
         const float movementDirection = launchSteering < 0.0F ? -1.0F : 1.0F;
         // Steering moves the ship toward movementSide, so the maneuvering
         // exhaust belongs on the opposite side of the hull.
@@ -6747,29 +6817,28 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
             -right.x * movementDirection,
             -right.y * movementDirection
         };
-        const float rocketSize = (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale;
-        const float nozzleOffset = rocketSize
-            * (kManeuverBoosterNozzleOffset / kOrbitRocketSize);
+        const float rocketSize = (departingSurface(snapshot)
+            ? std::lerp(1.0F,0.86F,static_cast<float>(departureCameraProgress(snapshot.launchHandoffProgress)))
+            : surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale;
+        const float nozzleOffset = rocketSize * kSideThrustNozzleShare;
         const Vec2 nozzle {
             cx + exhaustSide.x * nozzleOffset,
             cy + exhaustSide.y * nozzleOffset
         };
-        const float halfWidth = rocketSize * (kManeuverBoosterHalfWidth / 0.11F);
-        const float length = rocketSize
-            * ((kManeuverBoosterBaseLength
-                + std::abs(launchSteering) * kManeuverBoosterLengthRange) / 0.11F);
-        const Vec2 tip {
-            nozzle.x + exhaustSide.x * length,
-            nozzle.y + exhaustSide.y * length
-        };
-        drawTriangle(
-            nozzle.x + forward.x * halfWidth,
-            nozzle.y + forward.y * halfWidth,
-            nozzle.x - forward.x * halfWidth,
-            nozzle.y - forward.y * halfWidth,
-            tip.x,
-            tip.y,
-            {1.0F, 0.42F, 0.06F, 1.0F});
+        const float halfWidth = rocketSize * kSideThrustWidthShare * .5F;
+        const float halfLength = rocketSize * (.10F + .06F*std::abs(launchSteering)) * .5F;
+        const int frame = static_cast<int>(snapshot.animationTime * 18.0) % 6;
+        // UV top is the flame root. Cropping the empty leading rows lets the
+        // root stay on the hull while the small plume animates outwards.
+        submitInstance(
+            {nozzle.x + exhaustSide.x*halfLength, nozzle.y + exhaustSide.y*halfLength,
+                -exhaustSide.y*halfWidth, exhaustSide.x*halfWidth,
+                -exhaustSide.x*halfLength, -exhaustSide.y*halfLength,
+                {1.0F,1.0F,1.0F,.98F},
+                static_cast<float>(frame)/6.0F, kThrustSheetLeadingTransparentShare,
+                static_cast<float>(frame+1)/6.0F, 1.0F,
+                SceneInstanceShape::Rectangle,4},
+            textureForAsset(ThrustAsset),CoordinateSpace::World,PipelineClass::Textured);
     }
 
     if (snapshot.preflightActive) {
@@ -6780,7 +6849,10 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         const float closeProgress = closeLinear * closeLinear * (3.0F - 2.0F * closeLinear);
 
         if (textureReady(RocketOpenAsset)) {
-            texturedQuad(RocketOpenAsset, (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale, (surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale, {1.0F, 1.0F, 1.0F, 1.0F});
+            const float size = (departingSurface(snapshot)
+                ? std::lerp(1.0F,0.86F,static_cast<float>(departureCameraProgress(snapshot.launchHandoffProgress)))
+                : surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale;
+            texturedQuad(RocketOpenAsset, size, size, {1.0F, 1.0F, 1.0F, 1.0F});
         }
         if (textureReady(MiningDroneAsset) && entryProgress < 0.995F) {
             const float droneX = 0.60F * (1.0F - entryProgress);
@@ -6825,6 +6897,27 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
     }
 }
 
+void SceneComposer::drawOrbitalArtifactSignal(const RenderSnapshot& snapshot, float x, float y,
+    float radius, float alpha, float approachBlend)
+{
+    if (!snapshot.orbitalArtifactHint || snapshot.launchLandingLocalFrame) return;
+    const auto direction = physicalFlightVector(snapshot, std::cos(snapshot.orbitalArtifactBearing),
+        std::sin(snapshot.orbitalArtifactBearing), approachBlend);
+    const float length = std::max(0.00001F, std::hypot(direction.x, direction.y));
+    const float r = radius * (snapshot.orbitalArtifactLocalized
+        ? 1.0F-static_cast<float>(std::clamp(snapshot.orbitalArtifactDepth,0.0,5.0))/5.5F : 0.95F);
+    x += r*direction.x/length;
+    y += r*direction.y/length;
+    const float pulse = 0.85F + 0.15F*std::sin(static_cast<float>(snapshot.animationTime)*2.0F);
+    drawRadialGlow(x,y,radius*0.28F,{0.74F,0.28F,1.0F,0.34F*pulse*alpha},32);
+    drawRadialGlow(x,y,radius*0.11F,{0.82F,0.58F,1.0F,0.46F*pulse*alpha},24);
+    if (snapshot.orbitalArtifactLocalized) {
+        drawCircle(x,y,0.008F,{0.90F,0.72F,1.0F,alpha},16);
+        drawPoiLabel(x,y-0.05F,0.0028F,"ARTIFACT / DEPTH +" +
+            std::to_string(static_cast<int>(snapshot.orbitalArtifactDepth)),PoiGuidanceKind::Ship);
+    }
+}
+
 void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
 {
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
@@ -6863,11 +6956,12 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                 drawPoiLabel(d.x,d.y+.06F,.003F,"DOCK",PoiGuidanceKind::Ship);
             }
             if (bodyOffscreen) continue;
-            const int asset = body.id == "earth" ? EarthAsset : body.id == "mars" ? MarsAsset : body.id == "mercury" ? MercuryAsset : body.id == "venus" ? VenusAsset :
-                body.id == "jupiter" ? JupiterAsset : body.id == "saturn" ? SaturnAsset : body.id == "uranus" ? UranusAsset : body.id == "neptune" ? NeptuneAsset : MoonAsset;
+            const int asset = systemBodyAsset(body);
             if (body.kind == SystemBodyKind::Star) drawCircle(p.x,p.y,radius,{1,.65F,.15F,1},64);
             else if (body.kind == SystemBodyKind::Station) drawSprite(p.x,p.y,radius*2.4F,radius*2.4F,{1,1,1,1},ArkDamagedAsset);
             else drawSprite(p.x,p.y,radius*2.0F,radius*2.0F,{1,1,1,1},asset);
+            if (body.id == snapshot.systemLocation.bodyId)
+                drawOrbitalArtifactSignal(snapshot,p.x,p.y,radius*0.92F,1.0F,0.0F);
             if (body.id != snapshot.flightGuidance.targetId)
                 drawPoiLabel(p.x,p.y+radius+.045F,.0035F,body.name,PoiGuidanceKind::Ship);
         }
@@ -6877,6 +6971,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             drawEllipseLine(p.x,p.y,.04F,.04F,{1,.6F,.2F,1},16,0,2*kPi);
             drawPoiLabel(p.x,p.y+.07F,.003F,"WRECK " + std::to_string(wreck.id),PoiGuidanceKind::Ship);
         }
+        drawLaunchAsteroids(snapshot);
         drawRoute(snapshot);
         return;
     }
@@ -6908,8 +7003,9 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             2.40F);
         // Keep the destination present until the transformed local horizon is
         // already readable, then finish the crossfade before the local frame.
-        const float destinationAlpha = 1.0F - smootherstep(
-            (view.landingBlend - 0.72F) / 0.26F);
+        const float destinationAlpha = departingSurface(snapshot)
+            ? 1.0F-departureTerrainOpacity(snapshot)
+            : 1.0F - smootherstep((view.landingBlend - 0.72F) / 0.26F);
         const Vec2 destinationCenter = physicalFlightPoint(
             snapshot,
             0.0,
@@ -6928,18 +7024,21 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             destinationSize = baseRadius * 2.55F;
         }
         destinationSize *= cameraZoom;
-        if (snapshot.systemTravel) {
-            const auto* body = systemBody(snapshot.system,snapshot.systemLocation.bodyId);
-            if (body) destinationSize = static_cast<float>(body->radius)*2.5F*view.camera.scale;
-        }
-        if (snapshot.surfaceArrivalPrepared) {
+        // Physical identity, not the parent planet's shared environment art.
+        const auto* activeBody = snapshot.systemTravel
+            ? systemBody(snapshot.system,snapshot.systemLocation.bodyId) : nullptr;
+        if (!activeBody && snapshot.systemTravel)
+            activeBody = systemBody(solarSystemDefinition(),snapshot.systemLocation.bodyId);
+        if (activeBody)
+            destinationSize = static_cast<float>(systemBodyDisplayRadius(*activeBody))*2.0F*view.camera.scale;
+        if (snapshot.surfaceArrivalPrepared && !departingSurface(snapshot)) {
             // Let the actual body fill and leave the frame as its real local
             // site becomes readable. This is a visual scale match, not a new
             // collision surface or a replacement mountain backdrop.
             destinationSize *= std::exp(std::log(5.0F) *
                 smootherstep(view.landingBlend / 0.72F));
         }
-        const int destinationAsset = destinationBodyAsset(snapshot);
+        const int destinationAsset = activeBody ? systemBodyAsset(*activeBody) : destinationBodyAsset(snapshot);
         if (destinationAlpha > 0.001F) {
             drawRadialGlow(
                 destinationCenter.x,
@@ -7018,7 +7117,8 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                 "ZONE " + std::to_string(zone.sectorIndex + 1), PoiGuidanceKind::Ship);
             drawOpacity_ = profileOpacity;
             for (const auto& layer : snapshot.orbitalSurveyLayers) {
-                const float visibility = std::clamp(reveal - layer.depth, 0.0F, 1.0F) * alpha;
+                const float visibility = (layer.artifact && snapshot.orbitalZoneSurveyed ? 1.0F :
+                    std::clamp(reveal - layer.depth, 0.0F, 1.0F)) * alpha;
                 if (visibility <= 0.001F) continue;
                 const float r = radius * (1.0F - (layer.depth + 0.5F) / 5.5F);
                 Color color = layer.exotic ? Color{0.94F, 0.37F, 0.91F, visibility * 0.9F}
@@ -7045,7 +7145,9 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                 const Vec2 ship = physicalFlightPoint(snapshot,snapshot.launchPositionX,snapshot.launchPositionY,approachBlend);
                 // Match vertical band ordering to avoid crossed leader lines.
                 const bool lowerSector = zonePoint(zone.centerBearing,1.0F).y < c.y;
-                const int row = lowerSector ? snapshot.orbitalSurveyDepth-layer.depth : layer.depth;
+                const int displayDepth = snapshot.orbitalSurveyLayers.empty() ? snapshot.orbitalSurveyDepth :
+                    std::max(snapshot.orbitalSurveyDepth,snapshot.orbitalSurveyLayers.back().depth);
+                const int row = lowerSector ? displayDepth-layer.depth : layer.depth;
                 const float labelY = c.y + radius * 0.90F - row * 0.145F;
                 bool left = zonePoint(zone.centerBearing, 1.0F).x < c.x;
                 const float preferredX = left ? std::max(-0.96F,c.x-radius-0.48F)+0.22F
@@ -7118,14 +7220,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                 drawCircle(mouth.x,mouth.y,0.008F,
                     {0.18F,0.76F,0.74F,0.78F*destinationAlpha},18);
             }
-            if (snapshot.orbitalArtifactHint && !snapshot.launchLandingLocalFrame) {
-                const Vec2 signal = zonePoint(snapshot.orbitalArtifactBearing, radius * 0.95F);
-                const float pulse = 0.85F + 0.15F * std::sin(static_cast<float>(snapshot.animationTime) * 2.0F);
-                drawRadialGlow(signal.x, signal.y, radius * 0.28F,
-                    {0.74F, 0.28F, 1.0F, 0.34F * pulse * destinationAlpha}, 32);
-                drawRadialGlow(signal.x, signal.y, radius * 0.11F,
-                    {0.82F, 0.58F, 1.0F, 0.46F * pulse * destinationAlpha}, 24);
-            }
+            drawOrbitalArtifactSignal(snapshot,c.x,c.y,radius,destinationAlpha,approachBlend);
             const Vec2 pad = zonePoint(zone.centerBearing, radius);
             const Vec2 shaft = zonePoint(snapshot.orbitalShaftBearing, radius);
             if (snapshot.launchOrbitCaptured && snapshot.orbitalZoneSurveyed && !snapshot.launchLandingLocalFrame) {

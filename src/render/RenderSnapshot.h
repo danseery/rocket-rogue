@@ -224,6 +224,8 @@ struct RenderSnapshot {
     double orbitalShaftBearing = 0.0;
     bool orbitalArtifactHint = false;
     double orbitalArtifactBearing = 0.0;
+    bool orbitalArtifactLocalized = false;
+    double orbitalArtifactDepth = 0.0;
     bool orbitalInsideZone = false;
     bool orbitalZoneSurveyed = false;
     std::string orbitalZoneLabel = "Orbit Here";
