@@ -3426,6 +3426,52 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         miningBaseTerrainTexture_ == TextureId::None ? PipelineClass::Solid : PipelineClass::Textured);
 
     if (arrivalComposite) {
+        // Continuous atmospheric occlusion, not per-cell exploration boxes.
+        // The known surface stays readable; depth silhouettes and the finite
+        // bedrock rim disappear into the same haze before their edges show.
+        // Ship/arrival actors are drawn afterwards and remain unobscured.
+        constexpr int fogColumns = 32;
+        constexpr int fogRows = 24;
+        auto& fog = scratchVertices(fogColumns*fogRows*6);
+        const float shipGridX = static_cast<float>(snapshot.launchLandingPadX + .5 +
+            snapshot.launchLandingHorizontalPosition / flight_landing::metersPerCell);
+        const float shipGridY = static_cast<float>(snapshot.launchLandingPadY -
+            snapshot.launchLandingAltitude / flight_landing::metersPerCell) - 3.0F;
+        const auto fogVertex = [&](float x, float y) {
+            const float gridX = (x-left-miningViewOffsetX)/cellW;
+            const float gridY = (top+miningViewOffsetY-y)/cellH;
+            const float depth = gridY-static_cast<float>(snapshot.miningReturnZoneY);
+            const float depthFog = smootherstep((depth-3.0F)/
+                (static_cast<float>(tuning::mining::surfaceVisibleDepthCells)-3.0F));
+            const float edgeDistance = std::min(gridX,static_cast<float>(snapshot.miningWidth)-gridX);
+            const float sideFog = (1.0F-smootherstep(edgeDistance/12.0F))*
+                smootherstep((depth+14.0F)/10.0F);
+            // Keep nearby collision surfaces readable even when taking off
+            // from an excavated shaft or flying close to the site's rim.
+            const float nearShipVisibility = smootherstep(
+                (std::hypot(gridX-shipGridX,gridY-shipGridY)-4.0F)/5.0F);
+            const float opacity = (1.0F-(1.0F-depthFog)*(1.0F-sideFog))*nearShipVisibility;
+            return Color{0.014F,0.025F,0.042F,opacity*drawOpacity_};
+        };
+        // Sample in the visible scene, with smooth interpolated vertex alpha.
+        // This keeps cost bounded at every zoom and avoids rectangular masks
+        // tied to the finite terrain, or fog leaking into the HUD.
+        const auto& clip = packet_.logicalSceneClip;
+        const float fogLeft = (static_cast<float>(clip.x)-scenePixelCenterX_)/sceneWorldUnitX_;
+        const float fogRight = (static_cast<float>(clip.x+clip.width)-scenePixelCenterX_)/sceneWorldUnitX_;
+        const float fogTop = (sceneCssHeight_-static_cast<float>(clip.y)-scenePixelCenterY_)/sceneWorldUnitY_;
+        const float fogBottom = (sceneCssHeight_-static_cast<float>(clip.y+clip.height)-scenePixelCenterY_)/sceneWorldUnitY_;
+        for (int row=0;row<fogRows;++row) for (int column=0;column<fogColumns;++column) {
+            const float x0=std::lerp(fogLeft,fogRight,static_cast<float>(column)/fogColumns);
+            const float x1=std::lerp(fogLeft,fogRight,static_cast<float>(column+1)/fogColumns);
+            const float y0=std::lerp(fogBottom,fogTop,static_cast<float>(row)/fogRows);
+            const float y1=std::lerp(fogBottom,fogTop,static_cast<float>(row+1)/fogRows);
+            const Color a=fogVertex(x0,y0), b=fogVertex(x1,y0), c=fogVertex(x1,y1), d=fogVertex(x0,y1);
+            if (std::max({a.a,b.a,c.a,d.a})<=0.001F) continue;
+            pushVertex(fog,x0,y0,a); pushVertex(fog,x1,y0,b); pushVertex(fog,x1,y1,c);
+            pushVertex(fog,x0,y0,a); pushVertex(fog,x1,y1,c); pushVertex(fog,x0,y1,d);
+        }
+        submit(fog,TextureId::None,CoordinateSpace::World,PipelineClass::Solid);
         // The shared environment is complete. Arrival owns only the staged
         // actors and ceremony; mining glints, scanner guidance and combat
         // feedback begin with the normal controllable Mining view.

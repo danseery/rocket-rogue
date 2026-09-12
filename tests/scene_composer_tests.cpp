@@ -3780,6 +3780,15 @@ void testSolarBeltRendering()
 void testCommittedDepartureRendering()
 {
     using namespace rocket;
+    const auto atmosphereAlphas = [](const ScenePacket& packet) {
+        std::vector<float> alphas;
+        for (const auto& packed : packet.vertices) {
+            // Packed RGB of the flight-only continuous atmospheric veil.
+            if (packed.r == 4 && packed.g == 6 && packed.b == 11)
+                alphas.push_back(unpackSceneVertex(packed).a);
+        }
+        return alphas;
+    };
     std::vector<MiningCell> cells(64*40);
     for (int y=16;y<40;++y) for (int x=0;x<64;++x) {
         auto& cell=cells[y*64+x];
@@ -3812,6 +3821,11 @@ void testCommittedDepartureRendering()
         snapshot.launchPositionY=snapshot.launchHandoffY=radius*std::sin(zone.centerBearing);
         auto ship=spriteInstance(composer.compose(snapshot),TextureId::RocketClosed,0,0,1,1);
         const auto local=ship;
+        const auto fogAtDeparture=atmosphereAlphas(composer.compose(snapshot));
+        assert(!fogAtDeparture.empty());
+        assert(fogAtDeparture.size()<=32*24*6);
+        assert(std::any_of(fogAtDeparture.begin(),fogAtDeparture.end(),
+            [](float alpha) { return alpha>0.05F && alpha<0.95F; }));
         snapshot.launchLandingLocalFrame=false;
         snapshot.launchHandoffFrom=static_cast<int>(FlightMode::Landing);
         for (int sample=0;sample<=100;++sample) {
@@ -3819,6 +3833,13 @@ void testCommittedDepartureRendering()
             snapshot.launchLandingBlend=1.0-departureCameraProgress(snapshot.launchHandoffProgress);
             snapshot.surfaceFramingProgress=snapshot.launchLandingBlend;
             const auto& packet=composer.compose(snapshot);
+            const auto fog=atmosphereAlphas(packet);
+            if (sample>=40) assert(fog.empty());
+            else {
+                const double fade=std::clamp(snapshot.launchHandoffProgress/.4,0.0,1.0);
+                const double opacity=1.0-fade*fade*fade*(fade*(fade*6.0-15.0)+10.0);
+                for (float alpha : fog) assert(alpha<=opacity+.005);
+            }
             const auto next=spriteInstance(packet,TextureId::RocketClosed,0,0,1,1);
             assert(std::hypot(next.centerX-ship.centerX,next.centerY-ship.centerY)<.06F);
             assert(std::abs(std::hypot(next.axisYx,next.axisYy)-std::hypot(ship.axisYx,ship.axisYy))<.025F);
@@ -3844,6 +3865,28 @@ void testCommittedDepartureRendering()
         reloaded.setTextureReady(TextureId::RocketClosed,true);
         const auto restored=spriteInstance(reloaded.compose(snapshot),TextureId::RocketClosed,0,0,1,1);
         assert(std::hypot(continued.centerX-restored.centerX,continued.centerY-restored.centerY)<.002F);
+        // Underground departures retain visibility immediately around the
+        // ship, even below the opaque surface-depth fog.
+        snapshot.launchLandingLocalFrame=true;
+        snapshot.launchLandingBlend=snapshot.surfaceFramingProgress=1.0;
+        snapshot.launchLandingAltitude=-24.0;
+        const auto& underground=composer.compose(snapshot);
+        const auto& camera=underground.surfaceCamera;
+        const float shipGridY=16.0F+24.0F/flight_landing::metersPerCell-3.0F;
+        bool checkedNearby=false;
+        for (const auto& packed : underground.vertices) {
+            if (packed.r!=4 || packed.g!=6 || packed.b!=11) continue;
+            const auto vertex=unpackSceneVertex(packed);
+            const float gridX=(vertex.x-camera.left)/camera.cellWidth;
+            const float gridY=(camera.top-vertex.y)/camera.cellHeight;
+            if (std::hypot(gridX-32.5F,gridY-shipGridY)<3.0F) {
+                assert(vertex.a==0.0F);
+                checkedNearby=true;
+            }
+        }
+        assert(checkedNearby);
+        snapshot.screen=Screen::Mining;
+        assert(atmosphereAlphas(composer.compose(snapshot)).empty());
     }
     // Io uses the existing moon artwork in the system scene, not the Jupiter
     // environment artwork. The handoff must not swap either art or scale.
