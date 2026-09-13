@@ -152,7 +152,10 @@ ScenarioActionOutcome performScenarioAction(
     const ContentCatalog& catalog,
     std::string_view scenarioId,
     std::string_view stepId,
-    ScenarioActionKind action);
+    ScenarioActionKind action,
+    // Mission acceptance during a live deployment can defer assignment
+    // without changing ordinary scenario rewards or granting policy state.
+    bool allowSupportDroneAutoAssignment = true);
 
 bool recordScenarioEvent(
     GameState& state,

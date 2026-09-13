@@ -701,7 +701,7 @@
 
     function requestedDebugLaunchLesson() {
       const rawValue = new URLSearchParams(window.location.search).get("debug_launch_lesson");
-      if (rawValue === null || !/^[0-4]$/.test(rawValue)) return null;
+      if (rawValue === null || !/^[0-5]$/.test(rawValue)) return null;
       return Number(rawValue);
     }
 

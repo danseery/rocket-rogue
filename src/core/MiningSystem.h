@@ -20,6 +20,7 @@ inline constexpr int shaftWidthCells = 10;
 inline constexpr int shaftLeftCells = shaftWidthCells / 2;
 inline constexpr int shaftRightCells = shaftWidthCells - shaftLeftCells - 1;
 inline constexpr double shaftCenterOffset = 0.5 + (shaftRightCells - shaftLeftCells) * 0.5;
+inline constexpr double artifactProtectionRadiusCells = 5.0;
 }
 
 struct MiningDrillStats {
@@ -119,6 +120,9 @@ struct PreparedSurfaceLanding : OrbitalSiteProgress {
     std::vector<PostSolarSystemRoster> postSolarSystemRosters;
     bool valid = false;
     std::string error;
+    // A restored or already excavated bore cannot jump to another column.
+    // The existing orbital progress remains the save-backed authority.
+    bool shaftCommitted = false;
     // Session-only orbital preparation. Modified terrain already uses the
     // existing Mining layer persistence when the landing is committed.
 };
@@ -126,6 +130,7 @@ struct PreparedSurfaceLanding : OrbitalSiteProgress {
 bool prepareOrbitalSurvey(const GameState&, const ContentCatalog&, PreparedSurfaceLanding&, int depth);
 std::uint64_t surfaceLandingBuildKey(const GameState&, const ContentCatalog&, const SurfaceLandingBuildRequest&);
 void excavateOrbitalShaft(PreparedSurfaceLanding&, int maximumDepth, double seconds);
+bool orbitalShaftAvoidsProtectedObjectives(const MiningRunState&, int shaftX);
 
 PreparedSurfaceLanding prepareSurfaceLanding(
     const GameState& state,
@@ -256,8 +261,9 @@ struct MiningDroneRecoveryStatus {
     int outstandingCargoMass = 0;
     bool recallInProgress = false;
 };
-MiningDroneRecoveryStatus miningDroneRecoveryStatus(const MiningRunState& mining);
-bool requestMiningDroneRecall(GameState& state);
+MiningDroneRecoveryStatus miningDroneRecoveryStatus(const MiningRunState& mining, bool includeDeployedDrones = false);
+bool requestMiningDroneRecall(GameState& state, bool includeDeployedDrones = false);
+void clearMiningDroneLoadoutRecall(GameState& state);
 MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& catalog);
 int miningDrillRepairCost(const MiningRunState& mining);
 int miningDroneRepairCost(const MiningRunState& mining);

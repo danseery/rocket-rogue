@@ -57,6 +57,7 @@ struct PanelRenderContext {
     bool orbitalInsideZone = false;
     bool incomingMessageDeliveryAllowed = true;
     const CoursePlan* waypointPreviewCourse = nullptr;
+    bool orbitalLandingEligible = false;
 };
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);

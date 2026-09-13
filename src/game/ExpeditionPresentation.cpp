@@ -1,6 +1,7 @@
 #include "game/ExpeditionPresentation.h"
 #include "core/ExpeditionSystem.h"
 #include "core/GameUi.h"
+#include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
@@ -66,10 +67,12 @@ double solarMapDiameter(const SystemBodyDefinition& body) {
     if (body.kind == SystemBodyKind::Station) return 34;
     return 21;
 }
-std::string button(std::string_view label, std::string_view id, bool enabled = true, std::string_view cssClass = {}) {
+std::string button(std::string_view label, std::string_view id, bool enabled = true, std::string_view cssClass = {},
+    bool defaultFocus = false) {
     return "<button type=\"button\" data-rr-action=\"" + esc(id) + "\"" +
         (enabled ? (cssClass.empty() ? "" : " class=\"" + esc(cssClass) + "\"") +
-                       " data-ui-focus-id=\"action:" + esc(id) + "\""
+                       " data-ui-focus-id=\"action:" + esc(id) + "\"" +
+                       (defaultFocus ? " data-ui-default-focus=\"1\"" : "")
                  : " class=\"disabled\" disabled") + ">" + esc(label) + "</button>";
 }
 void replaceModal(PanelDocumentPresentation& panel, ModalPresentation value) {
@@ -126,6 +129,53 @@ std::string solarMissionChecklist(
     return out.str();
 }
 }
+std::string hazardDroneMissionMarkup(const PanelRenderContext& c, bool includeDroneOps, bool defaultFocus)
+{
+    const auto& state = c.state;
+    const auto& expedition = state.run.expedition;
+    const auto* mission = solarMissionForBody(c.catalog, expedition.location.bodyId);
+    if (!expedition.travelInitialized || !mission || mission->bodyId != "io" ||
+        !solarMissionAvailable(state, *mission) || solarMissionClaimed(state, c.catalog, *mission)) return {};
+
+    const auto acceptance = solarMissionAcceptanceForBody(state, c.catalog, mission->bodyId);
+    const auto hasHazard = [&](const std::vector<std::string>& ids) {
+        return std::any_of(ids.begin(), ids.end(), [&](const std::string& id) {
+            const auto found = std::find_if(c.catalog.miniDrones.begin(), c.catalog.miniDrones.end(),
+                [&](const MiniDrone& drone) { return drone.id == id; });
+            return found != c.catalog.miniDrones.end() && found->role == MiniDroneRole::Hazard;
+        });
+    };
+    const bool owned = hasHazard(state.meta.ownedDroneIds);
+    const bool assigned = hasHazard(state.meta.equippedDroneIds);
+    std::string status, detail;
+    if (acceptance.available) {
+        status = "HAZARD SUPPORT // NOT COMMISSIONED";
+        detail = acceptance.detail;
+    } else if (assigned) {
+        status = "HAZARD SUPPORT // ASSIGNED";
+        detail = "Hazard Drone assigned to the active loadout.";
+    } else if (owned) {
+        status = "HAZARD SUPPORT // OWNED, NOT ASSIGNED";
+        detail = "Assign the owned Hazard Drone in Drone Ops at ship service. Free a slot if the bay is full.";
+    } else {
+        status = "HAZARD SUPPORT // NO FRAME ABOARD";
+        detail = "No Hazard Drone frame is aboard. Check available frames in Drone Ops.";
+    }
+    std::string result = "<section class=\"phase-advisory hazard-mission-strip\" data-hazard-support=\"" +
+        std::string(acceptance.available ? "uncommissioned" : assigned ? "assigned" : owned ? "unassigned" : "missing") +
+        "\"><strong>" + esc(status) + "</strong><p>" + esc(detail) + "</p>";
+    if (acceptance.available || includeDroneOps) {
+        result += "<div class=\"actions action-row hazard-mission-actions\">";
+        if (acceptance.available) {
+            result += button(acceptance.actionLabel,
+                ui::actions::scenarioAction(acceptance.scenarioId, acceptance.stepId, static_cast<int>(acceptance.action)),
+                true, "ok", defaultFocus);
+        }
+        if (includeDroneOps) result += button("Drone Ops", ui::actions::droneOps, true, "ghost", defaultFocus && !acceptance.available);
+        result += "</div>";
+    }
+    return result + "</section>";
+}
 void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPresentation& panel) {
     const auto& state = c.state;
     const auto& e = state.run.expedition;
@@ -162,7 +212,8 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         // The live dock has one departure surface. Legacy launch, crew intake,
         // route gates and refit modals must never compete with it.
         std::erase_if(panel.modals, [](const auto& item) {
-            return item.id != "settings" && item.id != "inventory" && item.id != "incoming_message";
+            return item.id != "settings" && item.id != "inventory" && item.id != "incoming_message" &&
+                item.id != "system_menu" && item.id != "controls" && item.id != "reset_save_confirm";
         });
     }
     const auto objective = [&] {
@@ -171,7 +222,9 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
             ? solar
             : scenarioObjectiveForDestination(state, c.catalog, expeditionEnvironment(state, c.catalog).id);
     }();
-    const auto action = [&](std::string_view label, std::string_view suffix, bool enabled = true) { return button(label, "expedition:" + std::string(suffix), enabled); };
+    const auto action = [&](std::string_view label, std::string_view suffix, bool enabled = true, bool defaultFocus = false) {
+        return button(label, "expedition:" + std::string(suffix), enabled, {}, defaultFocus);
+    };
     std::ostringstream map;
     map << "<section class=\"expedition-map\"><div class=\"solar-map-heading\"><span>SOLAR SYSTEM</span><strong>"
         << (atOperationalDock ? "DOCKED / CHOOSE NEXT DESTINATION" :
@@ -236,6 +289,15 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
             mapLine(map, "solar-moon-link", parent->x, parent->y, child->x, child->y);
     }
 
+    std::string mapDefaultBody = mapTarget ? mapTarget->id : std::string{};
+    if (mapDefaultBody.empty()) {
+        for (const auto& b : system.bodies) {
+            if (revealed(b) && displayPlacement(b.id) && b.kind != SystemBodyKind::Star) {
+                mapDefaultBody = b.id;
+                break;
+            }
+        }
+    }
     for (const auto& b : system.bodies) {
         if (!revealed(b)) continue;
         const auto placement = displayPlacement(b.id);
@@ -247,7 +309,9 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         map << "<button class=\"solar-planet" << (b.kind == SystemBodyKind::Star ? " solar-planet-sun" : "")
             << (b.id == mapCourse.targetBodyId ? " solar-planet-selected" : "")
             << "\" data-rr-action=\"expedition:preview:" << esc(b.id)
-            << "\" data-ui-focus-id=\"planet:" << esc(b.id) << "\" style=\"left:" << placement->x-size*.5
+            << "\" data-ui-focus-id=\"planet:" << esc(b.id)
+            << "\" data-ui-focus-skip=\"1\" tabindex=\"-1\" aria-label=\"" << esc(b.name)
+            << "\" style=\"left:" << placement->x-size*.5
             << "dp;top:" << placement->y-size*.5 << "dp;width:" << size << "dp;height:" << size << "dp;\">";
         if (b.kind == SystemBodyKind::Star) map << "<div class=\"solar-sun\"></div>";
         else map << "<img src=\"planets/" << art << ".png\" />";
@@ -255,7 +319,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         map << "<div class=\"solar-body" << (b.id == mapCourse.targetBodyId ? " solar-selected" : "") << (hazard ? " solar-hazard" : "")
             << (b.kind == SystemBodyKind::Moon ? " solar-moon-label" : "")
             << "\" style=\"left:" << placement->labelX << "dp;top:" << placement->labelY << "dp;width:"
-            << placement->labelWidth << "dp;\">" << action(b.name, "preview:" + b.id) << "</div>";
+            << placement->labelWidth << "dp;\">" << action(b.name, "preview:" + b.id, true, b.id == mapDefaultBody) << "</div>";
     }
     for (const auto& w : e.wrecks) {
         const auto p = convertSystemFrame(w.location, CoordinateFrame::System, "", system);
@@ -297,7 +361,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     if (e.active) map << action("Abandon ship", "abandon");
     map << "</section>";
     replaceModal(panel, {"map", "SET WAYPOINT", map.str(), "expedition:close", false, true, true, ModalTone::Neutral});
-    if (e.active) replaceModal(panel, {"expedition_abandon", "ABANDON SHIP", "<p>Return to Earth in a replacement ship. Cargo and upgrades remain in your wreck.</p><div class=\"action-row\">" + action("Cancel", "close") + action("Abandon ship", "confirm_abandon") + "</div>", "expedition:close", false, true, true, ModalTone::Warning});
+    if (e.active) replaceModal(panel, {"expedition_abandon", "ABANDON SHIP", "<p>Return to Earth in a replacement ship. Cargo and upgrades remain in your wreck.</p><div class=\"action-row\">" + action("Cancel", "close", true, true) + action("Abandon ship", "confirm_abandon") + "</div>", "expedition:close", false, true, true, ModalTone::Warning});
     if (!e.progression.pendingGraftConflicts.empty()) {
         const auto& conflict = e.progression.pendingGraftConflicts.front();
         const auto moduleName = [&](DroneModuleKind kind) {
@@ -307,7 +371,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         };
         const std::string copy = "<p>Slot " + std::to_string(conflict.equippedFrame + 1) +
             " has two grafts. Choose the installed module.</p><div class=\"action-row\">" +
-            action("Keep " + moduleName(conflict.current.module), "graft_conflict:keep") +
+            action("Keep " + moduleName(conflict.current.module), "graft_conflict:keep", true, true) +
             action("Install " + moduleName(conflict.recovered.module), "graft_conflict:recovered") + "</div>";
         replaceModal(panel, {"graft_conflict", "RECOVERED GRAFT", copy, {}, true, false, false, ModalTone::Neutral});
     }
@@ -335,7 +399,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         home << "<p>NEXT MISSION: "
             << esc(nextBody ? nextBody->name : (arkDiscovered(state) ? "Straylight" : "Complete"))
             << "</p><p>WAYPOINT: " << esc(waypointName)
-            << "</p>" << action(departLabel, "depart") << "</section><div class=\"action-row\">" << action("Change waypoint", "map");
+            << "</p>" << action(departLabel, "depart", true, true) << "</section><div class=\"action-row\">" << action("Change waypoint", "map");
         if (operationalHomeDocked(e) && droneBayUnlocked(state))
             home << button("Drone Ops", ui::actions::droneOps);
         home << "</div>";
@@ -387,12 +451,17 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     if (state.screen == Screen::Flight && !c.surfaceArrivalActive) {
         const bool dockInRange = expeditionDockInRange(e, flight, system);
         const bool dockReady = canDockExpedition(e, flight, system);
-        panel.contentMarkup += "<div class=\"expedition-flight-bar\"><p>" + esc(region ? region->name : "Solar space") +
+        const bool flightDefaultAvailable = panel.contentMarkup.find("data-ui-default-focus=") == std::string::npos;
+        const std::string hazardMission = hazardDroneMissionMarkup(c);
+        panel.contentMarkup += "<div class=\"expedition-flight-bar" +
+        std::string(hazardMission.empty() ? "" : " expedition-flight-mission-flow") + "\"><p>" + esc(region ? region->name : "Solar space") +
         " / Target: " + esc(target ? target->name : "None") + " / " + (e.cruise.active ?
             (e.cruise.cooling ? "CRUISE COOLING" : "CRUISE ACTIVE") : "MANUAL") + "</p><p>" + esc(objective.available ? objective.goal : "Explore, mine, and return to Earth") + "</p>" +
         solarMissionChecklist(state, c.catalog, e.location.bodyId) +
-        action(e.cruise.active ? "Cruise off [C / L3]" : "Cruise [C / L3]", "cruise", flight.active && flight.mode != FlightMode::Landing && !e.undockReady) +
-        (dockInRange ? "<div class=\"expedition-dock-action\">" + button("DOCK", "expedition:dock", true, "ok") + "</div>"
+        hazardMission +
+        action(e.cruise.active ? "Cruise off [C / L3]" : "Cruise [C / L3]", "cruise", flight.active && flight.mode != FlightMode::Landing && !e.undockReady,
+            flightDefaultAvailable && !dockReady) +
+        (dockInRange ? "<div class=\"expedition-dock-action\">" + button("DOCK", "expedition:dock", dockReady, "ok", flightDefaultAvailable && dockReady) + "</div>"
                      : action("Dock", "dock", false));
         if (flight.active && flight.mode != FlightMode::Landing) {
             auto position = e.location;
@@ -422,6 +491,6 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     if (!d.pendingId.empty() && !d.awaitingAscent && state.screen == Screen::Flight && flight.mode != FlightMode::Landing && c.incomingMessageDeliveryAllowed && e.progression.pendingRunUpgradeChoices == 0 &&
         std::none_of(panel.modals.begin(), panel.modals.end(), [](const auto& item) { return item.autoOpen; }))
         replaceModal(panel, {"expedition_decision", "NEXT COURSE", "<p>Objective secured. Return to bank salvage, or continue with your current fuel and build.</p><div class=\"action-row\">" +
-            action("Set Earth waypoint", "decision:home:" + d.pendingId) + action("Set " + recommendedExpeditionLead(state, c.catalog) + " waypoint", "decision:lead:" + d.pendingId) + action("Inspect map", "decision:map:" + d.pendingId) + "</div>", "expedition:decision:map:" + d.pendingId, true, false, false, ModalTone::Neutral});
+            action("Set Earth waypoint", "decision:home:" + d.pendingId, true, true) + action("Set " + recommendedExpeditionLead(state, c.catalog) + " waypoint", "decision:lead:" + d.pendingId) + action("Inspect map", "decision:map:" + d.pendingId) + "</div>", "expedition:decision:map:" + d.pendingId, true, false, false, ModalTone::Neutral});
 }
 } // namespace rocket

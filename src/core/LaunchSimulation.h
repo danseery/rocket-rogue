@@ -7,6 +7,13 @@
 
 namespace rocket {
 
+constexpr bool hasFlightDestructionCinematic(LaunchFailureCause cause)
+{
+    return cause == LaunchFailureCause::LunarImpact ||
+        cause == LaunchFailureCause::ThermalRunaway ||
+        cause == LaunchFailureCause::HullBreach;
+}
+
 struct LaunchAsteroidState {
     double routeProgress = 0.0;
     double courseOffset = 0.0;

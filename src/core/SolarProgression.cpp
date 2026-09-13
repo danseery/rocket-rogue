@@ -11,6 +11,26 @@
 #include <set>
 
 namespace rocket {
+namespace {
+
+const ScenarioStepDefinition* missionAcceptanceStep(
+    const ContentCatalog& catalog, const SolarMissionDefinition& mission)
+{
+    const ScenarioDefinition* scenario = catalog.findScenario(mission.scenarioId);
+    const ScenarioStepDefinition* step = scenario == nullptr ? nullptr
+        : findScenarioStepDefinition(*scenario, mission.acceptanceStepId);
+    if (step == nullptr || !step->mandatoryBriefing || step->claimRequired ||
+        step->action != mission.acceptanceAction || step->actionLabel.empty() ||
+        step->transition.kind != ScenarioTransitionKind::None) return nullptr;
+    const bool acknowledgement = mission.acceptanceAction == ScenarioActionKind::AcknowledgeBriefing &&
+        step->completionEvent == ScenarioEventKind::None;
+    const bool commissioning = mission.acceptanceAction == ScenarioActionKind::BeginActivity &&
+        step->completionEvent == ScenarioEventKind::ManualAction &&
+        step->miningSiteDefinitionId.empty() && step->activity == ScenarioActivityKind::None;
+    return acknowledgement || commissioning ? step : nullptr;
+}
+
+} // namespace
 
 const SolarMissionDefinition* solarMissionForBody(const ContentCatalog& catalog, std::string_view bodyId)
 {
@@ -29,6 +49,51 @@ bool solarMissionClaimed(const GameState& state, const ContentCatalog&, const So
 bool solarMissionAvailable(const GameState& state, const SolarMissionDefinition& mission)
 {
     return mission.prerequisiteUnlockKey.empty() || hasUnlock(state.meta, mission.prerequisiteUnlockKey);
+}
+
+bool solarMissionAccepted(
+    const GameState& state, const ContentCatalog& catalog, const SolarMissionDefinition& mission)
+{
+    return missionAcceptanceStep(catalog, mission) != nullptr &&
+        scenarioStepState(state, catalog, mission.scenarioId, mission.acceptanceStepId) ==
+            ScenarioStepState::Complete;
+}
+
+ScenarioObjectivePresentation solarMissionAcceptanceForBody(
+    const GameState& state, const ContentCatalog& catalog, std::string_view bodyId)
+{
+    const SolarMissionDefinition* mission = solarMissionForBody(catalog, bodyId);
+    if (!state.run.expedition.travelInitialized || state.run.expedition.location.bodyId != bodyId ||
+        mission == nullptr || !solarMissionAvailable(state, *mission) ||
+        missionAcceptanceStep(catalog, *mission) == nullptr ||
+        scenarioStepState(state, catalog, mission->scenarioId, mission->acceptanceStepId) !=
+            ScenarioStepState::Active) return {};
+    ScenarioObjectivePresentation presentation = scenarioObjectivePresentation(
+        state, catalog, mission->scenarioId, mission->acceptanceStepId);
+    presentation.action = mission->acceptanceAction;
+    return presentation;
+}
+
+SolarMissionAcceptanceOutcome acceptSolarMission(
+    GameState& state, const ContentCatalog& catalog, const SolarMissionDefinition& mission)
+{
+    if (missionAcceptanceStep(catalog, mission) == nullptr) {
+        return {false, false, "Mission acceptance is unavailable."};
+    }
+    if (solarMissionAccepted(state, catalog, mission)) {
+        return {true, false, "Mission already accepted."};
+    }
+    if (!state.run.expedition.travelInitialized ||
+        state.run.expedition.location.bodyId != mission.bodyId ||
+        !solarMissionAvailable(state, mission)) {
+        return {false, false, "Reach the mission body before accepting this objective."};
+    }
+    ensureScenarioInstances(state, catalog);
+    const ScenarioActionOutcome outcome = performScenarioAction(
+        state, catalog, mission.scenarioId, mission.acceptanceStepId, mission.acceptanceAction,
+        !state.run.mining.active);
+    return {outcome.applied && solarMissionAccepted(state, catalog, mission),
+        outcome.applied, outcome.message};
 }
 
 const SolarMissionDefinition* nextSolarMission(const GameState& state, const ContentCatalog& catalog)
@@ -87,6 +152,9 @@ bool validateSolarMissionCatalog(const ContentCatalog& catalog, std::string* err
             ? nullptr : findScenarioStepDefinition(*scenario, mission.claimStepId);
         if (claim == nullptr) {
             return fail("solar mission claim step is unavailable: " + mission.bodyId);
+        }
+        if (missionAcceptanceStep(catalog, mission) == nullptr) {
+            return fail("solar mission acceptance binding is invalid: " + mission.bodyId);
         }
         const bool hasClaimAction = claim->action == ScenarioActionKind::ClaimReward ||
             (claim->action == ScenarioActionKind::BeginActivity && !claim->miningSiteDefinitionId.empty());

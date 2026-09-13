@@ -629,18 +629,30 @@ void RocketGameApp::resumeOrbitalFlight()
     work.phase = OrbitalWorkPhase::Inactive;
     work.held = false;
     work.releaseRequired = true;
+    if (pauseReason_ == PauseReason::ControllerUiFocus && !services_.ui.modalOpen())
+        clearControllerPause();
+    if (activeInputSource_ == InputSource::Controller) {
+        releaseRealtimeInputs(true);
+        controllerGameplayNeutralRequired_ = true;
+    }
     panelDirty_ = true;
+}
+
+bool RocketGameApp::orbitalLandingEligible() const
+{
+    return state_.screen == Screen::Flight && session_.flight.active &&
+        session_.flight.mode == FlightMode::Orbit && session_.flight.orbit.captured &&
+        session_.orbitalWork.active() && session_.orbitalWork.surveyComplete &&
+        shipInsideOrbitalWorkZone() && surfaceArrival_.prepared && surfaceArrival_.prepared->valid &&
+        preparedSurfaceLandingCurrent(state_, catalog_, *surfaceArrival_.prepared);
 }
 
 void RocketGameApp::landFromOrbit()
 {
     auto& work = session_.orbitalWork;
     auto& flight = session_.flight;
-    if (state_.screen != Screen::Flight || services_.ui.modalOpen() ||
-        !flight.active || flight.mode != FlightMode::Orbit || !flight.orbit.captured ||
-        !work.active() || !work.surveyComplete ||
-        work.phase == OrbitalWorkPhase::LandingAlignment || !shipInsideOrbitalWorkZone() ||
-        !surfaceArrival_.prepared || !surfaceArrival_.prepared->valid) return;
+    if (services_.ui.modalOpen() || !orbitalLandingEligible() ||
+        work.phase == OrbitalWorkPhase::LandingAlignment) return;
 
     // An explicit arcade deorbit command, not an ongoing braking assist.
     // Hold the current position while the nose turns along the shortest arc.
@@ -655,8 +667,14 @@ void RocketGameApp::landFromOrbit()
     flight.selectedThrottle = 0.0;
     flight.throttleInputActive = false;
     flight.landing.gateArmed = true;
+    // Orbit -> Landing while still in Orbit records the explicit alignment
+    // commitment in the existing saved handoff, without a new save field.
+    flight.handoff = {FlightMode::Orbit, FlightMode::Landing, 0.0,
+        flight.positionX, flight.positionY, flight.heading};
     flight.predictedTrajectory.clear();
     panelDirty_ = realtimeHudDirty_ = true;
+    storeOrbitalSite();
+    save();
 }
 
 bool RocketGameApp::shipInsideOrbitalWorkZone() const
@@ -719,19 +737,44 @@ void RocketGameApp::orbitalWorkInput(bool held)
 
 bool RocketGameApp::advanceOrbitalWork(double seconds, const Destination& destination)
 {
+    if (session_.flight.mode == FlightMode::Orbit &&
+        session_.flight.handoff.from == FlightMode::Orbit && session_.flight.handoff.to == FlightMode::Landing &&
+        session_.orbitalWork.phase != OrbitalWorkPhase::LandingAlignment) {
+        prepareSurfaceArrivalIfNeeded(destination);
+        auto& restored = session_.orbitalWork;
+        restored.phase = OrbitalWorkPhase::LandingAlignment;
+        restored.elapsed = std::min(1.0, session_.flight.handoff.elapsed);
+        restored.landingStartHeading = session_.flight.handoff.sourceHeading;
+        restored.landingTargetHeading = std::atan2(session_.flight.positionY, session_.flight.positionX);
+        restored.releaseRequired = true;
+    }
     auto& work = session_.orbitalWork;
     const double dt = std::clamp(seconds, 0.0, 0.1);
     work.captureDelay = std::max(0.0, work.captureDelay - dt);
     if (work.phase == OrbitalWorkPhase::LandingAlignment) {
         work.elapsed = std::min(1.0, work.elapsed + dt);
+        session_.flight.handoff.elapsed = work.elapsed;
         const double t = work.elapsed;
         const double blend = t*t*t*(t*(t*6.0-15.0)+10.0);
         session_.flight.heading = work.landingStartHeading +
             flightWrappedAngleDelta(work.landingStartHeading, work.landingTargetHeading) * blend;
         work.overlay = std::max(0.0, work.overlay - dt);
         if (work.elapsed >= 1.0) {
+            if (orbitalLandingEligible()) {
+                auto& flight = session_.flight;
+                const auto& site = surfaceArrival_.prepared->miningTemplate;
+                if (flight.landing.siteKey != site.geologySeed) flight.landing.siteBound = false;
+                bindLandingSite(flight, site);
+                enterLocalLanding(flight);
+                refreshLandingSiteView();
+            } else {
+                // An invalid restored site must not release a stopped ship
+                // into gravity. Keep the commitment paused for a valid site.
+                return true;
+            }
             work.phase = OrbitalWorkPhase::Inactive;
             resumeOrbitalFlight();
+            save();
         }
         return true; // Gravity and manual control resume on the next frame.
     }
@@ -1047,6 +1090,13 @@ bool RocketGameApp::commitSurfaceTouchdown(
         surfaceArrival_.reset();
         return false;
     }
+    const bool landingReward = recordScenarioEvent(state_, catalog_,
+        {ScenarioEventKind::SurfaceLanded, {}, {}, {}, state_.run.expedition.location.bodyId, 1, 0});
+    if (landingReward && state_.run.expedition.location.bodyId == "triton") {
+        enqueueIncomingMessage(state_.incomingMessages, catalog_,
+            {"campaign.triton_attack_drone", "triton_attack_drone", "default"});
+    }
+    if (landingReward) save();
     if (hardTouchdown && enqueueIncomingMessage(state_.incomingMessages, catalog_,
         {"campaign.hard_landing_tip", "hard_landing_tip", "default"})) save();
     panelDirty_ = true;
@@ -1669,6 +1719,8 @@ InputContext RocketGameApp::gameplayInputContext() const
             ? InputContext::SurfaceArrival
             : session_.destruction.active
             ? InputContext::Stamp
+            : session_.orbitalWork.active()
+            ? InputContext::OrbitalWork
             : (session_.flightArmed ? InputContext::Launch : InputContext::Preflight);
     case Screen::Results:
     case Screen::ArrivalFanfare:
@@ -1703,6 +1755,7 @@ std::string_view controllerContextName(InputContext context)
     case InputContext::Ui: return "ui";
     case InputContext::Preflight: return "preflight";
     case InputContext::Launch: return "launch";
+    case InputContext::OrbitalWork: return "orbital_work";
     case InputContext::SurfaceArrival: return "surface_arrival";
     case InputContext::MiningActive: return "mining_active";
     case InputContext::MiningService: return "mining_service";
@@ -1880,6 +1933,7 @@ bool RocketGameApp::realtimeControllerContext(InputContext context) const
 {
     return context == InputContext::Preflight
         || context == InputContext::Launch
+        || context == InputContext::OrbitalWork
         || context == InputContext::SurfaceArrival
         || context == InputContext::MiningActive
         || context == InputContext::MiningService
@@ -1909,8 +1963,9 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
 void RocketGameApp::applyRealtimeInputs()
 {
     const bool useController = activeInputSource_ == InputSource::Controller;
-    const double moveX = useController ? controllerRealtimeInput_.moveX : keyboardRealtimeInput_.moveX;
-    const double moveY = useController ? controllerRealtimeInput_.moveY : keyboardRealtimeInput_.moveY;
+    const bool orbitalUiOwnsStick = useController && session_.orbitalWork.active();
+    const double moveX = orbitalUiOwnsStick ? 0.0 : useController ? controllerRealtimeInput_.moveX : keyboardRealtimeInput_.moveX;
+    const double moveY = orbitalUiOwnsStick ? 0.0 : useController ? controllerRealtimeInput_.moveY : keyboardRealtimeInput_.moveY;
 
     switch (state_.screen) {
     case Screen::Flight:
@@ -1962,6 +2017,8 @@ void RocketGameApp::openControllerSystemMenu(PauseReason reason)
 
 void RocketGameApp::clearControllerPause()
 {
+    if (pauseReason_ != PauseReason::None && activeInputSource_ == InputSource::Controller)
+        controllerGameplayNeutralRequired_ = true;
     pauseReason_ = PauseReason::None;
     controllerResumeNeutralRequired_ = false;
     services_.ui.setControllerResumeBlocked(false, controllerConnected_);
@@ -1995,10 +2052,13 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
         if (pauseReason_ == PauseReason::ControllerDisconnected || pauseReason_ == PauseReason::PageHidden) {
             // Safety pauses require the explicit Resume control; East cannot
             // dismiss their root menu and accidentally restart simulation.
+            (void)services_.ui.cancelChildModal();
             break;
         }
         if (pauseReason_ == PauseReason::ControllerUiFocus && !services_.ui.modalOpen()) {
             clearControllerPause();
+        } else if (context == InputContext::OrbitalWork && !services_.ui.modalOpen()) {
+            resumeOrbitalFlight();
         } else if (pauseReason_ == PauseReason::None && !services_.ui.modalOpen() && state_.screen == Screen::DroneOps) {
             backToSurfaceOps();
         } else {
@@ -2098,6 +2158,19 @@ void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGa
         return;
     }
 
+    // Establish the input boundary before writing movement or invoking a
+    // continuous orbital action on this same frame.
+    if (input.has(GameInputAction::OpenSystemMenu)) {
+        dispatchControllerAction(context, GameInputAction::OpenSystemMenu);
+        return;
+    }
+    if (input.has(GameInputAction::EnterUiFocus)) {
+        dispatchControllerAction(context, GameInputAction::EnterUiFocus);
+        services_.ui.setControllerFocusVisible(true);
+        if (input.navigation) uiNavigate(*input.navigation);
+        return;
+    }
+
     if (context == InputContext::Launch) {
         // Launch steering is lateral: negative moves toward the left side of
         // the rendered corridor, matching the raw left-stick X convention.
@@ -2112,6 +2185,14 @@ void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGa
         controllerRealtimeInput_.moveX = 0.0;
         controllerRealtimeInput_.moveY = 0.0;
     }
+    if (activeInputSource_ == InputSource::Controller && state_.screen == Screen::Flight
+        && pauseReason_ == PauseReason::ControllerUiFocus && input.orbitalHeld) {
+        clearControllerPause();
+        controllerGameplayNeutralRequired_ = false; // This explicit action stays in the safe orbital-work context.
+        orbitalWorkInput(false);
+        orbitalWorkInput(true);
+    } else if (context == InputContext::OrbitalWork && activeInputSource_ == InputSource::Controller)
+        orbitalWorkInput(input.orbitalHeld);
     if (context == InputContext::MiningActive || context == InputContext::MiningService) {
         controllerRealtimeInput_.aimX = input.aimX;
         controllerRealtimeInput_.aimY = input.aimY;
@@ -2126,20 +2207,6 @@ void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGa
     controllerRealtimeInput_.drilling = (context == InputContext::MiningActive || context == InputContext::MiningService)
         && input.drilling;
 
-    // Pause transitions outrank every gameplay action. This prevents a Menu
-    // press on the same frame as a completed eject/abort hold from performing
-    // the dangerous action behind the newly opened overlay.
-    if (input.has(GameInputAction::OpenSystemMenu)) {
-        dispatchControllerAction(context, GameInputAction::OpenSystemMenu);
-        return;
-    }
-    if (input.has(GameInputAction::EnterUiFocus)) {
-        dispatchControllerAction(context, GameInputAction::EnterUiFocus);
-        if (input.navigation) {
-            uiNavigate(*input.navigation);
-        }
-        return;
-    }
     if (input.navigation) {
         uiNavigate(*input.navigation);
     }
@@ -2177,12 +2244,14 @@ void RocketGameApp::previewSyntheticControllerInput(const ControllerFrame& frame
         lastControllerInputSeconds_ = realTimeSeconds;
     }
     const InputContext context = inputContext();
-    const double focusedActivationHoldSeconds = services_.ui.focusedId() == "action:reset_save" ? 0.75 : 0.0;
+    const auto focusedAction = services_.ui.focusedControllerAction();
     const RoutedGameInput routed = syntheticInputRouter_.route(
         context,
         frame,
         controllerPreferences_,
-        focusedActivationHoldSeconds);
+        focusedAction.holdSeconds,
+        focusedAction.id,
+        focusedAction.kind == ControllerActivationKind::ContinuousHold);
 
     if (routed.navigation) {
         services_.ui.navigate(*routed.navigation);
@@ -2224,9 +2293,7 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
 
     controllerConnected_ = frame.connected;
     const InputContext presentationContext = gameplayInputContext();
-    const bool directGameplayControls = presentationContext == InputContext::Preflight
-        || presentationContext == InputContext::Launch
-        || presentationContext == InputContext::SurfaceArrival
+    const bool directGameplayControls = presentationContext == InputContext::Launch
         || presentationContext == InputContext::MiningActive
         || presentationContext == InputContext::MiningService;
     const bool openingScreen = titleScreenActive_
@@ -2237,6 +2304,7 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
     const bool controllerFocusVisible = controllerPresentation
         && (!directGameplayControls || pauseReason_ != PauseReason::None || services_.ui.modalOpen());
     services_.ui.setControllerFocusVisible(controllerFocusVisible);
+    services_.ui.setControllerConfirmCancelSwapped(controllerPreferences_.swapConfirmCancel);
     services_.ui.setControllerPresentation(controllerPresentation, frame.family);
 
     if (state_.screen != lastInputScreen_) {
@@ -2249,6 +2317,18 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
 
     const InputContext gameplayContext = gameplayInputContext();
     const bool realtime = realtimeControllerContext(gameplayContext);
+    if (lastControllerGameplayContext_ && *lastControllerGameplayContext_ != gameplayContext) {
+        // A real gameplay handoff, not a blanket Launch exception: stale
+        // preflight focus cannot pause a newly armed flight.
+        if (*lastControllerGameplayContext_ == InputContext::Preflight && gameplayContext == InputContext::Launch
+            && pauseReason_ == PauseReason::ControllerUiFocus)
+            clearControllerPause();
+        if (*lastControllerGameplayContext_ == InputContext::OrbitalWork && gameplayContext == InputContext::Launch) {
+            releaseRealtimeInputs(true);
+            controllerGameplayNeutralRequired_ = activeInputSource_ == InputSource::Controller;
+        }
+    }
+    lastControllerGameplayContext_ = gameplayContext;
 
     if (!frame.pageVisible || !frame.browserFocused) {
         if (realtime) {
@@ -2278,7 +2358,7 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
     }
 
     controllerWasConnected_ = frame.connected;
-    if (frame.meaningfulInput) {
+    if (frame.meaningfulInput && activeInputSource_ == InputSource::Controller) {
         controllerClaimedInput_ = true;
         lastControllerInputSeconds_ = realTimeSeconds;
     }
@@ -2329,15 +2409,43 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
         pauseReason_ = PauseReason::BlockingModal;
     }
 
+    if (activeInputSource_ == InputSource::KeyboardPointer) {
+        // A connected pad may keep reporting held sticks/buttons after the
+        // pointer takes ownership. Preserve modal/pause bookkeeping above,
+        // but suspend both its action latch and its realtime movement.
+        inputRouter_.observeInactiveFrame(inputContext(), frame, controllerPreferences_,
+            services_.ui.focusedControllerAction());
+        controllerRealtimeInput_ = {};
+        return;
+    }
+
     const InputContext context = inputContext();
-    const double focusedActivationHoldSeconds = services_.ui.focusedId() == "action:reset_save" ? 0.75 : 0.0;
+    if (controllerGameplayNeutralRequired_ && pauseReason_ == PauseReason::None && !modalOpen && realtime) {
+        const bool neutral = frame.down.none() && !frame.navigation
+            && std::abs(frame.leftX) <= .01 && std::abs(frame.leftY) <= .01
+            && std::abs(frame.rightX) <= .01 && std::abs(frame.rightY) <= .01;
+        if (!neutral) {
+            releaseRealtimeInputs(false);
+            if (frame.wasPressed(ControllerButton::Menu)) openControllerSystemMenu(PauseReason::SystemMenu);
+            return;
+        }
+        controllerGameplayNeutralRequired_ = false;
+    }
+    const auto focusedAction = services_.ui.focusedControllerAction();
     const RoutedGameInput routed = inputRouter_.route(
         context,
         frame,
         controllerPreferences_,
-        focusedActivationHoldSeconds);
+        focusedAction.holdSeconds,
+        focusedAction.id,
+        focusedAction.kind == ControllerActivationKind::ContinuousHold);
     const Screen screenBeforeDispatch = state_.screen;
     dispatchControllerInput(context, routed);
+    if (gameplayContext != InputContext::OrbitalWork && gameplayInputContext() == InputContext::OrbitalWork
+        && pauseReason_ == PauseReason::ControllerUiFocus) {
+        clearControllerPause();
+        controllerGameplayNeutralRequired_ = false;
+    }
     if (state_.screen != screenBeforeDispatch) {
         releaseRealtimeInputs(true);
         if (pauseReason_ == PauseReason::ControllerUiFocus) {
@@ -2349,6 +2457,9 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
 
 void RocketGameApp::tick(double deltaSeconds)
 {
+    // Do not advance physics, mission delivery, or recovery in scaled substeps
+    // while the destruction presentation owns the outgoing scene.
+    if (session_.destruction.active) return;
     if (titleScreenActive_) {
         const double transitionDeltaSeconds = std::clamp(deltaSeconds, 0.0, 0.25);
         if (titleLaunchActive_) {
@@ -2519,27 +2630,6 @@ void RocketGameApp::tick(double deltaSeconds)
     }
 
     if (state_.screen == Screen::Flight) {
-        if (session_.destruction.active) {
-            const double clampedDelta = std::clamp(
-                deltaSeconds,
-                0.0,
-                tuning::launch::maxFrameStepSeconds);
-            session_.destruction.elapsed = std::min(
-                session_.destruction.elapsed + clampedDelta,
-                tuning::session::flightDestructionSequenceSeconds);
-            if (session_.destruction.elapsed >= tuning::session::flightDestructionSequenceSeconds) {
-                const double burnMultiplier = session_.destruction.burnMultiplier;
-                const LaunchFailureCause failureCause = session_.destruction.failureCause;
-                session_.destruction.active = false;
-                completeLaunch(
-                    burnMultiplier,
-                    RecoveryMethod::None,
-                    failureCause);
-            } else {
-                realtimeHudDirty_ = true;
-            }
-            return;
-        }
         if (surfaceArrival_.active()) {
             advanceSurfaceArrival(deltaSeconds);
             return;
@@ -2626,6 +2716,16 @@ void RocketGameApp::tick(double deltaSeconds)
             },
             clampedDelta,
             landingSiteView_ ? &landingSiteView_->world : nullptr);
+        if (step.failed && hasFlightDestructionCinematic(step.failureCause)) {
+            // A terminal contact owns this frame before body/sector refreshes
+            // can prepare a new site or persist the failed flight. Capture the
+            // final telemetry, then freeze the outgoing scene for presentation.
+            session_.elapsed += clampedDelta;
+            session_.currentMultiplier = session_.flight.currentMultiplier;
+            recordTelemetryPeak(launchTelemetryAt(flightModel, session_.flight));
+            beginFlightDestructionCinematic(step.failureCause);
+            return;
+        }
         if (liveExpedition && wasCruiseCooling != state_.run.expedition.cruise.cooling)
             panelDirty_ = true;
         if (liveExpedition && previousBody != state_.run.expedition.location.bodyId) {
@@ -2723,11 +2823,7 @@ void RocketGameApp::tick(double deltaSeconds)
             state_.statusLine = "ORBIT CAPTURED — fly inward through the green descent gate.";
             queueControllerHapticCue(ControllerHapticCue::Arrival);
         }
-        if (step.failed &&
-            (step.failureCause == LaunchFailureCause::LunarImpact ||
-             step.failureCause == LaunchFailureCause::ThermalRunaway)) {
-            beginFlightDestructionCinematic(step.failureCause);
-        } else if (step.failed) {
+        if (step.failed) {
             completeLaunch(session_.flight.peakMultiplier, RecoveryMethod::None, step.failureCause);
         } else if (step.reachedHome) {
             completeLaunch(session_.flight.peakMultiplier, RecoveryMethod::ReturnHome);
@@ -2842,9 +2938,32 @@ void RocketGameApp::tick(double deltaSeconds)
     }
 }
 
+void RocketGameApp::advancePresentation(double deltaSeconds)
+{
+    auto& destruction = session_.destruction;
+    if (!destruction.active ||
+        controllerPauseStopsSimulation(pauseReason_, gameplayInputContext(), services_.ui.modalOpen())) return;
+    if (destruction.terminalFrameRendered) {
+        const double multiplier = destruction.burnMultiplier;
+        const LaunchFailureCause cause = destruction.failureCause;
+        destruction.active = false;
+        completeLaunch(multiplier, RecoveryMethod::None, cause);
+        return;
+    }
+    if (!std::isfinite(deltaSeconds)) return;
+    destruction.elapsed = std::min(
+        destruction.elapsed + std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds),
+        tuning::session::flightDestructionSequenceSeconds);
+    realtimeHudDirty_ = true;
+}
+
 void RocketGameApp::renderScene()
 {
     services_.renderer.render(snapshot());
+    if (session_.destruction.active &&
+        session_.destruction.elapsed >= tuning::session::flightDestructionSequenceSeconds) {
+        session_.destruction.terminalFrameRendered = true;
+    }
 }
 
 void RocketGameApp::renderUi()
@@ -3020,7 +3139,7 @@ void RocketGameApp::returnHome()
 
 void RocketGameApp::arrivalOps()
 {
-    if (state_.screen != Screen::Flight || !session_.flightArmed || session_.controls.actions.returningHome || session_.preparedLaunch.config.frontierTransfer) {
+    if (session_.destruction.active || state_.screen != Screen::Flight || !session_.flightArmed || session_.controls.actions.returningHome || session_.preparedLaunch.config.frontierTransfer) {
         return;
     }
 
@@ -3380,6 +3499,7 @@ void RocketGameApp::selectSurfaceUpgrade(int index)
 
 void RocketGameApp::openDroneOps()
 {
+    if (session_.destruction.active || surfaceBaySequence_.active() || surfaceArrival_.active()) return;
     const bool miningService = state_.screen == Screen::Mining
         && state_.run.mining.active
         && miningAtReturnZone(state_.run.mining);
@@ -3387,9 +3507,14 @@ void RocketGameApp::openDroneOps()
     const bool homeService = state_.screen == Screen::Hangar
         && state_.run.expedition.travelInitialized
         && operationalHomeDocked(state_.run.expedition);
-    if ((!miningService && !legacySurface && !homeService)
+    const auto* ioMission = solarMissionForBody(catalog_, "io");
+    const bool ioMissionAccess = ioMission && state_.run.expedition.travelInitialized &&
+        state_.run.expedition.location.bodyId == "io" &&
+        (state_.screen == Screen::Flight || state_.screen == Screen::Mining) &&
+        solarMissionAvailable(state_, *ioMission);
+    if (!ioMissionAccess && ((!miningService && !legacySurface && !homeService)
         || (!homeService && !state_.run.planetaryExpedition.active)
-        || !droneBayUnlocked(state_)) {
+        || !droneBayUnlocked(state_))) {
         state_.statusLine = "Complete the Prospector contract before assigning Support Drones.";
         panelDirty_ = true;
         return;
@@ -3397,6 +3522,9 @@ void RocketGameApp::openDroneOps()
 
     ui::briefings::acknowledge(state_.meta.acknowledgedActivityBriefingIds, ui::briefings::miniDrones);
     ensureDroneBayState(state_, catalog_);
+    releaseRealtimeInputs(true);
+    services_.ui.closeModal();
+    clearControllerPause();
     state_.screen = Screen::DroneOps;
     state_.statusLine = "Choose Support Drones for the next mining run.";
     save();
@@ -3408,6 +3536,13 @@ void RocketGameApp::backToSurfaceOps()
     if (state_.screen != Screen::DroneOps) {
         return;
     }
+
+    releaseRealtimeInputs(true);
+    messageMoveReleaseRequired_ = messageDrillReleaseRequired_ =
+        messageFireReleaseRequired_ = messageControllerNeutralRequired_ = true;
+    services_.ui.closeModal();
+    clearControllerPause();
+    clearMiningDroneLoadoutRecall(state_);
 
     if (state_.run.expedition.travelInitialized
         && operationalHomeDocked(state_.run.expedition)) {
@@ -3433,8 +3568,24 @@ void RocketGameApp::equipDrone(int index)
     if (state_.screen != Screen::DroneOps) {
         return;
     }
+    releaseRealtimeInputs(true);
+    messageMoveReleaseRequired_ = messageDrillReleaseRequired_ =
+        messageFireReleaseRequired_ = messageControllerNeutralRequired_ = true;
+    services_.ui.closeModal();
+    clearControllerPause();
+
+    if ((state_.run.expedition.travelInitialized && !state_.run.mining.active &&
+         !operationalHomeDocked(state_.run.expedition)) ||
+        (state_.run.mining.active &&
+        (!miningAtReturnZone(state_.run.mining) ||
+         miningDroneRecoveryStatus(state_.run.mining, true).outstandingDrones > 0))) {
+        state_.statusLine = "Recall Support Drones and wait for their cargo at the shuttle before changing the loadout.";
+        panelDirty_ = true;
+        return;
+    }
 
     if (equipMiniDrone(state_, catalog_, index)) {
+        clearMiningDroneLoadoutRecall(state_);
         queueAudioCue(GameAudioCue::UiToggle);
         captureDebugDroneLoadout();
         save();
@@ -3448,7 +3599,18 @@ void RocketGameApp::unequipDroneSlot(int slotIndex)
         return;
     }
 
+    if ((state_.run.expedition.travelInitialized && !state_.run.mining.active &&
+         !operationalHomeDocked(state_.run.expedition)) ||
+        (state_.run.mining.active &&
+        (!miningAtReturnZone(state_.run.mining) ||
+         miningDroneRecoveryStatus(state_.run.mining, true).outstandingDrones > 0))) {
+        state_.statusLine = "Recall Support Drones and wait for their cargo at the shuttle before changing the loadout.";
+        panelDirty_ = true;
+        return;
+    }
+
     if (unequipMiniDroneSlot(state_, catalog_, slotIndex)) {
+        clearMiningDroneLoadoutRecall(state_);
         queueAudioCue(GameAudioCue::UiToggle);
         captureDebugDroneLoadout();
         save();
@@ -3719,6 +3881,9 @@ void RocketGameApp::miningStow()
 
 void RocketGameApp::miningWaitForDrones()
 {
+    const bool loadoutRecall = state_.screen == Screen::DroneOps;
+    if (loadoutRecall && state_.run.mining.active &&
+        miningAtReturnZone(state_.run.mining)) backToSurfaceOps();
     if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
         return;
     }
@@ -3728,12 +3893,13 @@ void RocketGameApp::miningWaitForDrones()
         return;
     }
 
-    if (requestMiningDroneRecall(state_)) {
+    if (requestMiningDroneRecall(state_, loadoutRecall)) {
         queueAudioCue(GameAudioCue::DroneTask);
         state_.statusLine = "Support Drones recalled. Their payload counts only after they reach the shuttle.";
         save();
     } else {
-        state_.statusLine = "All Support Drone payload is already aboard.";
+        state_.statusLine = loadoutRecall ? "Support Drones and cargo are ready for ship service."
+            : "All Support Drone payload is already aboard.";
     }
     panelDirty_ = true;
 }
@@ -4337,6 +4503,22 @@ int RocketGameApp::debugActOneCheckpoint() const
 
 void RocketGameApp::debugStartLaunchLesson(int lessonIndex)
 {
+    if (lessonIndex == 5) {
+        debugStartLaunchLesson(4);
+        const auto& asteroid = solarAsteroidBelt().front();
+        auto& flight = session_.flight;
+        flight.positionX = asteroid.position.x - asteroid.radius - .3;
+        flight.positionY = asteroid.position.y;
+        flight.velocityX = .25;
+        flight.velocityY = 0;
+        flight.heading = 0;
+        flight.hullRemaining = 1;
+        flight.asteroidInvulnerabilitySeconds = 0;
+        captureSystemLocation(state_.run.expedition.location, flight);
+        state_.incomingMessages.acknowledgedMessages.push_back("asteroid_belt_intro");
+        state_.statusLine = "Debug fatal asteroid collision. Real save remains untouched.";
+        return;
+    }
     if (lessonIndex == 4) {
         debugStartLaunchLesson(3);
         state_.incomingMessages = {};
@@ -5396,6 +5578,7 @@ void RocketGameApp::completeLaunch(
     RecoveryMethod method,
     LaunchFailureCause failureCause)
 {
+    if (session_.destruction.active) return;
     if (state_.run.expedition.travelInitialized) {
         session_.destruction.active = false;
         if (failureCause != LaunchFailureCause::None) {
@@ -5560,6 +5743,7 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
             && !session_.destruction.active
             && (!earthLaunchReady(state_.run.expedition) || session_.launchQueued),
         session_.waypointPreviewCourse.targetBodyId.empty() ? nullptr : &session_.waypointPreviewCourse,
+        orbitalLandingEligible(),
     };
 }
 
@@ -5643,8 +5827,19 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
 
 
     const GameState stateBefore = state_;
-    const ScenarioActionOutcome outcome = performScenarioAction(
-        state_, catalog_, address.scenarioId, address.stepId, address.action);
+    ScenarioActionOutcome outcome;
+    const auto acceptanceMission = std::find_if(catalog_.solarMissions.begin(), catalog_.solarMissions.end(),
+        [&](const SolarMissionDefinition& mission) {
+            return mission.scenarioId == address.scenarioId && mission.acceptanceStepId == address.stepId &&
+                mission.acceptanceAction == address.action;
+        });
+    if (state_.run.expedition.travelInitialized && acceptanceMission != catalog_.solarMissions.end()) {
+        const auto accepted = acceptSolarMission(state_, catalog_, *acceptanceMission);
+        outcome.applied = accepted.accepted;
+        outcome.message = accepted.message;
+    } else {
+        outcome = performScenarioAction(state_, catalog_, address.scenarioId, address.stepId, address.action);
+    }
     if (!outcome.applied) {
         queueAudioCue(GameAudioCue::UiError);
         state_.statusLine = outcome.message.empty() ? "This objective is not ready to claim." : outcome.message;
@@ -5739,10 +5934,25 @@ void RocketGameApp::runUiAction(const std::string& action)
         else if (name == "activate") queueAudioCue(GameAudioCue::UiActivate);
         return;
     }
+    if (session_.destruction.active) return;
     if (runExpeditionAction(action)) return;
     constexpr std::string_view incomingPrefix = "ack_incoming_message:";
     if (action.starts_with(incomingPrefix)) {
-        if (const auto acknowledgement = acknowledgeIncomingMessage(state_.incomingMessages, action.substr(incomingPrefix.size()))) {
+        if (session_.destruction.active) return;
+        auto acknowledgedMessages = state_.incomingMessages;
+        if (const auto acknowledgement = acknowledgeIncomingMessage(acknowledgedMessages, action.substr(incomingPrefix.size()))) {
+            for (const SolarMissionDefinition& mission : catalog_.solarMissions) {
+                if (acknowledgement->messageId != mission.briefingMessageId) continue;
+                const auto outcome = acceptSolarMission(state_, catalog_, mission);
+                if (!outcome.accepted) {
+                    queueAudioCue(GameAudioCue::UiError);
+                    state_.statusLine = outcome.message;
+                    panelDirty_ = true;
+                    return;
+                }
+                break;
+            }
+            state_.incomingMessages = std::move(acknowledgedMessages);
             releaseRealtimeInputs(true);
             messageMoveReleaseRequired_ = true;
             messageDrillReleaseRequired_ = true;
@@ -5753,14 +5963,6 @@ void RocketGameApp::runUiAction(const std::string& action)
             if (earthLaunchReady(state_.run.expedition) &&
                 action.substr(incomingPrefix.size()) == "campaign.lunar_approach") {
                 startLaunch();
-            }
-            for (const SolarMissionDefinition& mission : catalog_.solarMissions) {
-                if (acknowledgement->messageId == mission.briefingMessageId) {
-                    (void)performScenarioAction(
-                        state_, catalog_, mission.scenarioId, "briefing",
-                        ScenarioActionKind::AcknowledgeBriefing);
-                    break;
-                }
             }
             save();
             panelDirty_ = true;
@@ -6348,6 +6550,16 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.launchHandoffProgress = std::clamp(session_.flight.handoff.elapsed/flight_landing::handoffSeconds,0.0,1.0);
         result.launchHandoffX=session_.flight.handoff.sourceX;
         result.launchHandoffY=session_.flight.handoff.sourceY;
+        if (result.launchLandingLocalFrame && session_.flight.handoff.from == FlightMode::Orbit &&
+            result.launchHandoffProgress < 1.0) {
+            // Physics enters at the authored 60 m altitude, even for a tight
+            // orbit inside that radius. Ease its visual pose from the saved
+            // outgoing position instead of exposing that coordinate change.
+            const double t = result.launchHandoffProgress;
+            const double blend = t*t*t*(t*(t*6.0-15.0)+10.0);
+            result.launchPositionX = std::lerp(result.launchHandoffX, result.launchPositionX, blend);
+            result.launchPositionY = std::lerp(result.launchHandoffY, result.launchPositionY, blend);
+        }
         result.launchLandingBasisAngle=session_.flight.landing.basisAngle;
         result.launchLandingHorizontalPosition=session_.flight.landing.horizontalPosition;
         if (!result.launchLandingLocalFrame && session_.flight.handoff.from == FlightMode::Landing &&

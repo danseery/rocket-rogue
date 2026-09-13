@@ -311,6 +311,8 @@ ContentCatalog createDefaultContent()
     addMissionMessages("mercury_mission", "Mercury", "Optional recovery: pulse the surface signal and return its artifact to the ship.", "The optional recovery reward is secured.");
     addMissionMessages("venus_mission", "Venus", "Optional recovery: pulse the surface signal and return its artifact to the ship.", "The optional recovery reward is secured.");
 
+    catalog.incomingMessages.push_back({"triton_attack_drone", "mission_control_fennec", "A little insurance", "Understood", true,
+        {{"default", "Those flying security drones are defending the artifact. We stowed away a secret Attack Drone, just in case something like this happened. It's yours now. With a free bay it is assigned automatically; otherwise use Drone Ops at ship service to assign it before deploying. Stay close and let it engage while you mine. The rest of our helpers can wait for the next system.", {}}}});
     catalog.incomingMessages.push_back({"hard_landing_tip", "mission_control_fennec", "Easy on the landing gear", "Understood", true,
         {{"default", "You're down safely, but that impact damaged the hull. Keep the ship upright and apply forward thrust before touchdown to slow your descent. Use short pulses to settle gently onto the ground. A softer landing will spare the ship.", {MessageHint::FlightThrust}}}});
     catalog.incomingMessages.back().concerned = true;
@@ -764,6 +766,15 @@ ContentCatalog createDefaultContent()
             content::unlock::routeNeptune,
             content::destination::neptune,
             {
+                {"attack_drone", {}, "TRITON // NEPTUNE SYSTEM", "Secret Attack Drone",
+                    "Land on Triton to activate the stowed Attack Drone. Assign it through ship service if your bays are full.",
+                    "REWARD // ATTACK DRONE", "Land on Triton", {},
+                    ScenarioEventKind::SurfaceLanded, {}, "triton", 1, 0, false, false, false,
+                    ScenarioActionKind::None, {},
+                    {{ScenarioRewardKind::UnlockKey, content::unlock::droneBay, 0, false},
+                     {ScenarioRewardKind::DroneBaySlots, {}, 1, false},
+                     {ScenarioRewardKind::UnlockKey, "triton_attack_drone", 0, false},
+                     {ScenarioRewardKind::SupportDrone, content::drone::attackDrone, 0, true}}},
                 {"briefing", {}, "TRITON // NEPTUNE SYSTEM", "Triton Artifact Mission",
                     "Survey Triton, pulse the final buried signal, and return its artifact to the ship.",
                     "OBJECTIVE // RECOVER TRITON ARTIFACT", "Accept Mission", {},
@@ -817,14 +828,14 @@ ContentCatalog createDefaultContent()
         }
     }
     catalog.solarMissions = {
-        {"moon", "moon", content::scenario::lunarProspector, "anomaly", content::protectedObjective::lunarSignalArtifact, "moon", {}, content::unlock::routeMars, "mars", "moon_mission_briefing", "moon_mission_complete", 0, false},
-        {"mars", "mars", content::scenario::marsBayExpansion, "artifact", content::protectedObjective::marsSignalArtifact, "mars", content::unlock::routeMars, content::unlock::routeJupiter, "io", "mars_mission_briefing", "mars_mission_complete", 1, false},
-        {"io", "jupiter", content::scenario::volcanicDescent, "recovery", content::protectedObjective::ioMinorArtifact, "io", content::unlock::routeJupiter, content::unlock::routeSaturn, "titan", "io_mission_briefing", "io_mission_complete", 2, false},
-        {"titan", "saturn", content::scenario::saturnDeparture, "artifact", content::protectedObjective::titanSignalArtifact, "titan", content::unlock::routeSaturn, content::unlock::routeUranus, "titania", "titan_mission_briefing", "titan_mission_complete", 3, false},
-        {"titania", "uranus", content::scenario::uranusDeparture, "artifact", content::protectedObjective::titaniaSignalArtifact, "titania", content::unlock::routeUranus, content::unlock::routeNeptune, "triton", "titania_mission_briefing", "titania_mission_complete", 4, false},
-        {"triton", "neptune", content::scenario::neptuneDiscovery, "artifact", content::protectedObjective::tritonSignalArtifact, "triton", content::unlock::routeNeptune, {}, "straylight", "triton_mission_briefing", "triton_mission_complete", 5, false},
-        {"mercury", "moon", content::scenario::mercuryArtifact, "artifact", content::protectedObjective::mercurySignalArtifact, {}, content::unlock::routeMars, {}, {}, "mercury_mission_briefing", "mercury_mission_complete", 0, true},
-        {"venus", "mars", content::scenario::venusArtifact, "artifact", content::protectedObjective::venusSignalArtifact, {}, content::unlock::routeMars, {}, {}, "venus_mission_briefing", "venus_mission_complete", 0, true}
+        {"moon", "moon", content::scenario::lunarProspector, "anomaly", content::protectedObjective::lunarSignalArtifact, "moon", {}, content::unlock::routeMars, "mars", "moon_mission_briefing", "moon_mission_complete", 0, false, "briefing", ScenarioActionKind::AcknowledgeBriefing},
+        {"mars", "mars", content::scenario::marsBayExpansion, "artifact", content::protectedObjective::marsSignalArtifact, "mars", content::unlock::routeMars, content::unlock::routeJupiter, "io", "mars_mission_briefing", "mars_mission_complete", 1, false, "briefing", ScenarioActionKind::AcknowledgeBriefing},
+        {"io", "jupiter", content::scenario::volcanicDescent, "recovery", content::protectedObjective::ioMinorArtifact, "io", content::unlock::routeJupiter, content::unlock::routeSaturn, "titan", "io_mission_briefing", "io_mission_complete", 2, false, "commission", ScenarioActionKind::BeginActivity},
+        {"titan", "saturn", content::scenario::saturnDeparture, "artifact", content::protectedObjective::titanSignalArtifact, "titan", content::unlock::routeSaturn, content::unlock::routeUranus, "titania", "titan_mission_briefing", "titan_mission_complete", 3, false, "briefing", ScenarioActionKind::AcknowledgeBriefing},
+        {"titania", "uranus", content::scenario::uranusDeparture, "artifact", content::protectedObjective::titaniaSignalArtifact, "titania", content::unlock::routeUranus, content::unlock::routeNeptune, "triton", "titania_mission_briefing", "titania_mission_complete", 4, false, "briefing", ScenarioActionKind::AcknowledgeBriefing},
+        {"triton", "neptune", content::scenario::neptuneDiscovery, "artifact", content::protectedObjective::tritonSignalArtifact, "triton", content::unlock::routeNeptune, {}, "straylight", "triton_mission_briefing", "triton_mission_complete", 5, false, "briefing", ScenarioActionKind::AcknowledgeBriefing},
+        {"mercury", "moon", content::scenario::mercuryArtifact, "artifact", content::protectedObjective::mercurySignalArtifact, {}, content::unlock::routeMars, {}, {}, "mercury_mission_briefing", "mercury_mission_complete", 0, true, "briefing", ScenarioActionKind::AcknowledgeBriefing},
+        {"venus", "mars", content::scenario::venusArtifact, "artifact", content::protectedObjective::venusSignalArtifact, {}, content::unlock::routeMars, {}, {}, "venus_mission_briefing", "venus_mission_complete", 0, true, "briefing", ScenarioActionKind::AcknowledgeBriefing}
     };
     catalog.scenarioFactories = {
         {"generated_mining", 1, content::scenario::generatedTemplate, 0x5343454E4152494FULL}
@@ -974,6 +985,7 @@ bool isCrewUpgradeUnlocked(const MetaProgress& meta, const CrewUpgrade& upgrade)
 
 bool isMiniDroneUnlocked(const MetaProgress& meta, const MiniDrone& drone)
 {
+    if (drone.id == content::drone::attackDrone && hasUnlock(meta, "triton_attack_drone")) return true;
     if (drone.id == content::drone::hazardDrone
         && hasUnlock(meta, content::unlock::droneSupportSuite)
         && std::find(meta.ownedDroneIds.begin(), meta.ownedDroneIds.end(), drone.id) != meta.ownedDroneIds.end()) {

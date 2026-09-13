@@ -33,6 +33,7 @@ enum class ControllerHapticCue {
 };
 
 class RocketGameApp {
+    friend struct OrbitalLandingTestAccess;
 public:
     explicit RocketGameApp(AppServices& services);
 
@@ -40,6 +41,8 @@ public:
     void shutdown();
     void inputFrame(const ControllerFrame& frame, double realTimeSeconds);
     void tick(double deltaSeconds);
+    // Presentation runs once per rendered frame, independently of game speed.
+    void advancePresentation(double deltaSeconds);
     void renderScene();
     void renderUi();
     int currentScreen() const;
@@ -283,6 +286,7 @@ private:
         double elapsed = 0.0;
         double burnMultiplier = 1.0;
         LaunchFailureCause failureCause = LaunchFailureCause::None;
+        bool terminalFrameRendered = false;
     };
 
     struct LaunchSessionState {
@@ -342,6 +346,7 @@ private:
     void prepareSurfaceArrivalIfNeeded(const Destination& destination, std::string_view zoneId = {});
     void storeOrbitalSite();
     bool shipInsideOrbitalWorkZone() const;
+    bool orbitalLandingEligible() const;
     bool advanceOrbitalWork(double seconds, const Destination& destination);
     bool commitSurfaceTouchdown(const Destination& destination, bool hardTouchdown);
     void advanceSurfaceArrival(double deltaSeconds);
@@ -454,6 +459,8 @@ private:
     bool controllerClaimedInput_ = false;
     bool controllerConnected_ = false;
     bool controllerResumeNeutralRequired_ = false;
+    bool controllerGameplayNeutralRequired_ = false;
+    std::optional<InputContext> lastControllerGameplayContext_;
     std::string lastControllerAction_ = "none";
     ControllerHapticCue pendingHapticCue_ = ControllerHapticCue::None;
     std::vector<GameAudioEvent> pendingAudioEvents_;

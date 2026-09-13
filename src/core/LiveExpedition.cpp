@@ -1,4 +1,5 @@
 #include "core/ExpeditionSystem.h"
+#include "core/FlightSystem.h"
 #include "core/ContentIds.h"
 #include "core/ScenarioSystem.h"
 #include "core/ResearchSystem.h"
@@ -38,7 +39,9 @@ FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool la
     else if (f.predictedImpact) g.nextAction = "Brake or turn: predicted impact";
     else if (e.cruise.active && e.cruise.cooling) g.nextAction = "Cruise cooling / engines off until 40%";
     else if (frame && f.orbit.captured && g.orbitBodyId == frame->id) g.nextAction = laserComplete ? "Align with the landing gate, then Land" : surveyed ? "Use the orbital laser to prepare your landing" : "Use Pulse Survey to inspect a landing site";
-    else if (frame && g.orbitBodyId == frame->id) g.nextAction = "Shape your trajectory into the orbit bands";
+    else if (frame && g.orbitBodyId == frame->id) g.nextAction = f.orbit.confirmationSeconds > 0.0
+        ? "Coast to confirm orbit / " + std::to_string(static_cast<int>(orbitConfirmationProgress(f) * 100.0)) + "%"
+        : "Shape your trajectory into the orbit bands";
     else if (target && target->dock) g.nextAction = "Approach the dock marker and slow to dock";
     else g.nextAction = target ? "Approach " + target->name + " / establish orbit" : "Plot a destination or fly manually";
     return g;

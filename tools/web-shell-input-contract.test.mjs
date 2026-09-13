@@ -10,6 +10,22 @@ const webPlatform = readFileSync(
   resolve(repositoryRoot, "src", "platform", "web", "WebPlatform.cpp"),
   "utf8",
 );
+const webMain = readFileSync(resolve(repositoryRoot, "src/platform/web/WebMain.cpp"), "utf8");
+
+test("controller lab honors query-only debug sessions without persisted settings", () => {
+  const body = webMain.match(/EM_JS\(int, rr_controller_debug_tools_enabled, \(\), \{([\s\S]*?)\n\}\);/);
+  assert.ok(body);
+  const enabled = new Function("globalThis", "URLSearchParams", body[1]);
+  const check = (search, setting) => enabled({
+    location: { search },
+    localStorage: { getItem: () => setting },
+  }, URLSearchParams);
+  assert.equal(check("?debug_tools=1", null), 1);
+  assert.equal(check("?debug_minigames=1", null), 1);
+  assert.equal(check("", "1"), 1);
+  assert.equal(check("", null), 0);
+  assert.equal(check("?ordinary_game=1", "0"), 0);
+});
 
 function functionBody(name) {
   const match = shell.match(new RegExp(
@@ -126,7 +142,7 @@ test("web console exposes launch-lesson visual verification hooks", () => {
   );
   assert.match(
     shell,
-    /get\("debug_launch_lesson"\)[\s\S]*?\^\[0-4\]\$[\s\S]*?window\.rr\.debugLaunchLesson\(lessonIndex\)/,
-    "debug_launch_lesson must safely select the four lessons or the main-belt crossing sandbox",
+    /get\("debug_launch_lesson"\)[\s\S]*?\^\[0-5\]\$[\s\S]*?window\.rr\.debugLaunchLesson\(lessonIndex\)/,
+    "debug_launch_lesson must safely select the lessons or the main-belt crossing/collision sandboxes",
   );
 });

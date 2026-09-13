@@ -67,12 +67,15 @@ public:
     bool navigate(UiDirection direction) override;
     bool activateFocused() override;
     bool cancel() override;
+    bool cancelChildModal() override;
     bool scroll(float amount) override;
     bool modalOpen() const override;
     void setControllerPresentation(bool active, ControllerFamily family) override;
+    void setControllerConfirmCancelSwapped(bool swapped) override;
     void setControllerFocusVisible(bool visible) override;
     void setControllerResumeBlocked(bool blocked, bool controllerConnected) override;
     std::string focusedId() const override;
+    FocusedControllerAction focusedControllerAction() const override;
     void requestFocus(std::string_view id) override;
     void openModal(const std::string& id) override;
     void closeModal() override;
@@ -102,6 +105,7 @@ private:
     bool rebuildPromptHost();
     bool rebuildPerformanceHost();
     void rebindAndRestoreFocus(bool restoreFocus);
+    void updateControllerConfirmGlyphs();
     bool applyPendingFocusIfAvailable();
     void applyPendingPointerActivation();
     void applyPendingModalOpen();
@@ -121,6 +125,7 @@ private:
     std::string renderedModalId_;
     std::vector<std::string> modalStack_;
     std::vector<std::string> modalFocusStack_;
+    std::vector<bool> modalExplicitFocusStack_;
     std::unordered_map<std::string, float> modalScrollPositions_;
     std::vector<RmlButtonBinding> buttonBindings_;
     std::string focusedId_;
@@ -130,8 +135,11 @@ private:
     float lastFocusCenterX_ = 0.0f;
     float lastFocusCenterY_ = 0.0f;
     bool hasLastFocusCenter_ = false;
+    bool controllerFocusExplicit_ = false;
+    bool modalReturnFocusExplicit_ = false;
     bool controllerPresentationActive_ = false;
     bool controllerFocusVisible_ = false;
+    bool controllerConfirmCancelSwapped_ = false;
     bool controllerResumeBlocked_ = false;
     bool controllerResumeConnected_ = false;
     bool performanceStatsVisible_ = false;

@@ -35,6 +35,8 @@ inline std::optional<std::size_t> directionalFocusTarget(
 
     std::optional<std::size_t> bestIndex;
     float bestScore = std::numeric_limits<float>::max();
+    std::optional<std::size_t> verticalFallback;
+    float fallbackScore = std::numeric_limits<float>::max();
     for (std::size_t index = 0; index < targets.size(); ++index) {
         if (index == currentIndex) {
             continue;
@@ -48,6 +50,19 @@ inline std::optional<std::size_t> directionalFocusTarget(
             : candidateCenterY - currentCenterY);
         if (primary <= 1.0f) {
             continue;
+        }
+
+        // Wide maps and centered grids can end in a footer far outside the
+        // current column. Prefer the normal aligned graph, but do not leave
+        // that footer unreachable when no aligned control exists. Requiring
+        // a distinct visual row avoids treating height differences in one
+        // button row as vertical navigation.
+        if (!horizontal && primary >= std::max(current.bottom - current.top, candidate.bottom - candidate.top) * 0.5f) {
+            const float score = primary + std::abs(candidateCenterX - currentCenterX) * 0.25f;
+            if (score < fallbackScore) {
+                fallbackScore = score;
+                verticalFallback = index;
+            }
         }
 
         const float secondary = std::abs(horizontal
@@ -83,7 +98,7 @@ inline std::optional<std::size_t> directionalFocusTarget(
             bestIndex = index;
         }
     }
-    return bestIndex;
+    return bestIndex ? bestIndex : verticalFallback;
 }
 
 } // namespace rocket

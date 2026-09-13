@@ -319,7 +319,8 @@ std::string sanitizeRml(std::string html)
     replaceAll(html, "</li>", "</p>");
     replaceAll(html, "<label", "<div");
     replaceAll(html, "</label>", "</div>");
-    replaceAll(html, "<input", "<span");
+    // RmlUi supports real checkbox controls; replacing them with spans made
+    // them decorative and removed their controller/pointer toggle behavior.
     return html;
 }
 
@@ -611,34 +612,23 @@ std::string collapsedText(std::string_view text)
     return out;
 }
 
-std::string textFromMarkup(std::string_view markup)
+std::string controllerIndependentButtonLabel(Rml::Element& element)
 {
-    std::string text;
-    text.reserve(markup.size());
-    bool inTag = false;
-    for (const char ch : markup) {
-        if (ch == '<') {
-            inTag = true;
-            text.push_back(' ');
-            continue;
-        }
-        if (ch == '>') {
-            inTag = false;
-            text.push_back(' ');
-            continue;
-        }
-        if (!inTag) {
-            text.push_back(ch);
-        }
+    if (element.IsClassSet("rr-controller-confirm-glyph")) return {};
+    if (auto* text = dynamic_cast<Rml::ElementText*>(&element)) return text->GetText();
+    std::string label;
+    for (int index = 0; index < element.GetNumChildren(); ++index) {
+        label += controllerIndependentButtonLabel(*element.GetChild(index));
+        label += ' ';
     }
-    return collapsedText(text);
+    return collapsedText(label);
 }
 
 RmlButtonBinding buttonBindingFromElement(Rml::Element& element)
 {
     RmlButtonBinding binding;
     binding.focusId = element.GetAttribute<Rml::String>("data-ui-focus-id", "");
-    binding.label = textFromMarkup(element.GetInnerRML());
+    binding.label = controllerIndependentButtonLabel(element);
     binding.action = element.GetAttribute<Rml::String>("data-rr-action", "");
     binding.modal = element.GetAttribute<Rml::String>("data-ui-modal", "");
     binding.close = element.HasAttribute("data-ui-close-modal");
@@ -1847,10 +1837,10 @@ std::string inputPromptBar(
     ControllerFamily family,
     bool controllerActive,
     bool modalOpen,
-    bool modalDismissible)
+    bool modalDismissible,
+    bool swapConfirmCancel)
 {
     const ControllerPromptLabels labels = controllerPromptLabels(promptControllerFamily(family));
-    const bool swapConfirmCancel = rr_rml_controller_boolean_preference(1) != 0;
     const char* confirm = swapConfirmCancel ? labels.east : labels.south;
     const char* cancel = swapConfirmCancel ? labels.south : labels.east;
     const Screen screen = presentation.metadata.screen;
@@ -1921,7 +1911,7 @@ std::string inputPromptBar(
         prompt += item("L-stick / D-pad", "Navigate") + item(confirm, "Select") + item(labels.menu, "Settings");
     } else if (presentation.metadata.interaction == PanelInteractionMode::Takeover
         && (screen == Screen::StoryBriefing || screen == Screen::ArrivalFanfare)) {
-        prompt += item(labels.south, "Continue") + item(labels.menu, "Pause");
+        prompt += item(confirm, "Continue") + item(labels.menu, "Pause");
     } else if (mining) {
         if (presentation.runtime.miningEvaActive) {
             prompt += describedItem("Thrust", "L-stick")
@@ -1959,7 +1949,7 @@ std::string inputPromptBar(
         prompt += item(labels.menu, "Pause");
     } else if (presentation.metadata.overlay == PanelOverlayKind::PreflightLaunch) {
         prompt += item(
-            labels.south,
+            confirm,
             presentation.runtime.launchQueued ? "Launch queued" : "Launch")
             + item(labels.menu, "Pause");
     } else {
@@ -2092,6 +2082,7 @@ enum class ControllerFocusRow {
     HangarActions,
     DroneChoices,
     DroneLoadout,
+    DroneMission,
     SurfaceChoices,
     SurfaceCallout,
     Actions,
@@ -2115,6 +2106,11 @@ ControllerFocusRow controllerFocusRow(const FocusTarget& target)
     }
     if (target.element->Closest(".drone-controller-loadout-row")) {
         return ControllerFocusRow::DroneLoadout;
+    }
+    if (target.element->Closest(".drone-workspace") &&
+        (target.element->Closest(".hazard-mission-actions") || target.element->Closest(".drone-service-status") ||
+         target.element->Closest(".drone-bay-strip"))) {
+        return ControllerFocusRow::DroneMission;
     }
     if (target.element->Closest(".surface-controller-action-row")) {
         return ControllerFocusRow::SurfaceChoices;
@@ -2425,6 +2421,11 @@ bool focusableElement(Rml::Element* element)
     if (!element || !element->IsVisible(true)) {
         return false;
     }
+    if (element->HasAttribute("data-ui-focus-skip")
+        || element->GetAttribute<int>("tabindex", 0) < 0) return false;
+    // RmlUi's generic <button> element is not necessarily an
+    // ElementFormControl. Its disabled attribute is still authoritative.
+    if (element->HasAttribute("disabled")) return false;
     const Rml::String& tag = element->GetTagName();
     if (tag != "button" && tag != "select" && !(tag == "input" && element->GetAttribute<Rml::String>("type", "") == "checkbox")) {
         return false;
@@ -2456,9 +2457,11 @@ std::string derivedFocusId(Rml::Element* element)
         return entry.element == element;
     });
     if (bound != g_elementButtonBindings.end()) {
-        return bound->binding.focusId;
+        if (!bound->binding.focusId.empty()) return bound->binding.focusId;
     }
-    return {};
+    // Content-defined controls without an action binding still need a stable
+    // identity (for example a tab or settings checkbox).
+    return element->GetId().empty() ? std::string{} : "control:" + element->GetId();
 }
 
 void collectFocusableElements(Rml::Element* element, std::vector<Rml::Element*>& elements)
@@ -2562,7 +2565,7 @@ FocusTarget* findFocusTarget(std::string_view id)
     const auto it = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [id](const FocusTarget& target) {
         return target.id == id;
     });
-    return it == g_focusTargets.end() ? nullptr : &*it;
+    return it == g_focusTargets.end() || !focusableElement(it->element) ? nullptr : &*it;
 }
 
 bool applyControllerFocus(
@@ -2616,8 +2619,8 @@ FocusTarget* defaultFocusTarget()
     return nullptr;
 }
 
-// Directional navigation is an explicit player choice, so it may establish a
-// starting focus even on a screen that intentionally has no confirm default.
+// A controller always gets a real, visibly focused entry point, including
+// screens whose primary action is temporarily unavailable.
 FocusTarget* navigationEntryFocusTarget()
 {
     if (FocusTarget* target = defaultFocusTarget()) {
@@ -2668,11 +2671,11 @@ bool activateButtonElement(GameRmlUi& owner, Rml::Element* target)
     if (!button) {
         return false;
     }
-    if (auto* control = dynamic_cast<Rml::ElementFormControl*>(button);
-        control && control->IsDisabled()) {
+    if (button->HasAttribute("disabled")) {
         owner.emitUiSound("error");
         return false;
     }
+    if (auto* control = dynamic_cast<Rml::ElementFormControl*>(button); control && control->IsDisabled()) return false;
 
     // A mouse-up may arrive after a binding action has rebuilt the Rml document.
     // Resolve the clicked element's attributes now rather than dereferencing the
@@ -2699,24 +2702,7 @@ bool activateButtonElement(GameRmlUi& owner, Rml::Element* target)
         return true;
     }
 
-    std::string label;
-    std::vector<Rml::Element*> stack {button};
-    while (!stack.empty()) {
-        Rml::Element* element = stack.back();
-        stack.pop_back();
-        if (auto* text = dynamic_cast<Rml::ElementText*>(element)) {
-            label += text->GetText();
-            label.push_back(' ');
-            continue;
-        }
-        for (int index = element->GetNumChildren(true) - 1; index >= 0; --index) {
-            stack.push_back(element->GetChild(index));
-        }
-    }
-    if (label.empty()) {
-        label = textFromMarkup(button->GetInnerRML());
-    }
-    return owner.activateButtonLabel(label);
+    return owner.activateButtonLabel(controllerIndependentButtonLabel(*button));
 }
 
 Rml::Element* buttonElementAtPoint(Rml::Context& context, const Rml::Vector2f& point)
@@ -2970,6 +2956,15 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
         });
     const std::string previousModalId = openModalId_;
 
+    if (presentation_.metadata.screen != presentation.metadata.screen
+        || presentation_.runtime.titleScreen != presentation.runtime.titleScreen) {
+        // Coordinates from a different screen are not a sensible fallback.
+        // Preserve only deliberate requestFocus requests across that handoff.
+        focusedId_.clear();
+        hasLastFocusCenter_ = false;
+        controllerFocusExplicit_ = false;
+    }
+
     presentation_ = presentation;
     panelMode_ = nextPanelMode;
     if (!openModalId_.empty() && !modalHierarchyRemainsValid) {
@@ -2977,18 +2972,22 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
         openModalId_.clear();
         modalStack_.clear();
         modalFocusStack_.clear();
+        modalExplicitFocusStack_.clear();
         focusedId_ = modalReturnFocusId_;
+        controllerFocusExplicit_ = modalReturnFocusExplicit_;
         modalReturnFocusId_.clear();
         hasLastFocusCenter_ = false;
     }
     if (openModalId_.empty()) {
         if (autoModal != modals.end()) {
             modalReturnFocusId_ = focusedId_;
+            modalReturnFocusExplicit_ = controllerFocusExplicit_;
             clearFocusTargets();
             modalScrollPositions_.erase(autoModal->id);
             openModalId_ = autoModal->id;
             focusedId_.clear();
             hasLastFocusCenter_ = false;
+            controllerFocusExplicit_ = false;
         }
     }
 
@@ -3140,6 +3139,11 @@ bool GameRmlUi::mouseDown(int x, int y, int button)
             pressedButton_ = nullptr;
         }
         if (pressedButton_) {
+            if (pressedButton_->HasAttribute("disabled")) {
+                emitUiSound("error");
+                pressedButton_ = nullptr;
+                return overUi;
+            }
             if (auto* control = dynamic_cast<Rml::ElementFormControl*>(pressedButton_);
                 control && control->IsDisabled()) {
                 emitUiSound("error");
@@ -3248,6 +3252,7 @@ bool GameRmlUi::navigate(UiDirection direction)
 {
     const std::string previous = focusedId_;
     const bool moved = navigateImpl(direction);
+    if (moved) controllerFocusExplicit_ = true;
     if (moved && previous != focusedId_) emitUiSound("focus");
     return moved;
 }
@@ -3273,11 +3278,36 @@ bool GameRmlUi::navigateImpl(UiDirection direction)
         return applyControllerFocus(fallback, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
     }
 
+    // The fixed modal Close button and scrolling settings/choice body are
+    // separate visual lanes. Explicitly connect their top row even when the
+    // close button is too far right for ordinary spatial navigation.
+    if (modalScope && direction == UiDirection::Down && current->element->Closest(".modal-head")) {
+        const auto firstBody = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [](const auto& target) {
+            return target.element->Closest(".modal-scroll-body") != nullptr;
+        });
+        return applyControllerFocus(firstBody == g_focusTargets.end() ? nullptr : &*firstBody,
+            focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+    }
+    if (modalScope && direction == UiDirection::Up && current->element->Closest(".modal-scroll-body")) {
+        const bool bodyControlAbove = std::any_of(g_focusTargets.begin(), g_focusTargets.end(), [&](const auto& target) {
+            return target.element->Closest(".modal-scroll-body") && target.centerY < current->centerY - 1.0f;
+        });
+        if (!bodyControlAbove) {
+            const auto header = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [](const auto& target) {
+                return target.element->Closest(".modal-head") != nullptr;
+            });
+            return applyControllerFocus(header == g_focusTargets.end() ? nullptr : &*header,
+                focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+        }
+    }
+
     if ((direction == UiDirection::Left || direction == UiDirection::Right)) {
         if (auto* select = dynamic_cast<Rml::ElementFormControlSelect*>(current->element)) {
             const int delta = direction == UiDirection::Left ? -1 : 1;
-            const int next = std::clamp(select->GetSelection() + delta, 0, std::max(0, select->GetNumOptions() - 1));
-            if (next != select->GetSelection()) {
+            int next = select->GetSelection() + delta;
+            for (; next >= 0 && next < select->GetNumOptions(); next += delta) {
+                Rml::Element* option = select->GetOption(next);
+                if (!option || option->HasAttribute("disabled")) continue;
                 select->SetSelection(next);
                 // Programmatic RmlUi selection does not emit Change on its
                 // own. Dispatch it explicitly so controller left/right has
@@ -3287,6 +3317,9 @@ bool GameRmlUi::navigateImpl(UiDirection direction)
                 select->DispatchEvent(Rml::EventId::Change, parameters);
                 return true;
             }
+            // Left/right belongs to the selected setting even at its limits;
+            // use up/down to move to another control.
+            return false;
         }
     }
 
@@ -3350,6 +3383,31 @@ bool GameRmlUi::navigateImpl(UiDirection direction)
     }
 
     ControllerFocusRow destinationRow = ControllerFocusRow::None;
+    if (current->element->Closest(".drone-workspace")) {
+        // Contextual mission/service actions sit between the toolbar and
+        // roster. Treat their dynamic lane as transparent only when empty.
+        // The old direct Utilities <-> DroneChoices link skipped Recall.
+        FocusTarget* missionHandoff = nullptr;
+        bool hasHandoff = false;
+        if (direction == UiDirection::Up && currentRow == ControllerFocusRow::DroneChoices) {
+            missionHandoff = firstDirectionalControllerRowTarget(*current, direction,
+                {ControllerFocusRow::DroneMission, ControllerFocusRow::Utilities, ControllerFocusRow::Titlebar});
+            hasHandoff = true;
+        } else if (direction == UiDirection::Down && currentRow == ControllerFocusRow::Utilities) {
+            missionHandoff = firstDirectionalControllerRowTarget(*current, direction,
+                {ControllerFocusRow::DroneMission, ControllerFocusRow::DroneChoices});
+            hasHandoff = true;
+        } else if (currentRow == ControllerFocusRow::DroneMission && direction == UiDirection::Up) {
+            missionHandoff = firstDirectionalControllerRowTarget(*current, direction,
+                {ControllerFocusRow::DroneMission, ControllerFocusRow::Utilities, ControllerFocusRow::Titlebar});
+            hasHandoff = true;
+        } else if (currentRow == ControllerFocusRow::DroneMission && direction == UiDirection::Down) {
+            missionHandoff = firstDirectionalControllerRowTarget(*current, direction,
+                {ControllerFocusRow::DroneMission, ControllerFocusRow::DroneChoices, ControllerFocusRow::DroneLoadout});
+            hasHandoff = true;
+        }
+        if (hasHandoff) return applyControllerFocus(missionHandoff, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+    }
     if (direction == UiDirection::Down && currentRow == ControllerFocusRow::Utilities
         && current->element->Closest(".phase-board-hangar")) {
         // Hangar operation buttons disappear from the focus graph when every
@@ -3440,7 +3498,6 @@ bool GameRmlUi::activateFocused()
         collectFocusTargets(modalScope);
     }
     FocusTarget* target = findFocusTarget(focusedId_);
-    if (!target) target = defaultFocusTarget();
     if (!target) {
         return false;
     }
@@ -3475,7 +3532,13 @@ bool GameRmlUi::cancel()
     target->element->Blur();
     emitUiSound("cancel");
     focusedId_.clear();
+    controllerFocusExplicit_ = false;
     return true;
+}
+
+bool GameRmlUi::cancelChildModal()
+{
+    return !modalStack_.empty() && cancel();
 }
 
 bool GameRmlUi::scroll(float amount)
@@ -3533,6 +3596,13 @@ void GameRmlUi::setControllerPresentation(bool active, ControllerFamily family)
     }
 }
 
+void GameRmlUi::setControllerConfirmCancelSwapped(bool swapped)
+{
+    if (controllerConfirmCancelSwapped_ == swapped) return;
+    controllerConfirmCancelSwapped_ = swapped;
+    if (initialized_) refreshPersistentHosts(false, false, false, false, true, false);
+}
+
 void GameRmlUi::setControllerFocusVisible(bool visible)
 {
     uiBridge_.setControllerFocusVisible(visible);
@@ -3542,6 +3612,7 @@ void GameRmlUi::setControllerFocusVisible(bool visible)
     controllerFocusVisible_ = visible;
     if (initialized_) {
         refreshPersistentHosts(false, false, false, false, false, false);
+        if (visible) rebindAndRestoreFocus(true);
     }
 }
 
@@ -3566,7 +3637,23 @@ void GameRmlUi::setControllerResumeBlocked(bool blocked, bool controllerConnecte
 
 std::string GameRmlUi::focusedId() const
 {
-    return initialized_ ? focusedId_ : std::string {};
+    return initialized_ && findFocusTarget(focusedId_) ? focusedId_ : std::string {};
+}
+
+FocusedControllerAction GameRmlUi::focusedControllerAction() const
+{
+    FocusedControllerAction action {focusedId()};
+    const FocusTarget* target = findFocusTarget(action.id);
+    if (!target) return action;
+    const std::string activation = target->element->GetAttribute<Rml::String>("data-ui-activation", "");
+    if (activation == "continuous") {
+        action.kind = ControllerActivationKind::ContinuousHold;
+    } else if (activation == "hold" || action.id == "action:reset_save") {
+        action.kind = ControllerActivationKind::HoldToConfirm;
+        action.holdSeconds = target->element->GetAttribute<double>("data-ui-hold-seconds", 0.75);
+        if (!std::isfinite(action.holdSeconds) || action.holdSeconds <= 0.0) action.holdSeconds = 0.75;
+    }
+    return action;
 }
 
 void GameRmlUi::requestFocus(std::string_view id)
@@ -3586,6 +3673,12 @@ void GameRmlUi::requestFocus(std::string_view id)
     collectFocusTargets(modalScope);
     if (findFocusTarget(pendingFocusId_)) {
         (void)applyPendingFocusIfAvailable();
+    } else {
+        // A future overlay action may not be mounted yet. Recollection must
+        // not silently erase the currently visible focus while it waits.
+        FocusTarget* current = findFocusTarget(focusedId_);
+        if (!current) current = navigationEntryFocusTarget();
+        applyControllerFocus(current, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
     }
 }
 
@@ -3615,14 +3708,17 @@ void GameRmlUi::openModalImmediately(const std::string& id)
     if (!openModalId_.empty()) {
         modalStack_.push_back(openModalId_);
         modalFocusStack_.push_back(focusedId_);
+        modalExplicitFocusStack_.push_back(controllerFocusExplicit_);
     } else {
         modalReturnFocusId_ = focusedId_;
+        modalReturnFocusExplicit_ = controllerFocusExplicit_;
     }
     modalScrollPositions_.erase(id);
     clearFocusTargets();
     openModalId_ = id;
     focusedId_.clear();
     hasLastFocusCenter_ = false;
+    controllerFocusExplicit_ = false;
     refreshPersistentHosts(false, false, true, true, true, true);
 }
 
@@ -3682,12 +3778,15 @@ void GameRmlUi::closeModal()
         openModalId_ = modalStack_.back();
         modalStack_.pop_back();
         focusedId_ = modalFocusStack_.empty() ? std::string() : modalFocusStack_.back();
+        controllerFocusExplicit_ = !modalExplicitFocusStack_.empty() && modalExplicitFocusStack_.back();
         if (!modalFocusStack_.empty()) {
             modalFocusStack_.pop_back();
         }
+        if (!modalExplicitFocusStack_.empty()) modalExplicitFocusStack_.pop_back();
     } else {
         openModalId_.clear();
         focusedId_ = modalReturnFocusId_;
+        controllerFocusExplicit_ = modalReturnFocusExplicit_;
         modalReturnFocusId_.clear();
     }
     refreshPersistentHosts(false, false, true, true, true, true);
@@ -3710,6 +3809,7 @@ void GameRmlUi::dispatchAction(const std::string& action)
         openModalId_.clear();
         modalStack_.clear();
         modalFocusStack_.clear();
+        modalExplicitFocusStack_.clear();
         modalReturnFocusId_.clear();
     }
     if (actionHandler_) {
@@ -3737,12 +3837,12 @@ bool GameRmlUi::applyPendingFocusIfAvailable()
     if (pendingFocusId_.empty()) {
         return false;
     }
-    const std::string requestedId = std::move(pendingFocusId_);
-    pendingFocusId_.clear();
-    FocusTarget* target = findFocusTarget(requestedId);
+    FocusTarget* target = findFocusTarget(pendingFocusId_);
     if (!target) {
         return false;
     }
+    pendingFocusId_.clear();
+    controllerFocusExplicit_ = true;
     return applyControllerFocus(
         target,
         focusedId_,
@@ -4111,7 +4211,8 @@ bool GameRmlUi::rebuildPromptHost()
                 controllerFamily_,
                 controllerPresentationActive_,
                 activeModal != nullptr,
-                activeModal == nullptr || activeModal->dismissible)
+                activeModal == nullptr || activeModal->dismissible,
+                controllerConfirmCancelSwapped_)
             : std::string {});
     return true;
 }
@@ -4142,6 +4243,7 @@ void GameRmlUi::rebindAndRestoreFocus(bool restoreFocus)
     g_document->RemoveEventListener(Rml::EventId::Change, &g_settingsEventListener);
     g_document->AddEventListener(Rml::EventId::Change, &g_settingsEventListener);
     buttonBindings_ = bindLoadedButtons();
+    updateControllerConfirmGlyphs();
     g_context->Update();
     collectFocusTargets(!openModalId_.empty());
     const bool appliedPendingFocus = applyPendingFocusIfAvailable();
@@ -4151,13 +4253,37 @@ void GameRmlUi::rebindAndRestoreFocus(bool restoreFocus)
         || !focusedId_.empty();
     if (!appliedPendingFocus && shouldRestoreFocus && !g_focusTargets.empty()) {
         FocusTarget* target = findFocusTarget(focusedId_);
-        if (!target && hasLastFocusCenter_) {
-            target = nearestFocusTarget(lastFocusCenterX_, lastFocusCenterY_);
-        }
-        if (!target) {
-            target = defaultFocusTarget();
-        }
+        if (!target) controllerFocusExplicit_ = false;
+        if (!controllerFocusExplicit_) target = navigationEntryFocusTarget();
+        if (!target) target = navigationEntryFocusTarget();
         applyControllerFocus(target, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+    }
+    if (g_focusTargets.empty()) {
+        focusedId_.clear();
+        hasLastFocusCenter_ = false;
+    }
+}
+
+void GameRmlUi::updateControllerConfirmGlyphs()
+{
+    if (!g_document) return;
+    const ControllerPromptLabels labels = controllerPromptLabels(promptControllerFamily(controllerFamily_));
+    const char* confirm = controllerConfirmCancelSwapped_ ? labels.east : labels.south;
+    std::vector<Rml::Element*> buttons;
+    collectButtonElements(g_document, buttons);
+    for (Rml::Element* button : buttons) {
+        Rml::Element* glyph = button->QuerySelector(".rr-controller-confirm-glyph");
+        if (!glyph) {
+            auto created = g_document->CreateElement("span");
+            created->SetClass("rr-controller-confirm-glyph", true);
+            created->SetAttribute("aria-hidden", "true");
+            glyph = button->AppendChild(std::move(created));
+        }
+        const std::string activation = button->GetAttribute<Rml::String>("data-ui-activation", "");
+        const bool held = activation == "hold" || activation == "continuous"
+            || button->GetAttribute<Rml::String>("data-rr-action", "") == "reset_save";
+        const std::string text = (held ? "Hold " : "") + std::string(confirm);
+        if (glyph->GetInnerRML() != text) glyph->SetInnerRML(text);
     }
 }
 
@@ -4173,7 +4299,7 @@ void GameRmlUi::refreshPersistentHosts(
         return;
     }
 
-    const bool focusTreeChanged = rebuildPanel || rebuildModal;
+    const bool focusTreeChanged = rebuildPanel || rebuildModal || rebuildOverlay;
     const bool bindingTreeChanged = focusTreeChanged || rebuildOverlay || rebuildPrompt;
     if (focusTreeChanged) {
         clearFocusTargets();
@@ -4272,14 +4398,18 @@ void GameRmlUi::shutdown()
     renderedModalId_.clear();
     modalStack_.clear();
     modalFocusStack_.clear();
+    modalExplicitFocusStack_.clear();
     modalScrollPositions_.clear();
     focusedId_.clear();
     pendingFocusId_.clear();
     modalReturnFocusId_.clear();
     performanceStatsHtml_.clear();
     hasLastFocusCenter_ = false;
+    controllerFocusExplicit_ = false;
+    modalReturnFocusExplicit_ = false;
     controllerPresentationActive_ = false;
     controllerFocusVisible_ = false;
+    controllerConfirmCancelSwapped_ = false;
     controllerResumeBlocked_ = false;
     controllerResumeConnected_ = false;
     performanceStatsVisible_ = false;

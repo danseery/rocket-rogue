@@ -37,6 +37,11 @@ inline constexpr double turnAcceleration = 5.50; // 25% above the previous 4.40.
 inline constexpr double keyboardThrottleRiseSeconds = 0.40;
 } // namespace flight_controls
 
+namespace flight_capture {
+inline constexpr double confirmationSeconds = 2.0;
+inline constexpr double decayPerSecond = 1.0;
+}
+
 namespace flight_landing {
 inline constexpr double entryAltitude = 60.0;
 inline constexpr double departureAltitude = 46.0;

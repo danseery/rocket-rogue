@@ -12,6 +12,7 @@
 #include "core/SurfacePresentation.h"
 #include "core/SolarProgression.h"
 #include <cmath>
+#include <algorithm>
 #include <stdexcept>
 #include <iostream>
 
@@ -24,10 +25,223 @@ void check(bool condition, const char *message)
         throw std::runtime_error(message);
     }
 }
+
+void orbitalObjectiveSafetyTests()
+{
+    using namespace rocket;
+    const auto catalog=createDefaultContent();
+    // The placement contract applies to complete prepared sites, not only the
+    // active surface or the one seed that originally exposed the Io overlap.
+    for (const auto& body : {std::pair{"moon","moon"},std::pair{"mars","mars"},std::pair{"io","jupiter"}})
+        for (std::uint64_t seed : {7U,31U,319U,0x105CAU}) for (const auto& zone : planetLandingZones()) {
+            auto state=createNewGame(catalog,seed);
+            state.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+            state.run.expedition.travelInitialized=true;
+            state.run.expedition.location.systemId="solar";
+            state.run.expedition.location.bodyId=body.first;
+            SurfaceLandingBuildRequest request;
+            request.bodyId=body.first; request.destinationId=body.second;
+            request.zoneId=zone.id; request.siteSeed=seed;
+            request.allowScenarioObjectives=zone.id=="zone_1";
+            auto prepared=prepareSurfaceLanding(state,catalog,request);
+            check(prepared.valid,"Every seeded body/sector must prepare for bore safety checks");
+            check(!prepared.laserBlocked && orbitalShaftAvoidsProtectedObjectives(prepared.miningTemplate,prepared.shaftX),
+                "Fresh shafts must avoid every prebuilt objective and protected footprint");
+            const auto repeated=prepareSurfaceLanding(state,catalog,request);
+            check(repeated.shaftX==prepared.shaftX,"Safe shaft selection must be deterministic");
+            check(prepareOrbitalSurvey(state,catalog,prepared,2),"Safety sweep must survey deeper layers");
+            check(orbitalShaftAvoidsProtectedObjectives(prepared.miningTemplate,prepared.shaftX),
+                "Survey-created layers must revalidate the complete shaft");
+            excavateOrbitalShaft(prepared,2,.2);
+            const int locked=prepared.shaftX;
+            check(prepareOrbitalSurvey(state,catalog,prepared,3),"Later scans must preserve committed bore geometry");
+            check(!prepared.shaftCommitted || prepared.shaftX==locked,"Started bore cannot silently switch columns");
+        }
+
+    auto state=createNewGame(catalog,0x105CA);
+    state.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+    state.run.expedition.travelInitialized=true;
+    state.run.expedition.location.systemId="solar";
+    state.run.expedition.location.bodyId="io";
+    SurfaceLandingBuildRequest request;
+    request.destinationId="jupiter"; request.bodyId="io"; request.siteSeed=319;
+    auto prepared=prepareSurfaceLanding(state,catalog,request);
+    check(prepareOrbitalSurvey(state,catalog,prepared,2),"Io migration fixture must survey");
+    prepared.surveyComplete=true;
+    auto objectiveLayer = [](auto& mining) -> auto& {
+        const auto found=std::find_if(mining.depthLayers.begin(),mining.depthLayers.end(),
+            [](const auto& layer){return layer.artifact.present;});
+        check(found!=mining.depthLayers.end(),"Fixture needs a cached protected artifact");
+        return *found;
+    };
+    int generatedRepairs=0;
+    for (std::uint64_t seed=1; seed<=16; ++seed) {
+        auto generatedState=state;
+        generatedState.seed=seed;
+        auto generatedRequest=request;
+        generatedRequest.siteSeed=seed;
+        auto generated=prepareSurfaceLanding(generatedState,catalog,generatedRequest);
+        check(prepareOrbitalSurvey(generatedState,catalog,generated,2),"Real Io terrain must survey for legacy repair");
+        const auto& before=objectiveLayer(generated.miningTemplate);
+        // Recreate a legacy bore crossing the real objective footprint while
+        // leaving all generated lava, resources, tunnels and actors intact.
+        generated.shaftX=static_cast<int>(std::floor(before.artifact.x))+4;
+        generated.laserDepth=before.depthZone;
+        generated.laserRow=static_cast<int>(std::floor(before.artifact.y))-4;
+        generated.laserBlocked=true;
+        PersistentSiteState old{"solar","io","io.beacon:zone_1",generated.expeditionTemplate,
+            generated.miningTemplate,static_cast<const OrbitalSiteProgress&>(generated)};
+        const auto restored=restoreSurfaceLanding(generatedState,catalog,generatedRequest,old);
+        const auto& after=objectiveLayer(restored.miningTemplate);
+        const bool moved=after.artifact.x!=before.artifact.x;
+        generatedRepairs+=moved;
+        check((moved && orbitalShaftAvoidsProtectedObjectives(restored.miningTemplate,restored.shaftX)) ||
+            (!moved && restored.laserBlocked),"Real legacy overlap must safely relocate or retain its defensive block");
+        check(after.artifact.y==before.artifact.y && after.artifact.health==before.artifact.health,
+            "Real Io migration must preserve depth and artifact condition");
+        for (std::size_t i=0;i<before.terrain.cells.size();++i) {
+            const auto& cell=before.terrain.cells[i];
+            if (cell.material==MiningCellMaterial::Empty || cell.material==MiningCellMaterial::CommonOre ||
+                cell.material==MiningCellMaterial::RareOre || cell.material==MiningCellMaterial::ExoticVein ||
+                cell.material==MiningCellMaterial::FuelPocket || cell.material==MiningCellMaterial::OxygenPocket)
+                check(after.terrain.cells[i].material==cell.material,
+                    "Real-terrain repair must never erase an existing tunnel, ore or supply pocket");
+        }
+    }
+    std::cout << "Real Io legacy bore repairs: " << generatedRepairs << "/16\n";
+    check(generatedRepairs>0,"Safe relocation must work on actual generated Io terrain, not only synthetic regolith");
+    auto& objective=objectiveLayer(prepared.miningTemplate);
+    check(objective.depthZone==2 && objective.gate.cocoonLayers.size()==1,"Io fixture must use its depth-two thermal seal");
+    // Supply ordinary virgin space for a deterministic migration, retaining
+    // the real generated artifact and authored seal cells exactly as built.
+    for (auto& cell : objective.terrain.cells) if (!cell.gateAssociated && cell.cocoonLayer<0) {
+        cell={}; cell.material=MiningCellMaterial::Regolith;
+        cell.maxToughness=cell.remainingToughness=2.0;
+    }
+    objective.enemies.clear(); objective.looseObjects.clear();
+    const int oldX=static_cast<int>(std::floor(objective.artifact.x));
+    const int oldY=static_cast<int>(std::floor(objective.artifact.y));
+    const auto at=[](auto& terrain,int x,int y) -> auto& {return terrain.cells[static_cast<std::size_t>(y*terrain.width+x)];};
+    // One seal tile is excavated, another partly treated/damaged. These are
+    // recovery progress, not permission to recreate an intact seal on load.
+    at(objective.terrain,oldX,oldY-2)={};
+    at(objective.terrain,oldX,oldY-2).revealed=true;
+    at(objective.terrain,oldX,oldY-2).gateAssociated=true;
+    at(objective.terrain,oldX,oldY-2).cocoonLayer=0; // Legacy retained ownership on an excavated tile.
+    auto& damaged=at(objective.terrain,oldX+2,oldY);
+    damaged.material=MiningCellMaterial::CommonOre; // Already treated, not virgin hazard.
+    damaged.hazard=false;
+    damaged.hazardAffinity=MiningElementalAffinity::None;
+    damaged.remainingToughness=damaged.maxToughness*.4;
+    damaged.revealed=true;
+    objective.artifact.health=.43;
+    objective.artifact.embedStrength=.27;
+    objective.artifact.revealed=true;
+    objective.gate.cocoonLayers[0].remaining=3;
+    objective.gate.cocoonLayers[0].revealed=true;
+    objective.gate.shellTilesRemaining=objective.gate.outerShellTilesRemaining=3;
+    objective.hasDownwardTransition=true;
+    objective.downwardTransitionX=oldX;
+    prepared.shaftX=oldX;
+    prepared.laserDepth=objective.depthZone;
+    prepared.laserRow=oldY-4;
+    prepared.laserRowWork=.015;
+    prepared.laserBlocked=true;
+    at(objective.terrain,oldX,oldY-5)={}; // Existing bore remains where excavated.
+    at(objective.terrain,oldX,oldY-5).feature=MiningCellFeature::MainTunnel;
+    PersistentSiteState saved{"solar","io","io.beacon:zone_1",prepared.expeditionTemplate,
+        prepared.miningTemplate,static_cast<const OrbitalSiteProgress&>(prepared)};
+    const auto restore=[&](const PersistentSiteState& site){return restoreSurfaceLanding(state,catalog,request,site);};
+    auto repaired=restore(saved);
+    const auto& moved=objectiveLayer(repaired.miningTemplate);
+    const int dx=static_cast<int>(moved.artifact.x-objective.artifact.x);
+    check(dx!=0 && moved.artifact.y==objective.artifact.y && moved.depthZone==objective.depthZone,
+        "Existing embedded objective must move only sideways at the same depth");
+    check(orbitalShaftAvoidsProtectedObjectives(repaired.miningTemplate,repaired.shaftX) && !repaired.laserBlocked,
+        "Repaired seal must clear the protected bore envelope and unblock a now-safe saved row");
+    check(moved.artifact.id==objective.artifact.id && moved.artifact.health==.43 && moved.artifact.embedStrength==.27 &&
+        moved.artifact.revealed && moved.gate.cocoonLayers[0].remaining==3 && moved.gate.shellTilesRemaining==3,
+        "Migration must preserve physical damage, discovery, identity and partial gate progress");
+    check(at(moved.terrain,oldX+dx,oldY-2).material==MiningCellMaterial::Empty &&
+        !at(moved.terrain,oldX,oldY-2).gateAssociated && at(moved.terrain,oldX,oldY-2).cocoonLayer==-1 &&
+        at(moved.terrain,oldX+2+dx,oldY).material==MiningCellMaterial::CommonOre &&
+        at(moved.terrain,oldX+2+dx,oldY).remainingToughness==damaged.remainingToughness,
+        "Removed and partly damaged seal members must retain their exact state at the new anchor");
+    check(at(moved.terrain,oldX,oldY-5).material==MiningCellMaterial::Empty &&
+        at(moved.terrain,oldX,oldY-5).feature==MiningCellFeature::MainTunnel &&
+        at(moved.terrain,oldX,oldY).material==MiningCellMaterial::Empty &&
+        moved.hasDownwardTransition && moved.downwardTransitionX==objective.downwardTransitionX &&
+        repaired.shaftX==saved.orbital.shaftX && repaired.laserDepth==saved.orbital.laserDepth &&
+        repaired.laserRow==saved.orbital.laserRow && repaired.laserRowWork==saved.orbital.laserRowWork,
+        "Migration must not refill excavation, redirect portals or reset orbital work");
+    for (int y=0; y<moved.terrain.height; ++y) for (int x=0; x<moved.terrain.width; ++x) {
+        const auto member=[&](int cx){return (x==cx && (y==oldY || y==oldY-2 || y==oldY+2)) ||
+            ((x==cx-2 || x==cx+2) && y==oldY);};
+        if (member(oldX) || member(oldX+dx)) continue;
+        const auto& before=at(objective.terrain,x,y); const auto& after=at(moved.terrain,x,y);
+        check(before.material==after.material && before.remainingToughness==after.remainingToughness &&
+            before.revealed==after.revealed && before.feature==after.feature,
+            "Cells outside the old/new objective footprint must remain unchanged");
+    }
+    auto second=restore(saved);
+    check(objectiveLayer(second.miningTemplate).artifact.x==moved.artifact.x,
+        "Legacy repair must choose the same safe translation every time");
+    state.run.expedition.sites={PersistentSiteState{"solar","io","io.beacon:zone_1",repaired.expeditionTemplate,
+        repaired.miningTemplate,static_cast<const OrbitalSiteProgress&>(repaired)}};
+    const auto decoded=deserializeExpedition(serializeExpedition(state.run.expedition));
+    check(decoded.has_value(),"Repaired site must persist through the real expedition serializer");
+    const auto reloaded=restore(decoded->sites.front());
+    const auto& reloadArtifact=objectiveLayer(reloaded.miningTemplate).artifact;
+    check(reloadArtifact.x==moved.artifact.x && reloadArtifact.health==moved.artifact.health &&
+        reloadArtifact.embedStrength==moved.artifact.embedStrength && reloaded.shaftX==saved.orbital.shaftX,
+        "Save/reload must be idempotent without re-healing or shifting the artifact again");
+    const double health=moved.artifact.health;
+    excavateOrbitalShaft(repaired,2,5.0);
+    check(objectiveLayer(repaired.miningTemplate).artifact.health==health,
+        "Resumed orbital laser must never damage the shifted artifact");
+
+    for (int excluded=0; excluded<6; ++excluded) {
+        auto unsafe=saved;
+        auto& layer=objectiveLayer(unsafe.mining);
+        if (excluded==0) layer.artifact.tethered=true;
+        if (excluded==1) layer.artifact.state=MiningArtifactState::Loose;
+        if (excluded==2) layer.artifact.state=MiningArtifactState::Delivered;
+        if (excluded==3) layer.artifact.state=MiningArtifactState::Destroyed;
+        if (excluded==4) ++layer.gate.cocoonDefinitionVersion;
+        if (excluded==5) for (auto& cell : layer.terrain.cells)
+            if (!cell.gateAssociated && cell.cocoonLayer<0) {cell={}; cell.material=MiningCellMaterial::CommonOre;}
+        const auto unchanged=restore(unsafe);
+        const auto& result=objectiveLayer(unchanged.miningTemplate);
+        check(result.artifact.x==layer.artifact.x && result.artifact.health==layer.artifact.health && unchanged.laserBlocked,
+            "Unsafe, recovered, unsupported and no-room artifacts must not relocate or unblock the laser");
+        for (std::size_t i=0;i<layer.terrain.cells.size();++i)
+            check(result.terrain.cells[i].material==layer.terrain.cells[i].material &&
+                result.terrain.cells[i].remainingToughness==layer.terrain.cells[i].remainingToughness,
+                "Failed migration must be atomic, preserving all terrain and partial seal damage");
+    }
+    auto obstructed=saved;
+    at(objectiveLayer(obstructed.mining).terrain,oldX,saved.orbital.laserRow).material=MiningCellMaterial::FuelPocket;
+    const auto guarded=restore(obstructed);
+    check(objectiveLayer(guarded.miningTemplate).artifact.x!=objective.artifact.x && guarded.laserBlocked,
+        "Successful artifact repair must retain unrelated supply-pocket laser blockers");
+
+    // A new protected object added to a committed preview must halt before any
+    // excavation. Revalidation is defensive, not a relocation during flight.
+    auto late=reloaded;
+    auto& lateLayer=objectiveLayer(late.miningTemplate);
+    at(lateLayer.terrain,late.shaftX,late.laserRow).gateAssociated=true;
+    late.laserBlocked=false;
+    const auto row=late.laserRow;
+    excavateOrbitalShaft(late,2,1.0);
+    check(late.laserBlocked && late.shaftX==saved.orbital.shaftX && late.laserRow==row &&
+        at(lateLayer.terrain,late.shaftX,late.laserRow).gateAssociated,
+        "Repeated validation must stop new protected overlaps before damage without moving a committed bore");
+}
 } // namespace
 void persistentExpeditionTests()
 {
     using namespace rocket;
+    orbitalObjectiveSafetyTests();
     {
         const auto catalog = createDefaultContent();
         const auto& system = solarSystemDefinition();

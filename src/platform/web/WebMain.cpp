@@ -89,6 +89,11 @@ WebAutoPowerPacer g_autoPowerPacer;
 
 EM_JS(int, rr_controller_debug_tools_enabled, (), {
     try {
+        // Match the shell's visible debug-tools entry points. Query-only
+        // sandbox sessions must be able to preview a controller without
+        // changing the user's persisted preferences.
+        const query = new URLSearchParams(globalThis.location.search);
+        if (query.has("debug_tools") || query.has("debug_minigames")) return 1;
         return globalThis.localStorage.getItem("rocket_rogue_debug_tools") === "1" ? 1 : 0;
     } catch (error) {
         return 0;

@@ -5,6 +5,7 @@
 #include "core/FlightInstrumentLayout.h"
 #include "core/SurfaceBayTiming.h"
 #include "core/FlightSystem.h"
+#include "core/LaunchSimulation.h"
 #include "core/UiViewportLayout.h"
 
 #include "core/MiningSystem.h"
@@ -1818,12 +1819,16 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
         const float available = std::max(1.0F,sceneHeightPixels-40.0F);
         const float altitudeCells = snapshot.screen == Screen::Flight
             ? static_cast<float>(std::max(0.0, padY - shipFootY)) : 0.0F;
-        const float shipHeight = std::min(cw,ch)*8.5F;
+        // Frame the service ring's outer tick, not just the ship sprite.
+        // Use the same envelope through landing/deployment to avoid a jump.
+        constexpr float surfaceHeadroomCells = static_cast<float>(
+            tuning::mining::returnZoneCenterHeightCells + tuning::mining::returnZoneRadiusCells * 1.08);
+        const float shipHeight = std::min(cw,ch)*surfaceHeadroomCells;
         const float fit = std::min(std::min(1.0F, (sceneWidthPixels*.8F-24.0F) /
             std::max(1.0F, (static_cast<float>(std::abs(lateralCells))*cw+shipHeight)*sceneWorldUnit_)),(available*.70F-24.0F)/
             std::max(1.0F,(altitudeCells*ch+shipHeight)*sceneWorldUnit_));
         cw *= fit; ch *= fit;
-        const float clearance = (altitudeCells*ch + std::min(cw,ch)*8.5F)*sceneWorldUnit_+24.0F;
+        const float clearance = (altitudeCells*ch + std::min(cw,ch)*surfaceHeadroomCells)*sceneWorldUnit_+24.0F;
         const float padPixels = 40.0F + std::max(available*.28F,clearance);
         surfaceCamera_.cellWidth = cw; surfaceCamera_.cellHeight = ch;
         surfaceCamera_.left = -static_cast<float>(focusX)*cw;
@@ -2783,8 +2788,10 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         if (surfaceCamera_.active) miningViewOffsetX = miningViewOffsetY = 0.0F;
     }
     drawOpacity_ = previousOpacity * arrivalOpacity;
-    if (!arrivalComposite)
-        drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.0F, 0.0F, 0.0F, 1.0F}, false);
+    if (!arrivalComposite) {
+        drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
+        drawSolarBackground(snapshot, 0.70F, false);
+    }
     if (arrivalOpacity <= 0.001F) {
         drawOpacity_ = previousOpacity;
         return;
@@ -2808,6 +2815,35 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
     auto gridPoint = [&](double x, double y) {
         return view.gridPoint(x, y, {miningViewOffsetX, miningViewOffsetY});
     };
+    // The same world-anchored back wall is visible through excavated cells
+    // during descent, deployment, and mining. Never put stars underground.
+    const auto& backdropClip = packet_.logicalSceneClip;
+    const float backdropLeft = (backdropClip.x - scenePixelCenterX_) / sceneWorldUnitX_;
+    const float backdropRight = (backdropClip.x + backdropClip.width - scenePixelCenterX_) / sceneWorldUnitX_;
+    const float backdropBottom = (sceneCssHeight_ - backdropClip.y - backdropClip.height - scenePixelCenterY_) / sceneWorldUnitY_;
+    const float viewportTop = (sceneCssHeight_ - backdropClip.y - scenePixelCenterY_) / sceneWorldUnitY_;
+    const float horizon = gridPoint(0, snapshot.miningReturnZoneY).y;
+    const float backdropTop = snapshot.miningActiveDepth > 0 ? viewportTop : std::min(viewportTop, horizon);
+    if (backdropTop > backdropBottom) {
+        const float tileW = cellW * 24.0F, tileH = cellH * 24.0F;
+        const float originX = gridPoint(0, 0).x;
+        const int firstX = static_cast<int>(std::floor((backdropLeft - originX) / tileW));
+        const int lastX = static_cast<int>(std::ceil((backdropRight - originX) / tileW));
+        const int firstY = static_cast<int>(std::floor((horizon - backdropTop) / tileH));
+        const int lastY = static_cast<int>(std::ceil((horizon - backdropBottom) / tileH));
+        const bool textured = textureReady(static_cast<int>(TextureId::MiningTunnelBackdrop) - 1);
+        for (int row = firstY; row < lastY; ++row) for (int column = firstX; column < lastX; ++column) {
+            const float x = originX + column * tileW, y = horizon - row * tileH;
+            const float x0 = std::max(x, backdropLeft), x1 = std::min(x + tileW, backdropRight);
+            const float y0 = std::max(y - tileH, backdropBottom), y1 = std::min(y, backdropTop);
+            submitInstance({(x0+x1)*.5F, (y0+y1)*.5F, (x1-x0)*.5F, 0, 0, (y1-y0)*.5F,
+                textured ? Color{.65F,.65F,.65F,drawOpacity_} : Color{.018F,.024F,.032F,drawOpacity_},
+                (x0-x)/tileW, (y-y1)/tileH, (x1-x)/tileW, (y-y0)/tileH,
+                SceneInstanceShape::Rectangle, 4},
+                textured ? TextureId::MiningTunnelBackdrop : TextureId::None,
+                CoordinateSpace::World, textured ? PipelineClass::Textured : PipelineClass::Solid);
+        }
+    }
     const double activeActorX = snapshot.miningAnchorValid
         ? snapshot.miningAnchorX
         : (snapshot.miningOperatorActive ? snapshot.miningOperatorX : snapshot.miningDroneX);
@@ -3114,12 +3150,6 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
                 textured
             }));
         };
-        if (!arrivalComposite) appendTerrainRect(
-            (left + right) * 0.5F + miningViewOffsetX,
-            (top + bottom) * 0.5F + miningViewOffsetY,
-            right - left + 0.035F,
-            top - bottom + 0.035F,
-            {0.0F, 0.0F, 0.0F, 1.0F});
 
         for (std::size_t index = 0; index < renderedCellCount; ++index) {
             const MiningCell& cell = snapshot.miningCells[index];
@@ -3926,7 +3956,9 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         }
 
         const MiningEnemyAnimationFrame animation = miningEnemyAnimationFrame(enemy, snapshot.animationTime, enemyIndex);
-        const int enemyAsset = miningEnemyAsset(enemy.type, miningEnemyVisualTheme(enemy, snapshot.miningEnemyTheme));
+        const int enemyAsset = enemy.type == MiningEnemyType::Flying && snapshot.systemLocation.bodyId == "triton"
+            ? static_cast<int>(TextureId::EnemySecurityDrone) - 1
+            : miningEnemyAsset(enemy.type, miningEnemyVisualTheme(enemy, snapshot.miningEnemyTheme));
         const float spriteCells = spawnerEnemy ? 2.45F : (largeEnemy ? 2.05F : 1.72F);
         const float spriteWidth = cellW * spriteCells;
         const float spriteHeight = cellH * spriteCells;
@@ -6803,8 +6835,7 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
     };
 
     if (snapshot.lastResult == LaunchResultType::Destroyed) {
-        if (snapshot.lastLaunchFailureCause == LaunchFailureCause::LunarImpact ||
-            snapshot.lastLaunchFailureCause == LaunchFailureCause::ThermalRunaway) {
+        if (hasFlightDestructionCinematic(snapshot.lastLaunchFailureCause)) {
             // The dedicated launch-screen cinematic has already played. Keep
             // the result backdrop still beneath the red outcome modal.
             return;
@@ -7020,14 +7051,29 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                 pixelY - halfHeight > clip.y + clip.height;
             if (body.id == "earth" && body.id != snapshot.flightGuidance.targetId &&
                 bodyOffscreen) {
-                const float factor = std::max(std::abs(p.x)/.84F,std::abs(p.y)/.70F);
-                const float x=p.x/factor,y=p.y/factor;
-                const float angle=std::atan2(p.y,p.x);
-                const float tipX=x+.08F*std::cos(angle),tipY=y+.08F*std::sin(angle);
+                // Anchor to the actual play-area edge, not camera/world bounds.
+                // Pixel sizing keeps this secondary waypoint quiet at every zoom.
+                const float centerX = clip.x + clip.width * 0.5F;
+                const float centerY = clip.y + clip.height * 0.5F;
+                const float dx = pixelX - centerX, dy = pixelY - centerY;
+                const float factor = std::max(std::abs(dx) / std::max(1.0F, clip.width * 0.5F - 28.0F),
+                    std::abs(dy) / std::max(1.0F, clip.height * 0.5F - 28.0F));
+                const float markerX = centerX + dx / factor;
+                const float markerY = centerY + dy / factor;
+                const auto worldX = [&](float px) { return (px - scenePixelCenterX_) / sceneWorldUnitX_; };
+                const auto worldY = [&](float py) { return (sceneCssHeight_ - scenePixelCenterY_ - py) / sceneWorldUnitY_; };
+                const float angle = std::atan2(dy, dx);
+                const float tipX = markerX + 17.0F * std::cos(angle);
+                const float tipY = markerY + 17.0F * std::sin(angle);
                 for (float side : {-1.0F,1.0F})
-                    drawLine(tipX,tipY,tipX-.04F*std::cos(angle+side*.6F),tipY-.04F*std::sin(angle+side*.6F),{.35F,.9F,1,1},3);
-                drawSprite(x,y,.10F,.10F,{1,1,1,1},EarthAsset);
-                drawPoiLabel(std::clamp(x,-.68F,.68F),y+(y>0 ? -.09F : .09F),.004F,"EARTH / HOME",PoiGuidanceKind::Ship);
+                    drawLine(worldX(tipX), worldY(tipY),
+                        worldX(tipX - 6.0F * std::cos(angle + side * .6F)),
+                        worldY(tipY - 6.0F * std::sin(angle + side * .6F)), {.35F,.9F,1,1}, 2);
+                drawSprite(worldX(markerX), worldY(markerY),
+                    20.0F / sceneWorldUnitX_, 20.0F / sceneWorldUnitY_, {1,1,1,1}, EarthAsset);
+                // Put the short label inward from top/bottom edges.
+                drawPoiLabel(worldX(markerX), worldY(markerY + (dy > 0 ? -20.0F : 20.0F)),
+                    1.0F / sceneWorldUnitY_, "HOME", PoiGuidanceKind::Ship);
             }
             if (body.dock) {
                 const auto dock = systemDockPosition(body);

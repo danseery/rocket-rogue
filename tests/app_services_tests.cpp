@@ -13,6 +13,7 @@
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
 #include "core/Tuning.h"
+#include "core/FlightSystem.h"
 #include "platform/AppServices.h"
 
 #include <RmlUi/Core/RenderInterface.h>
@@ -31,6 +32,37 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace rocket {
+struct OrbitalLandingTestAccess {
+    static void setOrbit(RocketGameApp& app, double radius, const PlanetLandingZone& zone, double direction) {
+        auto& expedition = app.state_.run.expedition;
+        expedition.travelInitialized = true;
+        expedition.location = {"solar", "moon", CoordinateFrame::Body, {}, {}, 0.0, ""};
+        expedition.selectedOrbitBody = "moon";
+        expedition.selectedOrbitZone = zone.id;
+        app.surfaceArrival_ = {};
+        app.prepareSurfaceArrivalIfNeeded(currentDestination(app.state_, app.catalog_), zone.id);
+        auto& work = app.session_.orbitalWork;
+        work.phase = OrbitalWorkPhase::LaserReady;
+        work.surveyComplete = true;
+        app.surfaceArrival_.prepared->surveyComplete = true;
+        app.surfaceArrival_.prepared->surveyedDepth = 1;
+        auto& flight = app.session_.flight;
+        flight.positionX = radius * std::cos(zone.centerBearing);
+        flight.positionY = radius * std::sin(zone.centerBearing);
+        flight.velocityX = -direction * .33 * std::sin(zone.centerBearing);
+        flight.velocityY = direction * .33 * std::cos(zone.centerBearing);
+    }
+    static void reloadAlignment(RocketGameApp& app) {
+        const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(app.state_)));
+        assert(saved);
+        restoreSaveData(app.state_, app.catalog_, *saved);
+        app.session_.orbitalWork = {};
+        app.surfaceArrival_ = {};
+    }
+};
+}
 
 #if defined(_MSC_VER)
 #include <crtdbg.h>
@@ -134,7 +166,8 @@ public:
         preferences = next;
         ++preferenceUpdateCount;
     }
-    rocket::InputSource activeSource() const override { return rocket::InputSource::Controller; }
+    rocket::InputSource activeSource() const override { return source; }
+    rocket::InputSource source = rocket::InputSource::Controller;
     void reset() override { resetCalled = true; }
     rocket::ControllerFrame frame;
     rocket::ControllerPreferences preferences;
@@ -170,6 +203,15 @@ public:
         launchCourseVelocity = snapshot.launchCourseVelocity;
         launchVelocityX = snapshot.launchVelocityX;
         launchVelocityY = snapshot.launchVelocityY;
+        launchFuelRemaining = snapshot.launchFuelRemaining;
+        launchThrottle = snapshot.launchThrottle;
+        landingLocalFrame = snapshot.launchLandingLocalFrame;
+        landingAltitude = snapshot.launchLandingAltitude;
+        landingVisualX = snapshot.launchPositionX;
+        landingVisualY = snapshot.launchPositionY;
+        orbitalSurveyProgress = snapshot.orbitalSurveyProgress;
+        orbitalLaserDepth = snapshot.orbitalLaserDepth;
+        orbitalLaserFiring = snapshot.orbitalLaserFiring;
         launchManualControlsEnabled = snapshot.launchManualControlsEnabled;
         launchHeatEnabled = snapshot.launchHeatEnabled;
         launchAsteroidsEnabled = snapshot.launchAsteroidsEnabled;
@@ -258,6 +300,14 @@ public:
     double launchVelocityX = 0.0;
     double launchVelocityY = 0.0;
     double launchFuelCapacity = 0.0;
+    double launchFuelRemaining = 0.0;
+    double launchThrottle = 0.0;
+    bool landingLocalFrame = false;
+    double landingAltitude = 0.0;
+    double landingVisualX = 0.0, landingVisualY = 0.0;
+    double orbitalSurveyProgress = 0.0;
+    double orbitalLaserDepth = 0.0;
+    bool orbitalLaserFiring = false;
     double launchTravelProgress = 0.0;
     double launchDestructionElapsed = 0.0;
     double miningViewChecksum = 0.0;
@@ -346,6 +396,7 @@ public:
     bool activateFocused() override
     {
         ++activateFocusedCount;
+        if (activationHook) activationHook();
         return activateFocusedResult;
     }
     bool cancel() override
@@ -362,6 +413,12 @@ public:
     void setControllerFocusVisible(bool) override {}
     void setControllerResumeBlocked(bool, bool) override {}
     std::string focusedId() const override { return focusedIdValue; }
+    rocket::FocusedControllerAction focusedControllerAction() const override
+    {
+        auto action = IGameUi::focusedControllerAction();
+        if (focusedIdValue == "action:orbital_drill") action.kind = rocket::ControllerActivationKind::ContinuousHold;
+        return action;
+    }
     void requestFocus(std::string_view id) override { requestedFocusId = std::string(id); }
     void openModal(const std::string& id) override
     {
@@ -410,6 +467,7 @@ public:
     rocket::RealtimeHudState hud;
     rocket::PerformanceStats lastPerformanceStats;
     std::function<void()> renderTimingHook;
+    std::function<void()> activationHook;
     std::function<void()> performanceStatsTimingHook;
 };
 
@@ -1422,8 +1480,578 @@ void straylightApproachRunsAndEndsActOne()
 
 } // namespace
 
+void explicitOrbitalLandingEntersLocalDescent()
+{
+    for (double radius : {.25, .39, .40, .70}) for (double direction : {-1.0, 1.0})
+    for (const auto& zone : rocket::planetLandingZones()) {
+    auto fixture = std::make_unique<AppFixture>();
+    assert(fixture->runner.initialize());
+    fixture->runner.app().debugStartSurfaceArrival(0, 23);
+    fixture->host.now += .05;
+    fixture->runner.frame();
+    fixture->runner.app().orbitalWorkInput(true);
+    fixture->runner.app().orbitalWorkInput(false);
+    for (int i=0; i<45; ++i) fixture->runner.app().tick(.05);
+    fixture->runner.app().renderScene();
+    assert(fixture->renderer.orbitalSurveyProgress >= .99);
+    rocket::OrbitalLandingTestAccess::setOrbit(fixture->runner.app(), radius, zone, direction);
+    fixture->runner.app().landFromOrbit();
+    for (int i=0; i<19; ++i) {
+        fixture->runner.app().landFromOrbit(); // Held/repeated action cannot restart alignment.
+        fixture->runner.app().tick(.05);
+    }
+    fixture->runner.app().renderScene();
+    assert(!fixture->renderer.landingLocalFrame);
+    if (direction < 0) rocket::OrbitalLandingTestAccess::reloadAlignment(fixture->runner.app());
+    fixture->runner.app().tick(.05);
+    fixture->runner.app().renderScene();
+    assert(fixture->renderer.landingLocalFrame);
+    assert(std::abs(fixture->renderer.landingAltitude - 60.0) < .01);
+    const double visualX = fixture->renderer.landingVisualX, visualY = fixture->renderer.landingVisualY;
+    fixture->runner.app().tick(.05);
+    fixture->runner.app().renderScene();
+    assert(fixture->renderer.landingAltitude < 60.0);
+    assert(std::hypot(fixture->renderer.landingVisualX-visualX,
+        fixture->renderer.landingVisualY-visualY) < .01);
+    }
+}
+
+void orbitalControllerSelectionOwnsInput()
+{
+    using namespace rocket;
+    for (bool swapped : {false, true}) {
+        auto fixture = std::make_unique<AppFixture>();
+        fixture->preferences.value.controller.swapConfirmCancel = swapped;
+        assert(fixture->runner.initialize());
+        fixture->runner.app().debugStartSurfaceArrival(0, 23);
+        fixture->ui.focusedIdValue = "action:orbital_scan";
+        fixture->ui.activationHook = [&] {
+            if (fixture->ui.focusedIdValue == "action:orbital_scan") fixture->ui.dispatchAction("orbital_work");
+            if (fixture->ui.focusedIdValue == "action:land_from_orbit") fixture->runner.app().landFromOrbit();
+        };
+        const auto confirm = static_cast<std::size_t>(swapped ? ControllerButton::East : ControllerButton::South);
+        const auto back = static_cast<std::size_t>(swapped ? ControllerButton::South : ControllerButton::East);
+        const auto step = [&](ControllerFrame frame = {}) {
+            frame.connected = true;
+            frame.family = ControllerFamily::Xbox;
+            frame.meaningfulInput = frame.down.any() || frame.navigation || std::abs(frame.leftY) > .01;
+            fixture->controllers.frame = frame;
+            fixture->host.now += .05;
+            fixture->runner.frame();
+        };
+        step();
+        ControllerFrame press;
+        press.down.set(confirm); press.pressed.set(confirm);
+        step(press);
+        assert(fixture->runner.app().inputContext() == InputContext::OrbitalWork);
+        const double fuel = fixture->renderer.launchFuelRemaining;
+        ControllerFrame navigate;
+        navigate.leftY = -.85;
+        navigate.navigation = UiDirection::Down;
+        for (int i=0; i<48; ++i) step(navigate);
+        assert(fixture->runner.app().inputContext() == InputContext::OrbitalWork);
+        assert(fixture->renderer.orbitalSurveyProgress >= .99);
+        assert(fixture->renderer.launchFuelRemaining == fuel);
+        assert(fixture->renderer.launchThrottle == 0.0);
+        assert(fixture->ui.lastNavigation == UiDirection::Down);
+
+        fixture->ui.focusedIdValue = "action:orbital_drill";
+        step();
+        step(press);
+        ControllerFrame held;
+        held.down.set(confirm);
+        for (int i=0; i<8; ++i) step(held);
+        assert(fixture->renderer.orbitalLaserFiring);
+        assert(fixture->renderer.orbitalLaserDepth > 0.0);
+        held.navigation = UiDirection::Down;
+        step(held);
+        assert(!fixture->renderer.orbitalLaserFiring);
+        fixture->ui.focusedIdValue = "action:land_from_orbit";
+        held.navigation.reset();
+        const int activations = fixture->ui.activateFocusedCount;
+        step(held);
+        assert(fixture->ui.activateFocusedCount == activations);
+
+        ControllerFrame menu = press;
+        menu.pressed.set(static_cast<std::size_t>(ControllerButton::Menu));
+        menu.leftY = -.9;
+        step(menu);
+        assert(fixture->ui.modalOpen());
+        assert(fixture->runner.app().inputContext() == InputContext::Paused);
+        const double depth = fixture->renderer.orbitalLaserDepth;
+        step(menu);
+        assert(fixture->renderer.orbitalLaserDepth == depth);
+        step();
+        ControllerFrame cancel;
+        cancel.down.set(back); cancel.pressed.set(back);
+        step(cancel);
+        assert(!fixture->ui.modalOpen());
+        step();
+        assert(fixture->runner.app().inputContext() == InputContext::OrbitalWork);
+        cancel.leftY = -.9;
+        step(cancel);
+        assert(fixture->runner.app().inputContext() == InputContext::Launch);
+        cancel.pressed.reset();
+        for (int i=0; i<3; ++i) step(cancel);
+        assert(fixture->renderer.launchFuelRemaining == fuel);
+        step(); // Fresh neutral is required before piloting resumes.
+        ControllerFrame thrust;
+        thrust.leftY = -.9;
+        for (int i=0; i<3; ++i) step(thrust);
+        assert(fixture->renderer.launchFuelRemaining < fuel);
+        fixture->runner.shutdown();
+    }
+}
+
+void controllerOwnershipFencesUiHolds()
+{
+    using namespace rocket;
+    auto fixture = std::make_unique<AppFixture>();
+    assert(fixture->runner.initialize());
+    fixture->ui.focusedIdValue = "action:reset_save";
+    auto& frame = fixture->controllers.frame;
+    frame.connected = true;
+    frame.meaningfulInput = true;
+    const auto confirm = static_cast<std::size_t>(ControllerButton::South);
+    const auto tick = [&] { fixture->host.now += .05; fixture->runner.frame(); };
+    tick();
+    frame.down.set(confirm);
+    frame.pressed.set(confirm);
+    frame.heldSeconds[confirm] = .4;
+    tick();
+    fixture->controllers.source = InputSource::KeyboardPointer;
+    frame.heldSeconds[confirm] = .8;
+    frame.navigation = UiDirection::Down;
+    tick();
+    assert(fixture->ui.activateFocusedCount == 0);
+    assert(fixture->ui.lastNavigation == UiDirection::Up);
+    fixture->controllers.source = InputSource::Controller;
+    frame.navigation.reset();
+    tick();
+    assert(fixture->ui.activateFocusedCount == 0);
+    frame.down.reset();
+    frame.heldSeconds[confirm] = 0;
+    tick();
+    frame.down.set(confirm);
+    frame.pressed.set(confirm);
+    frame.heldSeconds[confirm] = .8;
+    tick();
+    assert(fixture->ui.activateFocusedCount == 1);
+    // A genuinely fresh press after neutral pointer ownership is not a
+    // reconnect: reclaiming the pad must not consume the player's first tap.
+    fixture->controllers.source = InputSource::KeyboardPointer;
+    fixture->ui.focusedIdValue = "action:continue_game";
+    frame = {};
+    frame.connected = true;
+    tick();
+    fixture->controllers.source = InputSource::Controller;
+    frame.meaningfulInput = true;
+    frame.down.set(confirm);
+    frame.pressed.set(confirm);
+    tick();
+    assert(fixture->ui.activateFocusedCount == 2);
+    fixture->runner.shutdown();
+}
+
+void flightControllerSelectionPausesAndResumes()
+{
+    using namespace rocket;
+    auto fixture = std::make_unique<AppFixture>();
+    assert(fixture->runner.initialize());
+    fixture->runner.app().debugStartSurfaceArrival(0, 23);
+    const auto step = [&](ControllerFrame frame = {}) {
+        frame.connected = true;
+        frame.meaningfulInput = true;
+        fixture->controllers.frame = frame;
+        fixture->host.now += .05;
+        fixture->runner.frame();
+    };
+    step();
+    const double fuel = fixture->renderer.launchFuelRemaining;
+    const double velocity = fixture->renderer.launchVelocityX;
+    ControllerFrame select;
+    select.leftY = -.9;
+    select.down.set(static_cast<std::size_t>(ControllerButton::South));
+    select.pressed = select.down;
+    select.pressed.set(static_cast<std::size_t>(ControllerButton::DpadDown));
+    select.navigation = UiDirection::Down;
+    step(select);
+    assert(fixture->runner.app().inputContext() == InputContext::Paused);
+    assert(fixture->renderer.launchVelocityX == velocity);
+    assert(fixture->renderer.launchFuelRemaining == fuel);
+    assert(fixture->renderer.orbitalSurveyProgress == 0.0);
+    assert(fixture->ui.activateFocusedCount == 0);
+    fixture->ui.focusedIdValue = "action:resume_orbital_flight";
+    fixture->ui.activationHook = [&] { fixture->runner.app().resumeOrbitalFlight(); };
+    step();
+    ControllerFrame confirm;
+    confirm.down.set(static_cast<std::size_t>(ControllerButton::South));
+    confirm.pressed = confirm.down;
+    step(confirm);
+    assert(fixture->runner.app().inputContext() == InputContext::Launch);
+    confirm.pressed.reset(); confirm.leftY = -.9;
+    step(confirm);
+    assert(fixture->renderer.launchFuelRemaining == fuel);
+    step();
+    ControllerFrame menu;
+    menu.leftY = -.9;
+    menu.down.set(static_cast<std::size_t>(ControllerButton::South));
+    menu.pressed = menu.down;
+    menu.pressed.set(static_cast<std::size_t>(ControllerButton::Menu));
+    step(menu);
+    assert(fixture->ui.modalOpen());
+    assert(fixture->renderer.orbitalSurveyProgress == 0.0);
+    assert(fixture->renderer.launchFuelRemaining == fuel);
+    fixture->runner.shutdown();
+}
+
+void ioCommissioningReceiptsAndMiningRepairStayExplicit()
+{
+    using namespace rocket;
+    const auto catalog = createDefaultContent();
+    const auto* mission = solarMissionForBody(catalog, "io");
+    assert(mission);
+    const std::string occurrence = "campaign.solar.io.briefing";
+    const std::string acknowledgement = "ack_incoming_message:" + occurrence;
+    const std::string commissionAction = ui::actions::scenarioAction(
+        mission->scenarioId, mission->acceptanceStepId, static_cast<int>(mission->acceptanceAction));
+    const auto makeIo = [&](bool mining, bool acknowledged, bool hauling, bool remoteWorker = false) {
+        auto state = std::make_unique<GameState>(createNewGame(catalog, 0x10ACCULL));
+        assert(initializeLiveExpedition(*state, catalog));
+        state->meta.unlockKeys.push_back(content::unlock::routeJupiter);
+        state->meta.unlockKeys.push_back(content::unlock::droneBay);
+        state->meta.droneBaySlots = mining ? 2 : 1;
+        if (mining) {
+            state->meta.ownedDroneIds = {content::drone::miningDrone, content::drone::miningDrone};
+            state->meta.equippedDroneIds = state->meta.ownedDroneIds;
+        }
+        auto& expedition = state->run.expedition;
+        expedition.active = true;
+        expedition.undockReady = false;
+        expedition.location = {"solar", "io", CoordinateFrame::Body, {.9, 0}, {}, 0, ""};
+        auto& flight = state->run.flight;
+        flight.active = true;
+        flight.mode = FlightMode::Orbit;
+        flight.phase = FlightPhase::Orbiting;
+        flight.destinationId = "jupiter";
+        flight.selectedThrottle = 0;
+        flight.fuelRemaining = 8.25;
+        flight.hullRemaining = 78;
+        restoreSystemLocation(expedition.location, flight);
+        state->screen = Screen::Flight;
+        if (mining) {
+            SurfaceLandingBuildRequest request;
+            request.destinationId = "jupiter";
+            request.bodyId = "io";
+            request.siteSeed = 0x10ACCULL;
+            request.landingOrdinal = 1;
+            auto prepared = prepareSurfaceLanding(*state, catalog, request);
+            assert(prepared.valid && commitPreparedSurfaceLanding(*state, std::move(prepared), 8.25));
+            flight.mode = FlightMode::Landing;
+            flight.phase = FlightPhase::Landed;
+            flight.landing.siteCommitted = true;
+            state->screen = Screen::Mining;
+            auto& run = state->run.mining;
+            run.droneX = run.returnZoneX;
+            run.droneY = run.returnZoneY;
+            run.operatorPresent = false;
+            run.rigVelocityX = run.rigVelocityY = 0;
+            run.temporaryMaterials.rare = 2;
+            run.cargo = 2;
+            assert(run.miniDrones.size() == 2 && miningAtReturnZone(run));
+            for (auto& drone : run.miniDrones) {
+                drone.behavior = MiningMiniDroneBehavior::Docked;
+                drone.x = run.returnZoneX;
+                drone.y = run.returnZoneY;
+            }
+            if (hauling) {
+                run.miniDrones.front().haulMaterials.common = 3;
+                run.miniDrones.front().behavior = MiningMiniDroneBehavior::Returning;
+            }
+            if (remoteWorker) {
+                run.miniDrones.front().x += 8;
+                run.miniDrones.front().behavior = MiningMiniDroneBehavior::Working;
+            }
+            expedition.location.siteId = "io.beacon:zone_1";
+        }
+        ensureScenarioInstances(*state, catalog);
+        state->incomingMessages = {};
+        assert(enqueueIncomingMessage(state->incomingMessages, catalog,
+            {occurrence, mission->briefingMessageId, "default"}));
+        if (acknowledged) assert(acknowledgeIncomingMessage(state->incomingMessages, occurrence));
+        return state;
+    };
+    const auto load = [&](const GameState& state) {
+        auto fixture = std::make_unique<AppFixture>();
+        fixture->saves.value = serializeSaveData(captureSaveData(state));
+        assert(fixture->runner.initialize());
+        fixture->ui.modalOpenValue = true;
+        fixture->ui.dispatchAction("continue_game");
+        completeTitleLaunch(*fixture);
+        assert(fixture->runner.app().currentScreen() == static_cast<int>(state.screen));
+        return fixture;
+    };
+    const auto hazardCount = [](const SaveData& save) {
+        return std::count(save.ownedDroneIds.begin(), save.ownedDroneIds.end(), content::drone::hazardDrone);
+    };
+    {
+        auto state = makeIo(false, false, false);
+        auto fixture = load(*state);
+        fixture->ui.dispatchAction(acknowledgement);
+        const auto accepted = deserializeSaveData(fixture->saves.value);
+        assert(accepted && accepted->incomingMessages.pending.empty());
+        assert(std::find(accepted->incomingMessages.acknowledgedMessages.begin(),
+            accepted->incomingMessages.acknowledgedMessages.end(), mission->briefingMessageId) !=
+            accepted->incomingMessages.acknowledgedMessages.end());
+        assert(hazardCount(*accepted) == 1 &&
+            accepted->equippedDroneIds == std::vector<std::string>{content::drone::hazardDrone});
+        assert(accepted->expedition.location.bodyId == "io" && accepted->flight.fuelRemaining == 8.25 &&
+            accepted->flight.hullRemaining == 78 && accepted->screen == Screen::Flight);
+        const auto acceptedText = fixture->saves.value;
+        fixture->ui.dispatchAction(acknowledgement);
+        assert(fixture->saves.value == acceptedText);
+        fixture->runner.shutdown();
+    }
+    {
+        auto state = makeIo(false, false, false);
+        state->run.expedition.location.bodyId = "jupiter";
+        auto fixture = load(*state);
+        const auto original = fixture->saves.value;
+        const int stored = fixture->saves.storeCount;
+        fixture->ui.dispatchAction(acknowledgement);
+        assert(fixture->saves.storeCount == stored && fixture->saves.value == original);
+        assert(fixture->ui.modalOpenValue);
+        const auto failed = deserializeSaveData(fixture->saves.value);
+        assert(failed && failed->incomingMessages.pending.size() == 1 && hazardCount(*failed) == 0);
+        fixture->runner.shutdown();
+    }
+    for (const int serviceCase : {0, 1, 2}) {
+        const bool hauling = serviceCase == 1;
+        const bool remoteWorker = serviceCase == 2;
+        auto state = makeIo(true, true, hauling, remoteWorker);
+        auto fixture = load(*state);
+        // Open/close the existing local service panel to capture the restored
+        // live site before accepting; no flight, scan, or mining update runs.
+        fixture->ui.dispatchAction("drone_ops");
+        assert(fixture->runner.app().currentScreen() == static_cast<int>(Screen::DroneOps));
+        fixture->ui.dispatchAction("back_to_surface_ops");
+        const auto before = deserializeSaveData(fixture->saves.value);
+        assert(before && before->mining.active && before->mining.miniDrones.size() == 2);
+        assert(hazardCount(*before) == 0 && before->incomingMessages.pending.empty());
+        fixture->ui.modalOpenValue = true;
+        fixture->ui.dispatchAction(commissionAction);
+        const auto accepted = deserializeSaveData(fixture->saves.value);
+        assert(accepted && accepted->screen == Screen::Mining && accepted->mining.active);
+        assert(hazardCount(*accepted) == 1 && accepted->equippedDroneIds == before->equippedDroneIds);
+        assert(accepted->incomingMessages.acknowledgedMessages == before->incomingMessages.acknowledgedMessages &&
+            accepted->incomingMessages.acknowledgedOccurrences == before->incomingMessages.acknowledgedOccurrences);
+        assert(accepted->expedition.location.siteId == before->expedition.location.siteId &&
+            accepted->mining.miningSiteDefinitionId == before->mining.miningSiteDefinitionId &&
+            accepted->mining.geologySeed == before->mining.geologySeed &&
+            accepted->mining.terrain.cells.size() == before->mining.terrain.cells.size() &&
+            accepted->mining.depthLayers.size() == before->mining.depthLayers.size() &&
+            accepted->mining.droneX == before->mining.droneX && accepted->mining.droneY == before->mining.droneY &&
+            accepted->mining.temporaryMaterials.rare == 2 && accepted->mining.cargo == 2 &&
+            accepted->mining.rigFuel.current == before->mining.rigFuel.current &&
+            accepted->mining.miniDrones.size() == 2 &&
+            accepted->mining.miniDrones.front().haulMaterials.common == (hauling ? 3 : 0));
+        fixture->ui.dispatchAction(commissionAction);
+        const auto repeated = deserializeSaveData(fixture->saves.value);
+        assert(repeated && hazardCount(*repeated) == 1 && repeated->equippedDroneIds == before->equippedDroneIds);
+        fixture->ui.dispatchAction("drone_ops");
+        const auto serviceBefore = fixture->saves.value;
+        const auto hazard = std::find_if(catalog.miniDrones.begin(), catalog.miniDrones.end(),
+            [](const auto& drone) { return drone.id == content::drone::hazardDrone; });
+        assert(hazard != catalog.miniDrones.end());
+        fixture->ui.dispatchAction("unequip_drone_slot:0");
+        fixture->ui.dispatchAction("equip_drone:" + std::to_string(std::distance(catalog.miniDrones.begin(), hazard)));
+        const auto assigned = deserializeSaveData(fixture->saves.value);
+        assert(assigned);
+        if (hauling || remoteWorker) {
+            assert(fixture->saves.value == serviceBefore);
+            assert(assigned->equippedDroneIds == before->equippedDroneIds &&
+                assigned->mining.miniDrones.front().haulMaterials.common == (hauling ? 3 : 0));
+            fixture->ui.dispatchAction("mining_wait_for_drones");
+            assert(fixture->runner.app().currentScreen() == static_cast<int>(Screen::Mining));
+            const auto recalled = deserializeSaveData(fixture->saves.value);
+            assert(recalled && recalled->mining.miniDrones.size() == 2 &&
+                recalled->equippedDroneIds == before->equippedDroneIds &&
+                recalled->mining.miniDrones.front().haulMaterials.common == (hauling ? 3 : 0));
+        } else {
+            assert(assigned->equippedDroneIds.size() == 2 &&
+                std::count(assigned->equippedDroneIds.begin(), assigned->equippedDroneIds.end(), content::drone::hazardDrone) == 1);
+        }
+        fixture->runner.shutdown();
+    }
+}
+
+void fatalOrbitStepPreemptsSectorPreparationAndSave()
+{
+    using namespace rocket;
+    for (const bool immediateImpact : {false, true}) {
+    const auto catalog = createDefaultContent();
+    auto state = std::make_unique<GameState>(createNewGame(catalog, 0xF47A1ULL));
+    assert(initializeLiveExpedition(*state, catalog));
+    auto& expedition = state->run.expedition;
+    auto& flight = state->run.flight;
+    const double bearing = planetLandingZones()[3].centerBearing;
+    const auto* moon = systemBody(solarSystemDefinition(), "moon");
+    assert(moon);
+    const double radius = immediateImpact ? moon->radius - .001 : .8;
+    expedition.active = true;
+    expedition.undockReady = false;
+    expedition.location = {"solar", "moon", CoordinateFrame::Body,
+        {radius * std::cos(bearing), radius * std::sin(bearing)}, {}, 0, ""};
+    expedition.selectedOrbitBody = "moon";
+    expedition.selectedOrbitZone = "zone_1"; // Deliberately stale while physically in zone 4.
+    flight.active = flight.physicalFlight = true;
+    flight.mode = FlightMode::Orbit;
+    flight.phase = FlightPhase::Orbiting;
+    flight.orbit.captured = flight.orbit.rewardAwarded = true;
+    flight.heat = immediateImpact ? 0.0 : 1.2;
+    // Thermal exposure is session-only and restarts after save/reload. The
+    // thermal case permits normal sector preparation before exposure becomes
+    // fatal. A first-step planet impact separately proves a fatal result must
+    // preempt preparation while the saved sector is still deliberately stale.
+    flight.landing.gateArmed = !immediateImpact;
+    flight.selectedThrottle = 0;
+    restoreSystemLocation(expedition.location, flight);
+    state->screen = Screen::Flight;
+    state->meta.campaignIntroductionAcknowledged = true;
+    state->incomingMessages = {};
+    state->incomingMessages.acknowledgedMessages.push_back("moon_mission_briefing");
+    auto fixture = std::make_unique<AppFixture>();
+    fixture->preferences.value.gameSpeed = 8.0;
+    fixture->saves.value = serializeSaveData(captureSaveData(*state));
+    const auto initialSaved = deserializeSaveData(fixture->saves.value);
+    assert(initialSaved && initialSaved->flight.heatFailureSeconds == 0.0 &&
+        initialSaved->expedition.selectedOrbitZone == "zone_1");
+    assert(fixture->runner.initialize());
+    fixture->ui.dispatchAction("continue_game");
+    for (int i = 0; i < 300 && !fixture->renderer.launchDestructionActive; ++i) {
+        const int writesBeforeFrame = fixture->saves.storeCount;
+        const std::string saveBeforeFrame = fixture->saves.value;
+        fixture->host.now += 1.0 / 60.0;
+        fixture->runner.frame();
+        if (fixture->renderer.launchDestructionActive) {
+            assert(fixture->saves.storeCount == writesBeforeFrame);
+            assert(fixture->saves.value == saveBeforeFrame);
+        }
+    }
+    assert(fixture->renderer.launchDestructionActive &&
+        fixture->renderer.launchDestructionCause == (immediateImpact
+            ? LaunchFailureCause::LunarImpact : LaunchFailureCause::ThermalRunaway));
+    assert(fixture->audio.explosions == 1);
+    const auto saved = deserializeSaveData(fixture->saves.value);
+    assert(saved && saved->flight.active && saved->flight.failureCause == LaunchFailureCause::None &&
+        saved->expedition.wrecks.empty());
+    if (immediateImpact) assert(saved->expedition.selectedOrbitZone == "zone_1");
+    fixture->runner.shutdown();
+    }
+}
+
+void asteroidDestructionUsesRenderedUnscaledTime()
+{
+    using namespace rocket;
+    for (const double speed : {1.0, 8.0}) for (const double frameDelta : {1.0 / 60.0, .25}) {
+        const auto catalog = createDefaultContent();
+        auto state = createNewGame(catalog, 0xA57EULL);
+        assert(initializeLiveExpedition(state, catalog));
+        assert(departHome(state, catalog) == ExpeditionResult::Applied);
+        const auto model = expeditionFlightModel(state, catalog);
+        advanceExpeditionFlight(state.run.expedition, state.run.flight, model,
+            expeditionEnvironment(state, catalog), solarSystemDefinition(), {0,1,false,true}, .05);
+        const auto& asteroid = solarAsteroidBelt().front();
+        state.run.expedition.location.frame = CoordinateFrame::System;
+        state.run.expedition.location.bodyId.clear();
+        state.run.flight.positionX = asteroid.position.x;
+        state.run.flight.positionY = asteroid.position.y;
+        state.run.flight.velocityX = state.run.flight.velocityY = 0;
+        state.run.flight.hullRemaining = 1;
+        state.run.flight.asteroidInvulnerabilitySeconds = 0;
+        captureSystemLocation(state.run.expedition.location, state.run.flight);
+        state.screen = Screen::Flight;
+        state.meta.campaignIntroductionAcknowledged = true;
+        state.incomingMessages = {};
+        auto fixture = std::make_unique<AppFixture>();
+        fixture->preferences.value.gameSpeed = speed;
+        fixture->saves.value = serializeSaveData(captureSaveData(state));
+        assert(fixture->runner.initialize());
+        fixture->ui.dispatchAction("continue_game");
+        for (int i = 0; i < 300 && !fixture->renderer.launchDestructionActive; ++i) {
+            fixture->host.now += 1.0 / 60.0;
+            fixture->runner.frame();
+        }
+        assert(fixture->renderer.launchDestructionActive);
+        assert(fixture->renderer.launchDestructionCause == LaunchFailureCause::HullBreach);
+        assert(fixture->audio.explosions == 1);
+        const int savesBefore = fixture->saves.storeCount;
+        const double frozenProgress = fixture->renderer.launchTravelProgress;
+        const double frozenCourse = fixture->renderer.launchCourseOffset;
+        const double pausedElapsed = fixture->renderer.launchDestructionElapsed;
+        fixture->ui.modalOpenValue = true;
+        for (int i = 0; i < 4; ++i) {
+            fixture->host.now += .25;
+            fixture->runner.frame();
+        }
+        assert(fixture->renderer.launchDestructionElapsed == pausedElapsed);
+        fixture->ui.modalOpenValue = false;
+        std::array<bool, 8> renderedFrames {};
+        double previousElapsed = pausedElapsed;
+        bool terminalRendered = false;
+        for (int i = 0; i < 100 && fixture->renderer.launchDestructionActive; ++i) {
+            fixture->runner.app().arrivalOps();
+            fixture->runner.app().returnHome();
+            fixture->runner.app().launchMove(1, -1);
+            fixture->ui.dispatchAction("expedition:dock");
+            fixture->ui.dispatchAction("next");
+            fixture->host.now += frameDelta;
+            fixture->runner.frame();
+            if (!fixture->renderer.launchDestructionActive) {
+                assert(terminalRendered);
+                break;
+            }
+            const double elapsed = fixture->renderer.launchDestructionElapsed;
+            assert(std::abs(elapsed - std::min(tuning::session::flightDestructionSequenceSeconds,
+                previousElapsed + std::min(frameDelta, tuning::launch::maxFrameStepSeconds))) < 1e-8);
+            previousElapsed = elapsed;
+            assert(fixture->saves.storeCount == savesBefore);
+            assert(fixture->renderer.launchTravelProgress == frozenProgress);
+            assert(fixture->renderer.launchCourseOffset == frozenCourse);
+            if (elapsed >= tuning::session::flightDestructionHoldSeconds) {
+                const double progress = (elapsed - tuning::session::flightDestructionHoldSeconds) /
+                    (tuning::session::flightDestructionExplosionEndSeconds - tuning::session::flightDestructionHoldSeconds);
+                renderedFrames[std::clamp(static_cast<int>(progress * 8), 0, 7)] = true;
+            }
+            terminalRendered |= elapsed >= tuning::session::flightDestructionSequenceSeconds;
+        }
+        assert(std::all_of(renderedFrames.begin(), renderedFrames.end(), [](bool rendered) { return rendered; }));
+        assert(fixture->runner.app().currentScreen() == static_cast<int>(Screen::Hangar));
+        const auto recovered = deserializeSaveData(fixture->saves.value);
+        assert(recovered && recovered->expedition.wrecks.size() == 1);
+        assert(fixture->audio.explosions == 1);
+        for (int i = 0; i < 8; ++i) { fixture->host.now += frameDelta; fixture->runner.frame(); }
+        const auto later = deserializeSaveData(fixture->saves.value);
+        assert(later && later->expedition.wrecks.size() == 1);
+        fixture->runner.shutdown();
+    }
+}
+
 int main()
 {
+#if defined(_MSC_VER)
+    _set_error_mode(_OUT_TO_STDERR);
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#endif
+    explicitOrbitalLandingEntersLocalDescent();
+    orbitalControllerSelectionOwnsInput();
+    asteroidDestructionUsesRenderedUnscaledTime();
+    controllerOwnershipFencesUiHolds();
+    ioCommissioningReceiptsAndMiningRepairStayExplicit();
+    fatalOrbitStepPreemptsSectorPreparationAndSave();
+    flightControllerSelectionPausesAndResumes();
     {
         rocket::MiningRunState mining;
         assert(rocket::miningCollectedOreCount(mining) == 0);
@@ -1487,12 +2115,6 @@ int main()
         assert(fixture.runner.app().consumePendingAudioEvents().empty());
         fixture.runner.shutdown();
     }
-#if defined(_MSC_VER)
-    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
-    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
-    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
-#endif
-
     liveMissionClaimPresentationAndDockRecovery();
     liveWaypointModalActionOwnership();
     liveShipRecoveryAppFlows();
@@ -1687,7 +2309,7 @@ int main()
         fixture.ui.dispatchAction("continue_game");
         completeTitleLaunch(fixture);
         assert(fixture.ui.html.find("class=\"expedition-dock-action\"") != std::string::npos);
-        assert(fixture.ui.html.find("class=\"ok\" data-ui-focus-id=\"action:expedition:dock\"") != std::string::npos);
+        assert(fixture.ui.html.find("data-rr-action=\"expedition:dock\" class=\"disabled\" disabled") != std::string::npos);
         assert(fixture.ui.html.find("slow below 0.20 relative speed") != std::string::npos);
         fixture.runner.shutdown();
     }
@@ -3144,7 +3766,7 @@ int main()
         assert(fixture.saves.value == originalSave);
 
         const std::uint64_t stateBeforeInvalidLesson = fixture.runner.app().deterministicStateHash();
-        fixture.runner.app().debugStartLaunchLesson(5);
+        fixture.runner.app().debugStartLaunchLesson(6);
         assert(fixture.runner.app().deterministicStateHash() == stateBeforeInvalidLesson);
         assert(fixture.saves.value == originalSave);
         fixture.runner.app().debugStartLaunchLesson(4);

@@ -620,6 +620,52 @@ void supportDroneRecallIsPhysicalAndExplicit()
             miningDroneRecoveryStatus(mining).outstandingDrones == 0 &&
             !requestMiningDroneRecall(state),
         "ship contact should unload once and clear the outstanding recall state");
+
+    resource.x=mining.returnZoneX+8;
+    resource.y=mining.returnZoneY-1;
+    resource.behavior=MiningMiniDroneBehavior::Working;
+    resource.targetCellX=static_cast<int>(resource.x);
+    resource.targetCellY=static_cast<int>(resource.y)+1;
+    resource.transitDepthZone=-1;
+    require(miningDroneRecoveryStatus(mining).outstandingDrones==0 &&
+        miningDroneRecoveryStatus(mining,true).outstandingDrones==1 && !requestMiningDroneRecall(state),
+        "Loadout safety must count empty deployed workers without changing normal cargo-only departure policy");
+    require(requestMiningDroneRecall(state,true) && mining.droneLoadoutRecallActive &&
+        resource.behavior==MiningMiniDroneBehavior::Returning && resource.targetCellX==-1 &&
+        miningDroneRecoveryStatus(mining,true).recallInProgress,
+        "Strict recall must release the empty worker's task and latch its physical return");
+    const double awayX=resource.x;
+    updateMiningRun(state,catalog,.01);
+    require(std::abs(resource.x-awayX)<1 && miningDroneRecoveryStatus(mining,true).outstandingDrones==1,
+        "An empty worker must travel back rather than teleport on the first recall tick");
+    for (int tick=0;tick<1200 && miningDroneRecoveryStatus(mining,true).outstandingDrones>0;++tick)
+        updateMiningRun(state,catalog,.01);
+    require(miningDroneRecoveryStatus(mining,true).outstandingDrones==0 &&
+        resource.behavior==MiningMiniDroneBehavior::Docked,
+        "Strict recovery must complete only after the worker physically docks at service");
+    for (int tick=0;tick<100;++tick) updateMiningRun(state,catalog,.01);
+    require(resource.behavior==MiningMiniDroneBehavior::Docked && resource.targetCellX==-1,
+        "Docked workers must not reacquire work before the pending loadout operation completes");
+    clearMiningDroneLoadoutRecall(state);
+    require(!mining.droneLoadoutRecallActive && resource.behavior==MiningMiniDroneBehavior::Following,
+        "Completing or cancelling service must release the transient parking latch");
+
+    resource.x=mining.returnZoneX+8;
+    resource.behavior=MiningMiniDroneBehavior::Working;
+    resource.haulMaterials.common=1;
+    resource.uncreditedHaulMaterials.common=1;
+    const int bankedBefore=mining.stowedMaterials.common;
+    require(requestMiningDroneRecall(state,true),"Loaded worker should also enter strict service return");
+    require(resource.haulMaterials.common==1 && mining.stowedMaterials.common==bankedBefore,
+        "Starting strict recall must not remotely credit or erase the carried manifest");
+    for (int tick=0;tick<1200 && miningDroneRecoveryStatus(mining,true).outstandingDrones>0;++tick)
+        updateMiningRun(state,catalog,.01);
+    require(miningDroneRecoveryStatus(mining,true).outstandingDrones==0 &&
+        mining.stowedMaterials.common==bankedBefore+1 && resource.haulMaterials.common==0,
+        "Strict recall must unload carried ore exactly once at physical service contact");
+    mining.droneX=mining.returnZoneX+10;
+    updateMiningRun(state,catalog,.01);
+    require(!mining.droneLoadoutRecallActive,"Leaving service must release parked drones for ordinary gameplay");
 }
 
 void looseEvaOreAwardsXpWhenTheRigCollectsIt()

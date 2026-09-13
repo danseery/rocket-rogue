@@ -1038,6 +1038,101 @@ void testLaunchUsesAttachedAnimatedSideFlames()
     assert(neutral.instances.size()==1);
 }
 
+void testMiningSkyAndTunnelBackdrop()
+{
+    for (int width : {800, 1600}) for (int depth : {0, 2}) {
+        SceneComposer composer;
+        composer.setViewport({width, 800, width, 800, 1.0F});
+        composer.setTextureReady(TextureId::LocalSolarBackground, true);
+        composer.setTextureReady(TextureId::MiningTunnelBackdrop, true);
+        RenderSnapshot snapshot;
+        snapshot.screen = rocket::Screen::Mining;
+        snapshot.miningWidth = 64;
+        snapshot.miningHeight = 40;
+        snapshot.miningReturnZoneX = snapshot.miningDroneX = 32;
+        snapshot.miningReturnZoneY = snapshot.miningDroneY = 16;
+        snapshot.miningActiveDepth = depth;
+        snapshot.miningShipPresent = true;
+        std::vector<rocket::MiningCell> cells(64 * 40);
+        snapshot.miningCells = cells;
+        const auto packet = composer.compose(snapshot);
+        if (depth == 0) {
+            const auto& camera = packet.surfaceCamera;
+            const float ringTop = camera.top - static_cast<float>(snapshot.miningReturnZoneY -
+                rocket::tuning::mining::returnZoneCenterHeightCells -
+                rocket::tuning::mining::returnZoneRadiusCells * 1.08) * camera.cellHeight;
+            const float ringTopPixels = 800 - packet.transform.pixelCenterY - ringTop * packet.transform.worldUnitY;
+            assert(ringTopPixels >= packet.logicalSceneClip.y + 24.0F);
+        }
+        const auto uv = rocket::mapSceneAtlasUvRect(TextureId::MiningTunnelBackdrop, 0, 0, 1, 1);
+        float highest = -10000, lowest = 10000;
+        int wallQuads = 0;
+        bool stars = false;
+        for (const auto& draw : packet.draws) {
+            if (draw.texture == TextureId::LocalSolarBackground) stars = true;
+            if (draw.atlasPage != uv.page) continue;
+            for (std::size_t i=0; i<draw.instanceCount; ++i) {
+                const auto instance = rocket::unpackSceneInstance(packet.instances[draw.firstInstance+i]);
+                if (!instance.textured || instance.u0 < uv.u0-.001F || instance.u1 > uv.u1+.001F ||
+                    instance.v0 < uv.v0-.001F || instance.v1 > uv.v1+.001F) continue;
+                ++wallQuads;
+                highest = std::max(highest, instance.centerY + instance.axisYy);
+                lowest = std::min(lowest, instance.centerY - instance.axisYy);
+                assert(instance.color.a > .99F); // No stars bleeding through the tunnel.
+            }
+        }
+        assert(stars && wallQuads > 0 && wallQuads < 100);
+        const auto& t = packet.transform;
+        const float topPixel = 800 - t.pixelCenterY - highest*t.worldUnitY;
+        const float bottomPixel = 800 - t.pixelCenterY - lowest*t.worldUnitY;
+        if (depth == 0) assert(topPixel > packet.logicalSceneClip.y + 20);
+        else assert(std::abs(topPixel - packet.logicalSceneClip.y) < 1);
+        assert(std::abs(bottomPixel - packet.logicalSceneClip.y - packet.logicalSceneClip.height) < 1);
+    }
+}
+
+void testDistantEarthMarkerUsesViewportEdgeAndPixelSize()
+{
+    for (const auto size : {std::pair{800, 600}, std::pair{1280, 800}, std::pair{1920, 1080}}) {
+        for (const auto position : {rocket::SystemVector{100, 0}, rocket::SystemVector{-100, 0},
+                rocket::SystemVector{0, 100}, rocket::SystemVector{0, -100}}) {
+            SceneComposer composer;
+            composer.setViewport({size.first, size.second, size.first, size.second, 1.0F});
+            composer.setTextureReady(TextureId::Earth, true);
+            RenderSnapshot snapshot;
+            snapshot.screen = rocket::Screen::Flight;
+            snapshot.systemTravel = snapshot.launchPhysicalFlight = true;
+            snapshot.system = rocket::solarSystemDefinition();
+            std::erase_if(snapshot.system.bodies, [](const auto& body) { return body.id != "earth"; });
+            snapshot.systemLocation.frame = rocket::CoordinateFrame::System;
+            snapshot.launchPositionX = position.x;
+            snapshot.launchPositionY = position.y;
+            snapshot.flightGuidance.targetId = "io";
+            snapshot.flightGuidance.targetPosition = position;
+            const ScenePacket packet = composer.compose(snapshot);
+            const auto uv = rocket::mapSceneAtlasUvRect(TextureId::Earth, 0, 0, 1, 1);
+            int markers = 0;
+            for (const auto& packed : packet.instances) {
+                const auto instance = rocket::unpackSceneInstance(packed);
+                if (!instance.textured || std::abs(instance.u0 - uv.u0) > .001F ||
+                    std::abs(instance.v0 - uv.v0) > .001F ||
+                    std::abs(instance.u1 - uv.u1) > .001F || std::abs(instance.v1 - uv.v1) > .001F) continue;
+                ++markers;
+                const auto& t = packet.transform;
+                const float x = t.pixelCenterX + instance.centerX * t.worldUnitX;
+                const float y = size.second - t.pixelCenterY - instance.centerY * t.worldUnitY;
+                const auto& clip = packet.logicalSceneClip;
+                const float edgeDistance = std::min({x - clip.x, clip.x + clip.width - x,
+                    y - clip.y, clip.y + clip.height - y});
+                assert(std::abs(edgeDistance - 28.0F) < 1.0F);
+                assert(std::abs(2 * instance.axisXx * t.worldUnitX - 20.0F) < .2F);
+                assert(std::abs(2 * instance.axisYy * t.worldUnitY - 20.0F) < .2F);
+            }
+            assert(markers == 1);
+        }
+    }
+}
+
 void testPhysicalMoonFlightStartsOnScreenAtEarthDeparture()
 {
     SceneComposer composer;
@@ -3303,9 +3398,9 @@ void testMiningTerrainPersistentStreamInvalidation()
             ++miningTerrainDraws;
         }
     }
-    // Fog and revealed base terrain retain their original, separated places
-    // in the transparent submission order while sharing one persistent stream.
-    assert(miningTerrainDraws == 2U);
+    // Only base terrain remains in the persistent stream; the opaque black
+    // backdrop was replaced by the separately rendered sky and tunnel wall.
+    assert(miningTerrainDraws == 1U);
 
     snapshot.animationTime = 9.0;
     composer.setPresentationTime(9.0);
@@ -3699,13 +3794,20 @@ void testFlightDestructionCinematicUsesExplosionFramesAndAccessibleShake()
         (rocket::tuning::session::flightDestructionExplosionEndSeconds -
             rocket::tuning::session::flightDestructionHoldSeconds) /
         8.0;
-    for (int frame = 0; frame < 8; ++frame) {
-        impact.launchDestructionElapsed =
-            rocket::tuning::session::flightDestructionHoldSeconds +
-            (static_cast<double>(frame) + 0.5) * frameDuration;
-        impact.animationTime = impact.launchDestructionElapsed;
-        const ScenePacket& blastFrame = composer.compose(impact);
-        assert(explosionFrame(blastFrame) == frame);
+    for (const auto cause : {rocket::LaunchFailureCause::LunarImpact,
+                            rocket::LaunchFailureCause::ThermalRunaway,
+                            rocket::LaunchFailureCause::HullBreach}) {
+        impact.launchDestructionCause = cause;
+        for (int frame = 0; frame < 8; ++frame) {
+            impact.launchDestructionElapsed =
+                rocket::tuning::session::flightDestructionHoldSeconds +
+                (static_cast<double>(frame) + 0.5) * frameDuration;
+            impact.animationTime = impact.launchDestructionElapsed;
+            const ScenePacket& blastFrame = composer.compose(impact);
+            assert(explosionFrame(blastFrame) == frame);
+        }
+        impact.launchDestructionElapsed = rocket::tuning::session::flightDestructionSequenceSeconds;
+        assert(explosionFrame(composer.compose(impact)) == 7);
     }
 
     RenderSnapshot still = impact;
@@ -3750,6 +3852,9 @@ void testFlightDestructionCinematicUsesExplosionFramesAndAccessibleShake()
     const ScenePacket& resolvedThermalRunaway = composer.compose(lunarResult);
     assert(explosionFrame(resolvedThermalRunaway) < 0);
     assert(!hasTextureFrame(resolvedThermalRunaway, TextureId::RocketClosed, 0));
+
+    lunarResult.lastLaunchFailureCause = rocket::LaunchFailureCause::HullBreach;
+    assert(explosionFrame(composer.compose(lunarResult)) < 0);
 
     lunarResult.lastLaunchFailureCause = rocket::LaunchFailureCause::FuelExhausted;
     const ScenePacket& genericDestroyed = composer.compose(lunarResult);
@@ -3975,6 +4080,8 @@ int main()
     testEnemyThemesAndAnimationPriorityUseTheSharedSpriteContract();
     testFlightInstrumentClusterUsesAtlasNeedlesAndBlinkingWarning();
     testLaunchUsesAttachedAnimatedSideFlames();
+    testMiningSkyAndTunnelBackdrop();
+    testDistantEarthMarkerUsesViewportEdgeAndPixelSize();
     testPhysicalMoonFlightStartsOnScreenAtEarthDeparture();
     testPhysicalApproachZoomBeginsContinuouslyAtThreeQuarters();
     testPhysicalApproachCameraAppliesToMarsAndLaterDestinations();

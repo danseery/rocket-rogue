@@ -96,6 +96,7 @@ void GameRunner::frameWithDelta(std::optional<double> fixedDeltaSeconds)
     }
     const double inputFinished = performanceEnabled ? services_.host.monotonicSeconds() : frameStarted;
 
+    app_.advancePresentation(delta);
     double remaining = std::clamp(delta, 0.0, 0.25) * std::clamp(preferences.gameSpeed, 0.25, 8.0);
     int steps = 0;
     while (remaining > 0.0 && steps < 24) {

@@ -64,6 +64,7 @@ bool parseScenarioEventKind(std::string_view text, ScenarioEventKind& value)
     else if (text == "artifact_recovered") value = ScenarioEventKind::ArtifactRecovered;
     else if (text == "flight_data_banked") value = ScenarioEventKind::FlightDataBanked;
     else if (text == "destination_reached") value = ScenarioEventKind::DestinationReached;
+    else if (text == "surface_landed") value = ScenarioEventKind::SurfaceLanded;
     else return false;
     return true;
 }
@@ -78,6 +79,7 @@ bool awardsAuthoredObjectiveExperience(ScenarioEventKind kind)
     case ScenarioEventKind::DestinationReached:
         return true;
     case ScenarioEventKind::None:
+    case ScenarioEventKind::SurfaceLanded:
     case ScenarioEventKind::ManualAction:
     case ScenarioEventKind::ActivityAborted:
     case ScenarioEventKind::EquipmentAssigned:
@@ -467,7 +469,8 @@ void applyReward(
     const ScenarioDefinition& definition,
     const ScenarioStepDefinition& step,
     std::size_t index,
-    const ScenarioReward& reward)
+    const ScenarioReward& reward,
+    bool allowSupportDroneAutoAssignment)
 {
     const std::string id = rewardId(definition, step, index);
     if (containsId(instance.awardedRewardIds, id)) {
@@ -486,7 +489,9 @@ void applyReward(
         const bool alreadyOwned = containsId(state.meta.ownedDroneIds, reward.id);
         appendUniqueId(state.meta.ownedDroneIds, reward.id);
         ensureDroneBayState(state, catalog);
-        if (!alreadyOwned && reward.equipIfSlotAvailable &&
+        // The caller can grant commissioning rewards during a paused live
+        // deployment without rebuilding its agents and carried payload.
+        if (!alreadyOwned && reward.equipIfSlotAvailable && allowSupportDroneAutoAssignment &&
             state.meta.equippedDroneIds.size() < static_cast<std::size_t>(state.meta.droneBaySlots)) {
             state.meta.equippedDroneIds.emplace_back(reward.id);
         }
@@ -523,10 +528,12 @@ void applyStepRewards(
     const ContentCatalog& catalog,
     ScenarioInstance& instance,
     const ScenarioDefinition& definition,
-    const ScenarioStepDefinition& step)
+    const ScenarioStepDefinition& step,
+    bool allowSupportDroneAutoAssignment = true)
 {
     for (std::size_t index = 0; index < step.rewards.size(); ++index) {
-        applyReward(state, catalog, instance, definition, step, index, step.rewards[index]);
+        applyReward(state, catalog, instance, definition, step, index, step.rewards[index],
+            allowSupportDroneAutoAssignment);
     }
 }
 
@@ -1109,7 +1116,8 @@ ScenarioActionOutcome performScenarioAction(
     const ContentCatalog& catalog,
     std::string_view scenarioId,
     std::string_view stepId,
-    ScenarioActionKind action)
+    ScenarioActionKind action,
+    bool allowSupportDroneAutoAssignment)
 {
     ScenarioActionOutcome outcome;
     ensureScenarioInstances(state, catalog);
@@ -1142,7 +1150,7 @@ ScenarioActionOutcome performScenarioAction(
             progress->completed = true;
             awardScenarioStepExperience(state, *step);
             progress->claimed = true;
-            applyStepRewards(state, catalog, *instance, resolved, *step);
+            applyStepRewards(state, catalog, *instance, resolved, *step, allowSupportDroneAutoAssignment);
             refreshScenarioCompletion(resolved, *instance);
         }
         outcome.applied = true;
@@ -1166,7 +1174,7 @@ ScenarioActionOutcome performScenarioAction(
             return outcome;
         }
         progress->claimed = true;
-        applyStepRewards(state, catalog, *instance, resolved, *step);
+        applyStepRewards(state, catalog, *instance, resolved, *step, allowSupportDroneAutoAssignment);
         refreshScenarioCompletion(resolved, *instance);
         outcome.applied = true;
         outcome.transition = step->transition;
@@ -1202,7 +1210,7 @@ ScenarioActionOutcome performScenarioAction(
                 awardScenarioStepExperience(state, *step);
             }
             progress->claimed = true;
-            applyStepRewards(state, catalog, *instance, resolved, *step);
+            applyStepRewards(state, catalog, *instance, resolved, *step, allowSupportDroneAutoAssignment);
             refreshScenarioCompletion(resolved, *instance);
         } else {
             progress->activityStarted = true;

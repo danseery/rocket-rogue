@@ -66,12 +66,25 @@ enum class InputContext {
     Ui,
     Preflight,
     Launch,
+    OrbitalWork,
     SurfaceArrival,
     MiningActive,
     MiningService,
     MiningFailure,
     Stamp,
     Paused
+};
+
+enum class ControllerActivationKind {
+    Press,
+    HoldToConfirm,
+    ContinuousHold
+};
+
+struct FocusedControllerAction {
+    std::string id;
+    ControllerActivationKind kind = ControllerActivationKind::Press;
+    double holdSeconds = 0.0;
 };
 
 enum class PauseReason {

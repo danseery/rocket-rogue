@@ -60,25 +60,48 @@ struct RoutedGameInput {
 // validating actions against the authoritative screen and run state.
 class GameInputRouter {
 public:
+    // Pointer ownership is not a disconnected device. Keep observing button
+    // releases and focus changes, but never activate or navigate anything.
+    // A fresh Confirm may then reclaim the controller in one press, whereas
+    // a hold that spans the ownership change must still be released first.
+    void observeInactiveFrame(
+        InputContext context,
+        const ControllerFrame& frame,
+        const ControllerPreferences& preferences,
+        const FocusedControllerAction& focusedAction = {})
+    {
+        const ControllerButton confirmButton = preferences.swapConfirmCancel
+            ? ControllerButton::East : ControllerButton::South;
+        holdTriggered_ = frame.down;
+        confirmFenced_ = frame.isDown(confirmButton);
+        lastContinuousOutput_ = false;
+        if (!lastContext_ || *lastContext_ != context) {
+            contextualUiFocusActive_ = false;
+        }
+        lastContext_ = context;
+        lastFocusedActionId_ = focusedAction.id;
+        lastActivationHoldSeconds_ = std::max(0.0, focusedAction.holdSeconds);
+        lastContinuousActivation_ = focusedAction.kind == ControllerActivationKind::ContinuousHold;
+        lastConfirmButton_ = confirmButton;
+    }
+
     RoutedGameInput route(
         InputContext context,
         const ControllerFrame& frame,
         const ControllerPreferences& preferences,
-        double focusedActivationHoldSeconds = 0.0)
+        double focusedActivationHoldSeconds = 0.0,
+        std::string_view focusedActionId = {},
+        bool continuousActivation = false)
     {
         RoutedGameInput result;
-        const std::bitset<controllerButtonCount> holdTriggeredBeforeUpdate = holdTriggered_;
-        if (!lastContext_) {
-            lastContext_ = context;
-        } else if (*lastContext_ != context) {
-            // A button held across a screen/context transition must be released
-            // before it can trigger a dangerous hold action in the new context.
-            holdTriggered_ = frame.down;
-            lastContext_ = context;
-            contextualUiFocusActive_ = false;
+        const bool previouslyActivatedContinuously = lastContinuousOutput_;
+        lastContinuousOutput_ = false;
+        if (!frame.connected || frame.justDisconnected || !frame.pageVisible || !frame.browserFocused) {
+            // Losing an input boundary releases continuous activation now and
+            // never recreates a held action when that boundary becomes live.
+            suspended_ = suspended_ || lastContext_.has_value();
+            return result;
         }
-        updateHoldLatches(frame);
-
         const ControllerButton confirmButton = preferences.swapConfirmCancel
             ? ControllerButton::East
             : ControllerButton::South;
@@ -86,93 +109,156 @@ public:
             ? ControllerButton::South
             : ControllerButton::East;
         const double activationHoldSeconds = std::max(0.0, focusedActivationHoldSeconds);
-        if (lastActivationHoldSeconds_ < 0.0) {
-            lastActivationHoldSeconds_ = activationHoldSeconds;
-        } else if (lastActivationHoldSeconds_ != activationHoldSeconds) {
-            // Moving focus onto a hold-to-confirm action while Confirm is
-            // already down must not inherit time held on another control.
-            if (activationHoldSeconds > 0.0 && frame.isDown(confirmButton)) {
-                holdTriggered_.set(static_cast<std::size_t>(confirmButton));
+        const std::bitset<controllerButtonCount> holdTriggeredBeforeUpdate = holdTriggered_;
+        const auto fenceHeldInput = [&]() {
+            holdTriggered_ |= frame.down;
+            confirmFenced_ = confirmFenced_ || frame.isDown(confirmButton);
+        };
+        if (suspended_) {
+            fenceHeldInput();
+            suspended_ = false;
+        }
+        if (!lastContext_) {
+            // Disconnected startup polling is not a lost live controller.
+            // Accept its first real press, but never inherit a held snapshot
+            // with no new edge as an activation on first connection.
+            holdTriggered_ |= frame.down & ~frame.pressed;
+            confirmFenced_ = frame.isDown(confirmButton) && !frame.wasPressed(confirmButton);
+            lastContext_ = context;
+        } else if (*lastContext_ != context) {
+            // A held Scan must not become Drill, Land, or a confirmation in
+            // another screen. The same fence protects mining tap/hold actions.
+            const bool continuingOrbitalDrill = context == InputContext::OrbitalWork
+                && (*lastContext_ == InputContext::Launch || *lastContext_ == InputContext::Paused)
+                && previouslyActivatedContinuously && !confirmFenced_
+                && continuousActivation && lastContinuousActivation_
+                && !focusedActionId.empty() && focusedActionId == lastFocusedActionId_
+                && confirmButton == lastConfirmButton_;
+            // A deliberately started drill may establish orbital ownership on
+            // its next frame without interrupting that same continuous action.
+            // Scan-to-Drill, modal restoration and all other handoffs still fence.
+            if (!continuingOrbitalDrill) {
+                fenceHeldInput();
             }
-            lastActivationHoldSeconds_ = activationHoldSeconds;
+            lastContext_ = context;
+            contextualUiFocusActive_ = false;
+        }
+        if (context != InputContext::MiningActive && context != InputContext::MiningService
+            && lastActivationHoldSeconds_ >= 0.0
+            && (lastFocusedActionId_ != focusedActionId
+                || lastContinuousActivation_ != continuousActivation
+                || lastActivationHoldSeconds_ != activationHoldSeconds
+                || lastConfirmButton_ != confirmButton)) {
+            fenceHeldInput();
+        }
+        lastFocusedActionId_ = focusedActionId;
+        lastContinuousActivation_ = continuousActivation;
+        lastActivationHoldSeconds_ = activationHoldSeconds;
+        lastConfirmButton_ = confirmButton;
+        updateHoldLatches(frame);
+        if (!frame.isDown(confirmButton)) {
+            confirmFenced_ = false;
         }
         const auto add = [&](GameInputAction action) {
             result.actions.set(static_cast<std::size_t>(action));
         };
 
-        const bool uiContext = context == InputContext::Ui || context == InputContext::Paused;
+        // Focus boundaries win before any movement, trigger, hold or action
+        // is emitted. This is important when Menu and thrust share a frame.
+        if (frame.wasPressed(ControllerButton::Menu)) {
+            fenceHeldInput();
+            add(GameInputAction::OpenSystemMenu);
+            return result;
+        }
+        if ((context == InputContext::Ui || context == InputContext::Launch || context == InputContext::OrbitalWork)
+            && frame.wasPressed(ControllerButton::View)) {
+            fenceHeldInput();
+            add(GameInputAction::OpenMap);
+            return result;
+        }
+        if (context == InputContext::Ui && frame.wasPressed(ControllerButton::North)) {
+            fenceHeldInput();
+            add(GameInputAction::OpenInventory);
+            return result;
+        }
+        if ((context == InputContext::Launch || context == InputContext::MiningActive || context == InputContext::MiningService)
+            && dpadPressed(frame)) {
+            fenceHeldInput();
+            enterUiFocusFromDpad(frame, result);
+            return result;
+        }
+
+        const bool uiContext = context == InputContext::Ui || context == InputContext::Paused
+            || context == InputContext::OrbitalWork || context == InputContext::Preflight
+            || context == InputContext::Stamp || context == InputContext::SurfaceArrival
+            || context == InputContext::MiningFailure;
         if (uiContext) {
+            if (context == InputContext::SurfaceArrival) {
+                // Taking off without deploying retains its deliberate hold;
+                // Confirm/Cancel swapping changes the physical button only.
+                if (holdCrossed(frame, cancelButton, 0.45)) {
+                    fenceHeldInput();
+                    add(GameInputAction::DepartSurfaceUndeployed);
+                    return result;
+                }
+                if (frame.isDown(cancelButton)) {
+                    confirmFenced_ = confirmFenced_ || frame.isDown(confirmButton);
+                    if (frame.isDown(confirmButton)) {
+                        holdTriggered_.set(static_cast<std::size_t>(confirmButton));
+                    }
+                    return result;
+                }
+            } else if (frame.wasPressed(cancelButton)) {
+                fenceHeldInput();
+                add(GameInputAction::CancelFocused);
+                contextualUiFocusActive_ = false;
+                return result;
+            }
             result.navigation = frame.navigation;
             result.scroll = frame.rightY;
+            if (frame.navigation) {
+                fenceHeldInput();
+                contextualUiFocusActive_ = true;
+                return result;
+            }
+            if (confirmFenced_) {
+                return result;
+            }
+            if (continuousActivation) {
+                result.orbitalHeld = frame.isDown(confirmButton);
+                lastContinuousOutput_ = result.orbitalHeld;
+                return result;
+            }
             if ((activationHoldSeconds <= 0.0 && frame.wasPressed(confirmButton))
                 || (activationHoldSeconds > 0.0 && holdCrossed(frame, confirmButton, activationHoldSeconds))) {
-                add(GameInputAction::ActivateFocused);
-            }
-            if (frame.wasPressed(cancelButton)) {
-                add(GameInputAction::CancelFocused);
-            }
-            if (frame.wasPressed(ControllerButton::Menu)) {
-                add(GameInputAction::OpenSystemMenu);
-            }
-            if (context == InputContext::Ui && frame.wasPressed(ControllerButton::View)) {
-                add(GameInputAction::OpenMap);
-            }
-            if (context == InputContext::Ui && frame.wasPressed(ControllerButton::North)) {
-                add(GameInputAction::OpenInventory);
+                // Metadata makes the rendered control authoritative. Legacy
+                // callers retain their primary action until they expose focus.
+                GameInputAction action = GameInputAction::ActivateFocused;
+                if (focusedActionId.empty() && !contextualUiFocusActive_) {
+                    if (context == InputContext::Preflight || context == InputContext::Stamp) {
+                        action = GameInputAction::StartOrContinue;
+                    } else if (context == InputContext::SurfaceArrival) {
+                        action = GameInputAction::DeploySurfaceTeam;
+                    } else if (context == InputContext::MiningFailure) {
+                        action = GameInputAction::MiningFailureAcknowledge;
+                    }
+                }
+                add(action);
             }
             return result;
         }
 
-        if (frame.wasPressed(ControllerButton::Menu)) {
-            add(GameInputAction::OpenSystemMenu);
-        }
-
         switch (context) {
-        case InputContext::Preflight:
-            if (frame.wasPressed(ControllerButton::South)) {
-                add(GameInputAction::StartOrContinue);
-            }
-            break;
-
-        case InputContext::Stamp:
-            result.navigation = frame.navigation;
-            result.scroll = frame.rightY;
-            if (frame.navigation) {
-                contextualUiFocusActive_ = true;
-            }
-            if (frame.wasPressed(ControllerButton::South)) {
-                add(contextualUiFocusActive_
-                    ? GameInputAction::ActivateFocused
-                    : GameInputAction::StartOrContinue);
-            }
-            if (frame.wasPressed(ControllerButton::East)) {
-                add(GameInputAction::CancelFocused);
-                contextualUiFocusActive_ = false;
-                holdTriggered_.set(static_cast<std::size_t>(ControllerButton::East));
-            }
-            break;
-
         case InputContext::Launch:
             result.moveX = frame.leftX;
             result.moveY = preferences.invertFlightY ? frame.leftY : -frame.leftY;
-            result.orbitalHeld = frame.down.test(static_cast<std::size_t>(ControllerButton::South));
-            if (frame.wasPressed(ControllerButton::East)) add(GameInputAction::ResumeOrbitalFlight);
+            result.orbitalHeld = frame.isDown(confirmButton) && !confirmFenced_;
+            lastContinuousOutput_ = result.orbitalHeld;
             if (frame.wasPressed(ControllerButton::LeftStick)) add(GameInputAction::ToggleCruise);
-            if (frame.wasPressed(ControllerButton::View)) add(GameInputAction::OpenMap);
-            break;
-
-        case InputContext::SurfaceArrival:
-            if (frame.wasPressed(ControllerButton::South)) {
-                add(GameInputAction::DeploySurfaceTeam);
-            }
-            if (holdCrossed(frame, ControllerButton::East, 0.45)) {
-                add(GameInputAction::DepartSurfaceUndeployed);
-            }
             break;
 
         case InputContext::MiningActive:
         case InputContext::MiningService:
-            enterUiFocusFromDpad(frame, result);
             result.moveX = frame.leftX;
             result.moveY = frame.leftY;
             result.aimX = frame.rightX;
@@ -208,12 +294,11 @@ public:
             }
             break;
 
+        case InputContext::Preflight:
+        case InputContext::Stamp:
+        case InputContext::SurfaceArrival:
         case InputContext::MiningFailure:
-            if (frame.wasPressed(ControllerButton::South)) {
-                add(GameInputAction::MiningFailureAcknowledge);
-            }
-            break;
-
+        case InputContext::OrbitalWork:
         case InputContext::Ui:
         case InputContext::Paused:
             break;
@@ -226,6 +311,12 @@ public:
         holdTriggered_.reset();
         lastContext_.reset();
         lastActivationHoldSeconds_ = -1.0;
+        lastFocusedActionId_.clear();
+        lastContinuousActivation_ = false;
+        lastContinuousOutput_ = false;
+        lastConfirmButton_ = ControllerButton::South;
+        confirmFenced_ = false;
+        suspended_ = false;
         contextualUiFocusActive_ = false;
     }
 
@@ -271,6 +362,12 @@ private:
     std::bitset<controllerButtonCount> holdTriggered_;
     std::optional<InputContext> lastContext_;
     double lastActivationHoldSeconds_ = -1.0;
+    std::string lastFocusedActionId_;
+    bool lastContinuousActivation_ = false;
+    bool lastContinuousOutput_ = false;
+    ControllerButton lastConfirmButton_ = ControllerButton::South;
+    bool confirmFenced_ = false;
+    bool suspended_ = false;
     bool contextualUiFocusActive_ = false;
 };
 

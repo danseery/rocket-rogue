@@ -25,6 +25,7 @@
 #include "core/ResearchPresentation.h"
 #include "core/ResearchSystem.h"
 #include "core/ScenarioSystem.h"
+#include "core/SolarProgression.h"
 #include "core/SaveData.h"
 #include "core/SaveSchema.h"
 #include "core/ShipPresentation.h"
@@ -1713,6 +1714,171 @@ void scenarioUiActionsDoNotAwardExpeditionExperience()
             state.run.expedition.progression.pendingRunUpgradeChoices == 0,
         "briefings, manual actions, equipment assignment, and other UI actions must not grant expedition XP");
 
+}
+
+void solarMissionAcceptanceUsesAuthoredActionsAndPreservesLiveLoadouts()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    std::string error;
+    require(validateSolarMissionCatalog(catalog, &error),
+        "every solar mission should have a valid authored acceptance binding");
+    const SolarMissionDefinition* io = solarMissionForBody(catalog, "io");
+    require(io != nullptr && io->acceptanceStepId == "commission" &&
+            io->acceptanceAction == ScenarioActionKind::BeginActivity,
+        "Io must bind its commissioning action, not a nonexistent briefing acknowledgement");
+
+    for (int invalidBinding = 0; invalidBinding < 4; ++invalidBinding) {
+        ContentCatalog invalid = catalog;
+        auto& mission = *std::find_if(invalid.solarMissions.begin(), invalid.solarMissions.end(),
+            [](const auto& item) { return item.bodyId == "io"; });
+        if (invalidBinding == 0) mission.acceptanceStepId = "briefing";
+        if (invalidBinding == 1) mission.acceptanceAction = ScenarioActionKind::AcknowledgeBriefing;
+        if (invalidBinding == 2) mission.acceptanceStepId = "recovery";
+        if (invalidBinding == 3) mission.acceptanceAction = ScenarioActionKind::None;
+        require(!validateSolarMissionCatalog(invalid, &error),
+            "catalog validation must reject missing, incompatible, activity-starting, or empty acceptance bindings");
+        GameState unchanged = createNewGame(catalog, 0x10AC);
+        unchanged.run.expedition.travelInitialized = true;
+        unchanged.run.expedition.location.bodyId = "io";
+        unchanged.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+        const std::string before = serializeSaveData(captureSaveData(unchanged));
+        const auto result = acceptSolarMission(unchanged, invalid, mission);
+        require(!result.accepted && !result.applied &&
+                serializeSaveData(captureSaveData(unchanged)) == before,
+            "an invalid runtime binding must fail without consuming or changing campaign state");
+    }
+
+    const auto atIo = [&]() {
+        GameState state = createNewGame(catalog, 0x10AD);
+        state.run.expedition.travelInitialized = true;
+        state.run.expedition.location.bodyId = "io";
+        state.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+        ensureScenarioInstances(state, catalog);
+        return state;
+    };
+    GameState state = atIo();
+    state.run.expedition.location.bodyId = "jupiter";
+    require(!acceptSolarMission(state, catalog, *io).accepted &&
+            !solarMissionAcceptanceForBody(state, catalog, "io").available,
+        "entering Jupiter space or selecting Io as a target must not accept Io's mission");
+    state.run.expedition.location.bodyId = "io";
+    state.meta.unlockKeys.erase(std::remove(state.meta.unlockKeys.begin(), state.meta.unlockKeys.end(),
+        content::unlock::routeJupiter), state.meta.unlockKeys.end());
+    require(!acceptSolarMission(state, catalog, *io).accepted &&
+            !solarMissionAcceptanceForBody(state, catalog, "io").available,
+        "physical Io presence must not bypass its explicit route prerequisite");
+    state.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+    const auto acceptance = solarMissionAcceptanceForBody(state, catalog, "io");
+    require(acceptance.available && acceptance.stepId == "commission" &&
+            acceptance.action == ScenarioActionKind::BeginActivity &&
+            acceptance.actionLabel == "Commission Hazard Drone",
+        "the persistent acceptance control should expose the authored commissioning label and action");
+    const auto accepted = acceptSolarMission(state, catalog, *io);
+    require(accepted.accepted && accepted.applied && solarMissionAccepted(state, catalog, *io) &&
+            !solarMissionAcceptanceForBody(state, catalog, "io").available &&
+            hasUnlock(state.meta, content::unlock::ioHazardDrone) &&
+            ownedMiniDroneCount(state, content::drone::hazardDrone) == 1 &&
+            equippedMiniDroneCount(state, content::drone::hazardDrone) == 1 &&
+            scenarioStepState(state, catalog, io->scenarioId, "recovery") == ScenarioStepState::Active,
+        "explicit acceptance should commission one assigned Hazard frame and activate recovery");
+    const auto* instance = findScenarioInstance(state.meta, io->scenarioId);
+    require(instance != nullptr && instance->awardedRewardIds.size() == 4,
+        "commissioning should record each authored reward exactly once");
+    const std::string acceptedSave = serializeSaveData(captureSaveData(state));
+    const auto duplicate = acceptSolarMission(state, catalog, *io);
+    require(duplicate.accepted && !duplicate.applied &&
+            serializeSaveData(captureSaveData(state)) == acceptedSave,
+        "repeated acceptance should succeed idempotently without duplicate rewards or save mutations");
+
+    GameState full = atIo();
+    full.meta.unlockKeys.push_back(content::unlock::droneBay);
+    full.meta.droneBaySlots = 2;
+    full.meta.ownedDroneIds = {content::drone::miningDrone, content::drone::miningDrone};
+    full.meta.equippedDroneIds = full.meta.ownedDroneIds;
+    const auto occupiedSlots = full.meta.equippedDroneIds;
+    require(acceptSolarMission(full, catalog, *io).accepted && full.meta.droneBaySlots == 2 &&
+            full.meta.equippedDroneIds == occupiedSlots &&
+            ownedMiniDroneCount(full, content::drone::hazardDrone) == 1 &&
+            equippedMiniDroneCount(full, content::drone::hazardDrone) == 0,
+        "a full bay should retain every assigned frame and own the commissioned Hazard for an explicit swap");
+    const auto reload = deserializeSaveData(serializeSaveData(captureSaveData(full)));
+    require(reload.has_value() && reload->version == 23,
+        "successful commissioning must round-trip through the unchanged v23 schema");
+    GameState restored = createNewGame(catalog, 0x10AF);
+    restoreSaveData(restored, catalog, *reload);
+    require(solarMissionAccepted(restored, catalog, *io) &&
+            hasUnlock(restored.meta, content::unlock::ioHazardDrone) &&
+            ownedMiniDroneCount(restored, content::drone::hazardDrone) == 1 &&
+            restored.meta.equippedDroneIds == occupiedSlots &&
+            equippedMiniDroneCount(restored, content::drone::hazardDrone) == 0 &&
+            !solarMissionAcceptanceForBody(restored, catalog, "io").available,
+        "reload must preserve accepted commissioning and the owned-but-unassigned Hazard without replaying its prompt");
+    const std::string restoredSave = serializeSaveData(captureSaveData(restored));
+    const auto replay = acceptSolarMission(restored, catalog, *io);
+    require(replay.accepted && !replay.applied &&
+            serializeSaveData(captureSaveData(restored)) == restoredSave,
+        "replaying acceptance after reload must leave reward ownership and the save unchanged");
+
+    GameState mining = atIo();
+    mining.screen = Screen::Mining;
+    mining.run.mining.active = true;
+    mining.run.planetaryExpedition.active = true;
+    mining.run.mining.droneX = 14.5;
+    mining.run.mining.droneY = 8.25;
+    mining.run.mining.rigFuel.current = 4.75;
+    mining.meta.unlockKeys.push_back(content::unlock::droneBay);
+    mining.meta.droneBaySlots = 2;
+    mining.meta.ownedDroneIds = {content::drone::miningDrone};
+    mining.meta.equippedDroneIds = mining.meta.ownedDroneIds;
+    MiningMiniDroneAgent hauling;
+    hauling.role = MiniDroneRole::Mining;
+    hauling.haulMaterials.common = 3;
+    hauling.carriedLooseObjectId = 17;
+    hauling.x = 8.5;
+    mining.run.mining.miniDrones.push_back(hauling);
+    mining.incomingMessages.acknowledgedMessages.push_back(io->briefingMessageId);
+    mining.incomingMessages.acknowledgedOccurrences.push_back("campaign.solar.io.briefing");
+    require(solarMissionAcceptanceForBody(mining, catalog, "io").available,
+        "an acknowledged incoming message must not hide unresolved commissioning during active mining");
+    const auto originalLoadout = mining.meta.equippedDroneIds;
+    const auto miningAccepted = acceptSolarMission(mining, catalog, *io);
+    require(miningAccepted.accepted && miningAccepted.applied &&
+            ownedMiniDroneCount(mining, content::drone::hazardDrone) == 1 &&
+            mining.meta.equippedDroneIds == originalLoadout &&
+            mining.run.mining.miniDrones.size() == 1 &&
+            mining.run.mining.miniDrones.front().haulMaterials.common == 3 &&
+            mining.run.mining.miniDrones.front().carriedLooseObjectId == 17 &&
+            mining.run.mining.miniDrones.front().x == 8.5 &&
+            mining.screen == Screen::Mining && mining.run.mining.active &&
+            mining.run.mining.droneX == 14.5 && mining.run.mining.droneY == 8.25 &&
+            mining.run.mining.rigFuel.current == 4.75,
+        "commissioning in an existing mining run must grant ownership without assigning, rebuilding, moving, or resetting it");
+    require(mining.incomingMessages.acknowledgedMessages ==
+                std::vector<std::string>{io->briefingMessageId} &&
+            mining.incomingMessages.acknowledgedOccurrences ==
+                std::vector<std::string>{"campaign.solar.io.briefing"},
+        "same-schema recovery must not rewrite acknowledged message history");
+
+    GameState normalReward = atIo();
+    normalReward.run.mining.active = true;
+    require(performScenarioAction(normalReward, catalog, io->scenarioId, io->acceptanceStepId,
+                io->acceptanceAction).applied &&
+            equippedMiniDroneCount(normalReward, content::drone::hazardDrone) == 1,
+        "the default scenario reward policy must preserve unrelated existing automatic assignment behavior");
+
+    for (const SolarMissionDefinition& mission : catalog.solarMissions) {
+        if (mission.bodyId == "io") continue;
+        GameState other = createNewGame(catalog, 0x10AE);
+        other.run.expedition.travelInitialized = true;
+        other.run.expedition.location.bodyId = mission.bodyId;
+        if (!mission.prerequisiteUnlockKey.empty()) other.meta.unlockKeys.push_back(mission.prerequisiteUnlockKey);
+        ensureScenarioInstances(other, catalog);
+        require(mission.acceptanceStepId == "briefing" &&
+                mission.acceptanceAction == ScenarioActionKind::AcknowledgeBriefing &&
+                acceptSolarMission(other, catalog, mission).accepted &&
+                solarMissionAccepted(other, catalog, mission),
+            "ordinary solar missions should keep their explicit authored briefing acknowledgement");
+    }
 }
 
 
@@ -7902,6 +8068,30 @@ void unifiedPhysicalFlightCapturesOrbitAndResolvesTouchdown()
     orbit.heading = 1.5707963267948966;
     orbit.orbit.previousAngle = 0.0;
     const double coastingFuel = orbit.fuelRemaining;
+    {
+        auto correcting = orbit;
+        correcting.orbit.confirmationSeconds = 1.5;
+        correcting.selectedThrottle = 0.2;
+        FlightInput correction;
+        correction.throttle = .2;
+        correction.analogThrottle = true;
+        updateLaunchFlight(correcting, launch, *moon, correction, 0.01);
+        require(correcting.orbit.confirmationSeconds > 1.48 && correcting.orbit.confirmationSeconds < 1.5,
+            "small powered corrections should decay, not erase, capture progress");
+        require(!correcting.orbit.captured, "powered corrections cannot capture orbit");
+        correcting.selectedThrottle = 0.0;
+        correcting.velocityX = 0.0;
+        correcting.velocityY = std::sqrt(0.095 / orbit.orbit.targetRadius);
+        correcting.positionX = orbit.orbit.targetRadius;
+        correcting.positionY = 0.0;
+        const double before = correcting.orbit.confirmationSeconds;
+        updateLaunchFlight(correcting, launch, *moon, {}, 0.01);
+        require(correcting.orbit.confirmationSeconds > before, "safe coasting resumes confirmation");
+        correcting.mode = FlightMode::Travel;
+        correcting.positionX = 3.0;
+        updateLaunchFlight(correcting, launch, *moon, {}, 0.01);
+        require(correcting.orbit.confirmationSeconds == 0.0, "leaving Orbit clears pending capture");
+    }
     LaunchFlightStep orbitStep;
     for (int index = 0; index < 2000 && !orbit.orbit.captured; ++index) {
         orbitStep = updateLaunchFlight(orbit, launch, *moon, {}, 0.01);
@@ -8326,6 +8516,171 @@ void arkCampaignStateRoundTripsThroughSave()
 
 }
 
+
+void controllerPanelDefaultsAndOrbitalActions()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 0xC017);
+    Random rng(0xC017);
+    const PreparedLaunch launch = prepareLaunch(state, catalog, rng);
+    PanelRenderContext context{state, catalog, launch, launch};
+    context.firstTimeIntroductionsEnabled = false;
+    context.incomingMessageDeliveryAllowed = false;
+    const auto defaultIs = [](std::string_view markup, std::string_view id) {
+        require(countOccurrences(markup, "data-ui-default-focus=\"1\"") == 1,
+            "an action scope must declare exactly one controller default");
+        const std::string marker = "data-ui-focus-id=\"" + std::string(id) + "\" data-ui-default-focus=\"1\"";
+        require(markup.find(marker) != std::string_view::npos,
+            "the controller default must match the intended primary action: " + std::string(id));
+    };
+    const auto inspectScope = [](std::string_view markup) {
+        require(countOccurrences(markup, "data-ui-default-focus=\"1\"") <= 1,
+            "each rendered screen or modal must have at most one explicit default");
+        std::vector<std::string> ids;
+        std::size_t position = 0;
+        while (position < markup.size()) {
+            const auto begin = std::min(markup.find("<button", position), markup.find("<select", position));
+            if (begin == std::string_view::npos) break;
+            const auto end = markup.find('>', begin);
+            require(end != std::string_view::npos, "controller controls must have complete opening tags");
+            const auto tag = markup.substr(begin, end - begin);
+            position = end + 1;
+            if (tag.find(" disabled") != std::string_view::npos ||
+                tag.find("data-ui-focus-skip=\"1\"") != std::string_view::npos) continue;
+            constexpr std::string_view idAttribute = "data-ui-focus-id=\"";
+            const auto idStart = tag.find(idAttribute);
+            require(idStart != std::string_view::npos, "every enabled panel control needs a stable controller identity");
+            const auto valueStart = idStart + idAttribute.size();
+            const std::string id(tag.substr(valueStart, tag.find('"', valueStart) - valueStart));
+            require(std::find(ids.begin(), ids.end(), id) == ids.end(),
+                "controller identities must be unique within each screen or modal: " + id);
+            ids.push_back(id);
+        }
+    };
+    const auto inspectPanel = [&](const PanelDocumentPresentation& panel) {
+        inspectScope(panel.contentMarkup);
+        for (const auto& modal : panel.modals) inspectScope(modal.bodyMarkup);
+    };
+
+    state.screen = Screen::Flight;
+    FlightRunState flight;
+    flight.active = flight.physicalFlight = true;
+    flight.destinationId = content::destination::moon;
+    flight.mode = FlightMode::Orbit;
+    flight.selectedThrottle = 0.0;
+    flight.orbit.captured = flight.orbit.loopQualifies = true;
+    OrbitalWorkState work;
+    context.launchFlight = &flight;
+    context.orbitalWork = &work;
+    context.orbitalInsideZone = true;
+    auto panel = buildGamePanelPresentation(context);
+    defaultIs(panel.contentMarkup, "action:orbital_scan");
+    require(panel.contentMarkup.find("data-ui-activation=\"continuous\"") == std::string::npos,
+        "Scan must be a discrete press, not a continuous action");
+    flight.selectedThrottle = 0.60;
+    panel = buildGamePanelPresentation(context);
+    defaultIs(panel.contentMarkup, "action:resume_orbital_flight");
+    require(panel.contentMarkup.find("ESTABLISH A SAFE LOOP") != std::string::npos &&
+        panel.contentMarkup.find("action:orbital_scan") == std::string::npos,
+        "an unsafe powered loop must remain status rather than offer an unavailable Scan");
+    flight.selectedThrottle = 0.0;
+
+    work.phase = OrbitalWorkPhase::Surveying;
+    panel = buildGamePanelPresentation(context);
+    defaultIs(panel.contentMarkup, "action:resume_orbital_flight");
+    require(panel.contentMarkup.find("SCANNING...") != std::string::npos &&
+        panel.contentMarkup.find("data-rr-action=\"orbital_work\"") == std::string::npos,
+        "Scanning must render as status while Resume Flight remains reachable");
+
+    work.surveyComplete = true;
+    work.phase = OrbitalWorkPhase::LaserReady;
+    context.orbitalLandingEligible = true;
+    panel = buildGamePanelPresentation(context);
+    defaultIs(panel.contentMarkup, "action:orbital_drill");
+    require(panel.contentMarkup.find("data-ui-activation=\"continuous\"") != std::string::npos,
+        "focused Drill must advertise continuous hold activation");
+    const auto drillPosition = panel.contentMarkup.find("action:orbital_drill");
+    const auto landPosition = panel.contentMarkup.find("action:land_from_orbit");
+    const auto resumePosition = panel.contentMarkup.find("action:resume_orbital_flight");
+    require(drillPosition < landPosition && landPosition < resumePosition,
+        "orbital controller actions must follow Drill, Land, Resume Flight visual order");
+    for (const bool blocked : {false, true}) {
+        context.orbitalLaserComplete = !blocked;
+        context.orbitalLaserBlocked = blocked;
+        panel = buildGamePanelPresentation(context);
+        defaultIs(panel.contentMarkup, "action:land_from_orbit");
+        require(panel.contentMarkup.find(blocked ? "SURFACE TOOLS REQUIRED" : "SHAFT READY") != std::string::npos &&
+            panel.contentMarkup.find("data-rr-action=\"orbital_work\"") == std::string::npos,
+            "a completed or blocked laser must be status, never a false Drill default");
+    }
+    context.orbitalInsideZone = false;
+    context.orbitalLandingEligible = false;
+    panel = buildGamePanelPresentation(context);
+    defaultIs(panel.contentMarkup, "action:resume_orbital_flight");
+    require(panel.contentMarkup.find("action:land_from_orbit") == std::string::npos,
+        "Land must be skipped outside its eligible wedge");
+    inspectPanel(panel);
+    for (const auto phase : {OrbitalWorkPhase::Inactive, OrbitalWorkPhase::Surveying,
+             OrbitalWorkPhase::LaserReady, OrbitalWorkPhase::LandingAlignment}) {
+        work.phase = phase;
+        panel = buildGamePanelPresentation(context);
+        RealtimeHudState hud;
+        buildRealtimeHudState(context, hud);
+        for (const auto& patch : hud.patches) {
+            if (patch.elementId != "rr-hud-launch-status" && patch.elementId != "rr-orbital-status") continue;
+            require(panel.contentMarkup.find("id=\"" + patch.elementId + "\"") != std::string::npos,
+                "orbital HUD updates must target the active panel, including descent alignment");
+        }
+    }
+
+    context.launchFlight = nullptr;
+    context.orbitalWork = nullptr;
+    context.titleScreenActive = true;
+    context.hasSavedGame = true;
+    panel = buildGamePanelPresentation(context);
+    defaultIs(panel.contentMarkup, "action:continue_game");
+    inspectPanel(panel);
+    for (const auto& modal : panel.modals) {
+        if (modal.id == "new_game_confirm") defaultIs(modal.bodyMarkup, "new-game:cancel");
+        if (modal.id == "reset_save_confirm") {
+            defaultIs(modal.bodyMarkup, "reset:cancel");
+            require(modal.bodyMarkup.find("data-ui-activation=\"hold\" data-ui-hold-seconds=\"0.75\"") != std::string::npos,
+                "destructive reset must declare its hold threshold explicitly");
+        }
+        if (modal.id == "settings") defaultIs(modal.bodyMarkup, "setting:resolution");
+    }
+    context.titleScreenActive = false;
+    for (const auto screen : {Screen::Hangar, Screen::Research, Screen::DroneOps, Screen::Upgrade,
+             Screen::Results, Screen::ArrivalOps, Screen::StoryBriefing}) {
+        state.screen = screen;
+        inspectPanel(buildGamePanelPresentation(context));
+    }
+    state.run.destinationIndex = 1;
+    startSurfaceExpedition(state, catalog);
+    inspectPanel(buildGamePanelPresentation(context));
+    require(startMiningRun(state, catalog, {MiningAct::ActOne, 9, 0xC017}, false).applied,
+        "controller panel audit must enter the mining screen");
+    inspectPanel(buildGamePanelPresentation(context));
+
+    state = createNewGame(catalog, 0xC018);
+    state.screen = Screen::Hangar;
+    state.run.expedition.travelInitialized = true;
+    state.run.expedition.location.systemId = "solar";
+    state.run.expedition.location.bodyId = "earth";
+    state.run.expedition.location.siteId = "earth.dock";
+    state.run.expedition.course.targetBodyId = "moon";
+    panel = buildGamePanelPresentation(context);
+    defaultIs(panel.contentMarkup, "action:expedition:depart");
+    inspectPanel(panel);
+    require(std::any_of(panel.modals.begin(), panel.modals.end(), [](const auto& modal) { return modal.id == "system_menu"; }),
+        "the orbital dock must retain the controller pause menu");
+    for (const auto& modal : panel.modals) {
+        if (modal.id != "map") continue;
+        defaultIs(modal.bodyMarkup, "action:expedition:preview:moon");
+        require(modal.bodyMarkup.find("data-ui-focus-skip=\"1\" tabindex=\"-1\"") != std::string::npos,
+            "planet image aliases must not create duplicate controller stops beside the name buttons");
+    }
+}
 
 void structuredPanelPresentationCarriesTypedModalPolicy()
 {
@@ -8981,6 +9336,73 @@ void rigCompoundCollisionSweepsAndRecovery()
 
 int main(int argc, char** argv)
 {
+    try { (void)createDefaultContent(); }
+    catch (const std::exception& error) { std::cerr << "Content: " << error.what() << '\n'; return 1; }
+#ifdef _MSC_VER
+    _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+    _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
+    {
+        const auto catalog = createDefaultContent();
+        for (const bool full : {false, true}) {
+            auto state = createNewGame(catalog, 0x7A170);
+            state.meta.unlockKeys.push_back(content::unlock::routeNeptune);
+            state.meta.unlockKeys.push_back(content::unlock::droneBay);
+            state.meta.droneBaySlots = 1;
+            if (full) {
+                state.meta.ownedDroneIds = {content::drone::miningDrone};
+                state.meta.equippedDroneIds = state.meta.ownedDroneIds;
+            }
+            (void)recordScenarioEvent(state, catalog,
+                {ScenarioEventKind::DestinationReached, {}, {}, {}, "neptune", 1, 0});
+            require(ownedMiniDroneCount(state, content::drone::attackDrone) == 0,
+                "orbital arrival must not grant the stowed drone");
+            require(recordScenarioEvent(state, catalog,
+                {ScenarioEventKind::SurfaceLanded, {}, {}, {}, "triton", 1, 0}),
+                "Triton landing must grant the stowed drone");
+            require(ownedMiniDroneCount(state, content::drone::attackDrone) == 1 &&
+                equippedMiniDroneCount(state, content::drone::attackDrone) == (full ? 0 : 1),
+                "landing grants one attack frame and preserves occupied bays");
+            require(!hasUnlock(state.meta, content::unlock::perimeterDrones),
+                "introductory attack reward must not unlock the later combat suite");
+            const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+            require(saved.has_value(), "Triton reward saves successfully");
+            auto restored = createNewGame(catalog, 17);
+            restoreSaveData(restored, catalog, *saved);
+            require(!recordScenarioEvent(restored, catalog,
+                {ScenarioEventKind::SurfaceLanded, {}, {}, {}, "triton", 1, 0}) &&
+                ownedMiniDroneCount(restored, content::drone::attackDrone) == 1,
+                "repeated landings and reload must not duplicate or remove the drone");
+        }
+        for (int sector = 1; sector <= 6; ++sector) {
+            auto state = createNewGame(catalog, 0x7710 + sector);
+            state.meta.unlockKeys.push_back(content::unlock::routeNeptune);
+            state.run.expedition.travelInitialized = true;
+            state.run.expedition.location.bodyId = "triton";
+            const auto* mission = solarMissionForBody(catalog, "triton");
+            require(mission && acceptSolarMission(state, catalog, *mission).accepted, "accept Triton mission");
+            SurfaceLandingBuildRequest request;
+            request.destinationId = "neptune";
+            request.bodyId = "triton";
+            request.zoneId = "zone_" + std::to_string(sector);
+            auto prepared = prepareSurfaceLanding(state, catalog, request);
+            require(prepared.valid, "prepare Triton patrol site");
+            int guards = 0;
+            const auto check = [&](const auto& layer) {
+                for (const auto& enemy : layer.enemies) {
+                    require(enemy.type == MiningEnemyType::Flying && enemy.maxHealth == 4.0 && !enemy.elite,
+                        "Triton uses easy flying drones, not later organic enemies");
+                    require(layer.artifact.present, "security patrol stays with the artifact depth");
+                    ++guards;
+                }
+            };
+            check(prepared.miningTemplate);
+            for (const auto& layer : prepared.miningTemplate.depthLayers) check(layer);
+            require(guards == 3, "each Triton artifact site has exactly three defenders");
+        }
+    }
 #ifdef _MSC_VER
     // A failed guard must fail CI visibly, not wait on a native assertion dialog.
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
@@ -9027,6 +9449,7 @@ int main(int argc, char** argv)
     miningShipServiceRestoresOxygenWithoutEndingRun();
     droneBayUnlocksSlotsLoadoutsAndMiningEffects();
     scenarioUiActionsDoNotAwardExpeditionExperience();
+    solarMissionAcceptanceUsesAuthoredActionsAndPreservesLiveLoadouts();
     scenarioAndCocoonStateRoundTrips();
     activeFlightRoundTripsThroughSave();
     surfaceMiningUsesRigFuelAndRunsOnce();
@@ -9099,6 +9522,7 @@ int main(int argc, char** argv)
     flightProgressHelpersShareTravelAndReturnMath();
     hostileNavigationSelectsShuttleSortie();
     arkCampaignStateRoundTripsThroughSave();
+    controllerPanelDefaultsAndOrbitalActions();
     structuredPanelPresentationCarriesTypedModalPolicy();
     contentIdsResolveAgainstDefaultCatalog();
     miningThermalCutoffAndGuidanceAreExplicit();

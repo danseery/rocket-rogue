@@ -1947,6 +1947,57 @@ MaterialInventory unloadMiniDroneCargoAtShip(
     return newlyOwned;
 }
 
+bool miniDroneAtLoadoutService(const MiningRunState& mining, const MiningMiniDroneAgent& agent)
+{
+    const int depth=agent.transitDepthZone<0 ? mining.depthZone : agent.transitDepthZone;
+    const bool idle=agent.behavior==MiningMiniDroneBehavior::Docked ||
+        agent.behavior==MiningMiniDroneBehavior::Following || agent.behavior==MiningMiniDroneBehavior::Guarding;
+    return idle && depth==mining.shipDepthZone &&
+        std::hypot(agent.x-mining.returnZoneX,agent.y-mining.returnZoneY)<=tuning::mining::returnZoneRadiusCells;
+}
+
+void updateMiningLoadoutRecall(GameState& state, const ContentCatalog& catalog, double dt)
+{
+    auto& mining=state.run.mining;
+    std::optional<LandingSiteView> projection;
+    if (mining.surfaceOriginBound) projection=buildLandingSiteView(mining);
+    for (auto& agent : mining.miniDrones) {
+        agent.targetCellX=agent.targetCellY=agent.targetEnemyIndex=-1;
+        agent.taskProgressSeconds=0;
+        agent.finishTargetBeforeReturn=false;
+        const int depth=agent.transitDepthZone<0 ? mining.depthZone : agent.transitDepthZone;
+        const MiningRunState& world=projection ? projection->world : mining;
+        const double offset=projection ? projection->topRow(depth) : 0.0;
+        agent.y+=offset;
+        const double targetX=world.returnZoneX,targetY=world.returnZoneY-1.0;
+        moveMiniDroneTowardOpenPoint(agent,world,targetX,targetY,
+            tuning::mining::miniDroneCatchUpSpeedCellsPerSecond,dt);
+        const bool arrived=std::hypot(agent.x-targetX,agent.y-targetY)<1.0;
+        if (projection) {
+            agent.transitDepthZone=projection->depthAt(agent.y);
+            agent.y-=projection->topRow(agent.transitDepthZone);
+        }
+        if (!arrived) {agent.behavior=MiningMiniDroneBehavior::Returning; continue;}
+        const auto owned=unloadMiniDroneCargoAtShip(state,catalog,agent);
+        awardExpeditionExperience(state,miningMaterialExperience(owned),Screen::Mining);
+        // Carried physical supplies are released at service, not deleted by
+        // the following loadout rebuild. Normal collection still owns credit.
+        if (agent.carriedLooseObjectId!=0 && mining.depthZone==mining.shipDepthZone) {
+            for (auto& object : mining.looseObjects) if (object.persistentId==agent.carriedLooseObjectId && object.active) {
+                object.carrierFrame=-1;
+                object.x=mining.returnZoneX; object.y=mining.returnZoneY-1.0;
+                object.velocityX=object.velocityY=0;
+                agent.carriedLooseObjectId=0;
+                break;
+            }
+        }
+        agent.behavior=materialCargoMass(agent.haulMaterials)==0 && agent.carriedLooseObjectId==0
+            ? MiningMiniDroneBehavior::Docked : MiningMiniDroneBehavior::DeliveringToShip;
+        agent.velocityX=agent.velocityY=0;
+        if (mining.depthZone==mining.shipDepthZone) agent.transitDepthZone=-1;
+    }
+}
+
 MaterialInventory miniDroneCargoManifest(const MiningRunState& mining)
 {
     MaterialInventory result;
@@ -2157,6 +2208,7 @@ void advanceHazardDroneTreatments(
 void ensureMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog)
 {
     MiningRunState& mining = state.run.mining;
+    if (mining.droneLoadoutRecallActive) return;
     std::vector<std::pair<MiniDroneRole, int>> expected;
     expected.reserve(state.meta.equippedDroneIds.size());
     for (const std::string& droneId : state.meta.equippedDroneIds) {
@@ -2203,8 +2255,13 @@ void ensureMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
 
 void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog, const MiningDrillStats& stats, double dt)
 {
-    ensureMiningMiniDroneAgents(state, catalog);
+    if (!state.run.mining.droneLoadoutRecallActive) ensureMiningMiniDroneAgents(state, catalog);
     MiningRunState& mining = state.run.mining;
+    if (mining.droneLoadoutRecallActive && !miningAtReturnZone(mining)) clearMiningDroneLoadoutRecall(state);
+    if (mining.droneLoadoutRecallActive) {
+        updateMiningLoadoutRecall(state,catalog,dt);
+        return;
+    }
     for (MiningMiniDroneAgent& agent : mining.miniDrones) {
         agent.orbitPhaseRadians = std::fmod(
             agent.orbitPhaseRadians + tuning::mining::miniDroneOrbitRadiansPerSecond * dt,
@@ -3561,6 +3618,8 @@ bool shouldSpawnEnemyAt(const MiningTerrain& terrain, int x, int y, MiningCellFe
 
 void spawnMiningEnemies(MiningRunState& mining, const Destination& destination, const MiningArenaRules& rules)
 {
+    // Triton's introductory encounter is a finite authored security patrol.
+    if (destination.id == content::destination::neptune) return;
     if (rules.maxActiveEnemies <= 0) {
         return;
     }
@@ -5620,6 +5679,32 @@ void configureProgressionArtifactOnActiveLayer(
             false,
             MiningCellFeature::BranchTunnel);
     }
+    // Only the authored artifact layer gets the introductory patrol. Cached
+    // layers retain this vector (including defeated units) across revisits.
+    if (placement.artifactId == content::protectedObjective::tritonSignalArtifact && mining.artifact.present) {
+        mining.enemies.clear();
+        const int ax = static_cast<int>(std::floor(mining.artifact.x));
+        const int ay = static_cast<int>(std::floor(mining.artifact.y));
+        for (const auto& [dx, dy] : std::array<std::pair<int, int>, 3>{{{-5, -3}, {5, -3}, {0, -5}}}) {
+            const int x = std::clamp(ax + dx, 2, mining.terrain.width - 3);
+            const int y = std::clamp(ay + dy, 2, mining.terrain.height - 3);
+            for (int cy = y - 1; cy <= y + 1; ++cy) for (int cx = x - 1; cx <= x + 1; ++cx) {
+                MiningCell* cell = miningCellAt(mining.terrain, cx, cy);
+                if (cell && !cell->gateAssociated && cell->cocoonLayer < 0 &&
+                    std::max(std::abs(cx - ax), std::abs(cy - ay)) > 2) {
+                    *cell = makeCell(MiningCellMaterial::Empty, mining.depthZone);
+                    markDirty(mining.terrain, cx, cy);
+                }
+            }
+            MiningEnemy enemy = makeMiningEnemy(MiningEnemyType::Flying,
+                MiningCellFeature::TreasureVault, MiningElementalAffinity::None, x + 0.5, y + 0.5);
+            enemy.health = enemy.maxHealth = 4.0;
+            enemy.armor = 0.0;
+            enemy.damagePerSecond = 0.35;
+            enemy.speed *= 0.65;
+            mining.enemies.push_back(std::move(enemy));
+        }
+    }
     concealIncompleteTriangulationObjective(mining);
 }
 
@@ -5793,6 +5878,7 @@ void configureMiningSwarm(
     const MiningArenaRules& rules,
     bool authoredSite)
 {
+    if (destination.id == content::destination::neptune) return;
     const MiningSwarmPreview preview = miningSwarmPreview(
         state,
         catalog,
@@ -7495,18 +7581,19 @@ bool miningAtReturnZone(const MiningRunState& mining)
     return controlledActorAtReturnZone(mining);
 }
 
-MiningDroneRecoveryStatus miningDroneRecoveryStatus(const MiningRunState& mining)
+MiningDroneRecoveryStatus miningDroneRecoveryStatus(const MiningRunState& mining, bool includeDeployedDrones)
 {
     MiningDroneRecoveryStatus result;
     for (const MiningMiniDroneAgent& agent : mining.miniDrones) {
         const int cargoMass = materialCargoMass(agent.haulMaterials);
         const bool carryingObject = agent.carriedLooseObjectId != 0;
-        if (cargoMass <= 0 && !carryingObject) {
+        if (cargoMass <= 0 && !carryingObject && (!includeDeployedDrones || miniDroneAtLoadoutService(mining,agent))) {
             continue;
         }
         ++result.outstandingDrones;
         result.outstandingCargoMass += cargoMass;
         result.recallInProgress = result.recallInProgress ||
+            (includeDeployedDrones && mining.droneLoadoutRecallActive) ||
             agent.behavior == MiningMiniDroneBehavior::Returning ||
             agent.behavior == MiningMiniDroneBehavior::DeliveringToShip ||
             agent.behavior == MiningMiniDroneBehavior::ReturningFromShip ||
@@ -7515,13 +7602,24 @@ MiningDroneRecoveryStatus miningDroneRecoveryStatus(const MiningRunState& mining
     return result;
 }
 
-bool requestMiningDroneRecall(GameState& state)
+bool requestMiningDroneRecall(GameState& state, bool includeDeployedDrones)
 {
     MiningRunState& mining = state.run.mining;
     if (!mining.active || !miningAtReturnZone(mining)) {
         return false;
     }
 
+    if (includeDeployedDrones) {
+        if (miningDroneRecoveryStatus(mining,true).outstandingDrones==0) return false;
+        mining.droneLoadoutRecallActive=true;
+        for (auto& agent : mining.miniDrones) {
+            agent.targetCellX=agent.targetCellY=agent.targetEnemyIndex=-1;
+            agent.taskProgressSeconds=0;
+            agent.finishTargetBeforeReturn=false;
+            agent.behavior=MiningMiniDroneBehavior::Returning;
+        }
+        return true;
+    }
     bool recalled = false;
     for (MiningMiniDroneAgent& agent : mining.miniDrones) {
         if (materialCargoMass(agent.haulMaterials) <= 0 &&
@@ -7544,6 +7642,15 @@ bool requestMiningDroneRecall(GameState& state)
         agent.behavior = MiningMiniDroneBehavior::Returning;
     }
     return recalled;
+}
+
+void clearMiningDroneLoadoutRecall(GameState& state)
+{
+    auto& mining=state.run.mining;
+    if (!mining.droneLoadoutRecallActive) return;
+    mining.droneLoadoutRecallActive=false;
+    for (auto& agent : mining.miniDrones)
+        if (agent.behavior==MiningMiniDroneBehavior::Docked) agent.behavior=MiningMiniDroneBehavior::Following;
 }
 
 bool miningRigAtReturnZone(const MiningRunState& mining)
@@ -8758,6 +8865,239 @@ LandingSiteView buildLandingSiteView(const MiningRunState& mining)
     return result;
 }
 
+namespace {
+bool orbitalProtectedCell(const MiningTerrain& terrain, const MiningArtifactObject& artifact, int x, int y)
+{
+    const auto* cell = miningCellAt(terrain, x, y);
+    if (!cell) return true;
+    if (cell->gateAssociated || cell->cocoonLayer >= 0 ||
+        cell->material == MiningCellMaterial::ArtifactCache) return true;
+    if (artifact.present && artifact.state != MiningArtifactState::Delivered &&
+        artifact.state != MiningArtifactState::Destroyed &&
+        std::abs(x-artifact.x) < orbital_laser::artifactProtectionRadiusCells &&
+        std::abs(y-artifact.y) < orbital_laser::artifactProtectionRadiusCells) return true;
+    for (int dy=-1; dy<=1; ++dy) for (int dx=-1; dx<=1; ++dx) {
+        const auto* near = miningCellAt(terrain,x+dx,y+dy);
+        if (near && near->suitOnlyPassage) return true;
+    }
+    return false;
+}
+
+bool protectedShaftOverlap(const MiningTerrain& terrain, const MiningArtifactObject& artifact, int shaftX)
+{
+    for (int y=0; y<terrain.height; ++y)
+        for (int x=shaftX-orbital_laser::shaftLeftCells; x<=shaftX+orbital_laser::shaftRightCells; ++x)
+            if (orbitalProtectedCell(terrain,artifact,x,y)) return true;
+    return false;
+}
+
+bool orbitalRowBlocked(const MiningTerrain& terrain, const MiningArtifactObject& artifact,
+    int shaftX, int y, bool deeperLayer)
+{
+    for (int x=shaftX-orbital_laser::shaftLeftCells; x<=shaftX+orbital_laser::shaftRightCells; ++x) {
+        const auto* cell = miningCellAt(terrain,x,y);
+        if (orbitalProtectedCell(terrain,artifact,x,y) || !cell ||
+            cell->material == MiningCellMaterial::FuelPocket || cell->material == MiningCellMaterial::OxygenPocket ||
+            (cell->material == MiningCellMaterial::Bedrock && y<terrain.height-3 && !(deeperLayer && y<3))) return true;
+    }
+    return false;
+}
+
+void validateOrbitalShaft(PreparedSurfaceLanding& prepared)
+{
+    auto& mining = prepared.miningTemplate;
+    if (orbitalShaftAvoidsProtectedObjectives(mining,prepared.shaftX)) return;
+    prepared.laserBlocked = true;
+    if (prepared.shaftCommitted) return;
+    const int halfWidth = std::max(orbital_laser::shaftLeftCells,orbital_laser::shaftRightCells);
+    const auto safe = [&](int x) {
+        return x-halfWidth>=1 && x+halfWidth<mining.terrain.width-1 &&
+            std::abs(x+orbital_laser::shaftCenterOffset-mining.returnZoneX)>halfWidth+3.0 &&
+            orbitalShaftAvoidsProtectedObjectives(mining,x);
+    };
+    // Retain the established right/left staging choices where possible, then
+    // search nearby columns deterministically without moving the objective.
+    const int right = static_cast<int>(std::ceil(mining.droneX))+halfWidth+2;
+    const int left = static_cast<int>(std::floor(mining.droneX))-halfWidth-2;
+    std::vector<int> candidates{right,left};
+    const int center=static_cast<int>(std::floor(mining.droneX));
+    for (int distance=0; distance<mining.terrain.width; ++distance) {
+        candidates.push_back(center-distance);
+        candidates.push_back(center+distance);
+    }
+    for (int x : candidates) {
+        if (!safe(x)) continue;
+        prepared.shaftX=x;
+        prepared.laserBlocked=false;
+        return;
+    }
+}
+
+struct OrbitalRepairLayer {
+    int depth;
+    MiningTerrain& terrain;
+    MiningArtifactObject& artifact;
+    MiningGateRuntime& gate;
+    const std::vector<MiningEnemy>& enemies;
+    const std::vector<MiningLooseObject>& objects;
+};
+
+const MiningArtifactObject* originalOrbitalArtifact(const MiningRunState& original, int depth)
+{
+    if (original.depthZone==depth) return &original.artifact;
+    for (const auto& layer : original.depthLayers) if (layer.depthZone==depth) return &layer.artifact;
+    return nullptr;
+}
+
+bool translateOrbitalObjective(OrbitalRepairLayer layer, const MiningRunState& mining,
+    const MiningRunState& original, const ContentCatalog& catalog, int shaftX)
+{
+    auto& artifact=layer.artifact;
+    auto& gate=layer.gate;
+    const auto* saved=originalOrbitalArtifact(original,layer.depth);
+    if (!artifact.present || artifact.state!=MiningArtifactState::Embedded || artifact.tethered ||
+        (saved && saved->present && (saved->id!=artifact.id || saved->state!=MiningArtifactState::Embedded || saved->tethered))) return false;
+    // Other gate types own additional spatial actors/passages. They must not
+    // be partially translated by the protective-seal repair.
+    if (gate.active && (gate.type!=MiningGateType::HazardCocoon || !gate.markers.empty() ||
+        gate.objectivePassage!=MiningPassageClass::AllActors || gate.burrowBreach || gate.shieldCorridor)) return false;
+    const int anchorX=static_cast<int>(std::floor(artifact.x));
+    const int anchorY=static_cast<int>(std::floor(artifact.y));
+    struct Member { int x,y; MiningCell cell; };
+    std::vector<Member> members;
+    const auto* anchor=miningCellAt(layer.terrain,anchorX,anchorY);
+    if (!anchor || anchor->material!=MiningCellMaterial::ArtifactCache) return false;
+    members.push_back({anchorX,anchorY,*anchor});
+    if (gate.active) {
+        const auto* site=catalog.findMiningSite(gate.siteId);
+        std::optional<MiningCocoonDefinition> compatibility;
+        const MiningCocoonDefinition* cocoon=site ? &site->cocoon : nullptr;
+        if (gate.cocoonDefinitionId=="legacy_layered_hazard_gate" && gate.cocoonDefinitionVersion==1) {
+            compatibility=makeLegacyLayeredCocoonDefinition(MiningGateDefinition{});
+            cocoon=&*compatibility;
+        }
+        // Fractured cells lose their cocoon tag. Only the exact saved shape
+        // can identify already-cleared offsets without resurrecting a seal.
+        if (!cocoon || cocoon->id!=gate.cocoonDefinitionId || cocoon->version!=gate.cocoonDefinitionVersion ||
+            cocoon->layers.size()!=gate.cocoonLayers.size() ||
+            std::abs(gate.anchorX-artifact.x)>.001 || std::abs(gate.anchorY-artifact.y)>.001) return false;
+        for (std::size_t i=0; i<cocoon->layers.size(); ++i) {
+            if (cocoon->layers[i].id!=gate.cocoonLayers[i].id) return false;
+            for (const auto& offset : cocoon->layers[i].offsets) {
+                const int x=anchorX+offset.x,y=anchorY+offset.y;
+                const auto* cell=miningCellAt(layer.terrain,x,y);
+                if (!cell || (cell->material!=MiningCellMaterial::Empty &&
+                    (!cell->gateAssociated || cell->cocoonLayer!=static_cast<int>(i)))) return false;
+                members.push_back({x,y,*cell});
+            }
+        }
+    }
+    // Reject additional unmodelled gate geometry rather than leave half of a
+    // protected structure behind. Ordinary surrounding excavation is not moved.
+    for (int y=0; y<layer.terrain.height; ++y) for (int x=0; x<layer.terrain.width; ++x) {
+        const auto* cell=miningCellAt(layer.terrain,x,y);
+        if ((cell->gateAssociated || cell->cocoonLayer>=0) &&
+            std::none_of(members.begin(),members.end(),[&](const auto& member){return member.x==x && member.y==y;})) return false;
+    }
+    const auto destinationSafe = [&](int dx) {
+        auto moved=artifact;
+        moved.x+=dx;
+        // Check the shared protection footprint, not just the artifact cell.
+        for (int x=shaftX-orbital_laser::shaftLeftCells; x<=shaftX+orbital_laser::shaftRightCells; ++x)
+            if (std::abs(x-moved.x)<orbital_laser::artifactProtectionRadiusCells) return false;
+        for (const auto& member : members) {
+            const int x=member.x+dx,y=member.y;
+            if (x>=shaftX-orbital_laser::shaftLeftCells && x<=shaftX+orbital_laser::shaftRightCells) return false;
+            const auto* destination=miningCellAt(layer.terrain,x,y);
+            // Only untouched, ordinary regolith may be replaced. Never fill a
+            // tunnel, erase ore/supplies, or undo damage to another cell.
+            if (x<2 || x>=layer.terrain.width-2 || !destination ||
+                destination->material!=MiningCellMaterial::Regolith ||
+                destination->remainingToughness!=destination->maxToughness ||
+                destination->gateAssociated || destination->cocoonLayer>=0 || destination->suitOnlyPassage ||
+                destination->hazard || destination->hazardAffinity!=MiningElementalAffinity::None ||
+                destination->enemy!=MiningEnemyType::None || destination->feature!=MiningCellFeature::None ||
+                orbitalProtectedCell(layer.terrain,MiningArtifactObject{},x,y)) return false;
+            const auto overlaps = [&](double px,double py) {return std::abs(px-(x+.5))<2.0 && std::abs(py-(y+.5))<2.0;};
+            if ((mining.rigDepthZone==layer.depth && overlaps(mining.droneX,mining.droneY)) ||
+                (mining.operatorPresent && mining.depthZone==layer.depth && overlaps(mining.operatorX,mining.operatorY)) ||
+                (mining.shipDepthZone==layer.depth && overlaps(mining.returnZoneX,mining.returnZoneY))) return false;
+            for (const auto& object : layer.objects) if (object.active && overlaps(object.x,object.y)) return false;
+            for (const auto& enemy : layer.enemies) if (enemy.active && overlaps(enemy.x,enemy.y)) return false;
+            if (mining.depthZone==layer.depth)
+                for (const auto& drone : mining.miniDrones) if (overlaps(drone.x,drone.y)) return false;
+        }
+        return true;
+    };
+    int shift=0;
+    for (int distance=1; distance<layer.terrain.width && shift==0; ++distance)
+        for (int dx : {-distance,distance}) if (destinationSafe(dx)) {shift=dx; break;}
+    if (shift==0) return false;
+    // All reads/validation finish before any writes. Empty source members stay
+    // empty; copying them at the new anchor preserves partial recovery work.
+    for (const auto& member : members) {
+        auto* old=miningCellAt(layer.terrain,member.x,member.y);
+        if (member.cell.material==MiningCellMaterial::Empty) {
+            // Some older excavation paths retained ownership on an empty
+            // cell. Keep the hole, but do not duplicate its seal membership.
+            if (old->gateAssociated || old->cocoonLayer>=0) {
+                old->gateAssociated=false;
+                old->cocoonLayer=-1;
+                markDirty(layer.terrain,member.x,member.y);
+            }
+            continue;
+        }
+        *old=makeCell(MiningCellMaterial::Empty,layer.depth);
+        old->revealed=member.cell.revealed;
+        markDirty(layer.terrain,member.x,member.y);
+    }
+    for (const auto& member : members) {
+        *miningCellAt(layer.terrain,member.x+shift,member.y)=member.cell;
+        markDirty(layer.terrain,member.x+shift,member.y);
+    }
+    artifact.x+=shift;
+    if (gate.active) {gate.anchorX+=shift; gate.derivedStateDirty=true;}
+    return true;
+}
+
+void repairRestoredOrbitalObjectives(PreparedSurfaceLanding& prepared, const MiningRunState& original,
+    const ContentCatalog& catalog)
+{
+    if (orbitalShaftAvoidsProtectedObjectives(prepared.miningTemplate,prepared.shaftX)) return;
+    // Work against a private copy: a later unsupported layer or no-room case
+    // must leave every layer, portal and loose object untouched.
+    auto repaired=prepared.miningTemplate;
+    std::vector<OrbitalRepairLayer> layers;
+    layers.push_back({repaired.depthZone,repaired.terrain,repaired.artifact,repaired.gate,repaired.enemies,repaired.looseObjects});
+    for (auto& layer : repaired.depthLayers)
+        layers.push_back({layer.depthZone,layer.terrain,layer.artifact,layer.gate,layer.enemies,layer.looseObjects});
+    for (auto& layer : layers) {
+        if (!protectedShaftOverlap(layer.terrain,layer.artifact,prepared.shaftX)) continue;
+        if (!translateOrbitalObjective(layer,repaired,original,catalog,prepared.shaftX)) {
+            prepared.laserBlocked=true;
+            return;
+        }
+    }
+    if (!orbitalShaftAvoidsProtectedObjectives(repaired,prepared.shaftX)) {prepared.laserBlocked=true; return;}
+    prepared.miningTemplate=std::move(repaired);
+    const auto& mining=prepared.miningTemplate;
+    const MiningTerrain* terrain=nullptr;
+    const MiningArtifactObject* artifact=nullptr;
+    if (mining.depthZone==prepared.laserDepth) {terrain=&mining.terrain; artifact=&mining.artifact;}
+    for (const auto& layer : mining.depthLayers) if (layer.depthZone==prepared.laserDepth) {terrain=&layer.terrain; artifact=&layer.artifact;}
+    prepared.laserBlocked=!terrain || orbitalRowBlocked(*terrain,*artifact,prepared.shaftX,prepared.laserRow,
+        prepared.laserDepth>mining.entryDepthZone);
+}
+} // namespace
+
+bool orbitalShaftAvoidsProtectedObjectives(const MiningRunState& mining, int shaftX)
+{
+    if (protectedShaftOverlap(mining.terrain,mining.artifact,shaftX)) return false;
+    for (const auto& layer : mining.depthLayers)
+        if (protectedShaftOverlap(layer.terrain,layer.artifact,shaftX)) return false;
+    return true;
+}
+
 // Repair only the absent objective in older persisted mission sites; do not
 // regenerate their terrain or restore already delivered artifacts.
 static void ensureOrbitalMissionArtifact(const GameState& state, const ContentCatalog& catalog,
@@ -8842,12 +9182,15 @@ bool prepareOrbitalSurvey(const GameState& state, const ContentCatalog& catalog,
     }
     prepared.miningTemplate = std::move(mining);
     prepared.surveyedDepth = depth;
+    validateOrbitalShaft(prepared);
     return true;
 }
 
 void excavateOrbitalShaft(PreparedSurfaceLanding& prepared, int maximumDepth, double seconds)
 {
-    if (!prepared.valid || prepared.laserBlocked || prepared.laserComplete || seconds <= 0.0) return;
+    if (!prepared.valid || prepared.laserComplete || seconds <= 0.0) return;
+    validateOrbitalShaft(prepared);
+    if (prepared.laserBlocked) return;
     auto& mining = prepared.miningTemplate;
     const int entry = mining.entryDepthZone;
     const int maximum = entry + std::max(0, std::min(prepared.surveyedDepth, maximumDepth));
@@ -8867,30 +9210,17 @@ void excavateOrbitalShaft(PreparedSurfaceLanding& prepared, int maximumDepth, do
             prepared.laserRow = 0;
             continue;
         }
-        bool solid = false;
-        for (int x = prepared.shaftX - orbital_laser::shaftLeftCells;
-             x <= prepared.shaftX + orbital_laser::shaftRightCells; ++x) {
-            const auto* cell = miningCellAt(mining.terrain, x, y);
-            if (!cell) { prepared.laserBlocked = true; break; }
-            solid |= miningMaterialSolid(cell->material);
-            const bool pocket = cell->material == MiningCellMaterial::FuelPocket || cell->material == MiningCellMaterial::OxygenPocket;
-            const bool artifact = mining.artifact.present && std::abs(x - mining.artifact.x) < 5.0 && std::abs(y - mining.artifact.y) < 5.0;
-            bool suitBarrier = false;
-            for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
-                const auto* near = miningCellAt(mining.terrain, x + dx, y + dy);
-                suitBarrier |= near && near->suitOnlyPassage;
-            }
-            if (cell->gateAssociated || cell->cocoonLayer >= 0 || suitBarrier || artifact || pocket ||
-                cell->material == MiningCellMaterial::ArtifactCache ||
-                (cell->material == MiningCellMaterial::Bedrock && y < mining.terrain.height - 3 &&
-                    !(prepared.laserDepth > entry && y < 3))) {
-                prepared.laserBlocked = true; break;
-            }
+        if (orbitalRowBlocked(mining.terrain,mining.artifact,prepared.shaftX,y,prepared.laserDepth>entry)) {
+            prepared.laserBlocked=true;
+            break;
         }
-        if (prepared.laserBlocked) break;
+        bool solid = false;
+        for (int x=prepared.shaftX-orbital_laser::shaftLeftCells; x<=prepared.shaftX+orbital_laser::shaftRightCells; ++x)
+            solid |= miningMaterialSolid(miningCellAt(mining.terrain,x,y)->material);
         const double rowSeconds = orbital_laser::secondsPerLayer / std::max(1, mining.terrain.height);
         if (solid && prepared.laserRowWork < rowSeconds) break;
         if (solid) prepared.laserRowWork -= rowSeconds;
+        prepared.shaftCommitted=true;
         for (int x = prepared.shaftX - orbital_laser::shaftLeftCells;
              x <= prepared.shaftX + orbital_laser::shaftRightCells; ++x) {
             auto* cell = miningCellAt(mining.terrain, x, y);
@@ -8985,19 +9315,10 @@ PreparedSurfaceLanding prepareSurfaceLanding(
 
     prepared.expeditionTemplate = std::move(preview.run.planetaryExpedition);
     prepared.miningTemplate = std::move(preview.run.mining);
-    // Lock the shaft beside the cleared staging shelf at site creation, not
-    // when Survey is pressed. Never select a column under the service pad.
+    // Check every prebuilt depth, including objectives deeper than today's
+    // scanner reach, before fixing the new site's bore column.
     const auto& site = prepared.miningTemplate;
-    const int halfWidth = std::max(orbital_laser::shaftLeftCells, orbital_laser::shaftRightCells);
-    prepared.laserBlocked = true;
-    for (const int x : {static_cast<int>(std::ceil(site.droneX)) + halfWidth + 2,
-                       static_cast<int>(std::floor(site.droneX)) - halfWidth - 2}) {
-        if (x - halfWidth < 1 || x + halfWidth >= site.terrain.width - 1 ||
-            std::abs(x + orbital_laser::shaftCenterOffset - site.returnZoneX) <= halfWidth + 3.0) continue;
-        prepared.shaftX = x;
-        prepared.laserBlocked = false;
-        break;
-    }
+    validateOrbitalShaft(prepared);
     prepared.laserDepth = site.entryDepthZone;
     prepared.laserRow = 4;
     prepared.miningSites = std::move(preview.meta.miningSites);
@@ -9021,6 +9342,7 @@ PreparedSurfaceLanding restoreSurfaceLanding(const GameState& state, const Conte
     for (std::size_t i=0;i<catalog.destinations.size();++i)
         if (catalog.destinations[i].id == request.destinationId) p.destinationIndex = static_cast<int>(i);
     static_cast<OrbitalSiteProgress&>(p) = site.orbital;
+    p.shaftCommitted = true;
     auto& surface = p.expeditionTemplate;
     surface.active = true;
     surface.cargo = 0; surface.temporaryMaterials = {}; surface.temporaryArtifacts.clear();
@@ -9044,6 +9366,7 @@ PreparedSurfaceLanding restoreSurfaceLanding(const GameState& state, const Conte
     m.rigVelocityX = m.rigVelocityY = 0;
     m.combatProjectiles.clear(); m.damageNumbers.clear(); m.pickupEvents.clear();
     m.miniDrones.clear();
+    m.droneLoadoutRecallActive=false;
     const auto releaseCarriers = [](auto& objects) {
         for (auto& object : objects) { object.carrierFrame = -1; object.tethered = false; }
     };
@@ -9072,6 +9395,9 @@ PreparedSurfaceLanding restoreSurfaceLanding(const GameState& state, const Conte
     p.valid = p.destinationIndex >= 0 && !m.terrain.cells.empty();
     if (p.valid) {
         ensureOrbitalMissionArtifact(state, catalog, p);
+        // Eligibility comes from the original snapshot, before the new visit
+        // releases old tethers and replaces its actors. Never move live loot.
+        repairRestoredOrbitalObjectives(p,site.mining,catalog);
         if (p.surveyComplete) (void)prepareOrbitalSurvey(state, catalog, p, std::max(0, p.surveyedDepth));
     }
     if (p.valid) {

@@ -112,7 +112,7 @@ OrbitLoopAssessment assessOrbitLoop(const FlightRunState& flight)
 
 double orbitConfirmationProgress(const FlightRunState& flight)
 {
-    return flight.orbit.captured ? 1.0 : std::clamp(flight.orbit.confirmationSeconds / 2.0, 0.0, 1.0);
+    return flight.orbit.captured ? 1.0 : std::clamp(flight.orbit.confirmationSeconds / flight_capture::confirmationSeconds, 0.0, 1.0);
 }
 
 double flightWrappedAngleDelta(double from, double to)

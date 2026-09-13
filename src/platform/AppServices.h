@@ -313,6 +313,8 @@ public:
     virtual bool navigate(UiDirection direction) = 0;
     virtual bool activateFocused() = 0;
     virtual bool cancel() = 0;
+    // Safety pauses may close a nested panel without dismissing their root.
+    virtual bool cancelChildModal() { return false; }
     virtual bool scroll(float amount) = 0;
     // Modal visibility is the authoritative input and focus boundary. While
     // true, navigation, activation, cancellation, scrolling, and hit testing
@@ -320,9 +322,19 @@ public:
     // persistent panel or gameplay scene.
     virtual bool modalOpen() const = 0;
     virtual void setControllerPresentation(bool active, ControllerFamily family) = 0;
+    virtual void setControllerConfirmCancelSwapped(bool) {}
     virtual void setControllerFocusVisible(bool visible) = 0;
     virtual void setControllerResumeBlocked(bool blocked, bool controllerConnected) = 0;
     virtual std::string focusedId() const = 0;
+    virtual FocusedControllerAction focusedControllerAction() const
+    {
+        FocusedControllerAction action {focusedId()};
+        if (action.id == "action:reset_save") {
+            action.kind = ControllerActivationKind::HoldToConfirm;
+            action.holdSeconds = 0.75;
+        }
+        return action;
+    }
     virtual void requestFocus(std::string_view) {}
     virtual void openModal(const std::string& id) = 0;
     virtual void closeModal() = 0;

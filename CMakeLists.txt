@@ -243,6 +243,10 @@ if(MSVC)
     target_link_options(rocket_app_services_tests PRIVATE "/STACK:8388608")
 endif()
 
+add_executable(rocket_controller_focus_tests tests/controller_focus_tests.cpp)
+target_link_libraries(rocket_controller_focus_tests PRIVATE rocket_app rmlui_core)
+set_target_properties(rocket_controller_focus_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+
 add_executable(rocket_performance_metrics_tests tests/performance_metrics_tests.cpp)
 target_link_libraries(rocket_performance_metrics_tests PRIVATE rocket_app)
 set_target_properties(rocket_performance_metrics_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
@@ -261,6 +265,7 @@ set(ROCKET_TEST_TARGETS
     rocket_mining_economy_tests
     rocket_controller_input_tests
     rocket_app_services_tests
+    rocket_controller_focus_tests
     rocket_performance_metrics_tests
     rocket_frame_capture_tests
     rocket_scene_atlas_tests)
@@ -285,6 +290,9 @@ if(EMSCRIPTEN)
     target_link_options(rocket_app_services_tests PRIVATE
         "SHELL:--embed-file \"${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts@/assets/fonts\""
         "SHELL:--embed-file \"${CMAKE_CURRENT_SOURCE_DIR}/assets/ui@/assets/ui\"")
+    target_link_options(rocket_controller_focus_tests PRIVATE
+        "SHELL:--embed-file \"${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts@/assets/fonts\""
+        "SHELL:--embed-file \"${CMAKE_CURRENT_SOURCE_DIR}/assets/ui@/assets/ui\"")
     if(DEFINED ENV{EMSDK_NODE})
         set(ROCKET_TEST_NODE "$ENV{EMSDK_NODE}")
     else()
@@ -295,6 +303,7 @@ if(EMSCRIPTEN)
     add_test(NAME rocket_mining_economy_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_mining_economy_tests>")
     add_test(NAME rocket_controller_input_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_controller_input_tests>")
     add_test(NAME rocket_app_services_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_app_services_tests>")
+    add_test(NAME rocket_controller_focus_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_controller_focus_tests>")
     add_test(NAME rocket_performance_metrics_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_performance_metrics_tests>")
     add_test(NAME rocket_frame_capture_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_frame_capture_tests>")
     add_test(NAME rocket_scene_atlas_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_scene_atlas_tests>")
@@ -304,6 +313,7 @@ else()
     add_test(NAME rocket_mining_economy_tests COMMAND rocket_mining_economy_tests)
     add_test(NAME rocket_controller_input_tests COMMAND rocket_controller_input_tests)
     add_test(NAME rocket_app_services_tests COMMAND rocket_app_services_tests)
+    add_test(NAME rocket_controller_focus_tests COMMAND rocket_controller_focus_tests)
     add_test(NAME rocket_performance_metrics_tests COMMAND rocket_performance_metrics_tests)
     add_test(NAME rocket_frame_capture_tests COMMAND rocket_frame_capture_tests)
     add_test(NAME rocket_scene_atlas_tests COMMAND rocket_scene_atlas_tests)

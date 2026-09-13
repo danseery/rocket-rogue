@@ -105,6 +105,8 @@ enum class TextureId : std::uint8_t {
     MissionControlFennec,
     ServiceDock,
     MissionControlFennecConcerned,
+    MiningTunnelBackdrop,
+    EnemySecurityDrone,
     Count
 };
 

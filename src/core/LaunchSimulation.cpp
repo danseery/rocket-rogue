@@ -917,12 +917,19 @@ LaunchFlightStep updateSpaceFlight(
     // removes orbital velocity, so losing a qualifying loop must not revoke
     // the surface handoff. Body departure/ascent reset capture separately.
     if (!flight.orbit.captured) {
-        flight.orbit.confirmationSeconds = loop.qualifies && std::abs(flight.selectedThrottle) <= 0.001 &&
-            !result.asteroidHit ? flight.orbit.confirmationSeconds + realDt : 0.0;
+        if (result.asteroidHit || flight.mode != FlightMode::Orbit)
+            flight.orbit.confirmationSeconds = 0.0;
+        else {
+            const bool confirming = loop.qualifies && std::abs(flight.selectedThrottle) <= 0.001;
+            flight.orbit.confirmationSeconds = std::clamp(flight.orbit.confirmationSeconds +
+                (confirming ? realDt : -realDt * flight_capture::decayPerSecond),
+                0.0, flight_capture::confirmationSeconds);
+        }
         flight.orbit.stableAngularProgress = 0.0;
     }
     if (!flight.orbit.captured &&
-        flight.orbit.confirmationSeconds >= 2.0) {
+        flight.orbit.confirmationSeconds >= flight_capture::confirmationSeconds &&
+        loop.qualifies && std::abs(flight.selectedThrottle) <= 0.001 && !result.asteroidHit) {
         flight.orbit.captured = true;
         flight.orbit.grade = loop.perfect
             ? OrbitGrade::Perfect
@@ -994,6 +1001,7 @@ LaunchFlightStep updateSpaceFlight(
         return result;
     } else if (flight.mode == FlightMode::Orbit && radius > approachBoundary*1.10 && radialVelocity > 0.0) {
         flight.mode=FlightMode::Travel;
+        flight.orbit.confirmationSeconds = 0.0;
         flight.phase=FlightPhase::Transfer;
         flight.handoff={FlightMode::Orbit,FlightMode::Travel,0.0,flight.positionX,flight.positionY,flight.heading};
     } else if (!system && flight.mode == FlightMode::Travel && flight.orbit.enteredInfluence &&

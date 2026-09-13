@@ -46,17 +46,6 @@ bool orbitalWorkVisible(const PanelRenderContext& c)
         c.launchFlight->mode == FlightMode::Orbit && c.launchFlight->orbit.captured && c.orbitalWork->captureDelay <= 0.0;
 }
 
-std::string orbitalWorkLabel(const PanelRenderContext& c)
-{
-    const auto& w = *c.orbitalWork;
-    if (w.phase == OrbitalWorkPhase::Surveying) return "SCANNING...";
-    if (!w.surveyComplete) return "SCAN";
-    if (!c.orbitalInsideZone) return w.active() ? "RESUME FLIGHT" : "RETURN TO SELECTED WEDGE";
-    if (c.orbitalLaserBlocked) return "SURFACE TOOLS REQUIRED";
-    if (c.orbitalLaserComplete) return "SHAFT READY";
-    return "DRILL";
-}
-
 std::string orbitalLaserHint(const PanelRenderContext& c)
 {
     const std::string limit = "Depth " + std::to_string(
@@ -298,12 +287,15 @@ std::string phaseTitle(Screen screen)
     }
 }
 
-std::string button(std::string_view label, std::string_view action, std::string cssClass = "", bool defaultFocus = false)
+std::string button(std::string_view label, std::string_view action, std::string cssClass = "", bool defaultFocus = false,
+    std::string_view focusId = {}, std::string_view activation = {})
 {
     const std::string classAttr = " class=\"" + std::string(cssClass) + (cssClass.empty() ? "" : " ") + "rr-text-button\"";
     const std::string defaultAttr = defaultFocus ? " data-ui-default-focus=\"1\"" : "";
-    return "<button" + classAttr + " data-rr-action=\"" + htmlEscape(action) + "\" data-ui-focus-id=\"action:" +
-        htmlEscape(action) + "\"" + defaultAttr + "><span class=\"rr-button-label\">" + htmlEscape(label) + "</span></button>";
+    const std::string activationAttr = activation.empty() ? "" : " data-ui-activation=\"" + htmlEscape(activation) + "\"";
+    return "<button" + classAttr + " data-rr-action=\"" + htmlEscape(action) + "\" data-ui-focus-id=\"" +
+        (focusId.empty() ? "action:" + htmlEscape(action) : htmlEscape(focusId)) + "\"" + defaultAttr + activationAttr +
+        "><span class=\"rr-button-label\">" + htmlEscape(label) + "</span></button>";
 }
 
 std::string scenarioActionButton(
@@ -475,10 +467,12 @@ void collectSharedUtilityModals()
 {
     const std::string controlsBody =
         "<div class=\"detail-stack rr-detail-stack modal-body controller-controls\">"
-        "<div><strong>Menus</strong><span>Left stick or D-pad navigates. South selects. East goes back. Right stick scrolls.</span></div>"
+        "<div><strong>Menus</strong><span>Left stick or D-pad navigates. Confirm selects the highlighted action; Back returns. Right stick scrolls. Confirm and Back follow your controller settings.</span></div>"
         "<div><strong>Shortcuts</strong><span>Menu opens this pause menu. View opens Map. North opens Inventory outside real-time play.</span></div>"
         "<div><strong>Launch</strong><span>Left stick steers and changes throttle. South turns around. West turns engines off or on.</span></div>"
         "<div><strong>Flight</strong><span>Left stick steers. Apply thrust to change course; coast to conserve fuel.</span></div>"
+        "<div><strong>Orbital work</strong><span>After Scan, left stick or D-pad selects Scan, Drill, Land, or Resume Flight. Hold Confirm on Drill. Resume Flight or Back returns to piloting.</span></div>"
+        "<div><strong>Action selection</strong><span>Press D-pad during flight or mining to pause and select UI actions. Back returns to gameplay after sticks and action buttons are released.</span></div>"
         "<div><strong>Mining rig</strong><span>Left stick moves. Right trigger drills. West scans. North tethers. Tap South to stow cargo or leave; hold South for 0.6 seconds to exit.</span></div>"
         "<div><strong>Jetpack EVA</strong><span>Left stick thrusts. Right stick aims. Right trigger fires. Left trigger drills. West scans. North tethers. Hold South for 0.6 seconds to enter.</span></div>"
         "</div>";
@@ -496,7 +490,7 @@ void collectSharedUtilityModals()
         "<div class=\"modal-actions action-row\">"
         "<button type=\"button\" class=\"ok rr-text-button\" data-ui-close-modal=\"1\" data-ui-focus-id=\"reset:cancel\" data-ui-default-focus=\"1\"><span class=\"rr-button-label\">Cancel</span></button>"
         "<button type=\"button\" class=\"danger rr-text-button\" data-rr-action=\"reset_save\" data-ui-focus-id=\"action:reset_save\" "
-        "data-controller-hold-seconds=\"0.75\"><span class=\"rr-button-label\">Hold to reset save</span></button></div>";
+        "data-controller-hold-seconds=\"0.75\" data-ui-activation=\"hold\" data-ui-hold-seconds=\"0.75\"><span class=\"rr-button-label\">Hold to reset save</span></button></div>";
 
     collectModal({"system_menu", "Paused", systemMenuBody, {}, false, false, false});
     collectModal({"controls", "Controller controls", controlsBody});
@@ -998,7 +992,7 @@ std::string miningPanelButton(const PanelButtonPresentation& action, bool defaul
 {
     const std::string cssClass = action.enabled ? action.cssClass : "disabled";
     const std::string classAttr = " class=\"" + htmlEscape(cssClass) + " rr-mining-text-button\"";
-    const std::string defaultAttr = defaultFocus ? " data-ui-default-focus=\"1\"" : "";
+    const std::string defaultAttr = defaultFocus && action.enabled ? " data-ui-default-focus=\"1\"" : "";
     std::ostringstream out;
     out << "<button type=\"button\"" << classAttr;
     if (!action.actionId.empty()) {
@@ -1545,7 +1539,7 @@ std::string refitOfferCard(const RefitOfferPresentation& offer, bool defaultFocu
     return out.str();
 }
 
-std::string researchProjectCard(const ResearchProjectCardPresentation& project)
+std::string researchProjectCard(const ResearchProjectCardPresentation& project, bool defaultFocus = false)
 {
     std::ostringstream out;
     out << "<article class=\"ops-card rr-fixed-lane-card ui-choice-row management-choice-row\">";
@@ -1557,13 +1551,13 @@ std::string researchProjectCard(const ResearchProjectCardPresentation& project)
         out << "<strong class=\"module-impact\">" << htmlEscape(project.reward) << "</strong>";
     }
     out << "<div class=\"card-footer action-row\"><span>" << htmlEscape(project.materialCost) << "</span>"
-        << panelButton(project.action) << "</div></article>";
+        << panelButton(project.action, defaultFocus) << "</div></article>";
     return out.str();
 }
 
 std::string surfaceActionCard(
     const SurfaceActionPreviewPresentation& action,
-    std::string_view introductionModal = {})
+    std::string_view introductionModal = {}, bool defaultFocus = false)
 {
     std::ostringstream out;
     const bool isMining = isSurfaceMiningAction(action);
@@ -1576,7 +1570,7 @@ std::string surfaceActionCard(
     out << "<div class=\"card-topline surface-choice-cues\"><span class=\"surface-choice-cost\">" << htmlEscape(action.cost)
         << "</span><span class=\"surface-choice-outcome\">" << htmlEscape(surfaceActionRiskRewardCue(action)) << "</span></div></div>";
     const PanelButtonPresentation footerButton = surfaceActionFooterButton(action);
-    out << introductoryPanelButton(footerButton, introductionModal) << "</article>";
+    out << introductoryPanelButton(footerButton, introductionModal, defaultFocus) << "</article>";
     return out.str();
 }
 
@@ -1602,7 +1596,7 @@ std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade, bo
     return out.str();
 }
 
-std::string miniDroneControlCard(const MiniDroneCardPresentation& drone)
+std::string miniDroneControlCard(const MiniDroneCardPresentation& drone, bool defaultFocus = false)
 {
     std::ostringstream out;
     out << "<article class=\"drone-control-card " << rarityCardClass(drone.rarity) << "\">";
@@ -1614,8 +1608,8 @@ std::string miniDroneControlCard(const MiniDroneCardPresentation& drone)
     out << "<p class=\"card-copy drone-control-status\">" << htmlEscape(drone.status) << "</p>";
     out << "<p class=\"card-copy drone-card-summary\">" << htmlEscape(drone.detail) << "</p>";
     out << "<div class=\"card-footer action-row\">"
-        << modalButton("Details", droneDetailsModalId(drone.index), "ghost")
-        << panelButton(drone.action) << "</div></article>";
+        << modalButton("Details", droneDetailsModalId(drone.index), "ghost", defaultFocus && !drone.action.enabled)
+        << panelButton(drone.action, defaultFocus) << "</div></article>";
     return out.str();
 }
 
@@ -1636,7 +1630,7 @@ std::string droneDetailsModalBody(const MiniDroneCardPresentation& drone)
         << "<section class=\"drone-detail-section\"><h3>Build contribution</h3><p>"
         << htmlEscape(drone.buildHook) << "</p></section>"
         << "<div class=\"modal-actions action-row drone-details-actions\">"
-        << panelButton(drone.action);
+        << panelButton(drone.action, true);
     out << "</div></section>";
     return out.str();
 }
@@ -2475,13 +2469,13 @@ std::string buildGamePanelMarkup(
     };
     settingsDetails.push_back(detailPresentationRow(
         "Controller",
-        std::string_view("Left stick or D-pad navigates; South selects; East goes back; Menu pauses. Context prompts show flight and mining controls.")));
+        std::string_view("Left stick or D-pad navigates menus; Confirm selects; Back returns; Menu pauses. Confirm and Back follow controller settings. D-pad pauses live flight or mining for action selection.")));
     settingsBody << detailStack(settingsDetails);
     settingsBody << "<section class=\"settings-control\" data-resolution-settings>"
         << "<div><h3>" << htmlEscape("Display resolution") << "</h3>"
         << "<p>" << htmlEscape("Choose the render target. Auto follows the current display and pixel density.") << "</p></div>"
         << "<label><span>" << htmlEscape("Resolution") << "</span>"
-        << "<select data-resolution-select aria-label=\"Display resolution\">"
+        << "<select data-resolution-select data-ui-focus-id=\"setting:resolution\" data-ui-default-focus=\"1\" aria-label=\"Display resolution\">"
         << "<option value=\"auto\">Auto (display)</option>"
         << "<option value=\"1280x800\">1280 x 800 (Steam Deck)</option>"
         << "<option value=\"1920x1080\">1920 x 1080</option>"
@@ -2738,6 +2732,16 @@ std::string buildGamePanelMarkup(
             out << boardNote("No mapped destinations yet. Continue the frontier ladder to discover the Ark.");
         } else {
             out << "<section class=\"board-primary navigation-map phase-lane\"><h2>" << htmlEscape("Choose sortie") << "</h2><div class=\"ops-grid nav-grid\">";
+            int defaultDestinationIndex = -1;
+            for (int index = 0; index < static_cast<int>(destinations.size()); ++index) {
+                const Destination& destination = *destinations[static_cast<std::size_t>(index)];
+                if (state.meta.ark.fuelReserve < 2 + destination.tier) continue;
+                if (defaultDestinationIndex < 0) defaultDestinationIndex = index;
+                if (state.meta.navigation.selectedDestinationId == destination.id) {
+                    defaultDestinationIndex = index;
+                    break;
+                }
+            }
             for (int index = 0; index < static_cast<int>(destinations.size()); ++index) {
                 const Destination& destination = *destinations[static_cast<std::size_t>(index)];
                 const bool selected = state.meta.navigation.selectedDestinationId == destination.id;
@@ -2759,7 +2763,8 @@ std::string buildGamePanelMarkup(
                 out << "</div>";
                 out << "<div class=\"card-footer action-row\"><span>" << htmlEscape(selected ? "Selected" : (fuelAvailable ? "Mapped" : "Need fuel"))
                     << "</span>" << (fuelAvailable
-                        ? button("Plot course", ui::actions::selectNavigationDestination(index), selected ? "ok" : "warn")
+                        ? button("Plot course", ui::actions::selectNavigationDestination(index), selected ? "ok" : "warn",
+                            index == defaultDestinationIndex)
                         : disabledButton("Need fuel"))
                     << "</div></article>";
             }
@@ -2896,20 +2901,37 @@ std::string buildGamePanelMarkup(
             if (w.phase == OrbitalWorkPhase::LandingAlignment) {
                 out << "<p class=\"phase-copy\">ALIGNING FOR DESCENT</p>";
             } else {
-            const bool ready = w.active() || (context.launchFlight->orbit.loopQualifies &&
-                std::abs(context.launchFlight->selectedThrottle) <= 0.001);
-            const bool outside = w.surveyComplete && !context.orbitalInsideZone;
-            out << "<div data-orbital-work=\"1\" class=\"orbit-primary-action\">"
-                << (outside && !w.active() ? panelButton(disabledPanelButton("RETURN TO SELECTED WEDGE"))
-                    : ready ? button(orbitalWorkLabel(context), ui::actions::orbitalWork, "ok", true)
-                    : panelButton(disabledPanelButton("ESTABLISH A SAFE LOOP")))
-                << "</div><p id=\"rr-orbital-status\" class=\"phase-copy\">"
-                << (w.surveyComplete ? orbitalLaserHint(context)
-                    : "Scan depth " + std::to_string(surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray)))
-                << "</p>";
-            if (w.active() && w.surveyComplete && !outside)
-                out << button("LAND", ui::actions::landFromOrbit, "ok");
-            if (w.active() && !outside) out << button("RESUME FLIGHT", ui::actions::resumeOrbitalFlight, "ghost");
+                const bool ready = w.active() || (context.launchFlight->orbit.loopQualifies &&
+                    std::abs(context.launchFlight->selectedThrottle) <= 0.001);
+                const bool outside = w.surveyComplete && !context.orbitalInsideZone;
+                const bool scanning = w.phase == OrbitalWorkPhase::Surveying;
+                const bool canScan = ready && !w.surveyComplete && !scanning;
+                const bool canDrill = ready && w.surveyComplete && !outside &&
+                    !context.orbitalLaserBlocked && !context.orbitalLaserComplete;
+                const bool canLand = context.orbitalLandingEligible;
+                const bool workDefault = canScan || canDrill;
+                out << "<div data-orbital-work=\"1\" class=\"orbit-primary-action\">";
+                if (canScan) {
+                    out << button("SCAN", ui::actions::orbitalWork, "ok", true, "action:orbital_scan");
+                } else if (canDrill) {
+                    // Distinct identities prevent a held Scan confirm from turning
+                    // into a Drill hold when the survey refreshes the panel.
+                    out << button("DRILL", ui::actions::orbitalWork, "ok", true,
+                        "action:orbital_drill", "continuous");
+                } else {
+                    const std::string_view status = scanning ? "SCANNING..."
+                        : !ready ? "ESTABLISH A SAFE LOOP"
+                        : outside ? "RETURN TO SELECTED WEDGE"
+                        : context.orbitalLaserBlocked ? "SURFACE TOOLS REQUIRED"
+                        : context.orbitalLaserComplete ? "SHAFT READY" : "";
+                    out << "<p class=\"orbit-work-state\" role=\"status\">" << status << "</p>";
+                }
+                out << "</div><p id=\"rr-orbital-status\" class=\"phase-copy\">"
+                    << (w.surveyComplete ? orbitalLaserHint(context)
+                        : "Scan depth " + std::to_string(surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray)))
+                    << "</p>";
+                if (canLand) out << button("LAND", ui::actions::landFromOrbit, "ok", !workDefault);
+                out << button("RESUME FLIGHT", ui::actions::resumeOrbitalFlight, "ghost", !workDefault && !canLand);
             }
             out << "</section>";
         }
@@ -2933,7 +2955,7 @@ std::string buildGamePanelMarkup(
                     ? "Bay sealed. Use the cockpit launch control beside the vehicle."
                     : (context.preflightReady
                         ? "Mining Rig secured and bay sealed. Use the cockpit launch control beside the vehicle."
-                        : "Mining Rig transfer in progress. Press Cross or A now to queue launch for bay seal."));
+                        : "Mining Rig transfer in progress. Press Confirm now to queue launch for bay seal."));
             out << "<p class=\"cockpit-hold-copy\">" << htmlEscape(preflightCopy) << "</p>";
         } else if (physicalFlight) {
             out << "<p class=\"cockpit-hold-copy physical-flight-controls\">"
@@ -3064,12 +3086,14 @@ std::string buildGamePanelMarkup(
         }
         out << "</div>";
         out << "<section class=\"board-primary\"><h2>" << htmlEscape("Research options") << "</h2><div class=\"ops-grid\">";
+        bool researchDefaultAssigned = false;
         for (const ResearchProjectCardPresentation& project : researchPanel.projects) {
-            out << researchProjectCard(project);
+            out << researchProjectCard(project, !researchDefaultAssigned && project.action.enabled);
+            researchDefaultAssigned = researchDefaultAssigned || project.action.enabled;
         }
         out << "</div></section>";
         out << "<div class=\"actions action-row\">";
-        out << panelButton(researchPanel.skipAction);
+        out << panelButton(researchPanel.skipAction, !researchDefaultAssigned);
         out << "</div>";
         out << phaseBoardClose();
         out << modalTemplate(ui::modals::research, text::panel::modals::researchDetails, detailStack(researchPanel.details));
@@ -3212,10 +3236,28 @@ std::string buildGamePanelMarkup(
             << "</strong></header></article>";
         out << "</section><section class=\"mining-command-dock" << (miningHud.atShip ? " at-ship" : " away")
             << "\"><div class=\"actions action-row system-actions\">";
+        bool miningDefaultAssigned = false;
         for (const PanelButtonPresentation& action : miningHud.actions) {
-            out << miningPanelButton(action);
+            out << miningPanelButton(action, !miningDefaultAssigned && action.enabled);
+            miningDefaultAssigned = miningDefaultAssigned || action.enabled;
+        }
+        const std::string hazardMission = hazardDroneMissionMarkup(context, false);
+        std::ostringstream supportActions;
+        if (!hazardMission.empty() || (miningHud.atShip && droneBayUnlocked(state))) {
+            supportActions << panelButton(panelActionButton("Drone Ops", ui::actions::droneOps, "ghost"), !miningDefaultAssigned);
+            miningDefaultAssigned = true;
+        }
+        if (miningHud.atShip) {
+            const auto waitForDrones = std::find_if(miningRun.actions.begin(), miningRun.actions.end(), [](const auto& action) {
+                return action.actionId == ui::actions::miningWaitForDrones;
+            });
+            if (waitForDrones != miningRun.actions.end()) supportActions << panelButton(*waitForDrones, !miningDefaultAssigned);
         }
         out << "</div></section></footer>";
+        if (!hazardMission.empty() || !supportActions.str().empty()) {
+            out << "<div class=\"mining-hazard-mission\">" << hazardMission
+                << "<div class=\"actions action-row hazard-mission-actions\">" << supportActions.str() << "</div></div>";
+        }
         const auto drillRepair = std::find_if(miningRun.actions.begin(), miningRun.actions.end(), [](const PanelButtonPresentation& action) {
             return action.actionId == ui::actions::miningRepairDrill;
         });
@@ -3260,13 +3302,30 @@ std::string buildGamePanelMarkup(
     }
 
     if (state.screen == Screen::DroneOps) {
-        const DroneOpsPresentation dronePanel = droneOpsPresentation(state, catalog);
+        DroneOpsPresentation dronePanel = droneOpsPresentation(state, catalog);
+        const auto acceptance = solarMissionAcceptanceForBody(state, catalog, state.run.expedition.location.bodyId);
+        const std::string hazardMission = hazardDroneMissionMarkup(context, false, true);
+        const bool commissionDefault = !hazardMission.empty() && acceptance.available;
+        const auto& mining = state.run.mining;
+        const auto droneRecovery = miningDroneRecoveryStatus(mining, true);
+        const bool serviceAvailable = mining.active
+            ? miningAtReturnZone(mining) && droneRecovery.outstandingDrones == 0
+            : !state.run.expedition.travelInitialized || operationalHomeDocked(state.run.expedition);
+        if (!serviceAvailable) {
+            for (auto& drone : dronePanel.drones) drone.action.enabled = false;
+            for (auto& slot : dronePanel.loadoutSlots) slot.action.enabled = false;
+        }
+        if (state.run.expedition.travelInitialized) {
+            dronePanel.backAction.label = mining.active ? "Return to Mining"
+                : operationalHomeDocked(state.run.expedition) ? "Return to Dock" : "Resume Flight";
+        }
         const Destination& droneDestination = currentDestination(state, catalog);
-        ScenarioObjectivePresentation droneScenario = scenarioObjectiveForDestination(
-            state,
-            catalog,
-            droneDestination.id);
-        if (droneDestination.id == content::destination::mars) {
+        const ScenarioObjectivePresentation physicalMission = state.run.expedition.travelInitialized
+            ? solarMissionObjectiveForBody(state, catalog, state.run.expedition.location.bodyId)
+            : ScenarioObjectivePresentation{};
+        ScenarioObjectivePresentation droneScenario = physicalMission.available ? physicalMission
+            : scenarioObjectiveForDestination(state, catalog, droneDestination.id);
+        if (!physicalMission.available && droneDestination.id == content::destination::mars) {
             const ScenarioObjectivePresentation bayExpansion = scenarioObjectivePresentation(
                 state,
                 catalog,
@@ -3308,7 +3367,7 @@ std::string buildGamePanelMarkup(
             << "<p>" << htmlEscape("Assign owned Support Drone frames or build paid copies into open slots. Every change saves immediately.") << "</p></div>"
             << "<div class=\"utility-row utility-actions drone-workspace-actions\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
             << modalButton("Synergies", ui::modals::droneSynergies, "ghost")
-            << panelButton(dronePanel.backAction) << "</div></div>";
+            << panelButton(dronePanel.backAction, !commissionDefault && dronePanel.drones.empty()) << "</div></div>";
         std::string droneMissionInstruction = droneScenario.detail;
         if (droneScenarioStep != nullptr &&
             droneScenarioStep->completionEvent == ScenarioEventKind::SafeMaterialDelivered) {
@@ -3330,14 +3389,29 @@ std::string buildGamePanelMarkup(
                     + " Common Ore, then extract it safely.";
             }
         }
-        if (droneScenario.available) {
+        if (!hazardMission.empty()) {
+            out << hazardMission;
+        }
+        if (droneScenario.available && !commissionDefault) {
             out << droneMissionStripMarkup(droneScenario, droneMissionInstruction);
         }
-        if (hazardSwapRequired) {
+        if (hazardSwapRequired && hazardMission.empty()) {
             out << "<section class=\"phase-advisory warn scenario-hazard-swap-objective\">"
                 << "<strong>RECOVERY LOADOUT // EQUIP HAZARD SUPPORT</strong>"
                 << "<span>The active site needs a Hazard Drone. Free a slot, then assign a qualified frame before returning.</span>"
                 << "</section>";
+        }
+        if (!serviceAvailable) {
+            out << "<section class=\"phase-advisory warn drone-service-status\"><strong>LOADOUT // SHIP SERVICE REQUIRED</strong><span>"
+                << (mining.active && miningAtReturnZone(mining)
+                    ? "Recall all Support Drones to the shuttle before changing the loadout."
+                    : mining.active ? "Return the Mining Rig to the shuttle, then wait for all Support Drones before assigning frames."
+                                    : "Land and reach ship service to assign Support Drones. Commissioning and details remain available here.")
+                << "</span>";
+            if (mining.active && miningAtReturnZone(mining) && droneRecovery.outstandingDrones > 0) {
+                out << "<div class=\"actions action-row\">" << button("Recall and wait for drones", ui::actions::miningWaitForDrones, "ok") << "</div>";
+            }
+            out << "</section>";
         }
         const std::vector<PanelMetricPresentation> droneBayChips {
             dronePanel.metrics.size() > 0 ? dronePanel.metrics[0] : panelMetric("Slots", "0/0"),
@@ -3358,8 +3432,8 @@ std::string buildGamePanelMarkup(
         out << "<section class=\"board-primary drone-roster\"><div class=\"section-heading\"><div><span class=\"ui-kicker\">"
             << htmlEscape("AVAILABLE FRAMES") << "</span><h2>" << htmlEscape("Drone controls")
             << "</h2></div><p>" << htmlEscape("Assign owned frames and inspect expedition grafts or synergies.") << "</p></div><div class=\"drone-control-grid drone-controller-choice-row\">";
-        for (const MiniDroneCardPresentation& drone : dronePanel.drones) {
-            out << miniDroneControlCard(drone);
+        for (std::size_t index = 0; index < dronePanel.drones.size(); ++index) {
+            out << miniDroneControlCard(dronePanel.drones[index], !commissionDefault && index == 0);
         }
         out << "</div></section>";
         out << "<section class=\"board-primary drone-loadout-bench\"><div class=\"section-heading\"><div><span class=\"ui-kicker\">"
@@ -3466,10 +3540,12 @@ std::string buildGamePanelMarkup(
         out << "</div>";
         out << "<section class=\"board-primary surface-actions phase-lane primary-actions rr-fixed-action-lane rr-action-footer\">";
         out << "<div class=\"surface-choice-list controller-action-row surface-controller-action-row rr-card-grid\">";
+        bool surfaceDefaultAssigned = false;
         for (const SurfaceActionPreviewPresentation& action : surfacePanel.actions) {
             const std::string_view introductionModal = showMiningIntroduction && isSurfaceMiningAction(action)
                 ? ui::modals::miningIntroduction : std::string_view {};
-            out << surfaceActionCard(action, introductionModal);
+            out << surfaceActionCard(action, introductionModal, !surfaceDefaultAssigned && action.action.enabled);
+            surfaceDefaultAssigned = surfaceDefaultAssigned || action.action.enabled;
         }
         out << "</div></section>";
         out << phaseBoardClose();
@@ -3540,8 +3616,10 @@ std::string buildGamePanelMarkup(
         }
         out << "</div>";
         out << "<div class=\"pilot-card-grid draft-card-grid controller-choice-row\">";
-        for (std::size_t index = 0; index < surfacePanel.upgradeOffers.size(); ++index) {
-            out << surfaceUpgradeCard(surfacePanel.upgradeOffers[index], index == 0);
+        bool upgradeDefaultAssigned = false;
+        for (const auto& upgrade : surfacePanel.upgradeOffers) {
+            out << surfaceUpgradeCard(upgrade, !upgradeDefaultAssigned && upgrade.action.enabled);
+            upgradeDefaultAssigned = upgradeDefaultAssigned || upgrade.action.enabled;
         }
         out << "</div>";
         out << "</section>";
@@ -3595,17 +3673,17 @@ std::string buildGamePanelMarkup(
         out << "</div><div class=\"pilot-card-grid draft-card-grid controller-choice-row "
             << (singleLaunchLessonOffer ? "single-refit-offer" : "multi-refit-offers")
             << "\">";
-        // Ordinary Refit purchases spend credits and need deliberate focus.
-        // A single curated tutorial offer is the sole safe default.
-        const auto defaultRefit = singleLaunchLessonOffer
-            ? std::find_if(
-                  refitWindow.offers.begin(),
-                  refitWindow.offers.end(),
-                  [](const RefitOfferPresentation& offer) { return offer.action.enabled; })
-            : refitWindow.offers.end();
-        const std::size_t defaultRefitIndex = defaultRefit == refitWindow.offers.end()
+        // Focusing a choice never buys it. Re-enter on the current choice or
+        // the first available offer, then require a fresh Confirm to install.
+        const auto defaultRefit = std::find_if(refitWindow.offers.begin(), refitWindow.offers.end(),
+            [](const RefitOfferPresentation& offer) { return offer.action.enabled; });
+        std::size_t defaultRefitIndex = defaultRefit == refitWindow.offers.end()
             ? refitWindow.offers.size()
             : static_cast<std::size_t>(std::distance(refitWindow.offers.begin(), defaultRefit));
+        if (context.selectedRefitOfferIndex >= 0 &&
+            static_cast<std::size_t>(context.selectedRefitOfferIndex) < refitWindow.offers.size() &&
+            refitWindow.offers[static_cast<std::size_t>(context.selectedRefitOfferIndex)].action.enabled)
+            defaultRefitIndex = static_cast<std::size_t>(context.selectedRefitOfferIndex);
         for (std::size_t index = 0; index < refitWindow.offers.size(); ++index) {
             out << refitOfferCard(refitWindow.offers[index], index == defaultRefitIndex);
         }
@@ -3615,7 +3693,7 @@ std::string buildGamePanelMarkup(
             out << panelButton(refitWindow.rerollAction);
         }
         if (refitWindow.showSkip) {
-            out << panelButton(refitWindow.skipAction);
+            out << panelButton(refitWindow.skipAction, defaultRefitIndex == refitWindow.offers.size());
         }
         out << "</div></section>";
         out << phaseBoardClose();
@@ -3838,8 +3916,9 @@ std::string buildGamePanelMarkup(
             "<span class=\"activity-introduction-kicker\">ONE-WAY OUTER EXPEDITION</span>"
             "<p class=\"activity-introduction-setup\">The required transfer solution is complete. Crossing this window commits the expedition outward.</p>"
             "<div class=\"activity-introduction-payoff\"><span>Point of no return</span><strong>The inner planets will no longer be reachable after departure.</strong></div>"
-            "<div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">" +
-            button("Lock course", ui::actions::attemptFrontier, "danger", true) +
+            "<div class=\"modal-actions action-row rr-action-footer activity-introduction-actions\">"
+            "<button type=\"button\" class=\"ok rr-text-button\" data-ui-close-modal=\"1\" data-ui-focus-id=\"course:cancel\" data-ui-default-focus=\"1\"><span class=\"rr-button-label\">Cancel</span></button>" +
+            button("Lock course", ui::actions::attemptFrontier, "danger") +
             "</div></section>";
         out << modalTemplate("one_way_launch_confirm", "CONFIRM OUTER COURSE", oneWayLaunchBody);
     }
@@ -4215,7 +4294,13 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
         const auto* variant = message ? messageVariant(*message, occurrence.variantId) : nullptr;
         if (speaker && variant && (message->context == MessageDeliveryContext::Any || context.state.screen == Screen::Mining)) {
             const std::string action = "ack_incoming_message:" + occurrence.id;
-            if (auto card = buildIncomingMessageCard(context, occurrence.messageId, occurrence.variantId, action))
+            std::string acceptLabel;
+            const auto* mission = solarMissionForBody(context.catalog, context.state.run.expedition.location.bodyId);
+            if (mission && occurrence.messageId == mission->briefingMessageId) {
+                const auto acceptance = solarMissionAcceptanceForBody(context.state, context.catalog, mission->bodyId);
+                if (acceptance.available) acceptLabel = acceptance.actionLabel;
+            }
+            if (auto card = buildIncomingMessageCard(context, occurrence.messageId, occurrence.variantId, action, {}, {}, acceptLabel))
                 result.modals.push_back(std::move(*card));
         }
     }
@@ -4355,10 +4440,15 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
                 display::fixed(std::max(0.0, context.launchFlight->hullRemaining), 0) + " / " +
                     display::fixed(context.launchFlight->hullMaximum, 0) + " HP");
         }
-        appendHudText(result, "rr-hud-launch-status", state.run.expedition.travelInitialized ? expeditionGuidance(state,context.orbitalWork && context.orbitalWork->surveyComplete,context.orbitalLaserComplete).nextAction : launchPanel.telemetryMessage);
-        if (orbitalWorkVisible(context) && context.orbitalWork->surveyComplete)
-            appendHudText(result, "rr-orbital-status", orbitalLaserHint(context));
-        appendHudClass(result, "rr-hud-launch-status", launchStatusSeverity(context));
+        if (orbitalWorkVisible(context)) {
+            if (context.orbitalWork->surveyComplete && context.orbitalWork->phase != OrbitalWorkPhase::LandingAlignment)
+                appendHudText(result, "rr-orbital-status", orbitalLaserHint(context));
+        } else {
+            appendHudText(result, "rr-hud-launch-status", state.run.expedition.travelInitialized
+                ? expeditionGuidance(state,context.orbitalWork && context.orbitalWork->surveyComplete,context.orbitalLaserComplete).nextAction
+                : launchPanel.telemetryMessage);
+            appendHudClass(result, "rr-hud-launch-status", launchStatusSeverity(context));
+        }
         return;
     }
 
@@ -4550,7 +4640,7 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
         if (context.orbitalWork) key << orbitalWorkVisible(context) << ':' << context.orbitalWork->active() << ':'
             << static_cast<int>(context.orbitalWork->phase) << ':' << context.orbitalWork->surveyComplete << ':'
             << context.orbitalLaserBlocked << ':' << context.orbitalLaserComplete << ':'
-            << context.orbitalInsideZone << ':'
+            << context.orbitalInsideZone << ':' << context.orbitalLandingEligible << ':'
             << (context.launchFlight && context.launchFlight->orbit.loopQualifies) << ':'
             << (context.launchFlight && std::abs(context.launchFlight->selectedThrottle) > 0.001) << '|';
         key << context.surfaceArrivalActive << '|' << context.surfaceArrivalPhase << '|'

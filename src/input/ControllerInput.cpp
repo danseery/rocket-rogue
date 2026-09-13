@@ -139,7 +139,7 @@ bool controllerResumeBlocked(PauseReason reason, bool controllerConnected, bool 
     return false;
 }
 
-bool controllerPauseStopsSimulation(PauseReason reason, InputContext gameplayContext, bool modalOpen)
+bool controllerPauseStopsSimulation(PauseReason reason, InputContext /*gameplayContext*/, bool modalOpen)
 {
     // Modal visibility is authoritative even before a controller-specific
     // pause reason has been assigned. Results and other non-realtime screens
@@ -152,10 +152,10 @@ bool controllerPauseStopsSimulation(PauseReason reason, InputContext gameplayCon
     if (reason == PauseReason::None) {
         return false;
     }
-    // Launch is an autonomous burn. A stale controller-focus pause from the
-    // prior screen must not freeze it. Steering/drilling contexts still pause
-    // for safety.
-    return reason != PauseReason::ControllerUiFocus || gameplayContext != InputContext::Launch;
+    // Explicit UI selection pauses manual flight just as it pauses mining.
+    // Screen handoffs clear stale focus in the app; routing must not silently
+    // treat a live ship as an autonomous launch.
+    return true;
 }
 
 InputContext resolvedControllerInputContext(InputContext gameplayContext, PauseReason reason, bool modalOpen)
@@ -166,14 +166,6 @@ InputContext resolvedControllerInputContext(InputContext gameplayContext, PauseR
     // stale pause reason.
     if (modalOpen) {
         return InputContext::Paused;
-    }
-    // Preflight and launch are hard gameplay handoffs. Stale menu focus must
-    // not replace Cross/South with generic UI activation. Actual modals and
-    // safety pauses still take precedence.
-    if ((gameplayContext == InputContext::Preflight || gameplayContext == InputContext::Launch)
-        && reason == PauseReason::ControllerUiFocus
-        && !modalOpen) {
-        return gameplayContext;
     }
     if (reason != PauseReason::None) {
         return InputContext::Paused;
@@ -293,21 +285,29 @@ std::optional<UiDirection> ControllerTracker::navigationDirection(const RawContr
 
     const double x = snapshot.leftX;
     const double y = snapshot.leftY;
+    if (std::max(std::abs(x), std::abs(y)) >= controller_tuning::menuEngageThreshold) {
+        // A fresh dominant direction wins even if the stick crosses neutral
+        // between samples. Absolute-value hysteresis used to keep an Up hold
+        // latched after moving the stick Down or around into another axis.
+        if (std::abs(x) > std::abs(y)) {
+            return x < 0.0 ? UiDirection::Left : UiDirection::Right;
+        }
+        return y < 0.0 ? UiDirection::Up : UiDirection::Down;
+    }
     if (navigationDirection_) {
-        const bool stillEngaged = (*navigationDirection_ == UiDirection::Left || *navigationDirection_ == UiDirection::Right)
-            ? std::abs(x) >= controller_tuning::menuReleaseThreshold
-            : std::abs(y) >= controller_tuning::menuReleaseThreshold;
-        if (stillEngaged) {
+        double directionalMagnitude = 0.0;
+        switch (*navigationDirection_) {
+        case UiDirection::Left: directionalMagnitude = -x; break;
+        case UiDirection::Right: directionalMagnitude = x; break;
+        case UiDirection::Up: directionalMagnitude = -y; break;
+        case UiDirection::Down: directionalMagnitude = y; break;
+        case UiDirection::Count: break;
+        }
+        if (directionalMagnitude >= controller_tuning::menuReleaseThreshold) {
             return navigationDirection_;
         }
     }
-    if (std::max(std::abs(x), std::abs(y)) < controller_tuning::menuEngageThreshold) {
-        return std::nullopt;
-    }
-    if (std::abs(x) > std::abs(y)) {
-        return x < 0.0 ? UiDirection::Left : UiDirection::Right;
-    }
-    return y < 0.0 ? UiDirection::Up : UiDirection::Down;
+    return std::nullopt;
 }
 
 ControllerFrame ControllerTracker::update(

@@ -1082,7 +1082,8 @@ enum class ScenarioEventKind {
     // A transfer arrival is the generic handoff from flight mechanics to an
     // authored destination beat. It deliberately carries the destination in
     // ScenarioEvent::targetId rather than teaching launch code story IDs.
-    DestinationReached
+    DestinationReached,
+    SurfaceLanded
 };
 
 enum class ScenarioActionKind {
@@ -1274,6 +1275,10 @@ struct SolarMissionDefinition {
     std::string completionMessageId;
     int progressionOrdinal = 0;
     bool optional = false;
+    // Content-owned action binding, not campaign save state. A briefing may
+    // commission equipment rather than merely acknowledge a narrative step.
+    std::string acceptanceStepId;
+    ScenarioActionKind acceptanceAction = ScenarioActionKind::None;
 };
 
 struct ScenarioFactoryDefinition {
@@ -2095,6 +2100,9 @@ struct MiningRunState {
     MiningTerrain terrain;
     std::vector<MiningEnemy> enemies;
     std::vector<MiningMiniDroneAgent> miniDrones;
+    // Session-only service operation; intentionally not serialized. Loadout
+    // changes wait for physical return instead of rebuilding deployed agents.
+    bool droneLoadoutRecallActive = false;
     std::vector<MiningLooseObject> looseObjects;
     std::uint64_t nextLooseObjectId = 1;
     std::uint64_t pickupEventSequence = 0;

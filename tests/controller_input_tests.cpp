@@ -311,6 +311,39 @@ void navigationRepeatUsesRealTime()
     require(!frame.navigation, "releasing below hysteresis should stop repeat");
 }
 
+void stickNavigationFollowsDirectionChanges()
+{
+    using namespace rocket;
+    ControllerTracker tracker;
+    std::vector<RawControllerSnapshot> pads {controller()};
+    pads[0].leftY = -0.8;
+    require(tracker.update(pads, 1.0).navigation == UiDirection::Up, "upward stick engagement navigates Up");
+    pads[0].leftY = 0.8;
+    ControllerFrame frame = tracker.update(pads, 1.01);
+    require(frame.navigation == UiDirection::Down && !frame.navigationRepeated,
+        "an opposite stick direction between samples must immediately navigate Down, never repeat Up");
+    pads[0].leftX = -0.9;
+    pads[0].leftY = 0.6;
+    frame = tracker.update(pads, 1.02);
+    require(frame.navigation == UiDirection::Left && !frame.navigationRepeated,
+        "rotating the stick into a new dominant axis must not remain latched to the old row");
+    pads[0].leftX = -0.4;
+    pads[0].leftY = 0.0;
+    frame = tracker.update(pads, 1.38);
+    require(frame.navigation == UiDirection::Left && frame.navigationRepeated,
+        "direction-aware navigation keeps the existing lower release threshold");
+    pads[0].leftX = 0.4;
+    frame = tracker.update(pads, 1.5);
+    require(!frame.navigation, "opposite motion below engage must release the prior direction, not repeat it");
+    pads[0].leftX = 0.8;
+    pads[0].buttons[index(ControllerButton::DpadUp)] = 1.0;
+    require(tracker.update(pads, 1.6).navigation == UiDirection::Up,
+        "D-pad retains priority over the stick when both navigate");
+    pads[0].buttons.fill(0.0);
+    require(tracker.update(pads, 1.7).navigation == UiDirection::Right,
+        "releasing D-pad restores the stick's actual direction without requiring a neutral detour");
+}
+
 void mostRecentMeaningfulControllerWins()
 {
     using namespace rocket;
@@ -429,15 +462,19 @@ void resumeSafetyPredicateMatchesPauseContract()
         "ordinary pause reasons should not inherit disconnect resume restrictions");
 }
 
-void controllerUiFocusKeepsAutonomousLaunchMoving()
+void explicitControllerFocusPausesRealtimeGameplay()
 {
     using namespace rocket;
     require(!controllerPauseStopsSimulation(PauseReason::None, InputContext::Launch, false),
         "an unpaused launch should keep simulating");
     require(controllerPauseStopsSimulation(PauseReason::None, InputContext::Stamp, true),
         "a visible launch-outcome modal must freeze its results scene even before a separate pause reason is assigned");
-    require(!controllerPauseStopsSimulation(PauseReason::ControllerUiFocus, InputContext::Launch, false),
-        "D-pad flight-control focus must not silently freeze an autonomous launch");
+    require(controllerPauseStopsSimulation(PauseReason::ControllerUiFocus, InputContext::Launch, false),
+        "explicit D-pad flight UI selection must pause the manually piloted ship");
+    require(!controllerPauseStopsSimulation(PauseReason::None, InputContext::OrbitalWork, false),
+        "orbital-work selection must leave scanning and drilling simulation running");
+    require(controllerPauseStopsSimulation(PauseReason::None, InputContext::OrbitalWork, true),
+        "a modal must stop orbital-work simulation");
     require(controllerPauseStopsSimulation(PauseReason::ControllerUiFocus, InputContext::MiningActive, false),
         "Mining should retain its safety pause while UI focus is active");
     require(controllerPauseStopsSimulation(PauseReason::ControllerUiFocus, InputContext::Launch, true)
@@ -448,21 +485,21 @@ void controllerUiFocusKeepsAutonomousLaunchMoving()
         "visible and safety pauses must still stop launch simulation");
 }
 
-void launchBindingsOverrideCockpitFocus()
+void launchUsesExplicitFocusOwnership()
 {
     using namespace rocket;
     require(resolvedControllerInputContext(
                 InputContext::Launch,
                 PauseReason::ControllerUiFocus,
                 false)
-            == InputContext::Launch,
-        "D-pad cockpit focus must not replace active launch bindings with generic UI controls");
+            == InputContext::Paused,
+        "explicit cockpit focus must replace active launch bindings with UI controls");
     require(resolvedControllerInputContext(
                 InputContext::Preflight,
                 PauseReason::ControllerUiFocus,
                 false)
-            == InputContext::Preflight,
-        "stale menu focus must not replace the preflight launch binding");
+            == InputContext::Paused,
+        "the app must clear stale preflight focus at the handoff rather than the router ignoring it");
     require(resolvedControllerInputContext(
                 InputContext::Launch,
                 PauseReason::ControllerUiFocus,
@@ -483,7 +520,9 @@ void launchBindingsOverrideCockpitFocus()
     frame.meaningfulInput = true;
     frame.navigation = UiDirection::Left;
     frame.pressed.set(index(ControllerButton::DpadLeft));
-    router.route(InputContext::Launch, frame, preferences);
+    const RoutedGameInput focusInput = router.route(InputContext::Launch, frame, preferences);
+    require(focusInput.has(GameInputAction::EnterUiFocus) && focusInput.navigation == UiDirection::Left,
+        "a fresh D-pad press during live flight must enter explicit UI selection");
 
     frame = {};
     frame.connected = true;
@@ -536,15 +575,15 @@ void launchBindingsOverrideCockpitFocus()
     frame.navigation = UiDirection::Right;
     frame.pressed.set(index(ControllerButton::DpadRight));
     RoutedGameInput preflightInput = router.route(InputContext::Preflight, frame, preferences);
-    require(!preflightInput.navigation && !preflightInput.has(GameInputAction::EnterUiFocus),
-        "D-pad input must not enter menu focus during preflight");
+    require(preflightInput.navigation == UiDirection::Right && !preflightInput.has(GameInputAction::EnterUiFocus),
+        "preflight is already UI-owned and should navigate without requesting a gameplay pause");
     frame = {};
     frame.connected = true;
     frame.meaningfulInput = true;
     frame.pressed.set(index(ControllerButton::South));
     preflightInput = router.route(InputContext::Preflight, frame, preferences);
-    require(preflightInput.has(GameInputAction::StartOrContinue) && !preflightInput.has(GameInputAction::ActivateFocused),
-        "Cross/South must always start or queue launch during preflight");
+    require(preflightInput.has(GameInputAction::ActivateFocused) && !preflightInput.has(GameInputAction::StartOrContinue),
+        "preflight navigation must make Confirm activate the selected action rather than always launching");
 }
 
 void globalModalOwnsEveryControllerContext()
@@ -555,6 +594,8 @@ void globalModalOwnsEveryControllerContext()
         InputContext::Ui,
         InputContext::Preflight,
         InputContext::Launch,
+        InputContext::OrbitalWork,
+        InputContext::SurfaceArrival,
         InputContext::MiningActive,
         InputContext::MiningService,
         InputContext::MiningFailure,
@@ -580,8 +621,8 @@ void globalModalOwnsEveryControllerContext()
             == InputContext::MiningFailure,
         "mining failure keeps its dedicated action only when no global modal owns focus");
     require(resolvedControllerInputContext(InputContext::Launch, PauseReason::ControllerUiFocus, false)
-            == InputContext::Launch,
-        "launch should still ignore stale controller focus when no modal is visible");
+            == InputContext::Paused,
+        "launch should respect explicit controller focus even without a modal");
     require(resolvedControllerInputContext(InputContext::MiningActive, PauseReason::None, false)
             == InputContext::MiningActive,
         "unpaused mining should retain its realtime controller context");
@@ -606,7 +647,7 @@ void routerMapsEveryGameplayContext()
     frame.navigation = UiDirection::Down;
     frame.rightY = 0.75;
     RoutedGameInput input = router.route(InputContext::Ui, frame, preferences);
-    require(input.has(GameInputAction::ActivateFocused), "South should activate focused UI controls");
+    require(!input.has(GameInputAction::ActivateFocused), "navigation must win over a simultaneous UI confirm");
     require(input.navigation == UiDirection::Down && input.scroll == 0.75, "UI routing should preserve navigation and right-stick scrolling");
 
     router.reset();
@@ -659,10 +700,12 @@ void routerTableCoversEveryInputContext()
         GameInputAction southAction;
         bool southShouldAct;
     };
-    const std::array<ContextExpectation, 8> expectations {{
+    const std::array<ContextExpectation, 10> expectations {{
         {InputContext::Ui, GameInputAction::ActivateFocused, true},
         {InputContext::Preflight, GameInputAction::StartOrContinue, true},
         {InputContext::Launch, GameInputAction::ReturnHome, false},
+        {InputContext::OrbitalWork, GameInputAction::ActivateFocused, true},
+        {InputContext::SurfaceArrival, GameInputAction::DeploySurfaceTeam, true},
         {InputContext::MiningActive, GameInputAction::MiningStow, false},
         {InputContext::MiningService, GameInputAction::MiningStow, false},
         {InputContext::MiningFailure, GameInputAction::MiningFailureAcknowledge, true},
@@ -812,29 +855,35 @@ void routerContextualFocusPreservesDedicatedBindings()
     preferences.swapConfirmCancel = true;
 
     ControllerFrame frame = routedFrame();
-    frame.pressed.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::East));
     RoutedGameInput input = router.route(InputContext::Preflight, frame, preferences);
     require(input.has(GameInputAction::StartOrContinue) && !input.has(GameInputAction::ActivateFocused),
-        "preflight South should keep its fixed launch binding before UI navigation");
+        "preflight should honor swapped Confirm for its primary action before UI navigation");
 
     frame = routedFrame();
     frame.navigation = UiDirection::Right;
     frame.pressed.set(index(ControllerButton::DpadRight));
     router.route(InputContext::Preflight, frame, preferences);
     frame = routedFrame();
-    frame.pressed.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::East));
     input = router.route(InputContext::Preflight, frame, preferences);
-    require(input.has(GameInputAction::StartOrContinue) && !input.has(GameInputAction::ActivateFocused),
-        "preflight South should keep its launch binding after D-pad input");
+    require(input.has(GameInputAction::ActivateFocused) && !input.has(GameInputAction::StartOrContinue),
+        "preflight should activate the selected control after D-pad input");
 
     router.reset();
     frame = routedFrame();
     frame.navigation = UiDirection::Down;
     frame.pressed.set(index(ControllerButton::DpadDown));
-    frame.pressed.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::East));
     input = router.route(InputContext::Stamp, frame, preferences);
-    require(input.has(GameInputAction::ActivateFocused) && !input.has(GameInputAction::StartOrContinue),
-        "mission-stamp D-pad navigation should make South activate the focused control");
+    require(!input.has(GameInputAction::ActivateFocused) && !input.has(GameInputAction::StartOrContinue)
+            && input.navigation == UiDirection::Down,
+        "mission-stamp navigation should win over simultaneous swapped Confirm");
+    frame = routedFrame();
+    frame.pressed.set(index(ControllerButton::East));
+    input = router.route(InputContext::Stamp, frame, preferences);
+    require(input.has(GameInputAction::ActivateFocused),
+        "fresh swapped Confirm should activate the selected mission-stamp control");
 
 }
 
@@ -859,8 +908,10 @@ void routerHonorsConfirmSwapAndRealTimeHolds()
     frame = routedFrame();
     frame.down.set(index(ControllerButton::South));
     frame.heldSeconds[index(ControllerButton::South)] = 0.74;
+    frame.pressed.set(index(ControllerButton::South));
     input = router.route(InputContext::Ui, frame, preferences, 0.75);
     require(!input.has(GameInputAction::ActivateFocused), "hold-confirm controls should ignore an early South press");
+    frame.pressed.reset();
     frame.heldSeconds[index(ControllerButton::South)] = 0.75;
     input = router.route(InputContext::Ui, frame, preferences, 0.75);
     require(input.has(GameInputAction::ActivateFocused), "reset confirmation should activate after 750ms of unscaled hold time");
@@ -874,6 +925,342 @@ void routerHonorsConfirmSwapAndRealTimeHolds()
     frame.heldSeconds[index(ControllerButton::East)] = 0.75;
     input = router.route(InputContext::Launch, frame, preferences);
     require(input.actions.none(), "East must remain unbound during unified flight");
+}
+
+void orbitalWorkOwnsSticksAndContinuousActivation()
+{
+    using namespace rocket;
+    GameInputRouter router;
+    ControllerPreferences preferences;
+    ControllerFrame frame = routedFrame();
+    frame.leftX = 0.8;
+    frame.leftY = -0.9;
+    frame.rightX = 0.6;
+    frame.rightY = -0.4;
+    frame.navigation = UiDirection::Up;
+    frame.down.set(index(ControllerButton::RightTrigger));
+    frame.down.set(index(ControllerButton::LeftTrigger));
+    frame.down.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::South));
+    RoutedGameInput input = router.route(InputContext::OrbitalWork, frame, preferences, 0.0, "orbital-drill", true);
+    require(input.navigation == UiDirection::Up && input.actions.none(),
+        "orbital-work sticks navigate actions without entering another pause or resuming flight");
+    require(input.moveX == 0.0 && input.moveY == 0.0 && input.aimX == 0.0 && input.aimY == 0.0
+            && !input.firing && !input.drilling && !input.orbitalHeld,
+        "orbital navigation must never leak steering, thrust, weapons, or a simultaneous drill hold");
+
+    frame.navigation.reset();
+    frame.pressed.reset();
+    input = router.route(InputContext::OrbitalWork, frame, preferences, 0.0, "orbital-drill", true);
+    require(!input.orbitalHeld, "Confirm held through navigation stays fenced until release");
+    frame = routedFrame();
+    router.route(InputContext::OrbitalWork, frame, preferences, 0.0, "orbital-drill", true);
+    frame.down.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::South));
+    input = router.route(InputContext::OrbitalWork, frame, preferences, 0.0, "orbital-drill", true);
+    require(input.orbitalHeld && !input.has(GameInputAction::ActivateFocused),
+        "focused continuous actions must convey their held input rather than repeating UI clicks");
+    frame.pressed.reset();
+    frame.heldSeconds[index(ControllerButton::South)] = 1.8;
+    input = router.route(InputContext::OrbitalWork, frame, preferences, 0.0, "orbital-drill", true);
+    require(input.orbitalHeld, "a stable focused drill action remains active while Confirm is held");
+
+    input = router.route(InputContext::OrbitalWork, frame, preferences, 0.0, "orbital-land", false);
+    require(!input.orbitalHeld && !input.has(GameInputAction::ActivateFocused),
+        "finishing a drill must immediately release it without carrying held Confirm into Land");
+    frame.pressed.set(index(ControllerButton::South));
+    input = router.route(InputContext::OrbitalWork, frame, preferences, 0.0, "orbital-land", false);
+    require(!input.has(GameInputAction::ActivateFocused),
+        "even a recreated press edge must not bypass a held focus-change fence");
+    frame = routedFrame();
+    router.route(InputContext::OrbitalWork, frame, preferences, 0.0, "orbital-land", false);
+    frame.pressed.set(index(ControllerButton::South));
+    frame.down.set(index(ControllerButton::South));
+    input = router.route(InputContext::OrbitalWork, frame, preferences, 0.0, "orbital-land", false);
+    require(input.has(GameInputAction::ActivateFocused) && !input.orbitalHeld,
+        "Land requires a fresh Confirm after the prior hold is released");
+
+    frame = routedFrame();
+    frame.pressed.set(index(ControllerButton::East));
+    frame.navigation = UiDirection::Down;
+    input = router.route(InputContext::OrbitalWork, frame, preferences, 0.0, "orbital-land", false);
+    require(input.has(GameInputAction::CancelFocused) && input.actions.count() == 1 && !input.navigation,
+        "Back leaves orbital action selection before navigation or gameplay can act");
+}
+
+void boundariesSuppressAllSimultaneousGameplay()
+{
+    using namespace rocket;
+    constexpr std::array contexts {
+        InputContext::Ui, InputContext::Paused, InputContext::Launch, InputContext::OrbitalWork,
+        InputContext::MiningActive, InputContext::MiningService, InputContext::Preflight,
+        InputContext::Stamp, InputContext::SurfaceArrival, InputContext::MiningFailure,
+    };
+    for (const InputContext context : contexts) {
+        GameInputRouter router;
+        ControllerFrame frame = routedFrame();
+        frame.down.set();
+        frame.pressed.set();
+        frame.leftX = frame.leftY = frame.rightX = frame.rightY = 1.0;
+        frame.navigation = UiDirection::Down;
+        frame.heldSeconds.fill(10.0);
+        const RoutedGameInput input = router.route(context, frame, {}, 0.0, "primary", true);
+        require(input.has(GameInputAction::OpenSystemMenu) && input.actions.count() == 1,
+            "Menu must be the only action emitted when it shares a frame with every control");
+        require(input.moveX == 0.0 && input.moveY == 0.0 && input.aimX == 0.0 && input.aimY == 0.0
+                && !input.firing && !input.drilling && !input.orbitalHeld && !input.navigation && input.scroll == 0.0,
+            "opening Menu must suppress all movement, held actions, and navigation on that frame");
+    }
+    for (const InputContext context : {InputContext::Launch, InputContext::MiningActive, InputContext::MiningService}) {
+        GameInputRouter router;
+        ControllerFrame frame = routedFrame();
+        frame.down.set(index(ControllerButton::RightTrigger));
+        frame.down.set(index(ControllerButton::LeftTrigger));
+        frame.down.set(index(ControllerButton::South));
+        frame.down.set(index(ControllerButton::East));
+        frame.pressed.set(index(ControllerButton::DpadDown));
+        frame.pressed.set(index(ControllerButton::West));
+        frame.pressed.set(index(ControllerButton::LeftStick));
+        frame.heldSeconds.fill(10.0);
+        frame.leftX = frame.leftY = frame.rightX = frame.rightY = 1.0;
+        frame.navigation = UiDirection::Down;
+        RoutedGameInput input = router.route(context, frame, {});
+        require(input.has(GameInputAction::EnterUiFocus) && input.actions.count() == 1
+                && input.navigation == UiDirection::Down,
+            "fresh D-pad focus entry must win over simultaneous gameplay buttons and long holds");
+        require(input.moveX == 0.0 && input.moveY == 0.0 && input.aimX == 0.0 && input.aimY == 0.0
+                && !input.firing && !input.drilling && !input.orbitalHeld && input.operatorToggleProgress == 0.0,
+            "D-pad focus entry must not move the ship, fire weapons or start drilling");
+        frame.pressed.reset();
+        frame.navigation.reset();
+        input = router.route(InputContext::Paused, frame, {}, 0.0, "focused-pause-action", true);
+        require(!input.orbitalHeld && !input.has(GameInputAction::ActivateFocused),
+            "Confirm held during focus entry cannot trigger the newly focused action");
+    }
+    for (const InputContext context : {InputContext::Launch, InputContext::OrbitalWork}) {
+        GameInputRouter router;
+        ControllerFrame frame = routedFrame();
+        frame.pressed.set(index(ControllerButton::View));
+        frame.pressed.set(index(ControllerButton::LeftStick));
+        frame.down.set(index(ControllerButton::South));
+        frame.leftX = 1.0;
+        const RoutedGameInput input = router.route(context, frame, {}, 0.0, "scan");
+        require(input.has(GameInputAction::OpenMap) && input.actions.count() == 1
+                && input.moveX == 0.0 && !input.orbitalHeld,
+            "opening the map owns its frame before flight or orbital work can act");
+    }
+}
+
+void focusedActionIdentityAndContextFenceEveryActivationKind()
+{
+    using namespace rocket;
+    GameInputRouter router;
+    ControllerFrame frame = routedFrame();
+    frame.down.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::South));
+    RoutedGameInput input = router.route(InputContext::OrbitalWork, frame, {}, 0.0, "scan");
+    require(input.has(GameInputAction::ActivateFocused), "a fresh Scan press should activate normally");
+    frame.pressed.reset();
+    frame.heldSeconds[index(ControllerButton::South)] = 0.9;
+    input = router.route(InputContext::OrbitalWork, frame, {}, 0.0, "drill", true);
+    require(!input.orbitalHeld, "Scan-to-Drill in one context requires Confirm release");
+
+    frame = routedFrame();
+    router.route(InputContext::OrbitalWork, frame, {}, 0.0, "drill", true);
+    frame.down.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::South));
+    require(router.route(InputContext::OrbitalWork, frame, {}, 0.0, "drill", true).orbitalHeld,
+        "a released then freshly pressed Confirm starts drilling");
+    frame.pressed.reset();
+    frame.heldSeconds[index(ControllerButton::South)] = 2.0;
+    input = router.route(InputContext::Paused, frame, {}, 0.75, "reset-save");
+    require(!input.orbitalHeld && !input.has(GameInputAction::ActivateFocused),
+        "opening a modal releases continuous drilling without inheriting its hold on a destructive action");
+    input = router.route(InputContext::OrbitalWork, frame, {}, 0.0, "drill", true);
+    require(!input.orbitalHeld, "closing a modal does not restart drilling while Confirm remains down");
+
+    frame = routedFrame();
+    router.route(InputContext::Ui, frame, {}, 0.75, "delete-a");
+    frame.down.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::South));
+    router.route(InputContext::Ui, frame, {}, 0.75, "delete-a");
+    frame.pressed.reset();
+    frame.heldSeconds[index(ControllerButton::South)] = 0.8;
+    input = router.route(InputContext::Ui, frame, {}, 0.75, "delete-b");
+    require(!input.has(GameInputAction::ActivateFocused),
+        "two controls with identical hold timing must still fence by stable action identity");
+    frame = routedFrame();
+    router.route(InputContext::Ui, frame, {}, 0.75, "delete-b");
+    frame.down.set(index(ControllerButton::South));
+    frame.heldSeconds[index(ControllerButton::South)] = 0.8;
+    input = router.route(InputContext::Ui, frame, {}, 0.75, "delete-b");
+    require(input.has(GameInputAction::ActivateFocused), "the new hold action can activate after a release");
+
+    frame.pressed.reset();
+    input = router.route(InputContext::Launch, frame, {});
+    require(!input.orbitalHeld, "Confirm held across a UI-to-flight transition cannot start orbital work");
+
+    for (const InputContext startingContext : {InputContext::Launch, InputContext::Paused}) {
+        router.reset();
+        frame = routedFrame();
+        frame.down.set(index(ControllerButton::South));
+        frame.pressed.set(index(ControllerButton::South));
+        require(router.route(startingContext, frame, {}, 0.0, "drill", true).orbitalHeld,
+            "a deliberate held drill can start from flight or explicit orbital UI selection");
+        frame.pressed.reset();
+        input = router.route(InputContext::OrbitalWork, frame, {}, 0.0, "drill", true);
+        require(input.orbitalHeld,
+            "establishing orbital ownership must not interrupt the same deliberately started continuous drill");
+    }
+}
+
+void focusedActionsHonorSemanticSwapWithoutChangingMining()
+{
+    using namespace rocket;
+    ControllerPreferences preferences;
+    preferences.swapConfirmCancel = true;
+    for (const InputContext context : {InputContext::Ui, InputContext::Paused, InputContext::Preflight,
+             InputContext::Stamp, InputContext::SurfaceArrival, InputContext::MiningFailure, InputContext::OrbitalWork}) {
+        GameInputRouter router;
+        ControllerFrame frame = routedFrame();
+        frame.pressed.set(index(ControllerButton::East));
+        frame.down.set(index(ControllerButton::East));
+        const RoutedGameInput input = router.route(context, frame, preferences, 0.0, "selected-action");
+        require(input.has(GameInputAction::ActivateFocused) && input.actions.count() == 1,
+            "every semantic UI context must route swapped Confirm to its visibly selected control");
+    }
+    GameInputRouter router;
+    ControllerFrame frame = routedFrame();
+    frame.pressed.set(index(ControllerButton::South));
+    frame.down.set(index(ControllerButton::South));
+    RoutedGameInput input = router.route(InputContext::SurfaceArrival, frame, preferences, 0.0, "deploy");
+    require(input.actions.none(), "swapped Back must not immediately depart the surface");
+    frame.pressed.reset();
+    frame.heldSeconds[index(ControllerButton::South)] = 0.45;
+    input = router.route(InputContext::SurfaceArrival, frame, preferences, 0.0, "deploy");
+    require(input.has(GameInputAction::DepartSurfaceUndeployed), "swapped Back retains the safe departure hold");
+    frame.heldSeconds[index(ControllerButton::South)] = 1.0;
+    input = router.route(InputContext::SurfaceArrival, frame, preferences, 0.0, "deploy");
+    require(input.actions.none(), "holding Back after departure triggers only once");
+
+    router.reset();
+    frame = routedFrame();
+    frame.down.set(index(ControllerButton::South));
+    frame.pressed.set(index(ControllerButton::South));
+    router.route(InputContext::MiningActive, frame, preferences);
+    frame.pressed.reset();
+    frame.heldSeconds[index(ControllerButton::South)] = 0.6;
+    input = router.route(InputContext::MiningActive, frame, preferences);
+    require(input.has(GameInputAction::MiningOperatorToggle),
+        "UI Confirm swapping must preserve the physical South mining operator hold");
+    frame = routedFrame();
+    frame.down.set(index(ControllerButton::East));
+    frame.heldSeconds[index(ControllerButton::East)] = 0.45;
+    input = router.route(InputContext::MiningActive, frame, preferences);
+    require(input.has(GameInputAction::Abort), "UI swapping must preserve the physical East mining abort hold");
+}
+
+void connectionAndFocusLossReleaseContinuousActions()
+{
+    using namespace rocket;
+    for (int boundary = 0; boundary < 3; ++boundary) {
+        GameInputRouter router;
+        ControllerFrame frame = routedFrame();
+        frame.down.set(index(ControllerButton::South));
+        frame.pressed.set(index(ControllerButton::South));
+        require(router.route(InputContext::OrbitalWork, frame, {}, 0.0, "drill", true).orbitalHeld,
+            "continuous drill should start before testing boundary loss");
+        frame.pressed.reset();
+        if (boundary == 0) frame.connected = false;
+        if (boundary == 1) frame.pageVisible = false;
+        if (boundary == 2) frame.browserFocused = false;
+        RoutedGameInput input = router.route(InputContext::OrbitalWork, frame, {}, 0.0, "drill", true);
+        require(!input.orbitalHeld && input.actions.none(), "connection or focus loss immediately releases actions");
+        frame.connected = frame.pageVisible = frame.browserFocused = true;
+        frame.pressed.set(index(ControllerButton::South));
+        input = router.route(InputContext::OrbitalWork, frame, {}, 0.0, "drill", true);
+        require(!input.orbitalHeld, "reconnected held Confirm must not recreate a continuous action");
+        frame = routedFrame();
+        router.route(InputContext::OrbitalWork, frame, {}, 0.0, "drill", true);
+        frame.down.set(index(ControllerButton::South));
+        frame.pressed.set(index(ControllerButton::South));
+        require(router.route(InputContext::OrbitalWork, frame, {}, 0.0, "drill", true).orbitalHeld,
+            "a fresh Confirm after boundary recovery and release starts the action normally");
+    }
+}
+
+void inactiveSourceObservesReleaseWithoutConsumingFreshConfirm()
+{
+    using namespace rocket;
+    for (bool swapped : {false, true}) {
+        GameInputRouter router;
+        ControllerPreferences preferences;
+        preferences.swapConfirmCancel = swapped;
+        const auto confirm = swapped ? ControllerButton::East : ControllerButton::South;
+        ControllerFrame frame = routedFrame();
+        frame.down.set(index(confirm));
+        frame.pressed.set(index(confirm));
+        frame.heldSeconds[index(confirm)] = 0.4;
+        const FocusedControllerAction resetAction {"reset-save", ControllerActivationKind::HoldToConfirm, 0.75};
+        require(!router.route(InputContext::Ui, frame, preferences, 0.75, resetAction.id).has(GameInputAction::ActivateFocused),
+            "the original reset hold should not activate early");
+        frame.pressed.reset();
+        frame.heldSeconds[index(confirm)] = 0.9;
+        router.observeInactiveFrame(InputContext::Ui, frame, preferences, resetAction);
+        require(!router.route(InputContext::Ui, frame, preferences, 0.75, resetAction.id).has(GameInputAction::ActivateFocused),
+            "a held Confirm spanning pointer ownership must stay fenced when controller ownership returns");
+
+        frame = routedFrame();
+        const FocusedControllerAction continueAction {"continue", ControllerActivationKind::Press, 0.0};
+        router.observeInactiveFrame(InputContext::Ui, frame, preferences, continueAction);
+        frame.down.set(index(confirm));
+        frame.pressed.set(index(confirm));
+        require(router.route(InputContext::Ui, frame, preferences, 0.0, continueAction.id).has(GameInputAction::ActivateFocused),
+            "after a neutral pointer-owned frame, one fresh Confirm must activate the current control on reclaim");
+
+        frame = routedFrame();
+        const FocusedControllerAction drillAction {"drill", ControllerActivationKind::ContinuousHold, 0.0};
+        router.observeInactiveFrame(InputContext::OrbitalWork, frame, preferences, drillAction);
+        frame.down.set(index(confirm));
+        frame.pressed.set(index(confirm));
+        require(router.route(InputContext::OrbitalWork, frame, preferences, 0.0, drillAction.id, true).orbitalHeld,
+            "a fresh continuous action may also begin when it deliberately reclaims controller input");
+        frame.pressed.reset();
+        router.observeInactiveFrame(InputContext::OrbitalWork, frame, preferences, drillAction);
+        require(!router.route(InputContext::OrbitalWork, frame, preferences, 0.0, drillAction.id, true).orbitalHeld,
+            "an unchanged hold must not restart continuous drilling after the pointer takes over");
+    }
+}
+
+void disconnectedStartupDoesNotConsumeTheFirstFreshConfirm()
+{
+    using namespace rocket;
+    for (bool swapped : {false, true}) {
+        GameInputRouter router;
+        ControllerPreferences preferences;
+        preferences.swapConfirmCancel = swapped;
+        const auto confirm = swapped ? ControllerButton::East : ControllerButton::South;
+        for (int poll = 0; poll < 3; ++poll) {
+            require(router.route(InputContext::Ui, {}, preferences, 0.0, "continue").actions.none(),
+                "initial disconnected polling cannot emit actions");
+        }
+        ControllerFrame frame = routedFrame();
+        frame.down.set(index(confirm));
+        frame.pressed.set(index(confirm));
+        require(router.route(InputContext::Ui, frame, preferences, 0.0, "continue").has(GameInputAction::ActivateFocused),
+            "the first fresh Confirm after disconnected startup polling must activate in one press");
+
+        router.reset();
+        router.route(InputContext::Ui, {}, preferences, 0.75, "reset-save");
+        frame.pressed.reset();
+        frame.heldSeconds[index(confirm)] = 1.0;
+        require(!router.route(InputContext::Ui, frame, preferences, 0.75, "reset-save").has(GameInputAction::ActivateFocused),
+            "a first connected snapshot held without a press edge cannot activate a destructive hold");
+        router.reset();
+        router.route(InputContext::OrbitalWork, {}, preferences, 0.0, "drill", true);
+        require(!router.route(InputContext::OrbitalWork, frame, preferences, 0.0, "drill", true).orbitalHeld,
+            "a first connected held snapshot without a fresh edge must not begin continuous drilling");
+    }
 }
 
 } // namespace
@@ -890,13 +1277,14 @@ int main()
     physicalAndSyntheticTrackersRemainIndependent();
     triggerUsesHysteresis();
     navigationRepeatUsesRealTime();
+    stickNavigationFollowsDirectionChanges();
     mostRecentMeaningfulControllerWins();
     staleHeldPadCannotReclaimOwnership();
     sourceArbitrationRequiresMeaningfulActivity();
     sourceArbitrationTiesIgnoreCallOrder();
     resumeSafetyPredicateMatchesPauseContract();
-    controllerUiFocusKeepsAutonomousLaunchMoving();
-    launchBindingsOverrideCockpitFocus();
+    explicitControllerFocusPausesRealtimeGameplay();
+    launchUsesExplicitFocusOwnership();
     globalModalOwnsEveryControllerContext();
     routerMapsEveryGameplayContext();
     routerTableCoversEveryInputContext();
@@ -904,6 +1292,13 @@ int main()
     miningPointerAimUsesTheSharedSceneViewport();
     routerContextualFocusPreservesDedicatedBindings();
     routerHonorsConfirmSwapAndRealTimeHolds();
+    orbitalWorkOwnsSticksAndContinuousActivation();
+    boundariesSuppressAllSimultaneousGameplay();
+    focusedActionIdentityAndContextFenceEveryActivationKind();
+    focusedActionsHonorSemanticSwapWithoutChangingMining();
+    connectionAndFocusLossReleaseContinuousActions();
+    inactiveSourceObservesReleaseWithoutConsumingFreshConfirm();
+    disconnectedStartupDoesNotConsumeTheFirstFreshConfirm();
     std::cout << "Controller input tests passed.\n";
     return 0;
 }

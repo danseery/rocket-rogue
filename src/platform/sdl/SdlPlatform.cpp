@@ -504,6 +504,7 @@ void SdlPlatform::applyKeyboardState(RocketGameApp& app)
     const bool down = keyDown(state, SDL_SCANCODE_S, SDL_SCANCODE_DOWN);
     switch (app.inputContext()) {
     case InputContext::Launch:
+    case InputContext::OrbitalWork:
         app.launchMove((right ? 1.0 : 0.0) - (left ? 1.0 : 0.0), (up ? 1.0 : 0.0) - (down ? 1.0 : 0.0));
         break;
     case InputContext::SurfaceArrival:
@@ -587,6 +588,7 @@ void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& eve
         if (event.key == SDLK_SPACE || event.key == SDLK_RETURN) app.startLaunch();
         break;
     case InputContext::Launch:
+    case InputContext::OrbitalWork:
         if (event.key == SDLK_SPACE || event.key == SDLK_RETURN) app.orbitalWorkInput(true);
         else if (event.key == SDLK_ESCAPE) app.resumeOrbitalFlight();
         else if (event.key == SDLK_R) app.returnHome();
