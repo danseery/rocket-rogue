@@ -701,6 +701,7 @@ void RocketGameApp::orbitalWorkInput(bool held)
         if (prepared.bodyId == "moon" && expedition.moonTutorialZone.empty())
             expedition.moonTutorialZone = prepared.request.zoneId;
         work.phase = OrbitalWorkPhase::Surveying;
+        queueAudioCue(GameAudioCue::Scanner);
         work.elapsed = 0.0;
         work.touchedSite = true;
         work.releaseRequired = true;
@@ -709,6 +710,7 @@ void RocketGameApp::orbitalWorkInput(bool held)
         save();
     } else if (!prepared.laserBlocked && !prepared.laserComplete) {
         work.phase = OrbitalWorkPhase::Firing;
+        queueAudioCue(GameAudioCue::Weapon);
     } else {
         work.phase = OrbitalWorkPhase::LaserReady;
     }
@@ -1809,11 +1811,23 @@ std::vector<GameAudioEvent> RocketGameApp::consumePendingAudioEvents()
     return events;
 }
 
+double RocketGameApp::thrustAudioLevel() const
+{
+    if (titleScreenActive_ || state_.screen != Screen::Flight || !session_.flightArmed ||
+        pauseReason_ != PauseReason::None || services_.ui.modalOpen() ||
+        session_.destruction.active || session_.controls.actions.cutEnginesActive ||
+        !session_.flight.active || session_.flight.fuelRemaining <= 0.0) return 0.0;
+    return std::clamp(std::abs(session_.flight.selectedThrottle), 0.0, 1.0);
+}
+
 void RocketGameApp::queueAudioCue(GameAudioCue cue, double pitch)
 {
-    if (pendingAudioEvents_.size() >= 16U) {
+    const double audioNow = audioClockSeconds();
+    if (pendingAudioEvents_.size() >= 16U || !audioLimiter_.admit(cue, audioNow)) {
         return;
     }
+    // Vary repeated mineral contact without consuming simulation randomness.
+    if (cue == GameAudioCue::Drill) pitch *= .90 + .10 * std::sin(audioNow * 17.0);
     pendingAudioEvents_.push_back({cue, std::clamp(pitch, 0.75, 1.25)});
 }
 
@@ -1825,6 +1839,9 @@ double RocketGameApp::touchdownFeedbackScale() const
 
 void RocketGameApp::queueControllerHapticCue(ControllerHapticCue cue)
 {
+    if (cue == ControllerHapticCue::LevelUp) queueAudioCue(GameAudioCue::Progression);
+    else if (cue == ControllerHapticCue::Failure) queueAudioCue(GameAudioCue::Failure);
+    else if (cue == ControllerHapticCue::Damage) queueAudioCue(GameAudioCue::Damage);
     if (!controllerPreferences_.vibrationEnabled
         || !controllerConnected_
         || activeInputSource_ != InputSource::Controller) {
@@ -2649,6 +2666,7 @@ void RocketGameApp::tick(double deltaSeconds)
         const TelemetryEvent event = launchTelemetryAt(flightModel, session_.flight);
         recordTelemetryPeak(event);
         if (step.asteroidHit || (step.surfaceImpact && !step.reachedDestination && session_.flight.impact.damage>0.0)) {
+            queueAudioCue(GameAudioCue::Damage);
             session_.asteroidImpactFeedbackSeconds = asteroidImpactFeedbackDuration;
             if (step.surfaceImpact && !step.failed) queueControllerHapticCue(ControllerHapticCue::Damage);
         }
@@ -2690,6 +2708,7 @@ void RocketGameApp::tick(double deltaSeconds)
         }
 
         if (step.orbitCaptured) {
+            queueAudioCue(GameAudioCue::Orbit);
             session_.orbitalWork.captureDelay = 0.0;
             session_.orbitalWork.releaseRequired = session_.orbitalWork.held;
             panelDirty_ = true;
@@ -2761,8 +2780,32 @@ void RocketGameApp::tick(double deltaSeconds)
             const bool wasActive = state_.run.mining.active;
             const bool failureWasPending = state_.run.mining.failurePending;
             const bool thermalLockWasActive = state_.run.mining.drillThermalLock;
+            const int cargoBefore = state_.run.mining.stowedCargo;
+            const auto artifactBefore = state_.run.mining.stowedArtifacts.size();
+            const auto oxygenBefore = state_.run.mining.rigOxygen.current;
+            const auto suitBefore = state_.run.mining.suitOxygen.current;
+            const auto dronePayloadCount = [](const MiningRunState& value) {
+                int count = 0;
+                for (const auto& drone : value.miniDrones)
+                    count += drone.haulMaterials.common + drone.haulMaterials.rare + drone.haulMaterials.exotic;
+                return count;
+            };
+            const int droneCargoBefore = dronePayloadCount(state_.run.mining);
+            const auto contactBefore = state_.run.mining.contactIndicatorSerial;
             updateMiningRun(state_, catalog_, deltaSeconds);
             const MiningRunState& mining = state_.run.mining;
+            if (mining.contactIndicatorSerial != contactBefore)
+                queueAudioCue(GameAudioCue::RigImpact);
+            if (mining.stowedCargo > cargoBefore) queueAudioCue(GameAudioCue::OreCredit);
+            if (mining.stowedCargo > cargoBefore && dronePayloadCount(mining) < droneCargoBefore)
+                queueAudioCue(GameAudioCue::DroneReturn);
+            if (deltaSeconds > 0.0 && std::any_of(mining.combatProjectiles.begin(), mining.combatProjectiles.end(),
+                [](const auto& shot) { return shot.age == 0.0; })) queueAudioCue(GameAudioCue::Weapon);
+            if (mining.stowedArtifacts.size() > artifactBefore) queueAudioCue(GameAudioCue::Reward);
+            if ((oxygenBefore > 10 && mining.rigOxygen.current <= 10) ||
+                (suitBefore > 5 && mining.suitOxygen.current <= 5)) queueAudioCue(GameAudioCue::Warning);
+            if (mining.drilling && mining.contactIntensity > .05) queueAudioCue(GameAudioCue::Drill);
+            if (!thermalLockWasActive && mining.drillThermalLock) queueAudioCue(GameAudioCue::Warning);
             if (!failureWasPending &&
                 mining.failurePending &&
                 mining.operatorMode == MiningOperatorMode::Jetpack &&
@@ -2924,6 +2967,7 @@ void RocketGameApp::startLaunch()
             return;
         }
         if (launchEarthOpening(state_,catalog_) != ExpeditionResult::Applied) return;
+        queueAudioCue(GameAudioCue::TakeoffIgnition);
         session_.launchQueued = false;
         session_.flightArmed = true;
         releaseRealtimeInputs(true);
@@ -2934,6 +2978,7 @@ void RocketGameApp::startLaunch()
     session_.launchQueued = false;
     session_.flightArmed = true;
     session_.flight.active = true;
+    queueAudioCue(GameAudioCue::TakeoffIgnition);
     state_.statusLine = session_.preparedLaunch.config.frontierTransfer
         ? std::string(text::status::transferBurnStarted)
         : std::string(text::status::provingBurnStarted);
@@ -3043,6 +3088,7 @@ void RocketGameApp::cutEngines()
     departureThrustHeld_ = false;
     session_.throttleInput = 0.0;
     session_.controls.actions.cutEnginesActive = !session_.controls.actions.cutEnginesActive;
+    queueAudioCue(GameAudioCue::EngineToggle);
     state_.statusLine = session_.controls.actions.cutEnginesActive
         ? std::string(text::status::engineCutConfirmed)
         : std::string(text::status::thrustRestored);
@@ -3162,11 +3208,13 @@ void RocketGameApp::selectResearchProject(int index)
 
     const ResearchOutcome outcome = completeResearchProject(state_, catalog_, index);
     if (!outcome.completed) {
+        queueAudioCue(GameAudioCue::UiError);
         panelDirty_ = true;
         return;
     }
 
     const std::string researchSummary = researchOutcomeSummary(outcome);
+    queueAudioCue(GameAudioCue::Progression);
     beginSurfaceExpeditionOrRefit();
     state_.statusLine = researchSummary;
     save();
@@ -3289,6 +3337,7 @@ void RocketGameApp::extractSurface()
     }
 
     const SurfaceActionOutcome outcome = extractSurfacePayload(state_, catalog_);
+    queueAudioCue(outcome.applied ? GameAudioCue::Deposit : GameAudioCue::UiError);
     if (!outcome.applied) {
         panelDirty_ = true;
         return;
@@ -3309,6 +3358,7 @@ void RocketGameApp::selectSurfaceUpgrade(int index)
     }
 
     if (!chooseRunUpgrade(state_, catalog_, index)) {
+        queueAudioCue(GameAudioCue::UiError);
         state_.statusLine = "That expedition upgrade is no longer eligible.";
         panelDirty_ = true;
         return;
@@ -3322,6 +3372,7 @@ void RocketGameApp::selectSurfaceUpgrade(int index)
     levelUp_.resolveElapsed = 0.0;
     levelUp_.selectedOfferIndex = index;
     state_.statusLine = "Expedition upgrade installed.";
+    queueAudioCue(GameAudioCue::Upgrade);
     save();
     realtimeHudDirty_ = true;
 }
@@ -3383,6 +3434,7 @@ void RocketGameApp::equipDrone(int index)
     }
 
     if (equipMiniDrone(state_, catalog_, index)) {
+        queueAudioCue(GameAudioCue::UiToggle);
         captureDebugDroneLoadout();
         save();
     }
@@ -3396,6 +3448,7 @@ void RocketGameApp::unequipDroneSlot(int slotIndex)
     }
 
     if (unequipMiniDroneSlot(state_, catalog_, slotIndex)) {
+        queueAudioCue(GameAudioCue::UiToggle);
         captureDebugDroneLoadout();
         save();
     }
@@ -3409,6 +3462,7 @@ void RocketGameApp::upgradeDroneSlot()
     }
 
     if (::rocket::upgradeDroneSlot(state_, catalog_)) {
+        queueAudioCue(GameAudioCue::Upgrade);
         captureDebugDroneLoadout();
         save();
     }
@@ -3540,6 +3594,7 @@ void RocketGameApp::miningScanner()
     }
 
     const MiningScannerResult result = pulseMiningScanner(state_, catalog_);
+    queueAudioCue(result.pulsed ? GameAudioCue::Scanner : GameAudioCue::UiError);
     if (!result.discoveredObjectiveId.empty() && reconcileLunarMessages(state_, catalog_)) save();
     panelDirty_ = true;
 }
@@ -3555,6 +3610,8 @@ void RocketGameApp::miningTether()
     toggleMiningTether(state_);
     const MiningRunState& mining = state_.run.mining;
     const MiningArtifactObject& artifact = state_.run.mining.artifact;
+    queueAudioCue(artifact.tethered != before.tethered || mining.operatorRigTethered != beforeOperatorRigTethered
+        ? GameAudioCue::Tether : GameAudioCue::UiError);
     if (artifact.tethered && !before.tethered) {
         state_.statusLine = "Artifact tether locked. Pull it free and bring it to the ship bay.";
     } else if (!artifact.tethered && before.tethered) {
@@ -3581,6 +3638,7 @@ void RocketGameApp::miningRepairDrill()
     } else if (mining.stowedMaterials.common < cost) {
         state_.statusLine = "Need " + std::to_string(cost) + " stowed common materials to repair the drill bit.";
     } else if (repairMiningDrill(state_)) {
+        queueAudioCue(GameAudioCue::Repair);
         state_.statusLine = "Drill bit repaired for " + std::to_string(cost) + " common materials.";
         save();
     }
@@ -3610,6 +3668,7 @@ void RocketGameApp::miningRepairDrone()
             : "Return to the ship to repair the Mining Rig.";
     } else if (repairingDisabledRig) {
         if (repairMiningDrone(state_)) {
+            queueAudioCue(GameAudioCue::Repair);
             state_.statusLine =
                 "Shuttle umbilical patch complete: Rig restored to 35% integrity. Move beside it and re-enter to keep mining.";
             save();
@@ -3626,6 +3685,7 @@ void RocketGameApp::miningRepairDrone()
     } else if (repairingOperator
                    ? repairMiningOperator(state_)
                    : repairMiningDrone(state_)) {
+        queueAudioCue(GameAudioCue::Repair);
         state_.statusLine =
             std::string(repairingOperator ? "EVA suit" : "Mining Rig") +
             " repaired for " + std::to_string(cost) +
@@ -3648,6 +3708,7 @@ void RocketGameApp::miningStow()
     }
 
     const bool banked = bankMiningPayloadAtShip(state_, catalog_);
+    queueAudioCue(banked ? GameAudioCue::Deposit : GameAudioCue::UiError);
     state_.statusLine = banked
         ? "Payload banked. Surface control remains active."
         : "No rig payload can transfer. Drone cargo must physically return before unloading.";
@@ -3667,6 +3728,7 @@ void RocketGameApp::miningWaitForDrones()
     }
 
     if (requestMiningDroneRecall(state_)) {
+        queueAudioCue(GameAudioCue::DroneTask);
         state_.statusLine = "Support Drones recalled. Their payload counts only after they reach the shuttle.";
         save();
     } else {
@@ -4805,6 +4867,7 @@ void RocketGameApp::buyOffer(int index)
         (selectedModule->surfaceDepthUpgradeKind != SurfaceDepthUpgradeKind::None ||
          selectedModule->rigFuelLoopRank > 0);
     if (rocket::buyOffer(state_, catalog_, index)) {
+        queueAudioCue(GameAudioCue::Upgrade);
         selectedRefitOfferIndex_ = 0;
         if (permanentSurfacePurchase &&
             !refitWindowPresentation(state_, catalog_).offers.empty()) {
@@ -4814,6 +4877,8 @@ void RocketGameApp::buyOffer(int index)
             state_.screen = navigationAvailable(state_) ? Screen::Navigation : Screen::Hangar;
         }
         save();
+    } else {
+        queueAudioCue(GameAudioCue::UiError);
     }
     panelDirty_ = true;
 }
@@ -4837,7 +4902,10 @@ void RocketGameApp::rerollOffers()
 void RocketGameApp::repairShip()
 {
     if (rocket::repairShip(state_)) {
+        queueAudioCue(GameAudioCue::Repair);
         save();
+    } else {
+        queueAudioCue(GameAudioCue::UiError);
     }
     panelDirty_ = true;
 }
@@ -5036,6 +5104,10 @@ void RocketGameApp::beginTitleLaunch(bool newCampaign)
     titleLaunchStartsNewCampaign_ = newCampaign;
     titleLaunchElapsedSeconds_ = 0.0;
     sceneTransition_.clear();
+    std::erase_if(pendingAudioEvents_, [](const GameAudioEvent& event) {
+        return event.cue == GameAudioCue::UiActivate;
+    });
+    queueAudioCue(GameAudioCue::TakeoffIgnition);
     releaseRealtimeInputs(true);
     refreshPanel();
 }
@@ -5568,6 +5640,7 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
     const ScenarioActionOutcome outcome = performScenarioAction(
         state_, catalog_, address.scenarioId, address.stepId, address.action);
     if (!outcome.applied) {
+        queueAudioCue(GameAudioCue::UiError);
         state_.statusLine = outcome.message.empty() ? "This objective is not ready to claim." : outcome.message;
         panelDirty_ = true;
         return true;
@@ -5583,6 +5656,7 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
         if (pauseReason_ == PauseReason::BlockingModal) clearControllerPause();
         state_.statusLine = address.action == ScenarioActionKind::ClaimReward
             ? "MISSION COMPLETE / " + outcome.message : outcome.message;
+        if (address.action == ScenarioActionKind::ClaimReward) queueAudioCue(GameAudioCue::Reward);
         (void)reconcileSolarMissionMessages(state_, catalog_);
         (void)enforceLiveExpeditionFlow();
         save();
@@ -5647,6 +5721,18 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
 
 void RocketGameApp::runUiAction(const std::string& action)
 {
+    if (action.starts_with("sfx:")) {
+        if (surfaceBaySequence_.active() || surfaceArrival_.active() || titleLaunchActive_) return;
+        const auto name = action.substr(4);
+        if (name == "focus") queueAudioCue(GameAudioCue::UiFocus);
+        else if (name == "open") queueAudioCue(GameAudioCue::UiOpen);
+        else if (name == "close") queueAudioCue(GameAudioCue::UiClose);
+        else if (name == "cancel") queueAudioCue(GameAudioCue::UiCancel);
+        else if (name == "error") queueAudioCue(GameAudioCue::UiError);
+        else if (name == "toggle") queueAudioCue(GameAudioCue::UiToggle);
+        else if (name == "activate") queueAudioCue(GameAudioCue::UiActivate);
+        return;
+    }
     if (runExpeditionAction(action)) return;
     constexpr std::string_view incomingPrefix = "ack_incoming_message:";
     if (action.starts_with(incomingPrefix)) {

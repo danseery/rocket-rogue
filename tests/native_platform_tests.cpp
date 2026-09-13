@@ -1,6 +1,8 @@
 #include "platform/sdl/NativeStorage.h"
 #include "platform/sdl/NativeTextureSource.h"
 #include "platform/sdl/SdlPlatform.h"
+#include "platform/GameAudioCatalog.h"
+#include <SDL3/SDL.h>
 
 #include <cassert>
 #include <chrono>
@@ -10,6 +12,20 @@
 #include <iterator>
 
 namespace {
+
+void shippedAudioDecodesInNativeAdapter()
+{
+    const auto sourceRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+    for (const auto& cue : rocket::audioCueCatalog) {
+        SDL_AudioSpec spec {};
+        Uint8* bytes = nullptr;
+        Uint32 count = 0;
+        const auto path = sourceRoot / "assets/audio" / cue.path;
+        assert(SDL_LoadWAV(path.string().c_str(), &spec, &bytes, &count));
+        assert(spec.channels == 1 && spec.freq > 0 && count > 0);
+        SDL_free(bytes);
+    }
+}
 
 void nativeFrameLifecycleIsBoundedAndResetsOnResume()
 {
@@ -94,6 +110,7 @@ void swapFailureEnablesDisplayAwareFallbackPacing()
 
 int main()
 {
+    shippedAudioDecodesInNativeAdapter();
     nativeFrameLifecycleIsBoundedAndResetsOnResume();
     swapFailureEnablesDisplayAwareFallbackPacing();
 

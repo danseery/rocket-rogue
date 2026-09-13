@@ -1414,6 +1414,56 @@ void straylightApproachRunsAndEndsActOne()
 
 int main()
 {
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("sfx:activate");
+        fixture.runner.app().newGame();
+        fixture.ui.dispatchAction("sfx:activate");
+        auto events = fixture.runner.app().consumePendingAudioEvents();
+        assert(events.size() == 1 && events.front().cue == rocket::GameAudioCue::TakeoffIgnition);
+        fixture.runner.app().newGame();
+        assert(fixture.runner.app().consumePendingAudioEvents().empty());
+        fixture.runner.shutdown();
+    }
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        auto& app = fixture.runner.app();
+        assert(app.thrustAudioLevel() == 0.0);
+        app.debugStartLaunchLesson(2);
+        app.launchMove(0.0, 1.0);
+        app.tick(1.0 / 60.0);
+        assert(app.thrustAudioLevel() > 0.0);
+        fixture.ui.modalOpenValue = true;
+        assert(app.thrustAudioLevel() == 0.0);
+        fixture.ui.modalOpenValue = false;
+        assert(app.thrustAudioLevel() > 0.0);
+        app.cutEngines();
+        assert(app.thrustAudioLevel() == 0.0);
+        app.debugStartMining();
+        assert(app.thrustAudioLevel() == 0.0);
+        fixture.runner.shutdown();
+    }
+    {
+        rocket::AudioCueLimiter limiter;
+        assert(limiter.admit(rocket::GameAudioCue::Drill, 1.0));
+        assert(!limiter.admit(rocket::GameAudioCue::Drill, 1.1));
+        assert(limiter.admit(rocket::GameAudioCue::Failure, 1.1));
+        assert(!limiter.admit(rocket::GameAudioCue::Drill, 1.3));
+        assert(limiter.admit(rocket::GameAudioCue::Drill, 1.43));
+        assert(!limiter.admit(rocket::GameAudioCue::Count, 2.0));
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("sfx:focus");
+        fixture.ui.dispatchAction("sfx:focus");
+        auto events = fixture.runner.app().consumePendingAudioEvents();
+        assert(events.size() == 1 && events.front().cue == rocket::GameAudioCue::UiFocus);
+        fixture.runner.app().miningScanner(); // Invalid outside mining: no scan or success sound.
+        fixture.runner.app().buyOffer(-1);
+        assert(fixture.runner.app().consumePendingAudioEvents().empty());
+        fixture.runner.shutdown();
+    }
 #if defined(_MSC_VER)
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);

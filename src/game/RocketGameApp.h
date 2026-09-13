@@ -8,6 +8,7 @@
 #include "game/SceneTransition.h"
 #include "input/GameInputRouter.h"
 #include "platform/AppServices.h"
+#include "platform/GameAudioCatalog.h"
 #include "render/RenderSnapshot.h"
 
 #include <cstdint>
@@ -52,6 +53,7 @@ public:
     ControllerHapticCue consumePendingControllerHapticCue();
     double touchdownFeedbackScale() const;
     std::vector<GameAudioEvent> consumePendingAudioEvents();
+    double thrustAudioLevel() const;
     std::uint64_t deterministicStateHash() const;
 
     void prepareForLaunch();
@@ -455,6 +457,7 @@ private:
     std::string lastControllerAction_ = "none";
     ControllerHapticCue pendingHapticCue_ = ControllerHapticCue::None;
     std::vector<GameAudioEvent> pendingAudioEvents_;
+    AudioCueLimiter audioLimiter_;
     double lastMiningContactIntensity_ = 0.0;
     double lastMiningDroneHealth_ = 1.0;
     bool lastMiningFailurePending_ = false;

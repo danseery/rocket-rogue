@@ -95,23 +95,35 @@ EM_JS(int, rr_controller_debug_tools_enabled, (), {
     }
 });
 
-EM_JS(int, rr_web_play_audio_cue, (const char* cuePath, double pitch), {
+EM_JS(int, rr_web_play_audio_cue, (const char* cuePath, double pitch, int critical), {
     try {
         const path = UTF8ToString(cuePath);
         const audio = globalThis.__orebitGameAudio || (globalThis.__orebitGameAudio = {
             context: null,
             buffers: new Map(),
             pending: new Map(),
-            failures: new Set()
+            failures: new Set(),
+            voices: 0
         });
         const AudioContextType = globalThis.AudioContext || globalThis.webkitAudioContext;
         if (!AudioContextType) return 0;
         if (!audio.context) audio.context = new AudioContextType();
+        if (audio.failures.has(path)) return 0;
+        // Resume during the input gesture, before any asynchronous fetch.
+        audio.context.resume().catch(() => {});
+        const requested = performance.now();
         const play = (buffer) => {
+            if (audio.voices >= 8 || performance.now() - requested > 250) return;
+            if (!critical && audio.voices >= 6) return;
             const source = audio.context.createBufferSource();
             source.buffer = buffer;
             source.playbackRate.value = Math.max(0.75, Math.min(1.25, pitch));
-            source.connect(audio.context.destination);
+            const gain = audio.context.createGain();
+            gain.gain.value = 0.35;
+            source.connect(gain);
+            gain.connect(audio.context.destination);
+            audio.voices++;
+            source.onended = () => { audio.voices--; source.disconnect(); gain.disconnect(); };
             audio.context.resume().catch(() => {});
             source.start();
         };
@@ -120,6 +132,7 @@ EM_JS(int, rr_web_play_audio_cue, (const char* cuePath, double pitch), {
             return 1;
         }
         let pending = audio.pending.get(path);
+        if (pending) return 1;
         if (!pending) {
             pending = fetch(path)
                 .then((response) => {
@@ -149,31 +162,58 @@ EM_JS(int, rr_web_play_audio_cue, (const char* cuePath, double pitch), {
     }
 });
 
+EM_JS(void, rr_web_thrust, (double level), {
+    const thrust = Module.orebitThrust || (Module.orebitThrust = { level: 0, source: null, context: null, buffer: null, pending: null, failed: false });
+    thrust.level = Math.max(0, Math.min(1, level));
+    const stop = () => {
+        if (thrust.source) { thrust.source.stop(); thrust.source.disconnect(); thrust.source = null; }
+        if (thrust.gain) { thrust.gain.disconnect(); thrust.gain = null; }
+    };
+    if (!thrust.listeners) {
+        thrust.listeners = true;
+        window.addEventListener('blur', () => { thrust.level = 0; stop(); });
+        document.addEventListener('visibilitychange', () => { if (document.hidden) { thrust.level = 0; stop(); } });
+    }
+    if (thrust.level <= .01 || document.hidden) { stop(); return; }
+    if (thrust.failed) return;
+    try {
+        if (!thrust.context) thrust.context = new (window.AudioContext || window.webkitAudioContext)();
+        thrust.context.resume().catch(() => {});
+        const start = () => {
+            if (thrust.level <= .01 || document.hidden) return;
+            if (!thrust.source) {
+                thrust.source = thrust.context.createBufferSource();
+                thrust.source.buffer = thrust.buffer;
+                thrust.source.loop = true;
+                thrust.gain = thrust.context.createGain();
+                thrust.gain.gain.value = 0;
+                thrust.source.connect(thrust.gain);
+                thrust.gain.connect(thrust.context.destination);
+                thrust.source.start();
+            }
+            thrust.gain.gain.setTargetAtTime(.35 * thrust.level, thrust.context.currentTime, .025);
+            thrust.source.playbackRate.setTargetAtTime(.85 + .3 * thrust.level, thrust.context.currentTime, .025);
+        };
+        if (thrust.buffer) { start(); return; }
+        if (!thrust.pending) thrust.pending = fetch('assets/audio/gameplay/thrust.wav')
+            .then(r => { if (!r.ok) throw Error('HTTP ' + r.status); return r.arrayBuffer(); })
+            .then(bytes => thrust.context.decodeAudioData(bytes))
+            .then(buffer => { thrust.buffer = buffer; start(); })
+            .catch(error => { thrust.failed = true; console.warn('OREBIT thrust unavailable', error); });
+    } catch (error) { thrust.failed = true; console.warn('OREBIT thrust unavailable', error); }
+});
+
 class WebGameAudio final : public rocket::IGameAudio {
 public:
+    void setThrust(double level) override { rr_web_thrust(level); }
     bool playOneShot(const rocket::GameAudioEvent& event) override
     {
-        const std::string path = "assets/audio/surface/" + filename(event.cue);
-        return rr_web_play_audio_cue(path.c_str(), event.pitch) != 0;
+        const auto index = static_cast<std::size_t>(event.cue);
+        if (index >= rocket::audioCueCatalog.size()) return false;
+        const std::string path = "assets/audio/" + std::string(rocket::audioCueCatalog[index].path);
+        return rr_web_play_audio_cue(path.c_str(), event.pitch, rocket::audioCueCritical(event.cue)) != 0;
     }
 
-private:
-    static std::string filename(rocket::GameAudioCue cue)
-    {
-        switch (cue) {
-        case rocket::GameAudioCue::SafeTouchdown: return "safe_touchdown.wav";
-        case rocket::GameAudioCue::HardTouchdown: return "hard_touchdown.wav";
-        case rocket::GameAudioCue::BayOpen: return "bay_open.wav";
-        case rocket::GameAudioCue::RigEjection: return "rig_ejection.wav";
-        case rocket::GameAudioCue::ArrestingBurst: return "arresting_burst.wav";
-        case rocket::GameAudioCue::RigImpact: return "rig_impact.wav";
-        case rocket::GameAudioCue::DroneLaunch: return "drone_launch.wav";
-        case rocket::GameAudioCue::BayClose: return "bay_close.wav";
-        case rocket::GameAudioCue::SurfaceReady: return "surface_ready.wav";
-        case rocket::GameAudioCue::TakeoffIgnition: return "takeoff_ignition.wav";
-        }
-        return {};
-    }
 };
 
 void syncDomViewportLayout()

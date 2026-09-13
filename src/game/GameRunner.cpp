@@ -162,12 +162,14 @@ void GameRunner::frameWithDelta(std::optional<double> fixedDeltaSeconds)
 
 void GameRunner::resetFrameClock()
 {
+    if (services_.audio) services_.audio->setThrust(0.0);
     if (!initialized_) return;
     lastFrameSeconds_ = services_.host.monotonicSeconds();
 }
 
 void GameRunner::shutdown()
 {
+    if (services_.audio) services_.audio->setThrust(0.0);
     if (!initialized_) {
         return;
     }
@@ -270,6 +272,7 @@ void GameRunner::dispatchPendingAudio()
     for (const GameAudioEvent& event : events) {
         (void)services_.audio->playOneShot(event);
     }
+    services_.audio->setThrust(services_.host.focused() && services_.host.visible() ? app_.thrustAudioLevel() : 0.0);
 }
 
 void GameRunner::resetPerformanceSamples()

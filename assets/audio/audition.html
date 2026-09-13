@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OREBIT SFX audition</title>
+<style>
+body { background:#101921; color:#e5f0f2; font:16px system-ui; max-width:960px; margin:40px auto; padding:20px }
+button { background:#244c5e; color:white; border:1px solid #68b5ca; padding:10px; cursor:pointer }
+li { display:flex; gap:16px; align-items:center; margin:10px 0 }
+a { color:#85daeb } small { color:#a9bdc3 }
+</style>
+<h1>OREBIT SFX audition</h1>
+<p>CC0 recordings from Kenney and FrogPog. Previews use the game's 0.35 master gain.
+This checks the individual files; gameplay timing and mix still need in-game listening.</p>
+<button id="verify">Verify all files decode</button>
+<button id="stop">Stop preview</button>
+<p id="status" role="status">Loading manifest…</p>
+<ul id="cues"></ul>
+<script type="module">
+const rows = await fetch('manifest.json').then(r => r.json());
+const status = document.querySelector('#status');
+const list = document.querySelector('#cues');
+const cache = new Map();
+let context, playing;
+document.querySelector('#stop').onclick = () => { playing?.stop(); playing = null; status.textContent = 'Preview stopped.'; };
+async function decode(row) {
+  if (!cache.has(row.file)) {
+    const response = await fetch(row.file);
+    if (!response.ok) throw new Error(`${row.file}: HTTP ${response.status}`);
+    cache.set(row.file, await context.decodeAudioData(await response.arrayBuffer()));
+  }
+  return cache.get(row.file);
+}
+async function unlock() {
+  context ??= new AudioContext();
+  await context.resume();
+}
+document.querySelector('#verify').onclick = async () => {
+  try {
+    await unlock();
+    for (const row of rows) await decode(row);
+    status.textContent = `${rows.length}/${rows.length} WAV files decoded successfully. Audio context: ${context.state}.`;
+  } catch (error) { status.textContent = String(error); }
+};
+for (const row of rows) {
+  const item = document.createElement('li');
+  const button = document.createElement('button');
+  button.textContent = `Play ${row.cue}`;
+  button.onclick = async () => {
+    try {
+      await unlock();
+      const buffer = await decode(row);
+      playing?.stop();
+      const voice = context.createBufferSource();
+      const gain = context.createGain();
+      voice.buffer = buffer; gain.gain.value = .35;
+      voice.loop = row.cue === 'gameplay/thrust';
+      voice.connect(gain); gain.connect(context.destination);
+      voice.onended = () => { voice.disconnect(); gain.disconnect(); if (playing === voice) playing = null; };
+      playing = voice; voice.start();
+      status.textContent = `Playing ${row.cue}${voice.loop ? ' (looping at full throttle — Stop preview to end)' : ''}`;
+    } catch (error) { status.textContent = String(error); }
+  };
+  const credit = document.createElement('a');
+  credit.href = row.source; credit.textContent = `${row.creator} · ${row.duration}s · CC0`;
+  item.append(button, credit); list.append(item);
+}
+status.textContent = `${rows.length} cues ready to audition.`;
+</script>
+</html>

@@ -258,7 +258,13 @@ enum class GameAudioCue {
     DroneLaunch,
     BayClose,
     SurfaceReady,
-    TakeoffIgnition
+    TakeoffIgnition,
+    UiFocus, UiActivate, UiCancel, UiOpen, UiClose, UiError, UiToggle,
+    Upgrade, Reward, OreCredit, Progression, Damage, Failure, Warning,
+    Scanner, Tether, Drill, Deposit, Repair, DroneTask, DroneReturn,
+    EngineToggle, Orbit, Weapon,
+    Thrust,
+    Count
 };
 
 struct GameAudioEvent {
@@ -270,6 +276,7 @@ class IGameAudio {
 public:
     virtual ~IGameAudio() = default;
     virtual bool playOneShot(const GameAudioEvent& event) = 0;
+    virtual void setThrust(double level) { (void)level; }
 };
 
 class IGameRenderer {

@@ -2336,6 +2336,9 @@ RmlSettingsEventListener g_settingsEventListener;
 
 bool dispatchButtonBinding(GameRmlUi& owner, RmlButtonBinding binding)
 {
+    if (binding.helpToggle || binding.cameraShakeToggle || binding.desktopFullscreenToggle ||
+        binding.debugToolsToggle || binding.performanceStatsToggle || !binding.controllerSetting.empty())
+        owner.emitUiSound("toggle");
     if (binding.close) {
         owner.closeModal();
         return true;
@@ -2667,6 +2670,7 @@ bool activateButtonElement(GameRmlUi& owner, Rml::Element* target)
     }
     if (auto* control = dynamic_cast<Rml::ElementFormControl*>(button);
         control && control->IsDisabled()) {
+        owner.emitUiSound("error");
         return false;
     }
 
@@ -3108,6 +3112,11 @@ bool GameRmlUi::mouseMove(int x, int y)
     // Scaling input to the drawable framebuffer here caused hit testing to
     // drift whenever the display density differed from 1x.
     g_context->ProcessMouseMove(x, y, 0);
+    auto* hovered = buttonElementAtPoint(*g_context, {static_cast<float>(x), static_cast<float>(y)});
+    const std::string hoverId = hovered ? derivedFocusId(hovered) : std::string{};
+    if (!hoverId.empty() && hoverId != audioHoverId_ &&
+        (!modalOpen() || hovered->Closest("#rr-modal"))) emitUiSound("focus");
+    audioHoverId_ = hoverId;
     return hitTest(x, y);
 }
 
@@ -3131,6 +3140,12 @@ bool GameRmlUi::mouseDown(int x, int y, int button)
             pressedButton_ = nullptr;
         }
         if (pressedButton_) {
+            if (auto* control = dynamic_cast<Rml::ElementFormControl*>(pressedButton_);
+                control && control->IsDisabled()) {
+                emitUiSound("error");
+                pressedButton_ = nullptr;
+                return overUi;
+            }
             pressedButtonAtSeconds_ = rr_rml_now_seconds();
             auto binding = buttonBindingFromElement(*pressedButton_);
             if (binding.action == "orbital_work") {
@@ -3230,6 +3245,14 @@ bool GameRmlUi::hitTest(int x, int y) const
 }
 
 bool GameRmlUi::navigate(UiDirection direction)
+{
+    const std::string previous = focusedId_;
+    const bool moved = navigateImpl(direction);
+    if (moved && previous != focusedId_) emitUiSound("focus");
+    return moved;
+}
+
+bool GameRmlUi::navigateImpl(UiDirection direction)
 {
     if (!initialized_ || !g_document) {
         return false;
@@ -3450,6 +3473,7 @@ bool GameRmlUi::cancel()
     }
     target->element->SetClass("rr-controller-focus", false);
     target->element->Blur();
+    emitUiSound("cancel");
     focusedId_.clear();
     return true;
 }
@@ -3587,6 +3611,7 @@ void GameRmlUi::openModalImmediately(const std::string& id)
     if (!findModal(presentation_.modals, id)) {
         return;
     }
+    emitUiSound("open");
     if (!openModalId_.empty()) {
         modalStack_.push_back(openModalId_);
         modalFocusStack_.push_back(focusedId_);
@@ -3646,6 +3671,7 @@ void GameRmlUi::closeModal()
         return;
     }
     std::string closeAction;
+    emitUiSound("close");
     if (modalStack_.empty()) {
         if (const ModalPresentation* modal = findModal(presentation_.modals, openModalId_)) {
             closeAction = modal->closeAction;
@@ -3672,6 +3698,9 @@ void GameRmlUi::closeModal()
 
 void GameRmlUi::dispatchAction(const std::string& action)
 {
+    if (action != "deploy_surface_team" && action != "depart_surface_undeployed" &&
+        action != "start_launch" && action != "expedition:depart" &&
+        action != "orbital_work_press" && action != "orbital_work_release") emitUiSound("activate");
     // Expedition and scenario actions own their success/failure lifecycle.
     // Rejected selections must leave their feedback and choices on screen.
     const bool closesModal = !openModalId_.empty() &&
@@ -3696,6 +3725,11 @@ void GameRmlUi::dispatchAction(const std::string& action)
     if (closesModal) {
         refreshPersistentHosts(false, false, true, true, true, true);
     }
+}
+
+void GameRmlUi::emitUiSound(const std::string& name)
+{
+    if (actionHandler_) actionHandler_("sfx:" + name);
 }
 
 bool GameRmlUi::applyPendingFocusIfAvailable()

@@ -2028,6 +2028,8 @@ struct MiningRunState {
     // contactIntensity, this remembers which edge of the active vehicle hit
     // terrain so the scene can make tight clearances legible.
     double contactIndicatorSeconds = 0.0;
+    // Transient event serial: audio follows new indicator flashes, not its decay.
+    std::uint64_t contactIndicatorSerial = 0;
     double contactIndicatorDirX = 0.0;
     double contactIndicatorDirY = 0.0;
     // Short-lived presentation acknowledgement when a nearby artifact is

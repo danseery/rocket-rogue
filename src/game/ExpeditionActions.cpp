@@ -10,6 +10,7 @@ void RocketGameApp::toggleCruiseControl() {
     if (!state_.run.expedition.travelInitialized || state_.screen != Screen::Flight || services_.ui.modalOpen() ||
         session_.flight.mode == FlightMode::Landing || !session_.flight.active) return;
     const auto result = toggleCruise(state_.run.expedition);
+    queueAudioCue(result == ExpeditionResult::InvalidTarget ? GameAudioCue::UiError : GameAudioCue::EngineToggle);
     state_.statusLine = result == ExpeditionResult::InvalidTarget ? "Set a waypoint on the map first." :
         state_.run.expedition.cruise.active ? "CRUISE ACTIVE - manual approach required. C / L3 to cancel." : "CRUISE OFF - manual flight.";
     save();
@@ -82,6 +83,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         return true;
     } else if (action.starts_with("expedition:plot:")) {
         if (plot(action.substr(16), true) == ExpeditionResult::Applied) {
+            queueAudioCue(GameAudioCue::Orbit);
             close();
             const auto* waypoint = systemBody(solarSystemDefinition(), e.course.targetBodyId);
             state_.statusLine = operationalHomeDocked(e)
@@ -101,6 +103,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         if (selection == "map") return runExpeditionAction("expedition:map");
     } else if (action == "expedition:depart") {
         if (departHome(state_, catalog_) == ExpeditionResult::Applied) {
+            queueAudioCue(GameAudioCue::TakeoffIgnition);
             session_.preparedLaunch = expeditionFlightModel(state_, catalog_);
             session_.flightArmed = true;
             session_.preflightElapsed = tuning::session::preflightBoardingSeconds;
@@ -117,6 +120,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         const auto cargo = e.cargo.materials;
         const auto payout = static_cast<int>(e.cargo.credits);
         if (dockExpedition(state_, solarSystemDefinition()) == ExpeditionResult::Applied) {
+            queueAudioCue(GameAudioCue::Deposit);
             close();
             session_.flight.landing = {};
             if (operationalHomeDocked(e)) {
@@ -181,10 +185,13 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
             (module->launchUpgradeRank == launchUpgradeRank(state_, module->launchUpgradeKind) + 1 && installLaunchUpgrade(state_, catalog_, module->launchUpgradeKind)) :
             (module->surfaceDepthUpgradeRank == surfaceDepthUpgradeRank(state_, module->surfaceDepthUpgradeKind) + 1 && installSurfaceDepthUpgrade(state_, catalog_, module->surfaceDepthUpgradeKind));
         if (installed) {
+            queueAudioCue(GameAudioCue::Upgrade);
             state_.statusLine = "Installed " + module->name + ".";
             const auto model = expeditionFlightModel(state_, catalog_);
             session_.flight.fuelCapacity = session_.flight.fuelRemaining = model.fuelCapacity;
             session_.flight.hullMaximum = session_.flight.hullRemaining = tuning::launch::hullBaseIntegrity + model.hullRank * tuning::launch::hullIntegrityPerRank;
+        } else {
+            queueAudioCue(GameAudioCue::UiError);
         }
     } else if (action == "expedition:cruise") { toggleCruiseControl(); return true; }
     else return true;

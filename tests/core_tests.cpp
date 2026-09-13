@@ -5072,7 +5072,7 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     require(mining.recoilX < 0.0, "hard contact should push feedback opposite travel");
     require(mining.contactIntensity > 0.5, "hard contact should produce stronger mining feedback");
     require(
-        mining.contactIndicatorSeconds > 0.0 && mining.rigContactX == 33 &&
+        mining.contactIndicatorSeconds > 0.0 && mining.contactIndicatorSerial > 0 && mining.rigContactX == 33 &&
             nearlyEqual(mining.contactIndicatorDirX,-mining.rigContactNormalX) &&
             nearlyEqual(mining.contactIndicatorDirY,-mining.rigContactNormalY),
         "a player-driven rig collision should retain a short-lived indicator on the contacted edge");

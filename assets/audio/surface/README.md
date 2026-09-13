@@ -1,7 +1,7 @@
 # Surface arrival cues
 
-This folder intentionally contains no placeholder or generated sound effects.
-Drop human-supplied, approved PCM WAV files here using these names:
+This folder contains the ten CC0 source-recorded arrival cues selected for the
+SFX integration. See `../manifest.json` for provenance and processing:
 
 - `safe_touchdown.wav`
 - `hard_touchdown.wav`
@@ -14,4 +14,5 @@ Drop human-supplied, approved PCM WAV files here using these names:
 - `surface_ready.wav`
 - `takeoff_ignition.wav`
 
-Missing cues stay silent and log only once per asset.
+Missing cues stay silent and log only once per asset. Subjective in-game audio
+acceptance is tracked in `../README.md`.

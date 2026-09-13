@@ -6334,6 +6334,7 @@ void recordMiningMovementCollision(
         return;
     }
     mining.contactIndicatorSeconds = tuning::mining::contactIndicatorSeconds;
+    ++mining.contactIndicatorSerial;
     mining.contactIndicatorDirX = attemptedX / length;
     mining.contactIndicatorDirY = attemptedY / length;
 }

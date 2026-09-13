@@ -311,7 +311,10 @@ int main(int argumentCount, char** arguments)
             if (platform.consumeGraphicsRebuildRequest()) renderer.requestSwapchainRebuild();
 
             const rocket::NativeFrameDisposition disposition = platform.frameDisposition();
-            if (!rocket::nativeFrameRenders(disposition)) continue;
+            if (!rocket::nativeFrameRenders(disposition)) {
+                runner.resetFrameClock(); // Stop sustained audio even when minimized frames are skipped.
+                continue;
+            }
             if (platform.consumeFrameClockReset()) runner.resetFrameClock();
             if (rocket::nativeFrameAcceptsRealtimeInput(disposition)) {
                 platform.applyKeyboardState(runner.app());

@@ -77,6 +77,7 @@ public:
     void openModal(const std::string& id) override;
     void closeModal() override;
     void dispatchAction(const std::string& action) override;
+    void emitUiSound(const std::string& name);
     void refresh() override;
     bool activateButtonLabel(const std::string& label) override;
     void setPerformanceStats(const PerformanceStats& stats, bool visible) override;
@@ -84,6 +85,8 @@ public:
     void shutdown() override;
 
 private:
+    bool navigateImpl(UiDirection direction);
+    std::string audioHoverId_;
     void rebuildDocument();
     void refreshPersistentHosts(
         bool rebuildPanel,
