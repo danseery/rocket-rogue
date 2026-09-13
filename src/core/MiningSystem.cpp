@@ -2954,7 +2954,7 @@ bool applyDrillFootprintDamage(GameState& state, const MiningDrillStats& stats, 
         recordRigContact(mining,hit);
         dirX=-hit.normal.x;
         dirY=-hit.normal.y;
-        recordMiningMovementCollision(mining,dirX,dirY);
+        // Cutting contact is drill feedback, not a new movement impact.
     }
     mining.recoilX = -dirX;
     mining.recoilY = -dirY;
@@ -6333,6 +6333,8 @@ void recordMiningMovementCollision(
     if (length <= 0.0001) {
         return;
     }
+    if (mining.contactIndicatorLatched) return;
+    mining.contactIndicatorLatched = true;
     mining.contactIndicatorSeconds = tuning::mining::contactIndicatorSeconds;
     ++mining.contactIndicatorSerial;
     mining.contactIndicatorDirX = attemptedX / length;
@@ -10055,6 +10057,15 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     }
     mining.contactIntensity = std::max(0.0, mining.contactIntensity - dt * 5.5);
     mining.contactIndicatorSeconds = std::max(0.0, mining.contactIndicatorSeconds - dt);
+    // A small clearance probe keeps resting/scraping contact latched even when
+    // the collision solver leaves a tiny skin gap or movement input is released.
+    if (mining.contactIndicatorLatched && canOccupyControlledActor(
+            mining.terrain,
+            controlledActorX(mining) + mining.contactIndicatorDirX * .12,
+            controlledActorY(mining) + mining.contactIndicatorDirY * .12,
+            operatorControlled(mining), mining.hullDirX, mining.hullDirY)) {
+        mining.contactIndicatorLatched = false;
+    }
     mining.scannerPulseSeconds = std::max(0.0, mining.scannerPulseSeconds - dt);
     state.run.planetaryExpedition.scannerCooldownSeconds = std::max(0.0, state.run.planetaryExpedition.scannerCooldownSeconds - dt);
     for (DroneModuleRuntimeState& runtime : state.run.expedition.progression.droneModuleRuntime) {

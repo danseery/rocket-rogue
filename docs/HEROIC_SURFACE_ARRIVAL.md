@@ -4,6 +4,8 @@ The [OREBIT Game Design Document](Rocket_Rogue_Game_Design_Document.docx) is the
 
 Flight prepares the deterministic Mining world without committing campaign changes. The same terrain and service pad become visible during descent. The first 16 tile rows below pad height are revealed by default across the surface layer, displaying real rock and ore textures rather than a gray arrival mask. That knowledge remains after deployment; deeper unexplored terrain retains fog, while protected objectives, gated cells, and scanner-taught suit passages keep their discovery rules. Touchdown commits the landing in memory, but does not save.
 
+The continuous landing-style shadow veil persists in controllable Mining, with feathered exploration frontiers instead of flat hidden-tile squares. Deployment blends into that same exploration mask. The finite playable area's side and bottom boundaries fade into shadow; revealed interior terrain is not darkened merely because it is far from the rig. These presentation shadows do not change discovery or collision rules.
+
 After the two-second touchdown flourish, Space/Enter (controller South) deploys the team. A fresh press during touchdown is buffered. R (controller East hold) takes off without deployment. The first accepted command owns the sequence.
 
 Deployment lasts three seconds: bay opening, rig drop and arrest, equipped-drone fan, staging movement, and camera/layout handoff. Mining simulation and resource clocks do not run until control transfers. Completed deployment saves Mining; completed ship-only takeoff saves the routed state. Packing leads into manual local ascent; see [Underground Landing and Ascent](UNDERGROUND_LANDING_PROTOTYPE.md).

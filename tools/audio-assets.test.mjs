@@ -55,3 +55,21 @@ test('native and web resolve the same catalog and bound simultaneous playback', 
   assert.ok(web.includes('if (pending) return 1'));
   assert.ok(web.includes('audio.voices >= 8'));
 });
+
+test('web thrust release fades before stopping and disconnecting, once per release', () => {
+  const source = readFileSync(path.join(root, 'src/platform/web/WebMain.cpp'), 'utf8');
+  const body = source.split('EM_JS(void, rr_web_thrust, (double level), {')[1].split('\n});')[0];
+  const calls = [];
+  const voice = { stop: time => calls.push(['stop', time]), disconnect: () => calls.push(['voice disconnected']) };
+  const gain = { gain: {
+    cancelAndHoldAtTime: time => calls.push(['hold', time]),
+    linearRampToValueAtTime: (value, time) => calls.push(['fade', value, time]),
+  }, disconnect: () => calls.push(['gain disconnected']) };
+  const module = { orebitThrust: { source: voice, gain, context: {currentTime: 10}, listeners: true } };
+  const release = new Function('Module', 'document', 'level', body);
+  release(module, {hidden: false}, 0);
+  release(module, {hidden: false}, 0);
+  assert.deepEqual(calls, [['hold', 10], ['fade', 0, 10.035], ['stop', 10.040]]);
+  voice.onended();
+  assert.deepEqual(calls.slice(-2), [['voice disconnected'], ['gain disconnected']]);
+});

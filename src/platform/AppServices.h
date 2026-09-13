@@ -264,6 +264,7 @@ enum class GameAudioCue {
     Scanner, Tether, Drill, Deposit, Repair, DroneTask, DroneReturn,
     EngineToggle, Orbit, Weapon,
     Thrust,
+    ShipExplosion,
     Count
 };
 

@@ -2030,6 +2030,7 @@ struct MiningRunState {
     double contactIndicatorSeconds = 0.0;
     // Transient event serial: audio follows new indicator flashes, not its decay.
     std::uint64_t contactIndicatorSerial = 0;
+    bool contactIndicatorLatched = false;
     double contactIndicatorDirX = 0.0;
     double contactIndicatorDirY = 0.0;
     // Short-lived presentation acknowledgement when a nearby artifact is

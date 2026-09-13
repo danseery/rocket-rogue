@@ -530,7 +530,16 @@ std::string repositoryRootForRmlTests()
     return {};
 }
 
+struct ExplosionTestAudio : rocket::IGameAudio {
+    int explosions = 0;
+    bool playOneShot(const rocket::GameAudioEvent& event) override {
+        if (event.cue == rocket::GameAudioCue::ShipExplosion) ++explosions;
+        return true;
+    }
+};
+
 struct AppFixture {
+    ExplosionTestAudio audio;
     FakeSaveStore saves;
     FakePreferenceStore preferences;
     FakeHost host;
@@ -541,6 +550,7 @@ struct AppFixture {
     FakeUiBridge bridge;
     rocket::AppServices services {saves, preferences, host, controllers, textures, renderer, ui, bridge};
     rocket::GameRunner runner {services};
+    AppFixture() { services.audio = &audio; }
 };
 
 void completeTitleLaunch(AppFixture& fixture)
@@ -1414,6 +1424,19 @@ void straylightApproachRunsAndEndsActOne()
 
 int main()
 {
+    {
+        rocket::MiningRunState mining;
+        assert(rocket::miningCollectedOreCount(mining) == 0);
+        mining.temporaryMaterials.common = 1;
+        assert(rocket::miningCollectedOreCount(mining) == 1);
+        mining.temporaryMaterials.common = 0;
+        mining.stowedMaterials.common = 1;
+        assert(rocket::miningCollectedOreCount(mining) == 1);
+        mining.stowedCargo += 10; // Non-material cargo is not an ore pickup.
+        assert(rocket::miningCollectedOreCount(mining) == 1);
+        mining.stowedMaterials.rare = 1;
+        assert(rocket::miningCollectedOreCount(mining) == 2);
+    }
     {
         AppFixture fixture;
         assert(fixture.runner.initialize());
@@ -2464,6 +2487,7 @@ int main()
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
         assert(fixture.renderer.launchDestructionActive);
         assert(fixture.renderer.launchDestructionCause == rocket::LaunchFailureCause::ThermalRunaway);
+        assert(fixture.audio.explosions == 1);
         assert(fixture.runner.app().inputContext() == rocket::InputContext::Stamp);
         assert(fixture.host.hapticCount > 0);
         assert(fixture.renderer.sceneFadeToBlack == 0.0);
@@ -2479,6 +2503,7 @@ int main()
         assert(fixture.renderer.launchDestructionElapsed >
             rocket::tuning::session::flightDestructionHoldSeconds);
         assert(std::abs(fixture.renderer.launchTravelProgress - frozenProgress) < 0.000001);
+        assert(fixture.audio.explosions == 1);
         assert(std::abs(fixture.renderer.launchCourseOffset - frozenCourse) < 0.000001);
 
         for (int frame = 0;
@@ -3387,6 +3412,7 @@ int main()
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
         assert(fixture.renderer.launchDestructionActive);
         assert(fixture.renderer.launchDestructionCause == rocket::LaunchFailureCause::LunarImpact);
+        assert(fixture.audio.explosions == 1);
         assert(!fixture.renderer.launchLandingAuthorized);
         assert(!fixture.renderer.launchLandingLocalFrame);
         assert(fixture.renderer.sceneFadeToBlack == 0.0);

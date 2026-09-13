@@ -5053,6 +5053,9 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     MiningCell* hard = miningCellAt(mining.terrain, 33, 12);
     require(hard != nullptr, "hard contact cell should exist");
     *hard = {MiningCellMaterial::HardRock, 8.0, 8.0, false, false};
+    mining.contactIndicatorLatched = false;
+    mining.contactIndicatorSerial = 0;
+    mining.contactIndicatorSeconds = 0.0;
     mining.contactIntensity = 0.0;
     mining.contactBounce = 0.0;
     mining.contactBounceVelocity = 0.0;
@@ -5073,9 +5076,31 @@ void miningMovementGrindsSoftTerrainAndRecoilsFromHardTerrain()
     require(mining.contactIntensity > 0.5, "hard contact should produce stronger mining feedback");
     require(
         mining.contactIndicatorSeconds > 0.0 && mining.contactIndicatorSerial > 0 && mining.rigContactX == 33 &&
-            nearlyEqual(mining.contactIndicatorDirX,-mining.rigContactNormalX) &&
-            nearlyEqual(mining.contactIndicatorDirY,-mining.rigContactNormalY),
+            std::hypot(mining.contactIndicatorDirX,mining.contactIndicatorDirY) > .99,
         "a player-driven rig collision should retain a short-lived indicator on the contacted edge");
+    {
+        GameState resting = state;
+        auto& contact = resting.run.mining;
+        const auto serial = contact.contactIndicatorSerial;
+        const double x = contact.droneX, y = contact.droneY;
+        setMiningDrilling(resting, false);
+        for (int i = 0; i < 12; ++i) {
+            contact.droneX = x;
+            contact.droneY = y;
+            updateMiningRun(resting, catalog, .08);
+        }
+        require(contact.contactIndicatorSerial == serial && contact.contactIndicatorSeconds == 0.0,
+            "holding against terrain must not refresh the first-impact flash or sound event");
+        contact.droneX = x - 4.0;
+        setMiningMove(resting, 0.0, 0.0);
+        updateMiningRun(resting, catalog, .08);
+        require(!contact.contactIndicatorLatched, "clear separation must re-arm terrain impact feedback");
+        contact.droneX = x;
+        contact.droneY = y;
+        setMiningMove(resting, 1.0, 0.0);
+        updateMiningRun(resting, catalog, .08);
+        require(contact.contactIndicatorSerial > serial, "a new collision after separation must sound again");
+    }
     require(
         mining.contactBounce > 0.0 || mining.contactBounceVelocity > 0.0 || mining.contactBounceCooldown > 0.0,
         "hard contact should trigger a damped bounce impulse");

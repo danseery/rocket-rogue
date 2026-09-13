@@ -30,7 +30,7 @@ rows = [
  ('surface/drone_launch','sci','spaceEngineSmall_000.ogg',.2,.12),
  ('surface/bay_close','sci','doorClose_000.ogg',.65,.16),
  ('surface/surface_ready','chip','pick_up.wav',.8,.17),
- ('surface/takeoff_ignition','sci','spaceEngineLarge_000.ogg',1.3,.42),
+ ('surface/takeoff_ignition','sci','spaceEngineLarge_000.ogg',2.6,.42),
  ('ui/focus','ui','tick_001.ogg',.035,.025),
  ('ui/activate','ui','select_001.ogg',.15,.10),
  ('ui/cancel','ui','back_001.ogg',.2,.10),
@@ -40,14 +40,14 @@ rows = [
  ('ui/toggle','ui','switch_001.ogg',.15,.10),
  ('gameplay/upgrade','ui','confirmation_001.ogg',.24,.11),
  ('gameplay/reward','chip','level_passed.wav',2.0,.18),
- ('gameplay/ore_credit','ui','click_001.ogg',.065,.07),
+ ('gameplay/ore_credit','ui','click_001.ogg',.085,.42),
  ('gameplay/progression','ui','confirmation_003.ogg',.32,.12),
  ('gameplay/damage','chip','damaged.wav',.35,.22),
  ('gameplay/failure','chip','fail.wav',1.0,.24),
- ('gameplay/warning','ui','error_001.ogg',.4,.16),
+ ('gameplay/warning','ui','error_001.ogg',.4,.04),
  ('gameplay/scanner','sci','computerNoise_000.ogg',.5,.13),
  ('gameplay/tether','sci','forceField_000.ogg',.3,.14),
- ('gameplay/drill','impact','impactMining_000.ogg',.4,.12),
+ ('gameplay/drill','sci','engineCircular_000.ogg',.4,.12),
  ('gameplay/deposit','ui','click_001.ogg',.085,.09),
  ('gameplay/repair','ui','confirmation_001.ogg',.4,.14),
  ('gameplay/drone_task','sci','computerNoise_001.ogg',.2,.09),
@@ -56,6 +56,7 @@ rows = [
  ('gameplay/orbit','ui','confirmation_003.ogg',.5,.14),
  ('gameplay/weapon','sci','laserRetro_000.ogg',.15,.12),
  ('gameplay/thrust','sci','spaceEngineLow_000.ogg',2.0,.32),
+ ('gameplay/ship_explosion','sci','explosionCrunch_000.ogg',1.5,.42),
 ]
 manifest = []
 for cue, pack, name, seconds, peak in rows:
@@ -81,11 +82,13 @@ for cue, pack, name, seconds, peak in rows:
         samples = np.convolve(samples, np.ones(15)/15, mode='same')
     if cue in ('gameplay/ore_credit', 'gameplay/deposit'):
         samples = np.convolve(samples, np.ones(15)/15, mode='same')
-    softened = cue in ('gameplay/upgrade', 'gameplay/progression', 'gameplay/drill', 'surface/takeoff_ignition')
+    softened = cue in ('gameplay/upgrade', 'gameplay/progression', 'gameplay/drill', 'surface/takeoff_ignition', 'gameplay/ship_explosion')
     if softened:
-        speed = .55 if cue == 'gameplay/drill' else .75
+        speed = .8 if cue == 'gameplay/drill' else .75
+        if cue == 'surface/takeoff_ignition':
+            speed = .1875 # Another octave lower and half the previous playback speed.
         samples = np.interp(np.arange(0, len(samples)-1, speed), np.arange(len(samples)), samples)
-        width = max(3, int(rate * (.0015 if cue == 'gameplay/drill' else .0007)))
+        width = max(3, int(rate * (.0003 if cue == 'gameplay/drill' else .0007)))
         samples = np.convolve(samples, np.ones(width)/width, mode='same')[:int(rate*seconds)]
     if cue == 'gameplay/thrust':
         overlap = min(int(rate*.06), len(samples)//4)
@@ -97,8 +100,11 @@ for cue, pack, name, seconds, peak in rows:
         samples[:fade] *= np.linspace(0, 1, fade)
         samples[-fade:] *= np.linspace(1, 0, fade)
         if softened:
-            release = min(int(rate*.05), len(samples)//2)
+            release = min(int(rate*(.25 if cue == 'surface/takeoff_ignition' else .05)), len(samples)//2)
             samples[-release:] *= np.linspace(1, 0, release)
+    if cue == 'gameplay/warning':
+        # Lower about five semitones; preserve the quarter-amplitude envelope.
+        samples = np.interp(np.arange(0, len(samples)-1, .75), np.arange(len(samples)), samples)
     target = root / 'assets/audio' / (cue + '.wav')
     target.parent.mkdir(parents=True, exist_ok=True)
     sf.write(target, samples, rate, subtype='PCM_16')
@@ -109,7 +115,8 @@ for cue, pack, name, seconds, peak in rows:
         required_credit=None, processing=('mono, silence trim, duration cap, peak normalization, 60ms loop crossfade' if cue == 'gameplay/thrust'
             else 'mono, silence trim, duration cap, peak normalization, 8ms fades' + ('; 15-sample smoothing' if cue in ('ui/focus', 'gameplay/ore_credit', 'gameplay/deposit') else '')
             + (f'; recorded impact slowed to {speed}x, 2ms moving-average low-pass' if landing else '')
-            + (f'; slowed to {speed}x, {width}-sample low-pass, 50ms release' if softened else '')),
+            + (f'; slowed to {speed}x, {width}-sample low-pass, {250 if cue == "surface/takeoff_ignition" else 50}ms release' if softened else '')
+            + ('; 0.75x pitch playback, quarter original amplitude' if cue == 'gameplay/warning' else '')),
         duration=round(len(samples)/rate,4), peak=peak,
         sha256=hashlib.sha256(target.read_bytes()).hexdigest()))
 (root/'assets/audio/manifest.json').write_text(json.dumps(manifest, indent=2)+'\n', encoding='utf-8')

@@ -3013,13 +3013,6 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
     previousMiningStowedInventory_ = snapshot.miningStowedMaterials;
     previousMiningStowedCargo_ = snapshot.miningStowedCargo;
 
-    // Unexplored cells share one neutral fog treatment so the grid communicates
-    // unknown space without leaking whether rock, ore, or a tunnel lies behind it.
-    const Color unexploredFog = snapshot.destinationTier == 2
-        ? Color {0.15F, 0.085F, 0.060F, 0.68F}
-        : (snapshot.destinationTier == 1
-                  ? Color {0.13F, 0.14F, 0.15F, 0.68F}
-                  : Color {0.095F, 0.12F, 0.135F, 0.68F});
     const bool postSolarTiles = snapshot.miningPostSolarGeologyRow >= 0
         && snapshot.miningPostSolarGeologyRow < kPostSolarMiningGeologyRows;
     const TextureId tileTexture = postSolarTiles
@@ -3140,24 +3133,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
                 cell.hazard,
                 cell.suitOnlyPassage
             };
-            if (arrivalComposite) continue; // No rectangular exploration fog in the sky.
-            const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
-            const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
-            const float revealFraction = cell.revealed ? pulseRevealFraction(index, x, y) : 0.0F;
-            if (cell.revealed && revealFraction >= 1.0F) {
-                continue;
-            }
-            const Vec2 center = cellCenter(static_cast<double>(x), static_cast<double>(y));
-            Color fogColor = unexploredFog;
-            if (cell.revealed) {
-                fogColor.a *= 1.0F - revealFraction;
-            }
-            appendTerrainRect(
-                center.x,
-                center.y,
-                cellW * 0.90F,
-                cellH * 0.90F,
-                fogColor);
+            // Exploration is shaded by the continuous veil below, not inset
+            // per-cell squares. Keep this loop only for cache state tracking.
         }
         miningBackdropFogInstanceCount_ =
             static_cast<std::uint32_t>(packedMiningTerrainInstances_.size());
@@ -3195,9 +3172,6 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
 
         for (std::size_t index = 0; index < renderedCellCount; ++index) {
             const MiningCell& cell = snapshot.miningCells[index];
-            if (!cell.revealed && !arrivalComposite) {
-                continue;
-            }
             const int x = static_cast<int>(index % static_cast<std::size_t>(snapshot.miningWidth));
             const int y = static_cast<int>(index / static_cast<std::size_t>(snapshot.miningWidth));
             const int material = static_cast<int>(cell.material);
@@ -3207,13 +3181,13 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
                     tuning::mining::surfaceVisibleDepthCells;
             const float resourceReveal = arrivalComposite
                 ? std::max(normalViewBlend, surfaceExposed ? 1.0F : 0.0F) : 1.0F;
-            if (arrivalComposite && cell.material != MiningCellMaterial::Empty) {
+            if ((arrivalComposite || !cell.revealed) && cell.material != MiningCellMaterial::Empty) {
                 // The known shallow cross-section keeps its real textures
                 // during descent. Only deeper or undiscovered cells retain
                 // the neutral silhouette until the team is ready.
                 appendTerrainRect(
                     center.x, center.y, cellW * 1.002F, cellH * 1.002F,
-                    {0.14F, 0.15F, 0.18F, 1.0F - resourceReveal});
+                    {0.14F, 0.15F, 0.18F, cell.revealed ? 1.0F - resourceReveal : 1.0F});
             }
             if (!cell.revealed) {
                 continue;
@@ -3425,7 +3399,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         miningBaseTerrainAtlasPage_,
         miningBaseTerrainTexture_ == TextureId::None ? PipelineClass::Solid : PipelineClass::Textured);
 
-    if (arrivalComposite) {
+    const auto drawTerrainFog = [&]() {
         // Continuous atmospheric occlusion, not per-cell exploration boxes.
         // The known surface stays readable; depth silhouettes and the finite
         // bedrock rim disappear into the same haze before their edges show.
@@ -3433,10 +3407,45 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         constexpr int fogColumns = 32;
         constexpr int fogRows = 24;
         auto& fog = scratchVertices(fogColumns*fogRows*6);
-        const float shipGridX = static_cast<float>(snapshot.launchLandingPadX + .5 +
-            snapshot.launchLandingHorizontalPosition / flight_landing::metersPerCell);
-        const float shipGridY = static_cast<float>(snapshot.launchLandingPadY -
-            snapshot.launchLandingAltitude / flight_landing::metersPerCell) - 3.0F;
+        const float shipGridX = arrivalComposite
+            ? static_cast<float>(snapshot.launchLandingPadX + .5 +
+                snapshot.launchLandingHorizontalPosition / flight_landing::metersPerCell)
+            : static_cast<float>(snapshot.miningReturnZoneX);
+        const float shipGridY = arrivalComposite
+            ? static_cast<float>(snapshot.launchLandingPadY -
+                snapshot.launchLandingAltitude / flight_landing::metersPerCell) - 3.0F
+            : static_cast<float>(snapshot.miningReturnZoneY) - 3.0F;
+        // Bilinear sampling of a small, weighted neighborhood gives exploration
+        // a feathered frontier rather than exposing the square tile grid.
+        // Resolve animated discovery once per cell, not for every blur tap.
+        std::vector<float> unknownCells(renderedCellCount,1.0F);
+        for (std::size_t index=0;index<renderedCellCount;++index) {
+            if (snapshot.miningCells[index].revealed) {
+                const int x=static_cast<int>(index%snapshot.miningWidth);
+                const int y=static_cast<int>(index/snapshot.miningWidth);
+                unknownCells[index]=1.0F-pulseRevealFraction(index,x,y);
+            }
+        }
+        const auto unknownAt = [&](int x, int y) {
+            if (x < 0 || x >= snapshot.miningWidth || y < 0 || y >= snapshot.miningHeight) return 0.0F;
+            const auto index = static_cast<std::size_t>(y*snapshot.miningWidth+x);
+            if (index >= renderedCellCount) return 0.0F;
+            return unknownCells[index];
+        };
+        const auto explorationFog = [&](float x, float y) {
+            const int ix=static_cast<int>(std::floor(x-.5F)), iy=static_cast<int>(std::floor(y-.5F));
+            const float fx=x-.5F-ix, fy=y-.5F-iy;
+            float opacity=0.0F;
+            for (int dy=-4;dy<=4;++dy) for (int dx=-4;dx<=4;++dx) {
+                const float weight=static_cast<float>((5-std::abs(dx))*(5-std::abs(dy)))/625.0F;
+                opacity += weight*std::lerp(
+                    std::lerp(unknownAt(ix+dx,iy+dy),unknownAt(ix+dx+1,iy+dy),fx),
+                    std::lerp(unknownAt(ix+dx,iy+dy+1),unknownAt(ix+dx+1,iy+dy+1),fx),fy);
+            }
+            // Reach near-opaque at the unknown frontier, feathering across
+            // known terrain before its texture stops instead of after it.
+            return smootherstep(opacity*2.0F)*.98F;
+        };
         const auto fogVertex = [&](float x, float y) {
             const float gridX = (x-left-miningViewOffsetX)/cellW;
             const float gridY = (top+miningViewOffsetY-y)/cellH;
@@ -3450,7 +3459,16 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             // from an excavated shaft or flying close to the site's rim.
             const float nearShipVisibility = smootherstep(
                 (std::hypot(gridX-shipGridX,gridY-shipGridY)-4.0F)/5.0F);
-            const float opacity = (1.0F-(1.0F-depthFog)*(1.0F-sideFog))*nearShipVisibility;
+            const float bottomFog = 1.0F-smootherstep((snapshot.miningHeight-gridY)/8.0F);
+            const float nearRigVisibility = smootherstep(
+                (std::hypot(gridX-static_cast<float>(activeActorX),gridY-static_cast<float>(activeActorY))-3.0F)/4.0F);
+            const float boundaryFog = (1.0F-(1.0F-sideFog)*(1.0F-bottomFog))*
+                std::min(nearShipVisibility,nearRigVisibility);
+            const float normalFog = 1.0F-(1.0F-explorationFog(gridX,gridY))*(1.0F-boundaryFog);
+            const float landingFog = (1.0F-(1.0F-depthFog)*(1.0F-sideFog))*nearShipVisibility;
+            // Handoff ends with the exact normal exploration/boundary mask.
+            // Explored interior terrain is never fogged merely for being distant.
+            const float opacity = arrivalComposite ? std::lerp(landingFog,normalFog,normalViewBlend) : normalFog;
             return Color{0.014F,0.025F,0.042F,opacity*drawOpacity_};
         };
         // Sample in the visible scene, with smooth interpolated vertex alpha.
@@ -3461,17 +3479,31 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         const float fogRight = (static_cast<float>(clip.x+clip.width)-scenePixelCenterX_)/sceneWorldUnitX_;
         const float fogTop = (sceneCssHeight_-static_cast<float>(clip.y)-scenePixelCenterY_)/sceneWorldUnitY_;
         const float fogBottom = (sceneCssHeight_-static_cast<float>(clip.y+clip.height)-scenePixelCenterY_)/sceneWorldUnitY_;
+        // Adjacent quads share samples; evaluate the reveal neighborhood once
+        // per mesh point instead of four times per quad during active mining.
+        std::array<Color,(fogRows+1)*(fogColumns+1)> fogSamples;
+        for (int row=0;row<=fogRows;++row) for (int column=0;column<=fogColumns;++column) {
+            fogSamples[row*(fogColumns+1)+column]=fogVertex(
+                std::lerp(fogLeft,fogRight,static_cast<float>(column)/fogColumns),
+                std::lerp(fogBottom,fogTop,static_cast<float>(row)/fogRows));
+        }
         for (int row=0;row<fogRows;++row) for (int column=0;column<fogColumns;++column) {
             const float x0=std::lerp(fogLeft,fogRight,static_cast<float>(column)/fogColumns);
             const float x1=std::lerp(fogLeft,fogRight,static_cast<float>(column+1)/fogColumns);
             const float y0=std::lerp(fogBottom,fogTop,static_cast<float>(row)/fogRows);
             const float y1=std::lerp(fogBottom,fogTop,static_cast<float>(row+1)/fogRows);
-            const Color a=fogVertex(x0,y0), b=fogVertex(x1,y0), c=fogVertex(x1,y1), d=fogVertex(x0,y1);
+            const Color a=fogSamples[row*(fogColumns+1)+column];
+            const Color b=fogSamples[row*(fogColumns+1)+column+1];
+            const Color c=fogSamples[(row+1)*(fogColumns+1)+column+1];
+            const Color d=fogSamples[(row+1)*(fogColumns+1)+column];
             if (std::max({a.a,b.a,c.a,d.a})<=0.001F) continue;
             pushVertex(fog,x0,y0,a); pushVertex(fog,x1,y0,b); pushVertex(fog,x1,y1,c);
             pushVertex(fog,x0,y0,a); pushVertex(fog,x1,y1,c); pushVertex(fog,x0,y1,d);
         }
         submit(fog,TextureId::None,CoordinateSpace::World,PipelineClass::Solid);
+    };
+    if (arrivalComposite) {
+        drawTerrainFog();
         // The shared environment is complete. Arrival owns only the staged
         // actors and ceremony; mining glints, scanner guidance and combat
         // feedback begin with the normal controllable Mining view.
@@ -3693,6 +3725,9 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         appendLine(oreSparkVertices, center.x, center.y - length, center.x, center.y + length, {glow.r, glow.g, glow.b, alpha});
     }
     submitLines(oreSparkVertices, 1.4F);
+    // Terrain markers belong under the same shadows as their rock; actors,
+    // pickups and immediate gameplay feedback remain on top.
+    drawTerrainFog();
 
     std::vector<SceneVertex>& pickupVertices = scratchVertices(miningPickupBursts_.size() * 360U);
     miningPickupBurstScratch_.clear();

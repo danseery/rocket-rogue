@@ -5,6 +5,14 @@
 #include <chrono>
 
 namespace rocket {
+// Count carried and banked ore together so stowing is not a second pickup.
+// Drone payload is excluded until it is delivered to the ship.
+inline int miningCollectedOreCount(const MiningRunState& mining) {
+    const auto& carried = mining.temporaryMaterials;
+    const auto& banked = mining.stowedMaterials;
+    return carried.common + carried.rare + carried.exotic +
+        banked.common + banked.rare + banked.exotic;
+}
 struct AudioCueDefinition {
     std::string_view path;
     double cooldown;
@@ -23,13 +31,13 @@ inline constexpr std::array<AudioCueDefinition, static_cast<std::size_t>(GameAud
     {"gameplay/drill.wav", .42}, {"gameplay/deposit.wav", .4}, {"gameplay/repair.wav", .4},
     {"gameplay/drone_task.wav", .7}, {"gameplay/drone_return.wav", .4},
     {"gameplay/engine_toggle.wav", .25}, {"gameplay/orbit.wav", .5}, {"gameplay/weapon.wav", .12},
-    {"gameplay/thrust.wav", 0.0}
+    {"gameplay/thrust.wav", 0.0}, {"gameplay/ship_explosion.wav", 1.0}
 }};
 inline double audioClockSeconds() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 inline bool audioCueCritical(GameAudioCue cue) {
-    return cue == GameAudioCue::Failure || cue == GameAudioCue::Warning ||
+    return cue == GameAudioCue::ShipExplosion || cue == GameAudioCue::Failure || cue == GameAudioCue::Warning ||
         cue == GameAudioCue::Damage || cue == GameAudioCue::HardTouchdown;
 }
 class AudioCueLimiter {

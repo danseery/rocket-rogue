@@ -166,8 +166,16 @@ EM_JS(void, rr_web_thrust, (double level), {
     const thrust = Module.orebitThrust || (Module.orebitThrust = { level: 0, source: null, context: null, buffer: null, pending: null, failed: false });
     thrust.level = Math.max(0, Math.min(1, level));
     const stop = () => {
-        if (thrust.source) { thrust.source.stop(); thrust.source.disconnect(); thrust.source = null; }
-        if (thrust.gain) { thrust.gain.disconnect(); thrust.gain = null; }
+        const source = thrust.source, gain = thrust.gain;
+        if (!source || !gain) return;
+        thrust.source = null;
+        thrust.gain = null;
+        const now = thrust.context.currentTime;
+        // Keep the waveform connected until its envelope reaches silence.
+        gain.gain.cancelAndHoldAtTime(now);
+        gain.gain.linearRampToValueAtTime(0, now + .035);
+        source.onended = () => { source.disconnect(); gain.disconnect(); };
+        source.stop(now + .040);
     };
     if (!thrust.listeners) {
         thrust.listeners = true;

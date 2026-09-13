@@ -3777,13 +3777,49 @@ void testSolarBeltRendering()
     assert(std::hypot(asteroid.axisXx,asteroid.axisXy)>0);
 }
 
+void testMiningKeepsContinuousExplorationShadows()
+{
+    using namespace rocket;
+    MiningRunState mining;
+    mining.active = true;
+    mining.terrain.width = 64;
+    mining.terrain.height = 40;
+    mining.terrain.cells.resize(64*40);
+    mining.droneX = 32;
+    mining.droneY = 24;
+    mining.returnZoneX = 32;
+    mining.returnZoneY = 16;
+    for (auto& cell : mining.terrain.cells) {
+        cell.material = MiningCellMaterial::Regolith;
+        cell.revealed = true;
+    }
+    SceneComposer composer;
+    composer.setViewport({1280,800,1280,800,1.0F});
+    const auto fogWeight = [](const ScenePacket& packet) {
+        float sum=0;
+        for (const auto& vertex : packet.vertices)
+            if (vertex.r==4 && vertex.g==6 && vertex.b==11) sum+=unpackSceneVertex(vertex).a;
+        return sum;
+    };
+    const float explored = fogWeight(composer.compose(miningSnapshot(mining)));
+    for (auto& cell : mining.terrain.cells) cell.revealed = false;
+    const auto& hidden = composer.compose(miningSnapshot(mining));
+    assertValidDrawRanges(hidden);
+    const float unexplored = fogWeight(hidden);
+    assert(unexplored > explored + 1.0F);
+    assert(unexplored > 0.0F);
+    for (auto& cell : mining.terrain.cells) cell.revealed = true;
+    const float revealedAgain = fogWeight(composer.compose(miningSnapshot(mining)));
+    assert(std::abs(revealedAgain-explored)<.001F);
+}
+
 void testCommittedDepartureRendering()
 {
     using namespace rocket;
     const auto atmosphereAlphas = [](const ScenePacket& packet) {
         std::vector<float> alphas;
         for (const auto& packed : packet.vertices) {
-            // Packed RGB of the flight-only continuous atmospheric veil.
+            // Packed RGB of the shared continuous atmospheric veil.
             if (packed.r == 4 && packed.g == 6 && packed.b == 11)
                 alphas.push_back(unpackSceneVertex(packed).a);
         }
@@ -3886,7 +3922,7 @@ void testCommittedDepartureRendering()
         }
         assert(checkedNearby);
         snapshot.screen=Screen::Mining;
-        assert(atmosphereAlphas(composer.compose(snapshot)).empty());
+        assert(!atmosphereAlphas(composer.compose(snapshot)).empty());
     }
     // Io uses the existing moon artwork in the system scene, not the Jupiter
     // environment artwork. The handoff must not swap either art or scale.
@@ -3974,6 +4010,7 @@ int main()
     testFrameViewsKeepAuthoritativeEnemyIndices();
     testHazardDroneTransitShimmerAndAssistantBeams();
     testMiningTerrainPersistentStreamInvalidation();
+    testMiningKeepsContinuousExplorationShadows();
     testMiningTerrainUsesDestinationTilesAndMaterialFrames();
 
     testLevelUpFanfareGeometryAndAccessibleShake();

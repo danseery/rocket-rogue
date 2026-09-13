@@ -2781,6 +2781,7 @@ void RocketGameApp::tick(double deltaSeconds)
             const bool failureWasPending = state_.run.mining.failurePending;
             const bool thermalLockWasActive = state_.run.mining.drillThermalLock;
             const int cargoBefore = state_.run.mining.stowedCargo;
+            const int oreBefore = miningCollectedOreCount(state_.run.mining);
             const auto artifactBefore = state_.run.mining.stowedArtifacts.size();
             const auto oxygenBefore = state_.run.mining.rigOxygen.current;
             const auto suitBefore = state_.run.mining.suitOxygen.current;
@@ -2796,7 +2797,7 @@ void RocketGameApp::tick(double deltaSeconds)
             const MiningRunState& mining = state_.run.mining;
             if (mining.contactIndicatorSerial != contactBefore)
                 queueAudioCue(GameAudioCue::RigImpact);
-            if (mining.stowedCargo > cargoBefore) queueAudioCue(GameAudioCue::OreCredit);
+            if (miningCollectedOreCount(mining) > oreBefore) queueAudioCue(GameAudioCue::OreCredit);
             if (mining.stowedCargo > cargoBefore && dronePayloadCount(mining) < droneCargoBefore)
                 queueAudioCue(GameAudioCue::DroneReturn);
             if (deltaSeconds > 0.0 && std::any_of(mining.combatProjectiles.begin(), mining.combatProjectiles.end(),
@@ -5379,6 +5380,11 @@ void RocketGameApp::beginFlightDestructionCinematic(LaunchFailureCause failureCa
         ? "THERMAL RUNAWAY \xE2\x80\x94 ENGINE FAILURE"
         : "HULL LOST";
     queueControllerHapticCue(ControllerHapticCue::Failure);
+    // Let the physical explosion own this beat instead of stacking UI chirps.
+    std::erase_if(pendingAudioEvents_, [](const GameAudioEvent& event) {
+        return event.cue == GameAudioCue::Failure || event.cue == GameAudioCue::Damage;
+    });
+    queueAudioCue(GameAudioCue::ShipExplosion);
     // Destruction changes live values and copy, not panel structure. Keep the
     // existing Flight HUD mounted through the explosion and patch its status
     // in place instead of rebuilding the entire sidebar mid-cinematic.
