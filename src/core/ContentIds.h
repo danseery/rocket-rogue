@@ -55,6 +55,7 @@ inline constexpr const char* uranusNeptune = "uranus_neptune";
 namespace miningSite {
 inline constexpr const char* lunarAnomalyCrevice = "lunar_anomaly_crevice";
 inline constexpr const char* thermalLayeredRecovery = "thermal_layered_recovery";
+inline constexpr const char* reinforcedThermalRecovery = "reinforced_thermal_recovery";
 } // namespace miningSite
 
 namespace postSolarSystem {

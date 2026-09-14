@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <iostream>
+#include <memory>
 
 namespace
 {
@@ -30,6 +31,152 @@ void orbitalObjectiveSafetyTests()
 {
     using namespace rocket;
     const auto catalog=createDefaultContent();
+    {
+        auto state=createNewGame(catalog,1);
+        std::array<int,6> sectors{};
+        std::array<int,4> depths{};
+        for(int seed=1;seed<=6000;++seed) {
+            state.seed=seed;
+            const auto sector=artifactSectorForBody(state,"solar","titan");
+            ++sectors[sector.back()-'1'];
+            ++depths[encounterArtifactDepth(state,"aaru_vale","encounter_17")-1];
+            check(sector==artifactSectorForBody(state,"solar","titan"),"Sector rolls are repeatable");
+        }
+        for(int count:sectors) check(count>850 && count<1150,"All six sectors have an even seeded distribution");
+        for(int count:depths) check(count>1300 && count<1700,"Encounter depths have an even seeded distribution");
+        PersistentSiteState existing; existing.systemId="solar"; existing.bodyId="titan";
+        existing.siteId="titan.beacon:zone_4"; existing.mining.artifact.present=true;
+        state.run.expedition.sites.push_back(existing);
+        check(artifactSectorForBody(state,"solar","titan")=="zone_4","Saved artifact location overrides the new roll");
+        existing.mining.artifact.state=MiningArtifactState::Delivered;
+        state.run.expedition.sites[0]=existing;
+        check(artifactSectorForBody(state,"solar","titan")=="zone_4","Delivered artifacts do not reroll");
+        state.run.expedition.moonTutorialZone="zone_6";
+        check(artifactSectorForBody(state,"solar","moon")=="zone_6","Existing Moon tutorial sector remains stable");
+        for(int seed=1;seed<=12;++seed) {
+            auto encounter=createNewGame(catalog,seed);
+            for(std::size_t i=0;i<catalog.destinations.size();++i)
+                if(catalog.destinations[i].id==content::destination::nearbyStar) encounter.run.destinationIndex=static_cast<int>(i);
+            startSurfaceExpedition(encounter,catalog);
+            encounter.run.planetaryExpedition.miningSitePrepared=true;
+            encounter.run.planetaryExpedition.prospectArtifacts=1;
+            const auto beforeMining=std::make_unique<GameState>(encounter);
+            check(startMiningRun(encounter,catalog,{MiningAct::ActTwo,4,static_cast<std::uint64_t>(seed),true,MiningGateType::HazardCocoon},false).applied,
+                "Procedural encounter fixture starts");
+            const auto& mining=encounter.run.mining;
+            const int depth=encounterArtifactDepth(encounter,mining.postSolarSystemId,mining.bodyId);
+            int count=mining.artifact.present?1:0;
+            if(mining.artifact.present) check(mining.depthZone==depth,"Encounter artifact uses rolled depth");
+            for(const auto& layer:mining.depthLayers) if(layer.artifact.present) {
+                ++count; check(layer.depthZone==depth,"Cached encounter artifact uses rolled depth");
+            }
+            check(count==1,"Random depth must not duplicate the artifact at the entry layer");
+            if(seed<=3) for(const auto& zone:planetLandingZones()) {
+                auto sectorState=std::make_unique<GameState>(*beforeMining);
+                check(startMiningRun(*sectorState,catalog,{MiningAct::ActTwo,4,static_cast<std::uint64_t>(seed),true,MiningGateType::HazardCocoon},false,zone.id).applied,
+                    "Every procedural encounter sector remains landable");
+                const auto& sectorMining=sectorState->run.mining;
+                int sectorCount=sectorMining.artifact.present?1:0;
+                for(const auto& layer:sectorMining.depthLayers) sectorCount+=layer.artifact.present?1:0;
+                check(sectorCount==(zone.id==artifactSectorForBody(*sectorState,sectorMining.postSolarSystemId,sectorMining.bodyId)?1:0),
+                    "Only the rolled procedural sector contains the artifact");
+            }
+        }
+    }
+    {
+        MiningRunState legacy;
+        legacy.terrain.width=legacy.terrain.height=20;
+        legacy.terrain.cells.resize(400);
+        for (auto& cell : legacy.terrain.cells) {
+            cell.material=MiningCellMaterial::Regolith;
+            cell.maxToughness=cell.remainingToughness=2;
+        }
+        legacy.artifact.present=true; legacy.artifact.state=MiningArtifactState::Embedded;
+        legacy.artifact.x=legacy.artifact.y=10.5; legacy.artifact.health=.43;
+        legacy.gate.active=true; legacy.gate.type=MiningGateType::HazardCocoon;
+        legacy.gate.anchorX=legacy.gate.anchorY=10.5;
+        legacy.gate.cocoonDefinitionId="thermal_intro_seal";
+        legacy.gate.cocoonDefinitionVersion=2;
+        legacy.gate.cocoonLayers.resize(1); legacy.gate.cocoonLayers[0].id="thermal";
+        const auto at=[](auto& m,int x,int y)->auto& {return m.terrain.cells[y*20+x];};
+        at(legacy,10,10).material=MiningCellMaterial::ArtifactCache;
+        at(legacy,10,10).gateAssociated=true;
+        for (const auto [x,y] : {std::pair{10,8},{12,10},{10,12},{8,10}}) {
+            auto& cell=at(legacy,x,y); cell.material=MiningCellMaterial::HazardPocket;
+            cell.hazard=true; cell.hazardAffinity=MiningElementalAffinity::Thermal;
+            cell.gateAssociated=true; cell.cocoonLayer=0;
+        }
+        auto migrated=legacy;
+        at(migrated,10,8)={}; // Already excavated.
+        at(migrated,12,10).material=MiningCellMaterial::CommonOre;
+        at(migrated,12,10).hazard=false; at(migrated,12,10).hazardAffinity=MiningElementalAffinity::None;
+        at(migrated,12,10).remainingToughness=.6; at(migrated,12,10).revealed=true;
+        migrateAdjacentCocoonTiles(migrated);
+        check(migrated.gate.cocoonDefinitionVersion==3 && at(migrated,10,9).material==MiningCellMaterial::Empty &&
+            at(migrated,10,8).material==MiningCellMaterial::Empty,"Migration preserves excavated locks and holes");
+        check(at(migrated,11,10).material==MiningCellMaterial::CommonOre && at(migrated,11,10).remainingToughness==.6 &&
+            at(migrated,11,10).revealed && migrated.artifact.health==.43,"Migration preserves treatment, damage and discovery");
+        auto state=createNewGame(catalog,321); state.run.mining=migrated;
+        {
+            auto oldState=createNewGame(catalog,322); oldState.run.mining=legacy;
+            PersistentSiteState oldSite; oldSite.mining=legacy;
+            oldState.run.expedition.sites.push_back(oldSite);
+            const auto oldSave=captureSaveData(oldState);
+            restoreSaveData(oldState,catalog,oldSave);
+            check(oldState.run.mining.gate.cocoonDefinitionVersion==3 &&
+                oldState.run.expedition.sites.front().mining.gate.cocoonDefinitionVersion==3,
+                "Loading v2 converts both current mining and persistent site copies");
+        }
+        for (int repeat=0;repeat<2;++repeat) {
+            auto saved=deserializeSaveData(serializeSaveData(captureSaveData(state)));
+            check(saved.has_value(),"Adjacent cocoon save parses");
+            restoreSaveData(state,catalog,*saved);
+            check(state.run.mining.gate.cocoonDefinitionVersion==3 && at(state.run.mining,11,10).remainingToughness==.6,
+                "Repeated reload retains migrated tiles");
+        }
+        for (int blocked=0;blocked<7;++blocked) {
+            auto copy=legacy;
+            if(blocked==0) at(copy,11,10).material=MiningCellMaterial::CommonOre;
+            if(blocked==1) at(copy,11,10).gateAssociated=true;
+            if(blocked==2) {copy.droneX=11.5; copy.droneY=10.5; copy.rigDepthZone=copy.depthZone;}
+            if(blocked==3) copy.artifact.tethered=true;
+            if(blocked==4) copy.artifact.state=MiningArtifactState::Loose;
+            if(blocked==5) copy.gate.cocoonDefinitionVersion=99;
+            if(blocked==6) {MiningEnemy enemy; enemy.active=true; enemy.x=11.5; enemy.y=10.5; copy.enemies.push_back(enemy);}
+            migrateAdjacentCocoonTiles(copy);
+            check(copy.gate.cocoonDefinitionVersion==(blocked==5?99:2) && at(copy,12,10).cocoonLayer==0,
+                "Unsafe or unsupported migration leaves old shape intact");
+        }
+        MiningDepthLayerState cached; cached.depthZone=2; cached.terrain=legacy.terrain;
+        cached.artifact=legacy.artifact; cached.gate=legacy.gate;
+        MiningRunState deep; deep.depthLayers.push_back(cached);
+        migrateAdjacentCocoonTiles(deep);
+        check(deep.depthLayers[0].gate.cocoonDefinitionVersion==3,"Cached depth-two seal migrates");
+        for(auto& cell : legacy.terrain.cells) if(cell.cocoonLayer==0) cell={};
+        migrateAdjacentCocoonTiles(legacy);
+        check(legacy.gate.cocoonDefinitionVersion==3 && at(legacy,11,10).material==MiningCellMaterial::Empty,
+            "Completed seal stays excavated");
+    }
+    {
+        MiningRunState probe;
+        probe.terrain.width = 64; probe.terrain.height = 32;
+        probe.terrain.cells.resize(64 * 32);
+        probe.artifact.present = true;
+        probe.artifact.x = 40.5; probe.artifact.y = 16.5;
+        // Center is clear of the shaft, but the left seal lies in its buffer.
+        auto& seal = probe.terrain.cells[16 * 64 + 29];
+        seal.gateAssociated = true; seal.cocoonLayer = 0;
+        check(!orbitalShaftAvoidsProtectedObjectives(probe, 24),
+            "Cocoon clearance must reject a bore even when the artifact center is clear");
+        seal = {};
+        check(orbitalShaftAvoidsProtectedObjectives(probe, 24),
+            "Ordinary terrain outside the artifact buffer remains drillable");
+        probe.depthLayers.emplace_back();
+        probe.depthLayers.back().terrain = probe.terrain;
+        probe.depthLayers.back().terrain.cells[16 * 64 + 29].cocoonLayer = 0;
+        check(!orbitalShaftAvoidsProtectedObjectives(probe, 24),
+            "Cached deeper seals receive the same clearance");
+    }
     // The placement contract applies to complete prepared sites, not only the
     // active surface or the one seed that originally exposed the Io overlap.
     for (const auto& body : {std::pair{"moon","moon"},std::pair{"mars","mars"},std::pair{"io","jupiter"}})
@@ -112,6 +259,12 @@ void orbitalObjectiveSafetyTests()
     check(generatedRepairs>0,"Safe relocation must work on actual generated Io terrain, not only synthetic regolith");
     auto& objective=objectiveLayer(prepared.miningTemplate);
     check(objective.depthZone==2 && objective.gate.cocoonLayers.size()==1,"Io fixture must use its depth-two thermal seal");
+    for(const auto& offset : catalog.findMiningSite(content::miningSite::thermalLayeredRecovery)->cocoon.layers.front().offsets) {
+        const int x=static_cast<int>(objective.artifact.x)+offset.x;
+        const int y=static_cast<int>(objective.artifact.y)+offset.y;
+        check(std::abs(offset.x)+std::abs(offset.y)==1 && objective.terrain.cells[y*objective.terrain.width+x].cocoonLayer==0,
+            "Generated Io depth-two seal must have actual hazard tiles touching the artifact");
+    }
     // Supply ordinary virgin space for a deterministic migration, retaining
     // the real generated artifact and authored seal cells exactly as built.
     for (auto& cell : objective.terrain.cells) if (!cell.gateAssociated && cell.cocoonLayer<0) {
@@ -122,6 +275,13 @@ void orbitalObjectiveSafetyTests()
     const int oldX=static_cast<int>(std::floor(objective.artifact.x));
     const int oldY=static_cast<int>(std::floor(objective.artifact.y));
     const auto at=[](auto& terrain,int x,int y) -> auto& {return terrain.cells[static_cast<std::size_t>(y*terrain.width+x)];};
+    // Retain a genuine v2 fixture to exercise old-shape bore repair when
+    // adjacent resources prevent the independent compact-cocoon migration.
+    for (const auto [dx,dy] : {std::pair{0,-1}, {1,0}, {0,1}, {-1,0}}) {
+        std::swap(at(objective.terrain,oldX+dx,oldY+dy),at(objective.terrain,oldX+dx*2,oldY+dy*2));
+        at(objective.terrain,oldX+dx,oldY+dy).material=MiningCellMaterial::CommonOre;
+    }
+    objective.gate.cocoonDefinitionVersion=2;
     // One seal tile is excavated, another partly treated/damaged. These are
     // recovery progress, not permission to recreate an intact seal on load.
     at(objective.terrain,oldX,oldY-2)={};
@@ -330,6 +490,8 @@ void persistentExpeditionTests()
             "Fixture must precede Io mission commissioning");
         SurfaceLandingBuildRequest request;
         request.destinationId="jupiter"; request.bodyId="io"; request.siteSeed=319;
+        const auto rolledZone=artifactSectorForBody(state,"solar","io");
+        request.zoneId=rolledZone;
         auto objective = prepareSurfaceLanding(state,catalog,request);
         check(objective.valid, "Io objective site must prepare before mission commissioning");
         check(std::any_of(objective.miningTemplate.depthLayers.begin(),objective.miningTemplate.depthLayers.end(),
@@ -347,7 +509,7 @@ void persistentExpeditionTests()
         check(exact.detected && exact.localized && exact.depth>=2 && exact.depth<3,
             "A correctly guessed first slice must immediately localize the physical artifact");
         for (const auto& zone : planetLandingZones()) {
-            if (zone.id=="zone_1") continue;
+            if (zone.id==rolledZone) continue;
             request.zoneId=zone.id; request.allowScenarioObjectives=false;
             auto other=prepareSurfaceLanding(state,catalog,request);
             check(prepareOrbitalSurvey(state,catalog,other,2),"Every Io slice must be scannable");
@@ -357,10 +519,10 @@ void persistentExpeditionTests()
             other.surveyComplete=true;
             const auto coarse=orbitalArtifactSignal(state,catalog,&other);
             check(coarse.detected && !coarse.localized && coarse.depth==0 &&
-                coarse.bearing==planetLandingZones()[0].centerBearing,
+                coarse.bearing==planetLandingZone(rolledZone)->centerBearing,
                 "A first scan anywhere must reveal only the persistent purple sector signal");
         }
-        state.run.expedition.sites.push_back({"solar","io","io.beacon:zone_1",
+        state.run.expedition.sites.push_back({"solar","io","io.beacon:"+rolledZone,
             objective.expeditionTemplate,objective.miningTemplate,static_cast<const OrbitalSiteProgress&>(objective)});
         const auto saved=deserializeExpedition(serializeExpedition(state.run.expedition));
         check(saved.has_value(),"Artifact scan progress must serialize");
@@ -375,7 +537,7 @@ void persistentExpeditionTests()
         legacy.mining.artifact={};
         for(auto& layer:legacy.mining.depthLayers) layer.artifact={};
         legacy.mining.terrain.cells[0].material=MiningCellMaterial::Empty;
-        request.zoneId="zone_1"; request.allowScenarioObjectives=true;
+        request.zoneId=rolledZone; request.allowScenarioObjectives=true;
         auto repaired=restoreSurfaceLanding(state,catalog,request,legacy);
         check(repaired.valid && repaired.miningTemplate.terrain.cells[0].material==MiningCellMaterial::Empty &&
             orbitalArtifactSignal(state,catalog,&repaired).localized,

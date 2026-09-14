@@ -9,6 +9,7 @@ namespace rocket {
 struct MessageSpeaker {
     std::string id, name, channel, portrait;
     std::string concernedPortrait;
+    bool unknownSignal = false;
 };
 enum class MessageHint { Scanner, ExitRig, Drill, Tether, FlightSteer, FlightThrust };
 enum class MessageDeliveryContext { Any, Mining };

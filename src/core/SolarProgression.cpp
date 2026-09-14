@@ -91,9 +91,17 @@ SolarMissionAcceptanceOutcome acceptSolarMission(
     ensureScenarioInstances(state, catalog);
     const ScenarioActionOutcome outcome = performScenarioAction(
         state, catalog, mission.scenarioId, mission.acceptanceStepId, mission.acceptanceAction,
-        !state.run.mining.active);
+        true);
+    std::string message = outcome.message;
+    if (const auto* step = missionAcceptanceStep(catalog, mission)) {
+        for (const auto& reward : step->rewards) {
+            if (reward.kind == ScenarioRewardKind::SupportDrone && reward.equipIfSlotAvailable &&
+                std::find(state.meta.equippedDroneIds.begin(), state.meta.equippedDroneIds.end(), reward.id) == state.meta.equippedDroneIds.end())
+                message += " / Drone owned, not assigned: bay full. Recall the team and free a slot in Drone Ops.";
+        }
+    }
     return {outcome.applied && solarMissionAccepted(state, catalog, mission),
-        outcome.applied, outcome.message};
+        outcome.applied, message};
 }
 
 const SolarMissionDefinition* nextSolarMission(const GameState& state, const ContentCatalog& catalog)

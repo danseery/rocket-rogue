@@ -76,6 +76,37 @@ bool hasPermanentArtifactFrom(
 
 } // namespace
 
+std::string artifactSectorForBody(const GameState& state, std::string_view systemId, std::string_view bodyId)
+{
+    const auto& location=state.run.expedition.location;
+    if (location.systemId==systemId && location.bodyId==bodyId) {
+        bool hasArtifact=state.run.mining.artifact.present;
+        for (const auto& layer : state.run.mining.depthLayers) hasArtifact|=layer.artifact.present;
+        const auto separator=location.siteId.rfind(':');
+        if (hasArtifact && separator!=std::string::npos && planetLandingZone(std::string_view(location.siteId).substr(separator+1)))
+            return location.siteId.substr(separator+1);
+    }
+    // Materialized artifacts, including delivered ones, retain their sector.
+    for (const auto& site : state.run.expedition.sites) {
+        if (site.systemId!=systemId || site.bodyId!=bodyId) continue;
+        bool hasArtifact=site.mining.artifact.present;
+        for (const auto& layer : site.mining.depthLayers) hasArtifact|=layer.artifact.present;
+        if (!hasArtifact) continue;
+        const auto separator=site.siteId.rfind(':');
+        if (separator!=std::string::npos && planetLandingZone(std::string_view(site.siteId).substr(separator+1)))
+            return site.siteId.substr(separator+1);
+    }
+    if (bodyId=="moon" && !state.run.expedition.moonTutorialZone.empty()) return state.run.expedition.moonTutorialZone;
+    const auto seed=mixHash(mixHash(state.seed,textHash(systemId)),textHash(bodyId));
+    return "zone_"+std::to_string(1+seededChoice(seed,0x5EC70FULL,6));
+}
+
+int encounterArtifactDepth(const GameState& state, std::string_view systemId, std::string_view bodyId)
+{
+    const auto seed=mixHash(mixHash(state.seed,textHash(systemId)),textHash(bodyId));
+    return 1+seededChoice(seed,0xDE970ULL,tuning::surfaceDepthProgression::maximumDepthRating);
+}
+
 bool destinationHasAuthoredProgressionArtifact(
     const ContentCatalog& catalog,
     std::string_view destinationId)
@@ -232,8 +263,7 @@ OrbitalArtifactSignal orbitalArtifactSignal(const GameState& state, const Conten
     const auto* body = systemBody(solarSystemDefinition(), expedition.location.bodyId);
     if (!body || !unresolvedProgressionArtifactOpportunity(state, catalog,
             body->environmentId, body->id, false)) return signal;
-    const std::string zoneId = body->id == "moon" && !expedition.moonTutorialZone.empty()
-        ? expedition.moonTutorialZone : "zone_1";
+    const std::string zoneId = artifactSectorForBody(state,expedition.location.systemId,body->id);
     const auto* zone = planetLandingZone(zoneId);
     if (!zone) return signal;
     signal.bearing = zone->centerBearing;
@@ -284,6 +314,12 @@ ProgressionArtifactPlacement resolveProgressionArtifactPlacement(
         placement.ordinal = recoveredProgressionArtifactDestinationCount(state, catalog);
     }
 
+    if (!solarMissionForBody(catalog,bodyId) && !state.run.planetaryExpedition.postSolarSystemId.empty()) {
+        placement.targetDepth=encounterArtifactDepth(state,state.run.planetaryExpedition.postSolarSystemId,bodyId);
+        placement.withinDepthSlot=1;
+        placement.verticalOffset=10;
+        return placement;
+    }
     if (placement.ordinal <= 0) {
         placement.targetDepth = 1;
         placement.withinDepthSlot = 0;

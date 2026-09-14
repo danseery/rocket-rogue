@@ -6,6 +6,7 @@
 #include "core/IncomingMessages.h"
 #include "core/SolarProgression.h"
 #include "core/SystemContent.h"
+#include "core/MiningSystem.h"
 
 #include <algorithm>
 #include <charconv>
@@ -494,6 +495,9 @@ void applyReward(
         if (!alreadyOwned && reward.equipIfSlotAvailable && allowSupportDroneAutoAssignment &&
             state.meta.equippedDroneIds.size() < static_cast<std::size_t>(state.meta.droneBaySlots)) {
             state.meta.equippedDroneIds.emplace_back(reward.id);
+            const std::string messageId = "drone_arrival_" + reward.id;
+            enqueueIncomingMessage(state.incomingMessages, catalog, {messageId, messageId, "default"});
+            synchronizeMiningSupportDrones(state, catalog);
         }
         break;
     }

@@ -10696,8 +10696,32 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 #rr-modal.modal-incoming_message .modal-scroll-body, #rr-modal.modal-solar_mission_claim .modal-scroll-body { flex: 0 1 auto; padding-right: 0dp; }
 #rr-modal.modal-incoming_message .modal-actions button, #rr-modal.modal-solar_mission_claim .modal-actions button { min-width: 140dp; width: auto; }
 .incoming-message-layout { display: flex; align-items: center; }
+.drone-arrival-introduction {
+    border: 2dp solid #68f0ce;
+    padding: 12dp;
+    animation: 0.8s cubic-out drone-arrival-fanfare;
+}
+@keyframes drone-arrival-fanfare {
+    from { background-color: #245954; }
+    to { background-color: #08141c; }
+}
 .incoming-message-portrait { width: 210dp; flex-shrink: 0; padding: 8dp; }
 .incoming-message-portrait img { width: 100%; height: auto; }
+.incoming-unknown-signal {
+    height: 168dp;
+    border: 2dp solid #64e4ef;
+    border-radius: 22dp;
+    background-color: #091820;
+    color: #b7f8ff;
+    text-align: center;
+    line-height: 168dp;
+    font-size: 22dp;
+    animation: 2.4s cubic-in-out infinite alternate incoming-unknown-pulse;
+}
+@keyframes incoming-unknown-pulse {
+    from { opacity: 0.5; }
+    to { opacity: 1; }
+}
 .incoming-message-copy { flex: 1; padding: 12dp; }
 .incoming-message-channel { color: #52d6e6; font-size: 12dp; }
 .incoming-message-copy h2 { color: #ebf4f6; margin: 8dp 0; font-size: 22dp; }

@@ -1038,7 +1038,7 @@ void ioTerrainAndArtifactSealAreDeterministic()
     const int anchorX = static_cast<int>(std::floor(mining.gate.anchorX));
     const int anchorY = static_cast<int>(std::floor(mining.gate.anchorY));
     constexpr std::array<std::pair<int, int>, 4> thermalSealOffsets {{
-        {0, -2}, {2, 0}, {0, 2}, {-2, 0}
+        {0, -1}, {1, 0}, {0, 1}, {-1, 0}
     }};
     const ExpeditionExperienceSnapshot experienceBeforeGateOpen =
         snapshotExpeditionExperience(first);
@@ -1048,6 +1048,7 @@ void ioTerrainAndArtifactSealAreDeterministic()
             anchorX + dx,
             anchorY + dy);
         require(seal != nullptr, "thermal Io seal segment should exist");
+        require(seal->gateAssociated, "each adjacent thermal seal tile must belong to the cocoon");
         *seal = {};
     }
     mining.gate.derivedStateDirty = true;

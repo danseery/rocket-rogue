@@ -1844,15 +1844,16 @@ void solarMissionAcceptanceUsesAuthoredActionsAndPreservesLiveLoadouts()
     const auto miningAccepted = acceptSolarMission(mining, catalog, *io);
     require(miningAccepted.accepted && miningAccepted.applied &&
             ownedMiniDroneCount(mining, content::drone::hazardDrone) == 1 &&
-            mining.meta.equippedDroneIds == originalLoadout &&
-            mining.run.mining.miniDrones.size() == 1 &&
+            mining.meta.equippedDroneIds.size() == originalLoadout.size() + 1 &&
+            equippedMiniDroneCount(mining, content::drone::hazardDrone) == 1 &&
+            mining.run.mining.miniDrones.size() == 2 &&
             mining.run.mining.miniDrones.front().haulMaterials.common == 3 &&
             mining.run.mining.miniDrones.front().carriedLooseObjectId == 17 &&
             mining.run.mining.miniDrones.front().x == 8.5 &&
             mining.screen == Screen::Mining && mining.run.mining.active &&
             mining.run.mining.droneX == 14.5 && mining.run.mining.droneY == 8.25 &&
             mining.run.mining.rigFuel.current == 4.75,
-        "commissioning in an existing mining run must grant ownership without assigning, rebuilding, moving, or resetting it");
+        "commissioning must immediately append the Hazard without rebuilding, moving, or resetting the hauling team");
     require(mining.incomingMessages.acknowledgedMessages ==
                 std::vector<std::string>{io->briefingMessageId} &&
             mining.incomingMessages.acknowledgedOccurrences ==
@@ -8579,7 +8580,8 @@ void controllerPanelDefaultsAndOrbitalActions()
         "Scan must be a discrete press, not a continuous action");
     flight.selectedThrottle = 0.60;
     panel = buildGamePanelPresentation(context);
-    defaultIs(panel.contentMarkup, "action:resume_orbital_flight");
+    require(panel.contentMarkup.find("action:resume_orbital_flight") == std::string::npos,
+        "ordinary piloting must not offer Resume Flight when orbital work is inactive");
     require(panel.contentMarkup.find("ESTABLISH A SAFE LOOP") != std::string::npos &&
         panel.contentMarkup.find("action:orbital_scan") == std::string::npos,
         "an unsafe powered loop must remain status rather than offer an unavailable Scan");
@@ -9346,6 +9348,24 @@ int main(int argc, char** argv)
 #endif
     {
         const auto catalog = createDefaultContent();
+        const auto* cross = catalog.findMiningSite(content::miningSite::thermalLayeredRecovery);
+        const auto* reinforced = catalog.findMiningSite(content::miningSite::reinforcedThermalRecovery);
+        require(cross && reinforced, "both cocoon options must be authored");
+        require(cross->cocoon.layers.front().offsets.size() == 4,
+            "introductory cocoon retains four drill targets");
+        require(cross->cocoon.version==3,"adjacent cross has a new saved definition version");
+        for (const auto& offset : cross->cocoon.layers.front().offsets)
+            require(std::abs(offset.x)+std::abs(offset.y)==1,"cross tiles share an artifact edge");
+        const auto& shell = reinforced->cocoon.layers.front();
+        require(shell.offsets.size() == 8 && shell.completionRule == cross->cocoon.layers.front().completionRule &&
+            shell.requiredHazardMark == cross->cocoon.layers.front().requiredHazardMark,
+            "reinforced cocoon adds locks without changing treatment rules");
+        for (int y = -1; y <= 1; ++y) for (int x = -1; x <= 1; ++x) {
+            const auto count = std::count_if(shell.offsets.begin(), shell.offsets.end(),
+                [=](const auto& offset) { return offset.x == x && offset.y == y; });
+            require(count == ((x == 0 && y == 0) ? 0 : 1),
+                "reinforced shell covers all eight neighbors exactly once, leaving the artifact intact");
+        }
         for (const bool full : {false, true}) {
             auto state = createNewGame(catalog, 0x7A170);
             state.meta.unlockKeys.push_back(content::unlock::routeNeptune);

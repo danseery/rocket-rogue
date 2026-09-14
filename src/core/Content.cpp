@@ -268,7 +268,10 @@ const MiningSiteDefinition* ContentCatalog::findMiningSite(std::string_view id) 
 ContentCatalog createDefaultContent()
 {
     ContentCatalog catalog;
-    catalog.messageSpeakers = {{"mission_control_fennec", "Mission Control", "LUNAR OPERATIONS", "portraits/mission-control-fennec.png", "portraits/mission-control-fennec-concerned.png"}};
+    catalog.messageSpeakers = {
+        {"mission_control_fennec", "Mission Control", "LUNAR OPERATIONS", "portraits/mission-control-fennec.png", "portraits/mission-control-fennec-concerned.png"},
+        {"straylight_ai", "Unknown", "SHIP AI // UNIDENTIFIED SIGNAL", {}, {}, true}
+    };
     catalog.incomingMessages = {
         {"lunar_scan", "mission_control_fennec", "Use your tools", "On it", true,
             {{"default", "Contract delivery confirmed. There may be something else down there. Send out a scanner pulse and let's see what comes back.", {MessageHint::Scanner}}}},
@@ -308,6 +311,12 @@ ContentCatalog createDefaultContent()
     addMissionMessages("titan_mission", "Titan", "Survey the landing site, pulse the buried signal, and recover the artifact.", "The Titan battery is secured. Uranus and Titania are now charted; Titania is the next mission.");
     addMissionMessages("titania_mission", "Titania", "Survey the landing site, pulse the buried signal, and recover the artifact.", "The Titania battery is secured. Neptune and Triton are now charted; Triton is the next mission.");
     addMissionMessages("triton_mission", "Triton", "Survey the landing site, pulse the buried signal, and recover the final artifact.", "The sixth battery is secured. An impossible contact beyond Neptune has been revealed: Straylight.");
+    // Only the post-mission contact belongs to the unidentified ship AI.
+    // Keep the mission briefing and reward claim with Mission Control.
+    catalog.incomingMessages.back().speakerId = "straylight_ai";
+    catalog.incomingMessages.back().title = "Incoming transmission";
+    catalog.incomingMessages.back().variants.front().body =
+        "Signal recognized. All six fragments accounted for. Approach the illuminated corridor. Docking systems are standing by.";
     addMissionMessages("mercury_mission", "Mercury", "Optional recovery: pulse the surface signal and return its artifact to the ship.", "The optional recovery reward is secured.");
     addMissionMessages("venus_mission", "Venus", "Optional recovery: pulse the surface signal and return its artifact to the ship.", "The optional recovery reward is secured.");
 
@@ -429,6 +438,12 @@ ContentCatalog createDefaultContent()
         miniDrone(content::drone::attackDrone, "Attack Drone", "Auto-fires cyan shots, crits priority targets, and pulses a slowing field while you mine.", Rarity::Rare, MiniDroneRole::Attack, {.enemyEncounterRelief = 0.05, .sentryDamagePerSecond = 3.2, .areaControlDamagePerSecond = 0.85, .enemySlow = 0.12}, content::unlock::perimeterDrones, {"combat", "post-solar"}),
         miniDrone(content::drone::defenseDrone, "Defense Drone", "Holds a rotating charged shield arc, recharges after a break, and counter-hits enemies that reach the rig.", Rarity::Rare, MiniDroneRole::Defense, {.drillIntegrityRelief = 0.06, .enemyEncounterRelief = 0.08, .enemyDamageRelief = 0.32, .reactiveArmorDamagePerSecond = 1.6, .environmentalShieldRelief = 0.18}, content::unlock::perimeterDrones, {"defense", "post-solar"})
     };
+
+    for (const auto& drone : catalog.miniDrones) {
+        catalog.incomingMessages.push_back({"drone_arrival_" + drone.id, "mission_control_fennec",
+            drone.name + " online", "Let's go", true,
+            {{"default", "Your " + drone.name + " is assigned and ready to support the rig. " + drone.description, {}}}});
+    }
 
     catalog.droneModules = {
         {content::droneModule::combatDrill, "Combat Drill", MiniDroneRole::Mining, MiniDroneRole::Attack, DroneModuleKind::CombatDrill, content::unlock::perimeterDrones, Rarity::Rare},
@@ -611,7 +626,7 @@ ContentCatalog createDefaultContent()
 
     MiningSiteDefinition thermalLayeredRecovery;
     thermalLayeredRecovery.id = content::miningSite::thermalLayeredRecovery;
-    thermalLayeredRecovery.version = 2;
+    thermalLayeredRecovery.version = 3;
     thermalLayeredRecovery.arena = {MiningAct::ActOne, 8, 0, true, MiningGateType::HazardCocoon};
     thermalLayeredRecovery.biome = MiningSiteBiome::ThermalLava;
     thermalLayeredRecovery.enemyTheme = MiningEnemyTheme::Lava;
@@ -621,7 +636,7 @@ ContentCatalog createDefaultContent()
     // The first protected objective teaches the cocoon language with one
     // clearly visible seal, not a surprise second phase.
     thermalLayeredRecovery.cocoon.id = "thermal_intro_seal";
-    thermalLayeredRecovery.cocoon.version = 2;
+    thermalLayeredRecovery.cocoon.version = 3;
     thermalLayeredRecovery.cocoon.surveySignalDepthOffset = 1;
     // This is a content-owned payload identity. The cocoon and scenario
     // systems consume it generically; compatibility migration can preserve
@@ -630,12 +645,26 @@ ContentCatalog createDefaultContent()
         ProtectedObjectiveKind::Artifact,
         content::protectedObjective::ioMinorArtifact};
     thermalLayeredRecovery.cocoon.layers = {
-        {"thermal", "THERMAL SEAL", {{0, -2}, {2, 0}, {0, 2}, {-2, 0}},
+        {"thermal", "THERMAL SEAL", {{0, -1}, {1, 0}, {0, 1}, {-1, 0}},
             MiningCocoonRevealPolicy::OnAnyCellDiscovered,
             MiningCocoonCompletionRule::TreatAndExcavate,
             MiningElementalAffinity::Thermal, 1}
     };
+    // Optional authoring variant; the campaign still selects the four-lock
+    // introduction above. Eight adjacent locks use the same treatment rules.
+    MiningSiteDefinition reinforcedThermalRecovery = thermalLayeredRecovery;
+    reinforcedThermalRecovery.id = content::miningSite::reinforcedThermalRecovery;
+    reinforcedThermalRecovery.version = 1;
+    reinforcedThermalRecovery.cocoon.id = "reinforced_thermal_seal";
+    reinforcedThermalRecovery.cocoon.version = 1;
+    reinforcedThermalRecovery.cocoon.protectedObjective.id = "reinforced_thermal_artifact";
+    reinforcedThermalRecovery.cocoon.layers.front().label = "REINFORCED THERMAL SEAL";
+    reinforcedThermalRecovery.cocoon.layers.front().offsets = {
+        {0, -1}, {1, 0}, {0, 1}, {-1, 0},
+        {-1, -1}, {1, -1}, {1, 1}, {-1, 1}
+    };
     catalog.miningSites.push_back(std::move(thermalLayeredRecovery));
+    catalog.miningSites.push_back(std::move(reinforcedThermalRecovery));
 
     catalog.scenarios = {
         {

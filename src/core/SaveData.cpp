@@ -3254,6 +3254,8 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     }
     normalizeRestoredMiningHazards(state.run.mining);
     normalizeRestoredHazardDroneAssignments(state.run.mining);
+    migrateAdjacentCocoonTiles(state.run.mining);
+    for (auto& site : state.run.expedition.sites) migrateAdjacentCocoonTiles(site.mining);
     state.meta.unlockKeys = save.unlockKeys.empty() ? std::vector<std::string>{content::unlock::starter} : save.unlockKeys;
     state.meta.blueprintProgress = save.blueprintProgress;
     state.meta.materials = save.materials;

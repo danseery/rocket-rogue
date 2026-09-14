@@ -44,7 +44,7 @@ bool validateIncomingMessages(const ContentCatalog &catalog, std::string *error)
     std::unordered_set<std::string> ids;
     for (const auto &speaker : catalog.messageSpeakers) {
         if (!validId(speaker.id) || !ids.insert(speaker.id).second || speaker.name.empty() ||
-            speaker.channel.empty() || speaker.portrait.empty())
+            speaker.channel.empty() || (!speaker.unknownSignal && speaker.portrait.empty()))
             return fail("Invalid incoming-message speaker");
     }
     ids.clear();

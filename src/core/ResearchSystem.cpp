@@ -8,6 +8,7 @@
 #include "core/GameUi.h"
 #include "core/MiningProgression.h"
 #include "core/MiningSystem.h"
+#include "core/IncomingMessages.h"
 #include "core/ScenarioSystem.h"
 #include "core/Tuning.h"
 
@@ -1809,6 +1810,9 @@ bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index)
         state.meta.ownedDroneIds.push_back(drone.id);
     }
     state.meta.equippedDroneIds.push_back(drone.id);
+    const std::string arrivalId = "drone_arrival_" + drone.id;
+    enqueueIncomingMessage(state.incomingMessages, catalog, {arrivalId, arrivalId, "default"});
+    synchronizeMiningSupportDrones(state, catalog);
     // Equipment assignment is a first-class scenario event. It deliberately
     // routes by the equipped unit ID instead of by a campaign objective so
     // authored and procedural scenarios can require any configured support

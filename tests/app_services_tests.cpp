@@ -61,6 +61,17 @@ struct OrbitalLandingTestAccess {
         app.session_.orbitalWork = {};
         app.surfaceArrival_ = {};
     }
+    static void revisitSurveyedShaft(RocketGameApp& app, const PlanetLandingZone& zone) {
+        app.surfaceArrival_.prepared->laserComplete = true;
+        app.storeOrbitalSite();
+        app.surfaceArrival_ = {};
+        app.session_.orbitalWork = {};
+        app.prepareSurfaceArrivalIfNeeded(currentDestination(app.state_, app.catalog_), zone.id);
+        assert(app.session_.orbitalWork.surveyComplete);
+        assert(!app.session_.orbitalWork.active());
+        assert(app.surfaceArrival_.prepared->laserComplete);
+        assert(app.orbitalLandingEligible());
+    }
 };
 }
 
@@ -1495,6 +1506,10 @@ void explicitOrbitalLandingEntersLocalDescent()
     fixture->runner.app().renderScene();
     assert(fixture->renderer.orbitalSurveyProgress >= .99);
     rocket::OrbitalLandingTestAccess::setOrbit(fixture->runner.app(), radius, zone, direction);
+    // Returning to a surveyed site restores progress, not an active work
+    // session. Land must also work after deliberately resuming manual flight.
+    fixture->runner.app().resumeOrbitalFlight();
+    if (direction > 0) rocket::OrbitalLandingTestAccess::revisitSurveyedShaft(fixture->runner.app(), zone);
     fixture->runner.app().landFromOrbit();
     for (int i=0; i<19; ++i) {
         fixture->runner.app().landFromOrbit(); // Held/repeated action cannot restart alignment.
@@ -1799,7 +1814,8 @@ void ioCommissioningReceiptsAndMiningRepairStayExplicit()
         auto fixture = load(*state);
         fixture->ui.dispatchAction(acknowledgement);
         const auto accepted = deserializeSaveData(fixture->saves.value);
-        assert(accepted && accepted->incomingMessages.pending.empty());
+        assert(accepted && accepted->incomingMessages.pending.size() == 1 &&
+            accepted->incomingMessages.pending.front().messageId == "drone_arrival_hazard_drone");
         assert(std::find(accepted->incomingMessages.acknowledgedMessages.begin(),
             accepted->incomingMessages.acknowledgedMessages.end(), mission->briefingMessageId) !=
             accepted->incomingMessages.acknowledgedMessages.end());

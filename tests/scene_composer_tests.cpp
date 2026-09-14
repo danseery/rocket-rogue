@@ -2520,6 +2520,49 @@ void testMiningCellsAndScannerMarksUseMaterialSilhouettes()
     }
 }
 
+void testCocoonHasNoConnectingArms()
+{
+    rocket::MiningRunState mining;
+    mining.terrain.width = 9;
+    mining.terrain.height = 9;
+    mining.terrain.cells.resize(81);
+    mining.artifact.present = true;
+    mining.artifact.x = 4.5;
+    mining.artifact.y = 4.5;
+    mining.artifact.state = rocket::MiningArtifactState::Embedded;
+    mining.gate.type = rocket::MiningGateType::HazardCocoon;
+    for (const auto [x, y] : {std::pair{4, 2}, {6, 4}, {4, 6}, {2, 4}}) {
+        auto& cell = mining.terrain.cells[y * 9 + x];
+        cell.material = rocket::MiningCellMaterial::HazardPocket;
+        cell.revealed = true;
+        cell.gateAssociated = true;
+        cell.cocoonLayer = 0;
+    }
+    const auto jawVertices = [&](RenderSnapshot snapshot) {
+        snapshot.miningArtifact.present = mining.artifact.present;
+        snapshot.miningArtifact.x = mining.artifact.x;
+        snapshot.miningArtifact.y = mining.artifact.y;
+        snapshot.miningArtifact.state = static_cast<int>(mining.artifact.state);
+        snapshot.miningArtifact.tethered = mining.artifact.tethered;
+        SceneComposer composer;
+        composer.setViewport({1280, 800, 1280, 800, 1.0F});
+        const auto& packet = composer.compose(snapshot);
+        return std::count_if(packet.vertices.begin(), packet.vertices.end(), [](const auto& packed) {
+            const auto v = rocket::unpackSceneVertex(packed);
+            return std::abs(v.r - 0.12F) < 0.005F && std::abs(v.g - 0.08F) < 0.005F &&
+                std::abs(v.b - 0.16F) < 0.005F;
+        });
+    };
+    assert(jawVertices(miningSnapshot(mining)) == 0);
+    mining.terrain.cells[2 * 9 + 4].material = rocket::MiningCellMaterial::Empty;
+    assert(jawVertices(miningSnapshot(mining)) == 0);
+    mining.artifact.tethered = true;
+    assert(jawVertices(miningSnapshot(mining)) == 0);
+    mining.artifact.tethered = false;
+    mining.artifact.state = rocket::MiningArtifactState::Loose;
+    assert(jawVertices(miningSnapshot(mining)) == 0);
+}
+
 void testSceneTransitionFadesEverySceneToBlack()
 {
     const auto hasBlackOverlay = [](const ScenePacket& packet, float opacity) {
@@ -4100,6 +4143,7 @@ int main()
     testMiningLooseObjectsAreVisibleWorldEntities();
     testMiningLooseObjectsUseContinuousWorldCoordinates();
     testMiningCellsAndScannerMarksUseMaterialSilhouettes();
+    testCocoonHasNoConnectingArms();
     testSceneTransitionFadesEverySceneToBlack();
     testTetheredArtifactAuraHasNoRectangularOverlay();
     testTriangulationUsesOneThreeSliceAuraAndHidesArtifactGlow();

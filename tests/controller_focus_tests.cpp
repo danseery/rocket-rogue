@@ -472,6 +472,21 @@ void generatedPanelPass(int width, int height)
     audit("orbit drill");
     context.orbitalLaserComplete = true;
     audit("orbit shaft ready");
+    work.phase = rocket::OrbitalWorkPhase::Inactive;
+    context.orbitalLandingEligible = true;
+    const auto returningPanel = rocket::buildGamePanelPresentation(context);
+    assert(returningPanel.contentMarkup.find("land_from_orbit") != std::string::npos);
+    assert(returningPanel.contentMarkup.find("resume_orbital_flight") == std::string::npos);
+    audit("revisited shaft while piloting");
+    context.orbitalInsideZone = false;
+    context.orbitalLandingEligible = false;
+    const auto outsidePanel = rocket::buildGamePanelPresentation(context);
+    assert(outsidePanel.contentMarkup.find("land_from_orbit") == std::string::npos);
+    assert(outsidePanel.contentMarkup.find("Ready to land") == std::string::npos);
+    assert(outsidePanel.contentMarkup.find("resume_orbital_flight") == std::string::npos);
+    audit("revisited shaft outside wedge");
+    context.orbitalInsideZone = true;
+    work.phase = rocket::OrbitalWorkPhase::LaserReady;
     context.orbitalLaserComplete = false;
     context.orbitalLaserBlocked = true;
     audit("orbit tools blocked");
@@ -484,17 +499,35 @@ void generatedPanelPass(int width, int height)
     flight.mode = rocket::FlightMode::Landing;
     flight.landing.siteBound = true;
     audit("manual descent");
+    const auto auditRestoredSurfaceTitle = [&] {
+        context.titleScreenActive = true;
+        context.hasSavedGame = true;
+        const auto title = rocket::buildGamePanelPresentation(context);
+        assert(title.metadata.overlay == rocket::PanelOverlayKind::None);
+        assert(title.metadata.variant == "title");
+        assert(title.templateKind != rocket::PanelTemplateKind::Mining);
+        ui.setPanelPresentation(title);
+        auditRenderedGraph(ui, "restored surface title @" + std::to_string(width));
+        context.titleScreenActive = false;
+        const auto resumed = rocket::buildGamePanelPresentation(context);
+        assert(resumed.metadata.overlay == rocket::PanelOverlayKind::MiningExperience);
+        assert(resumed.templateKind == rocket::PanelTemplateKind::Mining);
+    };
+    auditRestoredSurfaceTitle();
     flight.landing.departureActive = true;
     audit("manual ascent");
+    auditRestoredSurfaceTitle();
     flight.landing.departureActive = false;
     context.surfaceArrivalActive = true;
     context.surfaceArrivalPhase = 3;
     context.surfaceArrivalLandingCommitted = true;
     audit("deployment choices");
+    auditRestoredSurfaceTitle();
     context.surfaceArrivalLandingCommitted = false;
     audit("undeployed takeoff");
     context.surfaceArrivalPhase = 4;
     audit("deployment animation");
+    auditRestoredSurfaceTitle();
     context.surfaceArrivalActive = false;
     context.launchFlight = nullptr;
 
@@ -581,6 +614,15 @@ void generatedPanelPass(int width, int height)
     assert(ui.focusedId() == "action:" + commissionAction);
     auditRenderedGraph(ui, "Io Drone Ops commission @" + std::to_string(width));
     assert(rocket::acceptSolarMission(*state, catalog, *io).accepted);
+    assert(rocket::equippedMiniDroneCount(*state, rocket::content::drone::hazardDrone) == 1);
+    assert(!state->run.mining.miniDrones.empty());
+    while (!state->incomingMessages.pending.empty())
+        assert(rocket::acknowledgeIncomingMessage(state->incomingMessages, state->incomingMessages.pending.front().id));
+    // Separately exercise an owned/unassigned frame while a loadout recall
+    // is in progress; normal additive assignments no longer require recall.
+    state->meta.equippedDroneIds.clear();
+    state->run.mining.miniDrones.clear();
+    state->run.mining.droneLoadoutRecallActive = true;
     ioPanel = rocket::buildGamePanelPresentation(context);
     assert(ioPanel.contentMarkup.find("data-hazard-support=\"unassigned\"") != std::string::npos);
     assert(ioPanel.contentMarkup.find("Commission Hazard Drone") == std::string::npos);
@@ -625,6 +667,7 @@ void generatedPanelPass(int width, int height)
     assert(rocket::miningDroneRecoveryStatus(state->run.mining, true).outstandingDrones == 0);
     state->meta.droneBaySlots = 2;
     state->meta.materials = {1000, 1000, 1000};
+    state->run.mining.droneLoadoutRecallActive = false;
     audit("Io service assignment ready");
     const auto hazard = std::find_if(catalog.miniDrones.begin(), catalog.miniDrones.end(), [](const auto& drone) {
         return drone.id == rocket::content::drone::hazardDrone;

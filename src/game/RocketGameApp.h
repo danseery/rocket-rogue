@@ -472,6 +472,7 @@ private:
     double visualTimeSeconds_ = 0.0;
     double miningOperatorToggleConfirmationSeconds_ = 0.0;
     double expeditionXpPulseSeconds_ = 0.0;
+    std::string lastDroneArrivalFanfare_;
     int observedExpeditionLevel_ = 1;
     double observedExpeditionExperience_ = 0.0;
     bool expeditionXpObservationInitialized_ = false;

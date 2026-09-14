@@ -264,6 +264,9 @@ struct MiningDroneRecoveryStatus {
 MiningDroneRecoveryStatus miningDroneRecoveryStatus(const MiningRunState& mining, bool includeDeployedDrones = false);
 bool requestMiningDroneRecall(GameState& state, bool includeDeployedDrones = false);
 void clearMiningDroneLoadoutRecall(GameState& state);
+void synchronizeMiningSupportDrones(GameState& state, const ContentCatalog& catalog);
+// Safe-load/site-entry compatibility; never call during live simulation.
+void migrateAdjacentCocoonTiles(MiningRunState& mining);
 MiningLoadStats miningLoadStats(const GameState& state, const ContentCatalog& catalog);
 int miningDrillRepairCost(const MiningRunState& mining);
 int miningDroneRepairCost(const MiningRunState& mining);
@@ -275,7 +278,8 @@ SurfaceActionOutcome startMiningRun(
     GameState& state,
     const ContentCatalog& catalog,
     const MiningArenaRequest& request,
-    bool progressionCreditEligible);
+    bool progressionCreditEligible,
+    std::string_view artifactSector = {});
 bool enterMiningSwarmArenaForDebug(GameState& state, const ContentCatalog& catalog);
 void setMiningMove(GameState& state, double xAxis, double yAxis);
 void setMiningAim(GameState& state, double normalizedX, double normalizedY);

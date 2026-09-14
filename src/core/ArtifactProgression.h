@@ -10,6 +10,8 @@
 namespace rocket {
 
 struct PreparedSurfaceLanding;
+std::string artifactSectorForBody(const GameState& state, std::string_view systemId, std::string_view bodyId);
+int encounterArtifactDepth(const GameState& state, std::string_view systemId, std::string_view bodyId);
 
 struct ProgressionArtifactOpportunity {
     std::string destinationId;

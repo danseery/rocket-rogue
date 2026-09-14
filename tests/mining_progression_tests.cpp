@@ -415,6 +415,13 @@ void miningGateContractsAndRuntimeAreDeterministic()
     prepareSurface(enemyState, content::destination::nearbyStar);
     const MiningArenaRequest enemyRequest {MiningAct::ActTwo, 2, 0xBEEF, true, MiningGateType::EnemySealedChamber};
     require(startMiningRun(enemyState, catalog, enemyRequest, false).applied, "Enemy-Sealed Chamber debug arena should start");
+    for (const auto& layer : enemyState.run.mining.depthLayers) {
+        if (layer.artifact.present) {
+            const int depth = layer.depthZone;
+            require(activateLandingLayer(enemyState.run.mining, depth), "enemy seal's rolled depth should activate");
+            break;
+        }
+    }
     require(enemyState.run.mining.gate.assignedEnemiesRemaining > 0, "enemy seal should own a specific encounter group");
     for (MiningEnemy& enemy : enemyState.run.mining.enemies) {
         if (enemy.gateAssociated) enemy.active = false;
@@ -504,6 +511,13 @@ void miningGateContractsAndRuntimeAreDeterministic()
     prepareSurface(burrowState, content::destination::nearbyGalaxy);
     const MiningArenaRequest burrowRequest {MiningAct::ActThree, 1, 0xB0770, true, MiningGateType::BurrowBreach};
     require(startMiningRun(burrowState, catalog, burrowRequest, false).applied, "Burrow Breach debug arena should start");
+    for (const auto& layer : burrowState.run.mining.depthLayers) {
+        if (layer.artifact.present) {
+            const int depth = layer.depthZone;
+            require(activateLandingLayer(burrowState.run.mining, depth), "burrow seal's rolled depth should activate");
+            break;
+        }
+    }
     const int markedBedrock = static_cast<int>(std::count_if(
         burrowState.run.mining.terrain.cells.begin(), burrowState.run.mining.terrain.cells.end(), [](const MiningCell& cell) {
             return cell.gateAssociated && cell.material == MiningCellMaterial::Bedrock;

@@ -51,7 +51,8 @@ std::string orbitalLaserHint(const PanelRenderContext& c)
     const std::string limit = "Depth " + std::to_string(
         surfaceDepthRating(c.state, SurfaceDepthUpgradeKind::BoreSystem));
     if (c.orbitalLaserBlocked) return limit + " · Surface tools needed";
-    if (c.orbitalLaserComplete) return limit + " · Ready to land";
+    if (c.orbitalLaserComplete) return limit + (c.orbitalLandingEligible
+        ? " · Ready to land" : !c.orbitalInsideZone ? " · Return to selected wedge" : " · Shaft ready");
     return limit + " · Hold to drill";
 }
 
@@ -64,7 +65,9 @@ bool surfaceDescentForContext(const PanelRenderContext& context)
 
 bool surfaceHudForContext(const PanelRenderContext& context)
 {
-    return context.state.screen == Screen::Flight && context.launchFlight &&
+    // A restored surface flight is still behind the title until Continue.
+    // Do not let its later HUD override resurrect the gameplay XP overlay.
+    return !context.titleScreenActive && context.state.screen == Screen::Flight && context.launchFlight &&
         context.launchFlight->landing.siteBound &&
         (context.surfaceArrivalActive || surfaceDescentForContext(context));
 }
@@ -2931,7 +2934,8 @@ std::string buildGamePanelMarkup(
                         : "Scan depth " + std::to_string(surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray)))
                     << "</p>";
                 if (canLand) out << button("LAND", ui::actions::landFromOrbit, "ok", !workDefault);
-                out << button("RESUME FLIGHT", ui::actions::resumeOrbitalFlight, "ghost", !workDefault && !canLand);
+                if (w.active())
+                    out << button("RESUME FLIGHT", ui::actions::resumeOrbitalFlight, "ghost", !workDefault && !canLand);
             }
             out << "</section>";
         }
@@ -3312,7 +3316,8 @@ std::string buildGamePanelMarkup(
             ? miningAtReturnZone(mining) && droneRecovery.outstandingDrones == 0
             : !state.run.expedition.travelInitialized || operationalHomeDocked(state.run.expedition);
         if (!serviceAvailable) {
-            for (auto& drone : dronePanel.drones) drone.action.enabled = false;
+            if (!mining.active || mining.droneLoadoutRecallActive)
+                for (auto& drone : dronePanel.drones) drone.action.enabled = false;
             for (auto& slot : dronePanel.loadoutSlots) slot.action.enabled = false;
         }
         if (state.run.expedition.travelInitialized) {
@@ -3404,8 +3409,8 @@ std::string buildGamePanelMarkup(
         if (!serviceAvailable) {
             out << "<section class=\"phase-advisory warn drone-service-status\"><strong>LOADOUT // SHIP SERVICE REQUIRED</strong><span>"
                 << (mining.active && miningAtReturnZone(mining)
-                    ? "Recall all Support Drones to the shuttle before changing the loadout."
-                    : mining.active ? "Return the Mining Rig to the shuttle, then wait for all Support Drones before assigning frames."
+                    ? "Free slots can be assigned immediately. Recall drones before removing or replacing an assigned frame."
+                    : mining.active ? "Free slots deploy immediately. Return to the shuttle and recall drones to remove or replace a frame."
                                     : "Land and reach ship service to assign Support Drones. Commissioning and details remain available here.")
                 << "</span>";
             if (mining.active && miningAtReturnZone(mining) && droneRecovery.outstandingDrones > 0) {
@@ -4123,10 +4128,16 @@ std::optional<ModalPresentation> buildIncomingMessageCard(
     const auto* variant = message ? messageVariant(*message, variantId) : nullptr;
     if (!speaker || !variant) return std::nullopt;
             std::ostringstream body;
-            body << "<section class=\"incoming-message modal-body\"><div class=\"incoming-message-layout\">"
-                 << "<div class=\"incoming-message-portrait\"><img src=\"" << htmlEscape(message->concerned ? speaker->concernedPortrait : speaker->portrait)
-                 << "\" alt=\"" << htmlEscape(speaker->name) << "\" /></div>"
-                 << "<div class=\"incoming-message-copy\"><div class=\"incoming-message-channel\">" << htmlEscape(speaker->channel)
+            body << "<section class=\"incoming-message modal-body"
+                 << (messageId.starts_with("drone_arrival_") ? " drone-arrival-introduction" : "")
+                 << "\"><div class=\"incoming-message-layout\">";
+            if (speaker->unknownSignal) {
+                body << "<div class=\"incoming-message-portrait\"><div class=\"incoming-unknown-signal\" aria-label=\"Unknown ship AI signal\"><span>Unknown</span></div></div>";
+            } else {
+                body << "<div class=\"incoming-message-portrait\"><img src=\"" << htmlEscape(message->concerned ? speaker->concernedPortrait : speaker->portrait)
+                     << "\" alt=\"" << htmlEscape(speaker->name) << "\" /></div>";
+            }
+            body << "<div class=\"incoming-message-copy\"><div class=\"incoming-message-channel\">" << htmlEscape(speaker->channel)
                  << "</div><h2>" << htmlEscape(speaker->name) << "</h2><h3>" << htmlEscape(titleOverride.empty() ? message->title : titleOverride)
                  << "</h3><p>" << htmlEscape(bodyOverride.empty() ? variant->body : bodyOverride) << "</p><div class=\"incoming-message-hints\">";
             for (const auto hint : variant->hints) {

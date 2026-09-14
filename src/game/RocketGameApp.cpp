@@ -642,7 +642,7 @@ bool RocketGameApp::orbitalLandingEligible() const
 {
     return state_.screen == Screen::Flight && session_.flight.active &&
         session_.flight.mode == FlightMode::Orbit && session_.flight.orbit.captured &&
-        session_.orbitalWork.active() && session_.orbitalWork.surveyComplete &&
+        session_.orbitalWork.surveyComplete &&
         shipInsideOrbitalWorkZone() && surfaceArrival_.prepared && surfaceArrival_.prepared->valid &&
         preparedSurfaceLandingCurrent(state_, catalog_, *surfaceArrival_.prepared);
 }
@@ -717,7 +717,7 @@ void RocketGameApp::orbitalWorkInput(bool held)
         work.surveyDepth = surfaceDepthRating(state_, SurfaceDepthUpgradeKind::SurveyArray);
         if (!prepareOrbitalSurvey(state_, catalog_, prepared, work.surveyDepth)) return;
         if (prepared.bodyId == "moon" && expedition.moonTutorialZone.empty())
-            expedition.moonTutorialZone = prepared.request.zoneId;
+            expedition.moonTutorialZone = artifactSectorForBody(state_,expedition.location.systemId,"moon");
         work.phase = OrbitalWorkPhase::Surveying;
         queueAudioCue(GameAudioCue::Scanner);
         work.elapsed = 0.0;
@@ -887,7 +887,7 @@ void RocketGameApp::prepareSurfaceArrivalIfNeeded(const Destination& destination
     if (systemSite) {
         request.siteSeed = surfaceSiteSeed(state_.seed, systemSite->id, 1);
         request.allowScenarioObjectives = systemSite->authoredObjectives &&
-            (systemSite->id == "moon" ? (expedition.moonTutorialZone.empty() || expedition.moonTutorialZone == requestedZone) : requestedZone == "zone_1");
+            requestedZone == artifactSectorForBody(state_,expedition.location.systemId,systemSite->id);
     }
     const auto key = surfaceLandingBuildKey(state_, catalog_, request);
     storeOrbitalSite();
@@ -3576,9 +3576,7 @@ void RocketGameApp::equipDrone(int index)
 
     if ((state_.run.expedition.travelInitialized && !state_.run.mining.active &&
          !operationalHomeDocked(state_.run.expedition)) ||
-        (state_.run.mining.active &&
-        (!miningAtReturnZone(state_.run.mining) ||
-         miningDroneRecoveryStatus(state_.run.mining, true).outstandingDrones > 0))) {
+        (state_.run.mining.active && state_.run.mining.droneLoadoutRecallActive)) {
         state_.statusLine = "Recall Support Drones and wait for their cargo at the shuttle before changing the loadout.";
         panelDirty_ = true;
         return;
@@ -5759,6 +5757,18 @@ void RocketGameApp::refreshPanel()
         presentation.metadata.interaction == PanelInteractionMode::Realtime,
     });
     services_.ui.setPanelPresentation(presentation);
+    if (!context.titleScreenActive && !state_.incomingMessages.pending.empty()) {
+        const auto& arrival = state_.incomingMessages.pending.front();
+        const bool showing = std::any_of(presentation.modals.begin(), presentation.modals.end(),
+            [](const auto& modal) { return modal.id == "incoming_message" && modal.autoOpen; });
+        if (showing && arrival.messageId.starts_with("drone_arrival_") &&
+            lastDroneArrivalFanfare_ != arrival.id) {
+            lastDroneArrivalFanfare_ = arrival.id;
+            queueAudioCue(GameAudioCue::Reward);
+            queueAudioCue(GameAudioCue::DroneLaunch);
+            queueControllerHapticCue(ControllerHapticCue::Arrival);
+        }
+    }
     panelStructureKey_ = realtimePanelStructureKey(context);
     panelDirty_ = false;
     realtimeHudDirty_ = false;
@@ -5857,6 +5867,8 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
         if (pauseReason_ == PauseReason::BlockingModal) clearControllerPause();
         state_.statusLine = address.action == ScenarioActionKind::ClaimReward
             ? "MISSION COMPLETE / " + outcome.message : outcome.message;
+        if (grantsAutoAssignedSupportDrone && state_.meta.equippedDroneIds.size() <= equippedDroneCountBefore)
+            state_.statusLine += " / DRONE OWNED, NOT ASSIGNED: bay full. In Drone Ops, recall the team, free a slot, then assign the new drone.";
         if (address.action == ScenarioActionKind::ClaimReward) queueAudioCue(GameAudioCue::Reward);
         (void)reconcileSolarMissionMessages(state_, catalog_);
         (void)enforceLiveExpeditionFlow();
@@ -5950,9 +5962,12 @@ void RocketGameApp::runUiAction(const std::string& action)
                     panelDirty_ = true;
                     return;
                 }
+                state_.statusLine = outcome.message;
                 break;
             }
-            state_.incomingMessages = std::move(acknowledgedMessages);
+            // Acceptance may enqueue a first-drone introduction. Acknowledge
+            // the live queue rather than overwrite those newly added messages.
+            (void)acknowledgeIncomingMessage(state_.incomingMessages, action.substr(incomingPrefix.size()));
             releaseRealtimeInputs(true);
             messageMoveReleaseRequired_ = true;
             messageDrillReleaseRequired_ = true;

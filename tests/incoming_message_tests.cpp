@@ -17,6 +17,17 @@ void incomingMessageTests() {
             throw std::runtime_error(message);
     };
     auto catalog = createDefaultContent();
+    for (const auto& drone : catalog.miniDrones) {
+        const std::string id = "drone_arrival_" + drone.id;
+        check(incomingMessage(catalog, id) != nullptr, "Every drone type has a shared first-arrival introduction");
+        IncomingMessageState arrivals;
+        check(enqueueIncomingMessage(arrivals, catalog, {id, id, "default"}), "First arrival queues an introduction");
+        check(acknowledgeIncomingMessage(arrivals, id).has_value(), "Arrival can be acknowledged");
+        IncomingMessageState savedArrivals;
+        check(deserializeIncomingMessages(serializeIncomingMessages(arrivals), savedArrivals) &&
+            !enqueueIncomingMessage(savedArrivals, catalog, {id + ".again", id, "default"}),
+            "Reassignment and save/load must not replay first-arrival introductions");
+    }
     {
         IncomingMessageState belt;
         check(enqueueIncomingMessage(belt,catalog,{"campaign.asteroid_belt_intro","asteroid_belt_intro","default"}),
@@ -105,6 +116,17 @@ void incomingMessageTests() {
           "Early discovery replaces stale scan instruction with EVA variant");
     PreparedLaunch prepared;
     PanelRenderContext context{game, catalog, prepared, prepared};
+    {
+        const auto* contact = incomingMessage(catalog, "triton_mission_complete");
+        check(contact && contact->speakerId == "straylight_ai", "Post-Triton contact belongs to the ship AI");
+        check(incomingMessage(catalog, "triton_mission_briefing")->speakerId == "mission_control_fennec",
+            "Normal mission briefing retains Mission Control");
+        const auto card = buildIncomingMessageCard(context, "triton_mission_complete", "default", "acknowledge");
+        check(card && card->bodyMarkup.find("incoming-unknown-signal") != std::string::npos &&
+            card->bodyMarkup.find("Unknown") != std::string::npos &&
+            card->bodyMarkup.find("<img") == std::string::npos,
+            "Ship AI uses the outlined Unknown signal without a fox portrait");
+    }
     context.firstTimeIntroductionsEnabled = false;
     auto panel = buildGamePanelPresentation(context);
     const auto find = [](const auto &p) {
@@ -193,8 +215,11 @@ void incomingMessageTests() {
     completeMission("moon");
     campaign.screen = Screen::Mining;
     check(reconcileSolarMissionMessages(campaign, catalog) &&
-              campaign.incomingMessages.pending.empty(),
-          "Claiming during mining should retire the briefing without a duplicate reward introduction; travel guidance waits for ascent");
+              campaign.incomingMessages.pending.size() == 1 &&
+              campaign.incomingMessages.pending.front().messageId == "drone_arrival_mining_drone",
+          "Claiming during mining retires the briefing and introduces the newly assigned Prospector immediately");
+    check(acknowledgeIncomingMessage(campaign.incomingMessages,
+        campaign.incomingMessages.pending.front().id).has_value(), "Acknowledge first Prospector arrival");
     campaign.screen = Screen::Hangar;
     campaign.run.expedition.active = false;
     campaign.run.expedition.location.bodyId = "earth";
