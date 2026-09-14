@@ -547,9 +547,16 @@ void launchUsesExplicitFocusOwnership()
     frame.leftX = -0.80;
     frame.leftY = -0.60;
     const RoutedGameInput pilotingInput = router.route(InputContext::Launch, frame, preferences);
-    require(std::abs(pilotingInput.moveX + 0.80) < 0.000001 &&
+    require(pilotingInput.moveX == 0.0 && std::abs(pilotingInput.strafe + 0.80) < 0.000001 &&
             std::abs(pilotingInput.moveY - 0.60) < 0.000001,
-        "active launch should continuously route left-stick steering and upward throttle input");
+        "left stick must strafe without rotation and retain proportional forward thrust");
+    frame.down.set(index(ControllerButton::RightBumper));
+    require(router.route(InputContext::Launch,frame,preferences).moveX==1.0,"right shoulder rotates clockwise");
+    frame.down.set(index(ControllerButton::LeftBumper));
+    require(router.route(InputContext::Launch,frame,preferences).moveX==0.0,"opposing shoulders cancel rotation");
+    frame.down.reset(index(ControllerButton::RightBumper));
+    require(router.route(InputContext::Launch,frame,preferences).moveX==-1.0,"left shoulder rotates counterclockwise");
+    frame.down.reset(index(ControllerButton::LeftBumper));
     preferences.invertFlightY = true;
     const RoutedGameInput invertedPilotingInput = router.route(InputContext::Launch, frame, preferences);
     require(std::abs(invertedPilotingInput.moveY + 0.60) < 0.000001,

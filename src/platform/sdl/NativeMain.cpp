@@ -250,11 +250,13 @@ int main(int argumentCount, char** arguments)
         };
         rocket::GameRunner runner(services);
         if (!runner.initialize()) {
+            audio.shutdown();
             platform.shutdown();
             return 1;
         }
         if (!platform.showWindowWhenReady()) {
             runner.shutdown();
+            audio.shutdown();
             platform.shutdown();
             return 1;
         }
@@ -267,6 +269,7 @@ int main(int argumentCount, char** arguments)
             if (!setup) {
                 platform.log(rocket::PlatformLogLevel::Error, setup.error);
                 runner.shutdown();
+                audio.shutdown();
                 platform.shutdown();
                 return 2;
             }
@@ -297,6 +300,7 @@ int main(int argumentCount, char** arguments)
             if (!started) {
                 platform.log(rocket::PlatformLogLevel::Error, started.error);
                 runner.shutdown();
+                audio.shutdown();
                 platform.shutdown();
                 return 2;
             }
@@ -407,6 +411,7 @@ int main(int argumentCount, char** arguments)
         }
 
         runner.shutdown();
+        audio.shutdown();
         platform.shutdown();
         steam.shutdown();
         return benchmarkSucceeded ? 0 : 1;

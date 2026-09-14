@@ -1,4 +1,5 @@
 #include "core/ExpeditionSystem.h"
+#include "core/StraylightSequence.h"
 #include "core/FlightSystem.h"
 #include "core/ContentIds.h"
 #include "core/ScenarioSystem.h"
@@ -26,12 +27,21 @@ std::optional<SystemLocation> courseTargetLocation(const PersistentExpeditionSta
         return SystemLocation{system.id,body->id,CoordinateFrame::System,systemNavigationPosition(*body),body->velocity,0,{}};
     return std::nullopt;
 }
+bool wreckCarriesArtifact(const PersistentExpeditionState& e, std::uint64_t wreckId) {
+    return std::any_of(e.batteries.begin(), e.batteries.end(), [&](const auto& battery) {
+        return battery.owner == BatteryOwner::Wreck && battery.wreckId == wreckId;
+    });
+}
+std::string wreckDisplayName(const PersistentExpeditionState& e, std::uint64_t wreckId) {
+    return std::string(wreckCarriesArtifact(e, wreckId) ? "Artifact / Wreck " : "Wreck ") + std::to_string(wreckId);
+}
 std::string courseTargetName(const PersistentExpeditionState& e,const SystemDefinition& system,std::string_view target) {
-    if (const auto* wreck=courseWreck(e,target)) return "Wreck " + std::to_string(wreck->id);
+    if (const auto* wreck=courseWreck(e,target)) return wreckDisplayName(e, wreck->id);
     if (const auto* body=systemBody(system,target)) return body->name + (body->dock ? " Dock" : "");
     return "None";
 }
 CampaignObjective recommendedCampaignObjective(const GameState& state,const ContentCatalog& catalog) {
+    if (const auto objective = straylightObjective(state)) return *objective;
     const auto& e=state.run.expedition;
     for (const auto owner : {BatteryOwner::Ship,BatteryOwner::Wreck}) {
         for (const auto& mission:catalog.solarMissions) {
@@ -81,6 +91,10 @@ bool reconcileCampaignGuidance(GameState& state,const ContentCatalog& catalog,bo
         if (objective.targetId.empty()) e.course={};
         else if (plotSystemCourse(e,f,solarSystemDefinition(),objective.targetId)!=ExpeditionResult::Applied) return changed;
         e.cruise={}; changed=true;
+    }
+    if (docked && state.meta.shipsLost > 0 && !e.wrecks.empty()) {
+        changed |= enqueueIncomingMessage(state.incomingMessages, catalog,
+            {"tutorial.wreck_salvage", "wreck_salvage_intro", "default"});
     }
     if (docked && objective.kind==CampaignObjectiveKind::RecoverArtifact) {
         changed |= enqueueIncomingMessage(state.incomingMessages,catalog,

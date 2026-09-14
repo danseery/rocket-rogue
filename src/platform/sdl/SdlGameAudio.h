@@ -18,6 +18,7 @@ class SdlGameAudio final : public IGameAudio {
 public:
     SdlGameAudio(std::filesystem::path runtimeRoot, IPlatformHost& host);
     ~SdlGameAudio() override;
+    void shutdown();
 
     bool playOneShot(const GameAudioEvent& event) override;
     void setThrust(double level) override;

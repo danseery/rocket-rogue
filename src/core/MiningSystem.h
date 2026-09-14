@@ -131,6 +131,7 @@ bool prepareOrbitalSurvey(const GameState&, const ContentCatalog&, PreparedSurfa
 std::uint64_t surfaceLandingBuildKey(const GameState&, const ContentCatalog&, const SurfaceLandingBuildRequest&);
 void excavateOrbitalShaft(PreparedSurfaceLanding&, int maximumDepth, double seconds);
 bool orbitalShaftAvoidsProtectedObjectives(const MiningRunState&, int shaftX);
+void repairSavedOrbitalObjectives(MiningRunState&, OrbitalSiteProgress&, const ContentCatalog&);
 
 PreparedSurfaceLanding prepareSurfaceLanding(
     const GameState& state,
@@ -254,6 +255,9 @@ double miningRigFuelConsumptionPerSecond(
     double loadMultiplier = 1.0);
 int miningCarriedCargo(const MiningRunState& mining);
 int miningBankedCargo(const MiningRunState& mining);
+MiningDrillContactKind miningDrillContactKind(const MiningRunState&, const MiningCell&);
+MiningDrillFeedback miningDrillFeedback(const MiningRunState&, const MiningDrillStats&);
+std::string_view miningDrillFeedbackLabel(MiningDrillContactKind);
 bool miningAtReturnZone(const MiningRunState& mining);
 bool miningRigAtReturnZone(const MiningRunState& mining);
 struct MiningDroneRecoveryStatus {

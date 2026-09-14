@@ -10227,6 +10227,9 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 .expedition-home h2, .expedition-home h3 { color: #62dbe8; margin: 10dp 0; }
 .expedition-home p, .expedition-map p { color: #d5e5eb; margin: 8dp 0; font-size: 13dp; }
 .expedition-dock-status { display: flex; flex-wrap: wrap; margin: 12dp 0dp; border: 1dp #284856; background-color: #071019; }
+.artifact-bank-status { margin: 10dp 0dp; padding: 10dp 12dp; border: 1dp #559e83; background-color: #102b25; }
+.artifact-bank-status strong { color: #9eebc7; font-size: 15dp; }
+#rr-panel .artifact-bank-status p { color: #d5e5eb; margin: 4dp 0dp 0dp; font-size: 13dp; }
 .dock-status-segment { min-width: 132dp; flex: 1; padding: 8dp 10dp; border-right: 1dp #284856; }
 .dock-status-segment:last-child { border-right-width: 0dp; }
 .dock-status-segment span { display: block; color: #66859a; font-size: 10dp; letter-spacing: 1dp; }
@@ -10277,6 +10280,8 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 .solar-selected button { border-color: #64edff; color: #64edff; }
 .solar-hazard button { border-color: #f3a451; color: #f3a451; }
 .solar-wreck { position: absolute; color: #ffbd67; font-size: 11dp; padding: 1dp 3dp; background-color: #1b1209; border: 1dp #8c6534; }
+.solar-wreck-artifact { color: #d39aff; background-color: #21102f; border-color: #b967ed; }
+.wreck-artifact-copy { color: #d39aff; }
 .solar-course { position: absolute; width: 2dp; height: 2dp; background-color: #4fdcec; opacity: .80; }
 .solar-moon-link { position: absolute; width: 2dp; height: 2dp; background-color: #315367; opacity: .75; }
 #rr-modal .expedition-map .solar-planet,
@@ -10516,3 +10521,20 @@ body.controller-focus-visible .rr-controller-focus .rr-controller-confirm-glyph 
     width: auto;
     margin: 12px 0px 0px;
 }
+.straylight-sequence {
+    position: absolute;
+    bottom: 12%;
+    left: 50%;
+    width: 704dp;
+    margin-left: -352dp;
+    padding: 16dp;
+    background-color: #07151eed;
+    border: 1dp #397c8e;
+    color: #d5ecf2;
+}
+.straylight-sequence h2, .straylight-sequence h3 { color: #8cecf3; }
+.straylight-sequence p { margin: 4dp 0dp; }
+.straylight-beacons { padding: 8dp 12dp; }
+.straylight-beacons p { margin: 3dp 0dp; }
+.straylight-checklist { margin-top: 10dp; color: #aacbd6; }
+.straylight-contact { padding: 12dp; background-color: #103c4aed; color: #a0f8ff; }

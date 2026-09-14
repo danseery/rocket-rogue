@@ -237,7 +237,7 @@ const SystemDefinition &solarSystemDefinition()
              "sun",
              "Straylight",
              SystemBodyKind::Station,
-             {52.5, -21},
+             {40.5 + 18.0 * 40.5 / std::hypot(40.5, 30.0), -30.0 - 18.0 * 30.0 / std::hypot(40.5, 30.0)},
              {},
              .10,
              1.42,
@@ -254,6 +254,10 @@ const SystemDefinition &solarSystemDefinition()
         if (body.id == "sun") body.displayRadius = 1.35;
         else if (body.id == "jupiter") body.displayRadius = .72;
         body.dockOffset = {body.id == "earth" ? body.influenceRadius * 1.1 + .40 : body.radius + .95, 0};
+        if (body.id == "straylight") {
+            body.displayRadius = 2.5;
+            body.dockOffset = {1.9, -0.6};
+        }
         if (body.id == "earth") {
             // Keep the service berth clear of the opening Earth-to-Moon lane.
             constexpr double angle = 0.7853981633974483;

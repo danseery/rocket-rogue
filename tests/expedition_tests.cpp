@@ -11,6 +11,8 @@
 #include "core/FlightSystem.h"
 #include "core/SurfacePresentation.h"
 #include "core/SolarProgression.h"
+#include "core/StraylightSequence.h"
+#include "core/PostSolarSystem.h"
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
@@ -25,6 +27,133 @@ void check(bool condition, const char *message)
         std::cerr << message << '\n';
         throw std::runtime_error(message);
     }
+}
+
+void straylightSequenceTests()
+{
+    using namespace rocket;
+    using Stage = StraylightStage;
+    const auto catalog = createDefaultContent();
+    auto state = std::make_unique<GameState>(createNewGame(catalog, 77));
+    auto& s = *state;
+    initializeLiveExpedition(s,catalog);
+    auto& e=s.run.expedition;
+    check(!revealStraylightOnDelivery(s,catalog), "Undelivered final artifact must not reveal Straylight");
+    check(plotSystemCourse(e,s.run.flight,solarSystemDefinition(),"straylight") == ExpeditionResult::InvalidTarget,
+        "Unrevealed Straylight must reject waypoint selection");
+    const auto* neptune=systemBody(solarSystemDefinition(),"neptune");
+    const auto* ark=systemBody(solarSystemDefinition(),"straylight");
+    check(std::abs(std::hypot(ark->position.x-neptune->position.x,ark->position.y-neptune->position.y)-18)<.00001,
+        "Straylight must be eighteen units beyond Neptune");
+    for (auto& b:e.batteries) b.owner=b.id=="triton" ? BatteryOwner::Ship : BatteryOwner::EarthStorage;
+    e.coursePlayerSelected=true;
+    check(revealStraylightOnDelivery(s,catalog) && e.course.targetBodyId=="straylight" && !e.coursePlayerSelected,
+        "Ship delivery immediately replaces manual course with Straylight");
+    check(!s.meta.straylightDiscoveryAcknowledged && recommendedCampaignObjective(s,catalog).targetId=="straylight",
+        "Earth banking must not steal first-contact guidance");
+    check(!revealStraylightOnDelivery(s,catalog), "Reveal must be idempotent");
+    const auto roundTrip = [&] {
+        const auto saved=deserializeSaveData(serializeSaveData(captureSaveData(s)));
+        check(saved.has_value(), "Every sequence boundary must serialize");
+        auto restored=std::make_unique<GameState>(createNewGame(catalog,1));
+        restoreSaveData(*restored,catalog,*saved);
+        check(restored->meta.straylightStage==s.meta.straylightStage, "Reload must preserve the sequence stage");
+        check(restored->run.expedition.batteries[0].owner==e.batteries[0].owner,
+            "Reload must preserve beacon ownership");
+    };
+    roundTrip();
+    s.meta.straylightStage=Stage::Reveal;
+    check(applyStraylightAction(s,catalog,"skip") && s.meta.straylightStage==Stage::Invitation,
+        "Skip ends only reveal animation");
+    check(!applyStraylightAction(s,catalog,"skip"), "Skip cannot acknowledge a transmission");
+    check(applyStraylightAction(s,catalog,"invitation"), "Invitation acknowledgement must enable approach");
+    e.location={"solar","straylight",CoordinateFrame::Body,ark->dockOffset,{},0,"straylight.dock"};
+    s.run.flight.active=false;
+    s.meta.straylightStage=Stage::Docking;
+    check(finishStraylightCinematic(s,catalog), "Docking ends at first contact");
+    roundTrip();
+    check(applyStraylightAction(s,catalog,"retrieve") && e.course.targetBodyId=="earth", "Beacon mission must target Earth explicitly");
+    check(!applyStraylightAction(s,catalog,"online"), "Activation cannot bypass confirmation or beacon requirement");
+    e.location={"solar","earth",CoordinateFrame::Body,{}, {},0,"earth.dock"};
+    e.cargo.materials.common=999;
+    e.batteries[0].owner=BatteryOwner::Wreck;
+    e.batteries[0].wreckId=420;
+    check(applyStraylightAction(s,catalog,"collect"), "One action collects all Earth beacons despite a full hold");
+    check(e.batteries[0].owner==BatteryOwner::Wreck && straylightObjective(s)->targetId=="wreck:420",
+        "Collection must not invent a missing wreck beacon");
+    e.batteries[0].owner=BatteryOwner::Ship;
+    e.batteries[0].wreckId=0;
+    check(!applyStraylightAction(s,catalog,"collect"), "Repeated collection must not duplicate beacons");
+    e.location={"solar","straylight",CoordinateFrame::Body,ark->dockOffset,{},0,"straylight.dock"};
+    check(applyStraylightAction(s,catalog,"install"), "Install all carried beacons");
+    check(!applyStraylightAction(s,catalog,"install"), "Repeated installation has no effect");
+    roundTrip();
+    check(applyStraylightAction(s,catalog,"prepare_online") && !e.arkActivated, "Confirmation must precede commitment");
+    check(applyStraylightAction(s,catalog,"cancel_online") && !e.arkActivated, "Not yet preserves solar exploration");
+    applyStraylightAction(s,catalog,"prepare_online");
+    check(applyStraylightAction(s,catalog,"online") && e.homeBodyId=="straylight" && straylightCommitted(s),
+        "Confirmed activation commits and sets the Ark as home");
+    roundTrip();
+    check(applyStraylightAction(s,catalog,"skip") && s.meta.straylightStage==Stage::Online, "Awakening skip cannot start evacuation");
+    check(!applyStraylightAction(s,catalog,"depart"), "Departure requires evacuation and boarding");
+    check(applyStraylightAction(s,catalog,"coordinate"), "Coordinate evacuation explicitly");
+    roundTrip();
+    check(applyStraylightAction(s,catalog,"boarding"), "Begin boarding explicitly");
+    roundTrip();
+    check(finishStraylightCinematic(s,catalog) && applyStraylightAction(s,catalog,"secure"), "Secure only after boarding");
+    roundTrip();
+    check(applyStraylightAction(s,catalog,"depart"), "Depart only from secured Ark");
+    roundTrip();
+    check(finishStraylightCinematic(s,catalog) && e.location.systemId==content::postSolarSystem::aaruVale &&
+        s.meta.navigation.currentSystemId==e.location.systemId && !e.active && !s.run.flight.active &&
+        !s.meta.ark.gravityWellDisaster && findPostSolarSystemRoster(s.meta,e.location.systemId),
+        "Departure must physically arrive safely in generated Aaru Vale without Arkfall");
+    roundTrip();
+    check(applyStraylightAction(s,catalog,"arrived"), "Arrival waits for explicit acknowledgement");
+    for (int value=static_cast<int>(Stage::RevealPending); value<=static_cast<int>(Stage::Complete); ++value) {
+        s.meta.straylightStage=static_cast<Stage>(value);
+        roundTrip();
+    }
+    // Exercise every combination of the four transferable ownership locations.
+    const std::array owners{BatteryOwner::EarthStorage, BatteryOwner::Ship, BatteryOwner::Wreck, BatteryOwner::ArkSlot};
+    for (int combination=0; combination<4096; ++combination) {
+        s.meta.straylightStage=Stage::RetrieveBeacons;
+        e.arkActivated=false;
+        int mask=combination;
+        std::array<BatteryOwner,6> before{};
+        for (std::size_t i=0; i<6; ++i) {
+            before[i]=e.batteries[i].owner=owners[mask%4]; mask/=4;
+            e.batteries[i].wreckId=before[i]==BatteryOwner::Wreck ? 420 : 0;
+        }
+        e.location={"solar","earth",CoordinateFrame::Body,{}, {},0,"earth.dock"};
+        applyStraylightAction(s,catalog,"collect");
+        e.location={"solar","straylight",CoordinateFrame::Body,ark->dockOffset,{},0,"straylight.dock"};
+        applyStraylightAction(s,catalog,"install");
+        for (std::size_t i=0; i<6; ++i)
+            check(e.batteries[i].owner==(before[i]==BatteryOwner::Wreck ? BatteryOwner::Wreck : BatteryOwner::ArkSlot),
+                "Collection and partial installation must preserve every missing wreck beacon");
+        const bool complete=std::none_of(before.begin(),before.end(),[](auto owner){return owner==BatteryOwner::Wreck;});
+        check(applyStraylightAction(s,catalog,"prepare_online")==complete && !e.arkActivated,
+            "Only six installed beacons enable confirmation, and confirmation never activates implicitly");
+    }
+    auto legacy=captureSaveData(s);
+    legacy.straylightStage=Stage::Hidden;
+    legacy.straylightPlacementVersion=0;
+    auto restored=std::make_unique<GameState>(createNewGame(catalog,1));
+    restoreSaveData(*restored,catalog,legacy);
+    check(restored->meta.straylightStage==Stage::Complete, "Previously departed saves must not replay first contact");
+    legacy.ark.firstJumpComplete=false;
+    legacy.expedition.arkActivated=false;
+    legacy.expedition.straylightRevealed=true;
+    legacy.expedition.location={"solar","straylight",CoordinateFrame::Body,{1.07,.01},{},0,"straylight.dock"};
+    restoreSaveData(*restored,catalog,legacy);
+    check(restored->meta.straylightStage==Stage::FirstContact &&
+        std::abs(restored->run.expedition.location.position.x-ark->dockOffset.x-.02)<.000001 &&
+        std::abs(restored->run.expedition.location.position.y-ark->dockOffset.y-.01)<.000001,
+        "Revealed legacy saves resume first contact and preserve their displacement from the relocated berth");
+    legacy.expedition.arkActivated=true;
+    restoreSaveData(*restored,catalog,legacy);
+    check(restored->meta.straylightStage==Stage::Online, "Activated legacy saves never regress to beacon retrieval");
 }
 
 void orbitalObjectiveSafetyTests()
@@ -355,6 +484,40 @@ void orbitalObjectiveSafetyTests()
     check(reloadArtifact.x==moved.artifact.x && reloadArtifact.health==moved.artifact.health &&
         reloadArtifact.embedStrength==moved.artifact.embedStrength && reloaded.shaftX==saved.orbital.shaftX,
         "Save/reload must be idempotent without re-healing or shifting the artifact again");
+    {
+        auto live = std::make_unique<GameState>(state);
+        live->run.expedition.sites = {saved};
+        live->run.expedition.location = {"solar","io",CoordinateFrame::Body,{}, {},0,saved.siteId};
+        live->run.planetaryExpedition = saved.surface;
+        live->run.planetaryExpedition.active = true;
+        live->run.mining = saved.mining;
+        check(activateLandingLayer(live->run.mining,objective.depthZone),"Load fixture must enter the artifact layer");
+        live->run.mining.active = true;
+        live->run.mining.droneX = 3.5;
+        live->run.mining.droneY = 7.5;
+        live->run.mining.rigDepthZone = objective.depthZone;
+        live->run.mining.rigOxygen.current = 37;
+        live->screen = Screen::Mining;
+        double repairedX = 0;
+        for (int reload=0; reload<2; ++reload) {
+            const auto data = deserializeSaveData(serializeSaveData(captureSaveData(*live)));
+            check(data.has_value(),"Active bore overlap must survive save serialization");
+            restoreSaveData(*live,catalog,*data);
+            const auto& current = live->run.mining;
+            const auto& stored = live->run.expedition.sites.front();
+            check(current.artifact.x!=objective.artifact.x &&
+                orbitalShaftAvoidsProtectedObjectives(current,stored.orbital.shaftX),
+                "Loading directly into mining must repair the visible artifact, without requiring a revisit");
+            check(current.droneX==3.5 && current.droneY==7.5 && current.rigOxygen.current==37 &&
+                current.artifact.health==.43 && current.artifact.embedStrength==.27 &&
+                current.gate.shellTilesRemaining==3 && stored.orbital.shaftX==saved.orbital.shaftX,
+                "Active-load repair preserves crew, oxygen, partial recovery and the existing bore");
+            check(stored.mining.artifact.x==current.artifact.x,
+                "Live and dormant site snapshots must agree after active-load repair");
+            if (reload) check(current.artifact.x==repairedX,"Reloading a repaired active site must not move it again");
+            repairedX = current.artifact.x;
+        }
+    }
     const double health=moved.artifact.health;
     excavateOrbitalShaft(repaired,2,5.0);
     check(objectiveLayer(repaired.miningTemplate).artifact.health==health,
@@ -402,6 +565,32 @@ void campaignGuidanceTests()
 {
     using namespace rocket;
     {
+        const auto catalog = createDefaultContent();
+        auto state = std::make_unique<GameState>(createNewGame(catalog, 918));
+        initializeLiveExpedition(*state, catalog);
+        state->meta.shipsLost = 1;
+        state->run.expedition.location = {"solar", "earth", CoordinateFrame::Body, {}, {}, 0, "earth.dock"};
+        state->screen = Screen::Hangar;
+        state->incomingMessages = {};
+        WreckState wreck; wreck.id = 1;
+        wreck.location = {"solar", "", CoordinateFrame::System, {12,9}, {}, 0, {}};
+        state->run.expedition.wrecks.push_back(wreck);
+        state->run.expedition.nextWreckId = 2;
+        reconcileCampaignGuidance(*state, catalog);
+        check(state->incomingMessages.pending.size() == 1 &&
+            state->incomingMessages.pending.front().messageId == "wreck_salvage_intro",
+            "first ordinary ship loss explains salvage even without an artifact");
+        check(acknowledgeIncomingMessage(state->incomingMessages, "tutorial.wreck_salvage").has_value(),
+            "salvage introduction requires explicit acknowledgement");
+        const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(*state)));
+        check(saved.has_value(), "salvage tutorial state saves");
+        auto restored = std::make_unique<GameState>(createNewGame(catalog, 919));
+        restoreSaveData(*restored, catalog, *saved);
+        restored->meta.shipsLost = 2;
+        reconcileCampaignGuidance(*restored, catalog);
+        check(restored->incomingMessages.pending.empty(), "acknowledged salvage tutorial does not replay after reload or another loss");
+    }
+    {
         const auto catalog=createDefaultContent();
         auto state=std::make_unique<GameState>(createNewGame(catalog,811));
         auto& e=state->run.expedition;
@@ -425,6 +614,9 @@ void campaignGuidanceTests()
         auto restored=std::make_unique<GameState>(createNewGame(catalog,1));
         restoreSaveData(*restored,catalog,*saved);
         check(courseWreck(restored->run.expedition,"wreck:7")!=nullptr,"restored target resolves actual wreck");
+        check(wreckCarriesArtifact(restored->run.expedition, 7) &&
+            wreckDisplayName(restored->run.expedition, 7) == "Artifact / Wreck 7",
+            "artifact wreck presentation derives from saved ownership");
         const auto pose=courseTargetLocation(e,solarSystemDefinition(),"wreck:7");
         check(pose && pose->position.x==12 && pose->velocity.y==.2,"wreck guidance preserves position and velocity");
         e.coursePlayerSelected=true; e.course.targetBodyId="venus";
@@ -441,6 +633,8 @@ void campaignGuidanceTests()
         reconcileCampaignGuidance(*state,catalog,true);
         check(e.batteries[1].owner==BatteryOwner::Ship && e.course.targetBodyId=="earth" && !e.wrecks.empty(),
             "recovered artifact directs home while leftover ore remains optional");
+        check(!wreckCarriesArtifact(e, 7) && wreckDisplayName(e, 7) == "Wreck 7",
+            "partially salvaged ore wreck must immediately lose its artifact marker");
         e.batteries[1].owner=BatteryOwner::EarthStorage;
         check(recommendedCampaignObjective(*state,catalog).kind==CampaignObjectiveKind::Mission,"banked artifact stops recovery guidance");
         e.batteries[1].owner=BatteryOwner::Wreck; e.batteries[1].wreckId=999;
@@ -481,6 +675,7 @@ void salvageSpeedBoundaryTests(rocket::PersistentExpeditionState& e, rocket::Fli
 
 void persistentExpeditionTests()
 {
+    straylightSequenceTests();
     using namespace rocket;
     campaignGuidanceTests();
     orbitalObjectiveSafetyTests();

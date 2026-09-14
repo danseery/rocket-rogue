@@ -8,12 +8,15 @@
 #include "core/SaveSchema.h"
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
+#include "core/ExpeditionSystem.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
+#include <queue>
 #include <string>
 #include <tuple>
 
@@ -1065,8 +1068,128 @@ void drillFeedbackUsesTheCuttingFootprint()
     }
 }
 
+void blockedDrillFeedbackDistinguishesTerrainAndRespectsVisibility()
+{
+    MiningRunState mining;
+    mining.active = mining.drilling = true;
+    mining.rigFuel.current = 10;
+    mining.terrain.width = mining.terrain.height = 40;
+    mining.terrain.cells.resize(1600);
+    mining.droneX = mining.droneY = 20.0;
+    mining.aimDirX = mining.hullDirX = 0;
+    mining.aimDirY = mining.hullDirY = 1;
+    MiningDrillStats stats;
+    for (auto& cell : mining.terrain.cells) { cell.material = MiningCellMaterial::HardRock; cell.revealed = true; }
+    const auto contacts = miningDrillFootprintCells(mining, stats);
+    require(!contacts.empty(), "feedback fixture needs real cutting contact");
+    for (auto& cell : mining.terrain.cells) cell.material = MiningCellMaterial::Empty;
+    auto& contact = mining.terrain.cells[contacts.front().y * 40 + contacts.front().x];
+    contact.material = MiningCellMaterial::HardRock;
+    require(miningDrillFeedback(mining, stats).kind == MiningDrillContactKind::HardRock, "hard rock remains drillable feedback");
+    contact.material = MiningCellMaterial::Bedrock;
+    require(miningDrillFootprintCells(mining, stats).empty() &&
+        miningDrillFeedback(mining, stats).kind == MiningDrillContactKind::Bedrock,
+        "bedrock produces blocked feedback without entering the damage footprint");
+    contact.material = MiningCellMaterial::HazardPocket;
+    require(miningDrillFeedback(mining, stats).kind == MiningDrillContactKind::Hazard, "ordinary hazards warn rather than pretend to be sealed");
+    contact.cocoonLayer = 0;
+    mining.gate.active = true;
+    mining.gate.cocoonLayers.resize(1);
+    mining.gate.cocoonLayers[0].revealed = true;
+    require(miningDrillFeedback(mining, stats).kind == MiningDrillContactKind::ProtectedHazard, "protected hazards request treatment");
+    mining.gate.cocoonLayers[0].revealed = false;
+    require(miningDrillFeedback(mining, stats).kind == MiningDrillContactKind::None, "feedback must not reveal a hidden seal");
+    contact.cocoonLayer = -1;
+    contact.material = MiningCellMaterial::Bedrock;
+    mining.drilling = false;
+    require(miningDrillFeedback(mining, stats).kind == MiningDrillContactKind::None, "releasing drill clears blocked feedback");
+    mining.drilling = true;
+    mining.rigFuel.current = 0;
+    require(miningDrillFeedback(mining, stats).kind == MiningDrillContactKind::None, "an unpowered rig cannot claim to be drilling");
+}
+
+void environmentalEncountersHaveSafeBypassesAndPersist()
+{
+    const auto catalog = createDefaultContent();
+    for (const auto& mission : catalog.solarMissions) {
+        if (mission.bodyId == "moon" || mission.bodyId == "io") continue;
+        for (std::uint64_t seed = 1; seed <= 6; ++seed) {
+            auto state = std::make_unique<GameState>(createNewGame(catalog, seed));
+            initializeLiveExpedition(*state, catalog);
+            for (const auto& other : catalog.solarMissions)
+                if (!other.prerequisiteUnlockKey.empty()) state->meta.unlockKeys.push_back(other.prerequisiteUnlockKey);
+            state->run.expedition.location.bodyId = mission.bodyId;
+            state->run.expedition.location.siteId.clear();
+            auto& expedition = state->run.planetaryExpedition;
+            expedition = {};
+            expedition.active = true;
+            expedition.destinationId = mission.environmentId;
+            expedition.bodyId = mission.bodyId;
+            expedition.rigFuelCapacity = 50;
+            state->screen = Screen::Mining;
+            require(startMiningRun(*state, catalog, {MiningAct::ActOne, 8, seed}, true).applied,
+                "every environmental mission must bind its encounter on direct entry");
+            auto& mining = state->run.mining;
+            const auto* site = catalog.findMiningSite(mining.miningSiteDefinitionId);
+            require(site && !site->terrainPatches.empty(), "mission must use its content-owned terrain encounter");
+            auto layer = std::find_if(mining.depthLayers.begin(), mining.depthLayers.end(),
+                [](const auto& candidate) { return candidate.artifact.present; });
+            require(layer != mining.depthLayers.end(), "encounter artifact must be cached at its campaign depth");
+            auto& terrain = layer->terrain;
+            const int ax = int(std::floor(layer->artifact.x)), ay = int(std::floor(layer->artifact.y));
+            // A three-cell-wide route models rig/tow clearance. Treat every hazard
+            // and hard-rock seam as blocked to verify the unequipped bypass too.
+            const auto safe = [&](int x, int y) {
+                if (x < ax-9 || x > ax+9 || y < ay-6 || y > ay+4) return false;
+                for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+                    const auto* cell = miningCellAt(terrain, x+dx, y+dy);
+                    if (!cell || cell->suitOnlyPassage || cell->material == MiningCellMaterial::Bedrock ||
+                        cell->material == MiningCellMaterial::HazardPocket || cell->material == MiningCellMaterial::HardRock) return false;
+                }
+                return true;
+            };
+            std::queue<std::pair<int,int>> pending;
+            std::vector<bool> visited(terrain.cells.size(), false);
+            require(safe(ax, ay), "artifact needs a safe staging area for towing");
+            pending.push({ax, ay});
+            visited[ay*terrain.width+ax] = true;
+            bool reachedApproach = false;
+            while (!pending.empty()) {
+                const auto [x,y] = pending.front(); pending.pop();
+                if (y == ay-6) { reachedApproach = true; break; }
+                for (const auto [dx,dy] : std::array<std::pair<int,int>,4>{{{1,0},{-1,0},{0,1},{0,-1}}}) {
+                    const int nx=x+dx, ny=y+dy;
+                    if (!safe(nx,ny) || visited[ny*terrain.width+nx]) continue;
+                    visited[ny*terrain.width+nx]=true; pending.push({nx,ny});
+                }
+            }
+            if (!reachedApproach) std::cerr << "No bypass: " << mission.bodyId << " seed " << seed << '\n';
+            require(reachedApproach, "environmental encounter must have a rig-width bypass without hazard upgrades");
+            require(std::any_of(terrain.cells.begin(), terrain.cells.end(), [](const auto& cell) {
+                return cell.material == MiningCellMaterial::Bedrock || cell.material == MiningCellMaterial::HazardPocket;
+            }), "encounter must retain its obstacle");
+            const int editedX=ax, editedY=ay-6;
+            auto* edited = miningCellAt(terrain, editedX, editedY);
+            edited->material = MiningCellMaterial::Empty;
+            edited->remainingToughness = edited->maxToughness = 0;
+            const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(*state)));
+            require(saved.has_value(), "encounter terrain and artifact ownership must serialize");
+            auto restored = std::make_unique<GameState>(createNewGame(catalog, 999));
+            restoreSaveData(*restored, catalog, *saved);
+            const auto restoredLayer = std::find_if(restored->run.mining.depthLayers.begin(), restored->run.mining.depthLayers.end(),
+                [](const auto& candidate) { return candidate.artifact.present; });
+            require(restoredLayer != restored->run.mining.depthLayers.end() &&
+                restoredLayer->artifact.x == layer->artifact.x && restoredLayer->artifact.y == layer->artifact.y &&
+                miningCellAt(restoredLayer->terrain, editedX, editedY)->material == MiningCellMaterial::Empty,
+                "reload must preserve excavation and artifact position instead of restamping the encounter");
+        }
+    }
+}
+
 int main()
 {
+    blockedDrillFeedbackDistinguishesTerrainAndRespectsVisibility();
+    environmentalEncountersHaveSafeBypassesAndPersist();
     allActLevelContractsResolve();
     drillFeedbackUsesTheCuttingFootprint();
     campaignMappingMatchesChapterPace();

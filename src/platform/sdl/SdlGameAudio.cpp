@@ -18,11 +18,18 @@ SdlGameAudio::SdlGameAudio(std::filesystem::path runtimeRoot, IPlatformHost& hos
 
 SdlGameAudio::~SdlGameAudio()
 {
+    shutdown();
+}
+
+void SdlGameAudio::shutdown()
+{
     setThrust(0.0);
     for (const ActiveStream& active : streams_) {
         SDL_DestroyAudioStream(active.stream);
     }
+    streams_.clear();
     if (audioAvailable_) SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    audioAvailable_ = false;
 }
 
 void SdlGameAudio::logOnce(std::string key, std::string message)

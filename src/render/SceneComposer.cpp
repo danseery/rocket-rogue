@@ -1486,7 +1486,9 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
     }
 
     beginFrame(snapshot);
-    if (snapshot.titleScreen) {
+    if (snapshot.straylightTableau && !snapshot.titleScreen) {
+        drawStraylightSequence(snapshot);
+    } else if (snapshot.titleScreen) {
         drawTitleBackdrop(snapshot);
     } else if (snapshot.screen == Screen::Mining) {
         drawMining(snapshot);
@@ -1554,7 +1556,7 @@ const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
             }
         }
     }
-    if (snapshot.flightInstrumentsVisible) {
+    if (snapshot.flightInstrumentsVisible && !snapshot.straylightTableau) {
         drawFlightInstruments(snapshot);
     }
     drawSceneTransition(snapshot);
@@ -5483,6 +5485,22 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         }
     }
 
+    if (!snapshot.miningExtractionActive && snapshot.miningDrillFeedback.kind != MiningDrillContactKind::None) {
+        const auto& feedback = snapshot.miningDrillFeedback;
+        const auto contact = gridPoint(feedback.x, feedback.y);
+        const bool hard = feedback.kind == MiningDrillContactKind::HardRock;
+        const bool hazard = feedback.kind == MiningDrillContactKind::Hazard || feedback.kind == MiningDrillContactKind::ProtectedHazard;
+        const Color color = hard ? Color{1.0F, .78F, .28F, 1.0F} : hazard ? Color{1.0F, .38F, .12F, 1.0F} : Color{.82F, .87F, 1.0F, 1.0F};
+        const float r = cellSize * .40F;
+        drawEllipseLine(contact.x, contact.y, r, r, color, 16, 0, kPi * 2);
+        if (!hard) {
+            drawLine(contact.x-r*.65F, contact.y-r*.65F, contact.x+r*.65F, contact.y+r*.65F, color, 2.5F);
+            drawLine(contact.x-r*.65F, contact.y+r*.65F, contact.x+r*.65F, contact.y-r*.65F, color, 2.5F);
+        }
+        drawPoiLabel(std::clamp(contact.x, -.60F, .60F), std::clamp(contact.y + cellSize * 1.5F, -.70F, .78F),
+            .0035F, miningDrillFeedbackLabel(feedback.kind), PoiGuidanceKind::Ship);
+    }
+
     for (const MiningDamageNumber& number : snapshot.miningDamageNumbers) {
         const Vec2 label = cellCenter(number.x, number.y);
         drawMiningCombatText(
@@ -6216,18 +6234,23 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
         if (snapshot.systemTravel && !snapshot.launchLandingLocalFrame) {
             const auto& g = snapshot.flightGuidance;
             if (!g.targetId.empty()) {
+                const bool wreckTarget = g.targetId.starts_with("wreck:");
+                const bool artifactTarget = wreckTarget && std::any_of(snapshot.artifactWreckIds.begin(), snapshot.artifactWreckIds.end(),
+                    [&](const auto id) { return g.targetId == "wreck:" + std::to_string(id); });
+                const Color targetColor = artifactTarget ? Color{.78F,.38F,1,1} : Color{1,.8F,.25F,1};
                 const auto p = view.camera.point(g.targetPosition.x,g.targetPosition.y);
                 const float limitX=.84F, limitY=.78F;
                 const float factor=std::max({1.0F,std::abs(p.x)/limitX,std::abs(p.y)/limitY});
                 const float x=p.x/factor,y=p.y/factor;
                 if (factor>1) {
                     const float angle=std::atan2(p.y,p.x);
-                    for (float side : {-1.0F,1.0F}) drawLine(x,y,x-.035F*std::cos(angle+side*.6F),y-.035F*std::sin(angle+side*.6F),{1,.8F,.25F,1},3);
-                } else drawEllipseLine(x,y,.04F,.04F,{1,.8F,.25F,1},24,0,2*kPi);
+                    for (float side : {-1.0F,1.0F}) drawLine(x,y,x-.035F*std::cos(angle+side*.6F),y-.035F*std::sin(angle+side*.6F),targetColor,3);
+                } else if (!wreckTarget) drawEllipseLine(x,y,.04F,.04F,targetColor,24,0,2*kPi);
                 std::ostringstream label;
                 label << g.targetName << " / " << std::fixed << std::setprecision(1) << g.targetDistance << " u";
-                const float labelY = factor>1 ? y+(y>0 ? -.07F : .07F) : y+static_cast<float>(snapshot.launchOrbitTargetRadius+snapshot.launchOrbitGoodBand)*view.camera.scale+.055F;
-                drawPoiLabel(std::clamp(x,-.68F,.68F),std::clamp(labelY,-.70F,.85F),.0040F,label.str(),PoiGuidanceKind::Ship);
+                const float labelY = factor>1 ? y+(y>0 ? -.07F : .07F) : wreckTarget ? y+.08F : y+static_cast<float>(snapshot.launchOrbitTargetRadius+snapshot.launchOrbitGoodBand)*view.camera.scale+.055F;
+                drawPoiLabel(std::clamp(x,-.68F,.68F),std::clamp(labelY,-.70F,.85F),wreckTarget ? .003F : .0040F,label.str(),
+                    artifactTarget ? PoiGuidanceKind::Artifact : PoiGuidanceKind::Ship);
             }
         }
         if (!snapshot.launchLandingLocalFrame && (!snapshot.systemTravel || (snapshot.systemLocation.frame == CoordinateFrame::Body &&
@@ -6916,8 +6939,10 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
         }
     }
 
-    const float launchSteering = static_cast<float>(
-        std::clamp(snapshot.launchSteerInput, -1.0, 1.0));
+    // Lateral thrust fires one side; rotation fires opposing fore/aft jets.
+    for (int jet=0; jet<3; ++jet) {
+    const float launchSteering = static_cast<float>(std::clamp(
+        jet==0 ? snapshot.launchStrafeInput : snapshot.launchSteerInput*(jet==1 ? 1.0 : -1.0), -1.0, 1.0));
     if (snapshot.screen == Screen::Flight
         && !snapshot.preflightActive
         && std::abs(launchSteering) > 0.05F
@@ -6933,9 +6958,10 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
             ? std::lerp(1.0F,0.86F,static_cast<float>(departureCameraProgress(snapshot.launchHandoffProgress)))
             : surfaceCamera_.active ? std::lerp(0.86F, 1.0F, surfaceCamera_.progress) : 0.86F) * scale;
         const float nozzleOffset = rocketSize * kSideThrustNozzleShare;
+        const float foreOffset = jet==0 ? 0.0F : rocketSize*(jet==1 ? .22F : -.22F);
         const Vec2 nozzle {
-            cx + exhaustSide.x * nozzleOffset,
-            cy + exhaustSide.y * nozzleOffset
+            cx + exhaustSide.x * nozzleOffset + forward.x*foreOffset,
+            cy + exhaustSide.y * nozzleOffset + forward.y*foreOffset
         };
         const float halfWidth = rocketSize * kSideThrustWidthShare * .5F;
         const float halfLength = rocketSize * (.10F + .06F*std::abs(launchSteering)) * .5F;
@@ -6951,6 +6977,7 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
                 static_cast<float>(frame+1)/6.0F, 1.0F,
                 SceneInstanceShape::Rectangle,4},
             textureForAsset(ThrustAsset),CoordinateSpace::World,PipelineClass::Textured);
+    }
     }
 
     if (snapshot.preflightActive) {
@@ -7030,6 +7057,80 @@ void SceneComposer::drawOrbitalArtifactSignal(const RenderSnapshot& snapshot, fl
     }
 }
 
+void SceneComposer::drawStraylightSequence(const RenderSnapshot& snapshot)
+{
+    using Stage = StraylightStage;
+    const auto stage = snapshot.straylightStage;
+    const float t = static_cast<float>(snapshot.straylightElapsed);
+    drawRect(0, 0, 3, 3, {.005F,.015F,.035F,1}, false);
+    drawSprite(0,0,2.06F,2.06F,{.35F,.45F,.62F,1},LocalSolarBgAsset,0,4,false);
+    const auto ease = [](float x) { x=std::clamp(x,0.0F,1.0F); return x*x*(3-2*x); };
+    // Frame the hull against scene width, independent of display aspect ratio.
+    const float revealSize = static_cast<float>(packet_.logicalSceneClip.width) * .82F / sceneWorldUnitX_;
+    float size=revealSize, x=.05F, y=.08F, light=.48F;
+    float shipX=-.74F, shipY=-.58F, shipSize=.065F;
+    bool ship=true;
+    if (stage == Stage::Reveal) {
+        const float reveal=ease((t-3)/5);
+        drawSprite(-.64F-reveal*.8F,.15F,.6F,.6F,{.55F,.65F,1,1},NeptuneAsset);
+        x=(sceneAspect_+revealSize*.5F)*(1-reveal)+.05F;
+        light=.08F+.4F*ease((t-6)/4);
+        shipX=-.2F-.54F*reveal;
+        shipY=.1F-.68F*reveal;
+    } else if (stage == Stage::Docking || stage == Stage::FirstContact || stage == Stage::RetrieveBeacons || stage == Stage::ConfirmOnline) {
+        const float approach=stage == Stage::Docking ? ease(t/10) : 1;
+        size=revealSize+approach*1.6F;
+        // Track the corridor locally as the camera closes on the hull.
+        x=.05F+(.25F-size*.31F-.05F)*approach;
+        const float bayX=x+size*.31F, bayY=y-size*.1F;
+        shipX=-.7F+(bayX+.7F)*approach;
+        shipY=-.58F+(bayY+.58F)*approach;
+        shipSize=.065F*(1-ease((t-8)/2));
+        light=.5F;
+        ship=stage == Stage::Docking;
+    } else if (stage >= Stage::Awakening) {
+        light=stage == Stage::Awakening ? .35F+.65F*ease(t/12) : 1;
+        ship=false;
+        if (stage == Stage::Departing) {
+            const float departure=ease((t-3)/9);
+            drawCircle(-.8F-departure*.7F,.35F,.12F*(1-departure*.7F),{1,.65F,.25F,1},32);
+            x+=departure*(sceneAspect_+revealSize);
+            size*=1-departure*.35F;
+        }
+    }
+    drawSprite(x,y,size,size,{light,light,light,1},ArkOperationalAsset);
+    const float bayX=x+size*.31F, bayY=y-size*.1F;
+    const float bayLight=stage == Stage::Reveal ? ease((t-8)/3) : 1;
+    if (stage < Stage::Secured) {
+        drawEllipseLine(bayX,bayY,size*.018F,size*.009F,{.2F,1,1,bayLight},24,0,2*kPi);
+        drawLine(bayX-size*.09F,bayY-size*.045F,bayX,bayY,{.15F,.8F,1,bayLight*.7F},2);
+    }
+    if (ship) drawSprite(shipX,shipY,shipSize,shipSize,{1,1,1,1},RocketClosedAsset);
+    if (stage == Stage::Boarding || stage == Stage::EvacuationBriefing) {
+        for (int i=0;i<6;++i) {
+            const float progress=stage == Stage::Boarding ? std::clamp((t-i*.75F)/5.5F,0.0F,1.0F) : .1F+i*.07F;
+            if (progress>=1) continue;
+            const float sx=-1.1F+(bayX+1.1F)*progress;
+            const float sy=-.9F+i*.025F+(bayY+.9F-i*.025F)*progress;
+            drawSprite(sx,sy,.045F,.045F,{.8F,.95F,1,1},RocketClosedAsset);
+        }
+    }
+    if (stage == Stage::Awakening) {
+        for (int i=0;i<6;++i) drawCircle(-.25F+i*.1F,.55F,.014F,
+            t > 1+i*1.2F ? Color{.3F,1,.8F,1} : Color{.12F,.18F,.22F,1},12);
+    }
+    if ((stage == Stage::Awakening && t>9) || stage == Stage::Departing) {
+        drawSpriteRotated(x-size*.49F,y-size*.05F,size*.08F,size*.24F,1,0,
+            {.6F,.85F,1,.85F},ThrustAsset,static_cast<int>(t*18)%6,6);
+    }
+    const std::string_view title = stage == Stage::Reveal && t<8 ? "CONTACT RESOLVED" :
+        stage == Stage::Docking ? "DOCKING CORRIDOR" : stage == Stage::Awakening ? "RESTORING POWER" :
+        stage == Stage::Online ? "STRAYLIGHT ONLINE" : stage == Stage::Boarding ? "EVACUATION / BOARDING" :
+        stage == Stage::Boarded ? "BOARDING COMPLETE" : stage == Stage::Secured ? "ARK SECURED / READY TO DEPART" :
+        stage == Stage::Departing ? "LEAVING THE SOLAR SYSTEM" : stage >= Stage::Arrived ? "AARU VALE" : "STRAYLIGHT";
+    drawPoiLabel(0,1.0F,.006F,title,PoiGuidanceKind::Ship);
+}
+
 void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
 {
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
@@ -7055,8 +7156,9 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             const float pixelX = scenePixelCenterX_ + p.x * sceneWorldUnitX_;
             const float pixelY = sceneCssHeight_ - scenePixelCenterY_ - p.y * sceneWorldUnitY_;
             const auto& clip = packet_.logicalSceneClip;
-            const float halfWidth = radius * sceneWorldUnitX_;
-            const float halfHeight = radius * sceneWorldUnitY_;
+            const float presentationBound = body.kind == SystemBodyKind::Station ? radius * 1.7F : radius;
+            const float halfWidth = presentationBound * sceneWorldUnitX_;
+            const float halfHeight = presentationBound * sceneWorldUnitY_;
             const bool bodyOffscreen = pixelX + halfWidth < clip.x ||
                 pixelX - halfWidth > clip.x + clip.width || pixelY + halfHeight < clip.y ||
                 pixelY - halfHeight > clip.y + clip.height;
@@ -7086,7 +7188,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                 drawPoiLabel(worldX(markerX), worldY(markerY + (dy > 0 ? -20.0F : 20.0F)),
                     1.0F / sceneWorldUnitY_, "HOME", PoiGuidanceKind::Ship);
             }
-            if (body.dock) {
+            if (body.dock && body.kind != SystemBodyKind::Station) {
                 const auto dock = systemDockPosition(body);
                 const auto d = view.camera.point(dock.x-offset.x,dock.y-offset.y);
                 drawEllipseLine(d.x,d.y,.035F,.035F,{.3F,1,.8F,1},24,0,2*kPi);
@@ -7097,7 +7199,17 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             if (bodyOffscreen) continue;
             const int asset = systemBodyAsset(body);
             if (body.kind == SystemBodyKind::Star) drawCircle(p.x,p.y,radius,{1,.65F,.15F,1},64);
-            else if (body.kind == SystemBodyKind::Station) drawSprite(p.x,p.y,radius*2.4F,radius*2.4F,{1,1,1,1},ArkDamagedAsset);
+            else if (body.kind == SystemBodyKind::Station) {
+                const float light = snapshot.straylightStage >= StraylightStage::Awakening ? 1.0F : .46F;
+                const auto hullUp = view.camera.vector(0,1);
+                drawSpriteRotated(p.x,p.y,radius*2.4F,radius*2.4F,hullUp.x,hullUp.y,{light,light,light,1},
+                    arkDamaged(snapshot.arkCondition) ? ArkDamagedAsset : ArkOperationalAsset);
+                const auto dock = systemDockPosition(body);
+                const auto d = view.camera.point(dock.x-offset.x,dock.y-offset.y);
+                drawEllipseLine(d.x,d.y,.035F,.018F,{.2F,1,1,1},24,0,2*kPi);
+                drawPoiLabel(d.x,d.y+.06F,.003F,"DOCKING CORRIDOR",PoiGuidanceKind::Ship);
+                slowDown(dock,body.velocity,d.x,d.y,expeditionDockRadius,expeditionDockSpeed);
+            }
             else drawSprite(p.x,p.y,radius*2.0F,radius*2.0F,{1,1,1,1},asset);
             if (body.id == snapshot.systemLocation.bodyId)
                 drawOrbitalArtifactSignal(snapshot,p.x,p.y,radius*0.92F,1.0F,0.0F);
@@ -7107,8 +7219,18 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         for (const auto& wreck : snapshot.wrecks) {
             const auto w = convertSystemFrame(wreck.location,CoordinateFrame::System,"",snapshot.system);
             const auto p = view.camera.point(w.position.x-offset.x,w.position.y-offset.y);
-            drawEllipseLine(p.x,p.y,.04F,.04F,{1,.6F,.2F,1},16,0,2*kPi);
-            drawPoiLabel(p.x,p.y+.07F,.003F,"WRECK " + std::to_string(wreck.id),PoiGuidanceKind::Ship);
+            const bool artifact = std::find(snapshot.artifactWreckIds.begin(), snapshot.artifactWreckIds.end(), wreck.id) != snapshot.artifactWreckIds.end();
+            const Color color = artifact ? Color{.78F,.38F,1,1} : Color{1,.6F,.2F,1};
+            if (artifact) {
+                drawLine(p.x, p.y+.05F, p.x+.05F, p.y, color, 2.5F);
+                drawLine(p.x+.05F, p.y, p.x, p.y-.05F, color, 2.5F);
+                drawLine(p.x, p.y-.05F, p.x-.05F, p.y, color, 2.5F);
+                drawLine(p.x-.05F, p.y, p.x, p.y+.05F, color, 2.5F);
+            } else drawEllipseLine(p.x,p.y,.04F,.04F,color,16,0,2*kPi);
+            // Selected wrecks get one name/distance label from route guidance.
+            if (snapshot.flightGuidance.targetId != "wreck:" + std::to_string(wreck.id))
+                drawPoiLabel(p.x,p.y+.08F,.003F,std::string(artifact ? "ARTIFACT / WRECK " : "WRECK ") + std::to_string(wreck.id),
+                    artifact ? PoiGuidanceKind::Artifact : PoiGuidanceKind::Ship);
             slowDown(w.position,w.velocity,p.x,p.y,expeditionSalvageRadius,expeditionSalvageSpeed);
         }
         drawLaunchAsteroids(snapshot);

@@ -31,6 +31,23 @@ Act 1 uses at most one lock, Act 2 uses at most two, and Act 3 uses at most thre
 
 Scenario sites reuse their resolved request and protected-objective identity until the payload is physically delivered to the ship and survives Surface extraction. Abort, rig loss, payload destruction, emergency recall, and rough Surface extraction do not complete the site. Completion is credited by protected-objective identity, not by a destination or narrative tag.
 
+### Environmental recovery encounters
+
+`MiningSiteDefinition::terrainPatches` holds ordered, objective-relative rectangles of ordinary terrain. The mission claim references the site, and direct entry and prepared landing resolve the same definition. Patches are stamped once on the artifact layer; cached terrain and excavation survive reload and revisits. The artifact, protected cells, and rich deposits retain their ownership and reward rules. These sites use a `None` gate override and physical bypasses, so an unequipped player can retrieve the artifact.
+
+| Body | Recovery challenge | Alternative |
+|---|---|---|
+| Moon | Existing EVA crevice | Hand drill and suit recovery |
+| Mars | Bedrock shelf with hard-rock seam | Drill the seam or go around the shelf |
+| Io | Existing four-segment thermal seal | Hazard Mk I treatment remains required |
+| Titan | Cryo belt | Hazard Mk I or an outer route |
+| Titania | Staggered bedrock faults and a cryo pocket | Turn around the fault ends |
+| Triton | Cryo crossing and lower bedrock ledge | Treat or bypass the cold approach; preserve the existing encounter |
+| Mercury | Separated thermal pockets | Weave through the cool gaps without Hazard support |
+| Venus | Toxic pockets beside a safe central route | Central route without upgrades; Hazard Mk II offers a shortcut |
+
+Broader cave-layout generation and oxygen retuning are separate work. `mining_progression_tests` checks three-cell-wide bypasses across deterministic seeds and confirms that reload preserves excavation and artifact placement.
+
 ### Generic cocoon authoring
 
 1. Add a versioned `MiningSiteDefinition` with a stable ID, arena request, biome, `HazardCocoon` gate, and any site-specific oxygen baseline.

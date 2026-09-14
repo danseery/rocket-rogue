@@ -293,6 +293,8 @@ ContentCatalog createDefaultContent()
     catalog.incomingMessages.push_back({"earth_dock_intro", "mission_control_fennec", "Earth orbital dock", "Understood", false,
         {{"moon_first", "That's Earth's orbital dock. Bring your salvage here to bank it, refuel, repair the ship, and install ship upgrades. For now, head to the Moon and complete your first mining contract. The dock will be here when you return.", {}},
          {"services", "That's Earth's orbital dock. Bring your salvage here to bank it, refuel, repair the ship, and install ship upgrades before your next expedition.", {}}}});
+    catalog.incomingMessages.push_back({"wreck_salvage_intro", "mission_control_fennec", "Recover your wreck", "Understood", true,
+        {{"default", "Your replacement ship is ready at the Earth dock. Carried cargo, unbanked credits, upgrades and artifacts remain in your wreck. Earth Storage is safe. Open Change waypoint and select the wreck. Approach slowly, then use Salvage. Purple diamond markers identify wrecks carrying artifacts. Artifacts and upgrades can be recovered even with a full ore hold; excess ore stays in the wreck.", {}}}});
     catalog.incomingMessages.push_back({"artifact_wreck_recovery", "mission_control_fennec", "Artifact recovery required", "Understood", false,
         {{"default", "Your unbanked artifact remains in the wreck. Rendezvous and salvage it, then return to Earth to secure it.", {}}}});
     catalog.incomingMessages.push_back({"asteroid_belt_intro", "mission_control_fennec", "Asteroid belt ahead", "Understood", true,
@@ -319,6 +321,14 @@ ContentCatalog createDefaultContent()
     catalog.incomingMessages.back().title = "Incoming transmission";
     catalog.incomingMessages.back().variants.front().body =
         "Signal recognized. All six fragments accounted for. Approach the illuminated corridor. Docking systems are standing by.";
+    catalog.incomingMessages.push_back({"straylight_beacons", "straylight_ai", "The beacons", "Retrieve the beacons", true,
+        {{"default", "The objects you recovered are beacons left by Straylight's crew. Their power sources can restart this ship and allow it to charge itself again. Retrieve the beacons stored at Earth and bring them aboard. All six are needed to bring Straylight online.", {}}}});
+    catalog.incomingMessages.push_back({"straylight_online", "straylight_ai", "Straylight online", "Coordinate evacuation", true,
+        {{"default", "Power restored. Straylight is charging. Your Sun is dying. We must get as many people out of this solar system as possible. Coordinate the evacuation, bring the shuttles aboard, and prepare to leave.", {}}}});
+    catalog.incomingMessages.push_back({"straylight_evacuation", "straylight_ai", "Evacuation coordination", "Complete boarding", true,
+        {{"default", "Evacuation shuttles are approaching. The docking corridor is open. Bring them aboard before securing the Ark for departure.", {}}}});
+    catalog.incomingMessages.push_back({"straylight_arrival", "straylight_ai", "Aaru Vale", "Acknowledge arrival", true,
+        {{"default", "We have reached Aaru Vale. The evacuation is complete, and Straylight is our home among the stars. The ship is safely holding here while we prepare for the next journey.", {}}}});
     addMissionMessages("mercury_mission", "Mercury", "Optional recovery: pulse the surface signal and return its artifact to the ship.", "The optional recovery reward is secured.");
     addMissionMessages("venus_mission", "Venus", "Optional recovery: pulse the surface signal and return its artifact to the ship.", "The optional recovery reward is secured.");
 
@@ -668,6 +678,42 @@ ContentCatalog createDefaultContent()
     catalog.miningSites.push_back(std::move(thermalLayeredRecovery));
     catalog.miningSites.push_back(std::move(reinforcedThermalRecovery));
 
+    // Small environmental encounters reuse ordinary terrain and treatment.
+    // None is a deliberate gate override: these routes have physical bypasses.
+    const auto addTerrainEncounter = [&](const char* id, int difficulty, std::vector<MiningSiteTerrainPatch> obstacles) {
+        MiningSiteDefinition site;
+        site.id = id;
+        site.arena = {MiningAct::ActOne, difficulty, 0, true, MiningGateType::None};
+        site.terrainPatches.push_back({-10, -7, 10, 5, MiningCellMaterial::Regolith});
+        site.terrainPatches.insert(site.terrainPatches.end(), obstacles.begin(), obstacles.end());
+        catalog.miningSites.push_back(std::move(site));
+    };
+    using Material = MiningCellMaterial;
+    using Affinity = MiningElementalAffinity;
+    addTerrainEncounter(content::miningSite::martianShelfRecovery, 3, {
+        {-7, -3, 3, -3, Material::Bedrock}, {-1, -3, 1, -3, Material::HardRock}
+    });
+    addTerrainEncounter(content::miningSite::titanCryoRecovery, 8, {
+        {-5, -4, 5, -3, Material::HazardPocket, Affinity::Cryo}
+    });
+    addTerrainEncounter(content::miningSite::titaniaFaultRecovery, 8, {
+        {-4, -6, -4, 0, Material::Bedrock}, {4, -1, 4, 4, Material::Bedrock},
+        {-2, -3, -1, -2, Material::HazardPocket, Affinity::Cryo}
+    });
+    addTerrainEncounter(content::miningSite::tritonCrossingRecovery, 8, {
+        {-7, -5, 0, -4, Material::HazardPocket, Affinity::Cryo},
+        {2, -1, 7, -1, Material::Bedrock}
+    });
+    addTerrainEncounter(content::miningSite::mercuryThermalRecovery, 7, {
+        {-6, -4, -4, -2, Material::HazardPocket, Affinity::Thermal},
+        {3, -2, 5, 0, Material::HazardPocket, Affinity::Thermal},
+        {-1, -5, 1, -5, Material::HardRock}
+    });
+    addTerrainEncounter(content::miningSite::venusToxicRecovery, 9, {
+        {-6, -5, -3, 1, Material::HazardPocket, Affinity::Toxic},
+        {3, -2, 6, 3, Material::HazardPocket, Affinity::Toxic}
+    });
+
     catalog.scenarios = {
         {
             content::scenario::lunarProspector,
@@ -841,6 +887,31 @@ ContentCatalog createDefaultContent()
             false
         }
     };
+    const auto bindEncounter = [&](const char* scenarioId, const char* siteId, const char* messageId, const char* hint) {
+        for (auto& scenario : catalog.scenarios) {
+            if (scenario.id != scenarioId) continue;
+            for (auto& step : scenario.steps) {
+                if (step.id != "artifact") continue;
+                step.miningSiteDefinitionId = siteId;
+                step.detail += std::string(" ") + hint;
+            }
+        }
+        for (auto& message : catalog.incomingMessages)
+            if (message.id == messageId && !message.variants.empty()) message.variants.front().body += std::string(" ") + hint;
+    };
+    bindEncounter(content::scenario::marsBayExpansion, content::miningSite::martianShelfRecovery, "mars_mission_briefing",
+        "A bedrock shelf blocks the direct route. Drill the hard-rock seam or go around its end.");
+    bindEncounter(content::scenario::saturnDeparture, content::miningSite::titanCryoRecovery, "titan_mission_briefing",
+        "A cryo belt slows the direct approach. Hazard Mk I can treat it, or take the outer route.");
+    bindEncounter(content::scenario::uranusDeparture, content::miningSite::titaniaFaultRecovery, "titania_mission_briefing",
+        "Staggered bedrock faults require turns around their ends. Clear a wide return route before towing.");
+    bindEncounter(content::scenario::neptuneDiscovery, content::miningSite::tritonCrossingRecovery, "triton_mission_briefing",
+        "Cross the cryo field and steer around the lower bedrock ledge. Hazard Mk I can clear the cold approach.");
+    bindEncounter(content::scenario::mercuryArtifact, content::miningSite::mercuryThermalRecovery, "mercury_mission_briefing",
+        "Weave between thermal pockets. A cool route stays open without Hazard support.");
+    bindEncounter(content::scenario::venusArtifact, content::miningSite::venusToxicRecovery, "venus_mission_briefing",
+        "Toxic pockets flank a safe central route. Keep the towline clear; Hazard Mk II is an optional shortcut.");
+
     // Every authored objective supplies the same player-facing contract. The
     // defaults deliberately live beside content rather than being inferred by
     // GamePanel, and specialized beats override only their actual transition.

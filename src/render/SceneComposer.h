@@ -65,6 +65,7 @@ private:
     void drawTitleBackdrop(const RenderSnapshot& snapshot);
     void drawSceneTransition(const RenderSnapshot& snapshot);
     void drawBackdrop(const RenderSnapshot& snapshot);
+    void drawStraylightSequence(const RenderSnapshot& snapshot);
     void drawOrbitalArtifactSignal(const RenderSnapshot& snapshot, float x, float y,
         float radius, float alpha, float approachBlend);
     void drawMining(const RenderSnapshot& snapshot, bool arrivalComposite = false);

@@ -19,6 +19,8 @@ inline constexpr char artifactFieldDelimiter = ':';
 namespace field {
 
 inline constexpr std::string_view version = "version";
+inline constexpr std::string_view straylightStage = "straylightStage";
+inline constexpr std::string_view straylightPlacementVersion = "straylightPlacementVersion";
 inline constexpr std::string_view seed = "seed";
 inline constexpr std::string_view credits = "credits";
 inline constexpr std::string_view destinationIndex = "destinationIndex";

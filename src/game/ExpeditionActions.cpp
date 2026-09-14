@@ -1,5 +1,6 @@
 #include "game/RocketGameApp.h"
 #include "core/ExpeditionSystem.h"
+#include "core/StraylightSequence.h"
 #include "core/PayloadTransfer.h"
 #include "core/ResearchSystem.h"
 #include "core/SolarProgression.h"
@@ -20,6 +21,21 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
     if (!action.starts_with("expedition:")) return false;
     auto& e = state_.run.expedition;
     if (!e.travelInitialized) return true;
+    if (action.starts_with("expedition:straylight:")) {
+        if (applyStraylightAction(state_, catalog_, std::string_view(action).substr(22))) {
+            if (action == "expedition:straylight:install")
+                reconcileCampaignGuidance(state_,catalog_,true);
+            services_.ui.closeModal();
+            releaseRealtimeInputs(true);
+            clearControllerPause();
+            straylightElapsed_ = 0;
+            session_.flightArmed = state_.run.flight.active;
+            save(); refreshPanel();
+        }
+        return true;
+    }
+    if (straylightCommitted(state_) || (straylightOwnsPresentation(state_) &&
+        !(state_.meta.straylightStage == StraylightStage::RetrieveBeacons && action == "expedition:depart"))) return true;
     if (surfaceBaySequence_.active() || sceneTransition_.active() || session_.destruction.active) return true;
     const auto release = [&] {
         releaseRealtimeInputs(true);
@@ -105,6 +121,15 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         save();
         if (selection == "map") return runExpeditionAction("expedition:map");
     } else if (action == "expedition:depart") {
+        if (state_.meta.straylightStage == StraylightStage::RetrieveBeacons && e.location.bodyId == "straylight") {
+            e.undockReady = true;
+            state_.screen = Screen::Flight;
+            session_.flightArmed = true;
+            if (departDock(e, session_.flight) == ExpeditionResult::Applied) {
+                close(); save(); refreshPanel();
+            }
+            return true;
+        }
         if (departHome(state_, catalog_) == ExpeditionResult::Applied) {
             queueAudioCue(GameAudioCue::TakeoffIgnition);
             session_.preparedLaunch = expeditionFlightModel(state_, catalog_);
@@ -123,11 +148,20 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         state_.run.flight = session_.flight;
         const auto cargo = e.cargo.materials;
         const auto payout = static_cast<int>(e.cargo.credits);
+        const auto batteriesBeforeDock = e.batteries;
         if (dockExpedition(state_, solarSystemDefinition()) == ExpeditionResult::Applied) {
             queueAudioCue(GameAudioCue::Deposit);
             close();
             session_.flight.landing = {};
-            if (operationalHomeDocked(e)) {
+            if (e.location.bodyId == "straylight" && state_.meta.straylightStage == StraylightStage::Approach) {
+                state_.meta.straylightStage = StraylightStage::Docking;
+                e.undockReady = false;
+                session_.flightArmed = false;
+                straylightElapsed_ = 0;
+            } else if (e.location.bodyId == "straylight" && state_.meta.straylightStage == StraylightStage::RetrieveBeacons) {
+                e.undockReady = false;
+                session_.flightArmed = false;
+            } else if (operationalHomeDocked(e)) {
                 state_.screen = Screen::Hangar;
                 state_.run.shipDamage = 0;
                 state_.run.mining = {};
@@ -138,6 +172,17 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
                 state_.statusLine = "DOCKED - Banked " + std::to_string(cargo.common) + " common / " + std::to_string(cargo.rare) +
                     " rare / " + std::to_string(cargo.exotic) + " exotic and " + std::to_string(payout) +
                     " credits. Ship serviced." + (nextWaypoint.empty() ? std::string{} : " Next waypoint: " + nextWaypoint + ".");
+                std::string bankedNames;
+                for (std::size_t i = 0; i < e.batteries.size(); ++i) {
+                    const auto& b = e.batteries[i];
+                    if (batteriesBeforeDock[i].owner != BatteryOwner::Ship ||
+                        (b.owner != BatteryOwner::EarthStorage && b.owner != BatteryOwner::ArkSlot)) continue;
+                    const auto* origin = systemBody(solarSystemDefinition(), b.id);
+                    if (!bankedNames.empty()) bankedNames += ", ";
+                    bankedNames += origin ? origin->name : b.id;
+                }
+                if (!bankedNames.empty())
+                    state_.statusLine = "ARTIFACT BANKED - " + bankedNames + ". " + state_.statusLine;
             } else {
                 state_.screen = Screen::Flight;
                 e.undockReady = true;
@@ -169,9 +214,11 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
                 [id](const auto& battery){return battery.owner==BatteryOwner::Wreck && battery.wreckId==id;});
             const bool following=!e.coursePlayerSelected || e.course.targetBodyId=="wreck:"+std::to_string(id);
             const auto result = salvageWreck(e, id, solarSystemDefinition(), shipHoldCapacity(state_, catalog_));
-            if (result==ExpeditionResult::Applied && following) reconcileCampaignGuidance(state_,catalog_,true);
+            const bool beaconMission = state_.meta.straylightStage == StraylightStage::RetrieveBeacons;
+            if (result==ExpeditionResult::Applied && (following || (artifactOnWreck && beaconMission)))
+                reconcileCampaignGuidance(state_,catalog_,true);
             state_.statusLine = result == ExpeditionResult::Applied
-                ? (artifactOnWreck ? "Artifact recovered — return to Earth to secure it. Remaining ore stays salvageable." : "Wreck recovered. Upgrades restored; remaining cargo stays salvageable.")
+                ? (artifactOnWreck ? (beaconMission ? "Beacon recovered. Recovery waypoint updated. Remaining ore stays salvageable." : "Artifact recovered — return to Earth to secure it. Remaining ore stays salvageable.") : "Wreck recovered. Upgrades restored; remaining cargo stays salvageable.")
                 : "Rendezvous with the wreck and match its speed to recover cargo and upgrades.";
         }
     } else if (action == "expedition:graft_conflict:keep" || action == "expedition:graft_conflict:recovered") {
@@ -208,6 +255,43 @@ void RocketGameApp::debugStartExpedition() {
     initializeLiveExpedition(state_, catalog_);
     state_.run.credits = 100;
     session_.preparedLaunch = expeditionFlightModel(state_, catalog_);
+    refreshPanel();
+}
+void RocketGameApp::debugStartStraylight(int requested) {
+    beginDebugSandbox("Straylight sequence preview. No campaign save writes.");
+    initializeLiveExpedition(state_,catalog_);
+    auto& e=state_.run.expedition;
+    e.straylightRevealed=true;
+    state_.meta.campaignMilestone=CampaignMilestone::ArkDiscovered;
+    state_.meta.ark.condition=ArkCondition::DerelictOperable;
+    const auto* ark=systemBody(solarSystemDefinition(),"straylight");
+    e.location={"solar","straylight",CoordinateFrame::Body,ark->dockOffset,{},0,"straylight.dock"};
+    state_.run.flight.active=false;
+    state_.run.flight.fuelRemaining=state_.run.flight.fuelCapacity=50;
+    state_.run.flight.hullRemaining=state_.run.flight.hullMaximum=100;
+    const auto stage=requested==1 ? StraylightStage::Docking : requested==2 ? StraylightStage::RetrieveBeacons :
+        requested==3 ? StraylightStage::Awakening : requested==4 ? StraylightStage::Boarding :
+        requested==5 ? StraylightStage::Departing : requested==6 ? StraylightStage::Approach : StraylightStage::Reveal;
+    state_.meta.straylightStage=stage;
+    for (auto& b:e.batteries) b.owner=requested>=3 && requested<=5 ? BatteryOwner::ArkSlot : BatteryOwner::Ship;
+    if (requested>=3 && requested<=5) { e.arkActivated=true; e.homeBodyId="straylight"; }
+    e.active=false;
+    e.undockReady=false;
+    state_.screen=Screen::Flight;
+    if (requested==6) {
+        e.location.siteId.clear();
+        e.location.position.x-=1;
+        e.location.position.y-=.4;
+        restoreSystemLocation(e.location,state_.run.flight);
+        e.active=true;
+        state_.run.flight.active=true;
+        session_.flightArmed=true;
+        session_.preparedLaunch=expeditionFlightModel(state_,catalog_);
+        plotSystemCourse(e,state_.run.flight,solarSystemDefinition(),"straylight");
+    }
+    straylightElapsed_=0;
+    services_.ui.closeModal();
+    releaseRealtimeInputs(true);
     refreshPanel();
 }
 void RocketGameApp::debugStartMoonApproach(bool acknowledge) {

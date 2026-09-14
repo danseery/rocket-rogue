@@ -56,6 +56,12 @@ namespace miningSite {
 inline constexpr const char* lunarAnomalyCrevice = "lunar_anomaly_crevice";
 inline constexpr const char* thermalLayeredRecovery = "thermal_layered_recovery";
 inline constexpr const char* reinforcedThermalRecovery = "reinforced_thermal_recovery";
+inline constexpr const char* martianShelfRecovery = "martian_shelf_recovery";
+inline constexpr const char* titanCryoRecovery = "titan_cryo_recovery";
+inline constexpr const char* titaniaFaultRecovery = "titania_fault_recovery";
+inline constexpr const char* tritonCrossingRecovery = "triton_crossing_recovery";
+inline constexpr const char* mercuryThermalRecovery = "mercury_thermal_recovery";
+inline constexpr const char* venusToxicRecovery = "venus_toxic_recovery";
 } // namespace miningSite
 
 namespace postSolarSystem {

@@ -61,7 +61,7 @@ public:
 
     void prepareForLaunch();
     void startLaunch();
-    void launchMove(double steerAxis, double throttleAxis);
+    void launchMove(double steerAxis, double throttleAxis, double strafeAxis = 0.0);
     void returnHome();
     void arrivalOps();
     void acknowledgeStoryBriefing();
@@ -70,6 +70,7 @@ public:
     void toggleCruiseControl();
     bool runExpeditionAction(const std::string& action);
     void debugStartExpedition();
+    void debugStartStraylight(int stage);
     void debugStartMoonApproach(bool acknowledge = false);
     void next();
     void attemptFrontierTransfer();
@@ -300,6 +301,7 @@ private:
         double currentMultiplier = 1.0;
         double peakWarning = 0.0;
         double steerInput = 0.0;
+        double strafeInput = 0.0;
         double throttleInput = 0.0;
         double asteroidImpactFeedbackSeconds = 0.0;
         FlightDestructionCinematicState destruction;
@@ -327,6 +329,7 @@ private:
             currentMultiplier = 1.0;
             peakWarning = 0.0;
             steerInput = 0.0;
+            strafeInput = 0.0;
             throttleInput = 0.0;
             asteroidImpactFeedbackSeconds = 0.0;
             destruction = {};
@@ -421,6 +424,7 @@ private:
 
     struct RealtimeInputState {
         double moveX = 0.0;
+        double strafe = 0.0;
         double moveY = 0.0;
         double aimX = 0.0;
         double aimY = 0.0;
@@ -466,6 +470,9 @@ private:
     std::vector<GameAudioEvent> pendingAudioEvents_;
     AudioCueLimiter audioLimiter_;
     double lastMiningContactIntensity_ = 0.0;
+    double miningFeedbackAudioCooldown_ = 0.0;
+    double straylightElapsed_ = 0.0;
+    StraylightStage straylightPresentedStage_ = StraylightStage::Hidden;
     double lastMiningDroneHealth_ = 1.0;
     bool lastMiningFailurePending_ = false;
     double lastControllerInputSeconds_ = 0.0;

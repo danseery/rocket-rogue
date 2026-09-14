@@ -1,5 +1,6 @@
 #include "game/ExpeditionPresentation.h"
 #include "core/ExpeditionSystem.h"
+#include "core/StraylightSequence.h"
 #include "core/GameUi.h"
 #include "core/MiningSystem.h"
 #include "core/ResearchSystem.h"
@@ -22,6 +23,23 @@ std::string esc(std::string_view text) {
     return result;
 }
 std::string num(double value) { std::ostringstream s; s << std::fixed << std::setprecision(1) << value; return s.str(); }
+std::string bankedArtifactMarkup(const PersistentExpeditionState& e) {
+    const bool ark = e.location.bodyId == "straylight";
+    if (!ark && e.location.bodyId != "earth") return {};
+    std::string names;
+    int count = 0;
+    for (const auto& b : e.batteries) {
+        if (b.owner != (ark ? BatteryOwner::ArkSlot : BatteryOwner::EarthStorage)) continue;
+        const auto* origin = systemBody(solarSystemDefinition(), b.id);
+        if (count++) names += ", ";
+        names += origin ? origin->name : b.id;
+    }
+    if (!count) return {};
+    return "<section class=\"artifact-bank-status\"><strong>" +
+        std::string(count == 1 ? "ARTIFACT BANKED" : "ARTIFACTS BANKED") +
+        "</strong><p>" + esc(names) + " / " + (ark ? "Installed aboard Straylight" : "Secured in Earth Storage") +
+        "</p></section>";
+}
 // Both Rml render hosts support positioned geometry; avoid depending on CSS
 // transforms for navigation lines, which must remain accurate on either host.
 void mapLine(std::ostream& out, std::string_view style, double ax, double ay, double bx, double by) {
@@ -180,6 +198,87 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     const auto& state = c.state;
     const auto& e = state.run.expedition;
     if (!e.travelInitialized || c.titleScreenActive || c.sceneFadeToBlack > 0.0) return;
+    using Stage = StraylightStage;
+    const auto stage = state.meta.straylightStage;
+    const auto beaconChecklist = [&]() {
+        std::string text = "<section class=\"straylight-beacons\"><h3>BEACON RECOVERY</h3>";
+        for (const auto& b : e.batteries) {
+            const auto* origin = systemBody(solarSystemDefinition(), b.id);
+            const std::string location = b.owner == BatteryOwner::EarthStorage ? "Earth Storage" :
+                b.owner == BatteryOwner::Ship ? "Aboard your ship" : b.owner == BatteryOwner::ArkSlot ? "Installed in Straylight" :
+                b.owner == BatteryOwner::Wreck ? "Wreck " + std::to_string(b.wreckId) : "At recovery site";
+            text += "<p>" + std::string(b.owner == BatteryOwner::ArkSlot ? "[x] " : "[ ] ") +
+                esc(origin ? origin->name : b.id) + " / " + location + "</p>";
+        }
+        return text + "</section>";
+    };
+    if (straylightOwnsPresentation(state)) {
+        std::erase_if(panel.modals, [](const auto& modal) {
+            return modal.id != "system_menu" && modal.id != "settings" &&
+                modal.id != "controls" && modal.id != "reset_save_confirm";
+        });
+        for (auto& modal : panel.modals) if (modal.id == "system_menu") {
+            modal.bodyMarkup = "<div class=\"modal-actions action-row system-menu-actions\">"
+                "<button class=\"ok\" data-ui-close-modal=\"1\" data-controller-resume=\"1\" data-ui-focus-id=\"system:resume\" data-ui-default-focus=\"1\">Resume</button>"
+                "<button class=\"ghost\" data-ui-modal=\"controls\" data-ui-focus-id=\"modal:controls\">Controls</button>"
+                "<button class=\"ghost\" data-ui-modal=\"settings\" data-ui-focus-id=\"modal:settings\">Settings</button></div>";
+        }
+        panel.contentMarkup = "<section class=\"straylight-sequence\">";
+        panel.templateKind = PanelTemplateKind::Takeover;
+        panel.metadata.overlay = PanelOverlayKind::None;
+        panel.metadata.screen = Screen::StoryBriefing;
+        panel.metadata.visualFamily = PanelVisualFamily::Fullscreen;
+        panel.metadata.layoutMode = PanelLayoutMode::Fullscreen;
+        panel.metadata.surface = PanelSurfaceKind::None;
+        panel.metadata.interaction = PanelInteractionMode::Takeover;
+        panel.runtime = {};
+        panel.metadata.legacyContentOwnsLaneGeometry = false;
+        panel.runtime.responsiveViewport = true;
+        const auto sequenceAction = [&](std::string_view label, std::string_view id, bool enabled = true) {
+            return button(label, "expedition:straylight:" + std::string(id), enabled, "ok", true);
+        };
+        const auto transmission = [&](std::string_view message, std::string_view id) {
+            if (auto card = buildIncomingMessageCard(c, message, "default", "expedition:straylight:" + std::string(id))) {
+                card->autoOpen = true;
+                panel.modals.push_back(std::move(*card));
+            }
+        };
+        if (straylightCinematicDuration(stage) > 0) {
+            panel.contentMarkup += sequenceAction("Skip animation", "skip");
+        } else if (stage == Stage::Invitation) {
+            transmission("triton_mission_complete", "invitation");
+        } else if (stage == Stage::FirstContact) {
+            transmission("straylight_beacons", "retrieve");
+        } else if (stage == Stage::RetrieveBeacons) {
+            const bool carried = std::any_of(e.batteries.begin(), e.batteries.end(), [](const auto& b) { return b.owner == BatteryOwner::Ship; });
+            const bool installed = std::all_of(e.batteries.begin(), e.batteries.end(), [](const auto& b) { return b.owner == BatteryOwner::ArkSlot; });
+            panel.contentMarkup += bankedArtifactMarkup(e) + beaconChecklist() + sequenceAction("Install carried beacons", "install", carried) +
+                sequenceAction("Bring Straylight online", "prepare_online", installed) +
+                button("Depart dock", "expedition:depart", true, "ghost");
+        } else if (stage == Stage::ConfirmOnline) {
+            panel.contentMarkup += "<h2>POINT OF NO RETURN</h2><p>Bringing Straylight online commits you to evacuation and departure. Solar exploration will end.</p>" +
+                button("Not yet", "expedition:straylight:cancel_online", true, "ghost", true) +
+                button("Bring Straylight online", "expedition:straylight:online", true, "warn");
+        } else if (stage == Stage::Online) {
+            transmission("straylight_online", "coordinate");
+        } else if (stage == Stage::EvacuationBriefing) {
+            transmission("straylight_evacuation", "boarding");
+        } else if (stage == Stage::Arrived) {
+            transmission("straylight_arrival", "arrived");
+        } else if (stage == Stage::Boarded || stage == Stage::Secured) {
+            panel.contentMarkup += stage == Stage::Boarded ? sequenceAction("Secure the Ark", "secure") : sequenceAction("Depart for Aaru Vale", "depart");
+        } else if (stage == Stage::Complete) {
+            panel.contentMarkup += "<h2>AARU VALE</h2><p>Straylight / Home dock</p><p>Evacuation complete. The Ark is safely holding in Aaru Vale.</p>" + bankedArtifactMarkup(e);
+        }
+        if (stage >= Stage::Online && stage <= Stage::Departing) {
+            panel.contentMarkup += "<div class=\"straylight-checklist\"><p>" + std::string(stage > Stage::Online ? "[x]" : "[ ]") + " Coordinate evacuation</p><p>" +
+                (stage >= Stage::Boarded ? "[x]" : "[ ]") + " Complete boarding</p><p>" +
+                (stage >= Stage::Secured ? "[x]" : "[ ]") + " Secure the Ark</p><p>[ ] Depart for Aaru Vale</p></div>";
+        }
+        if (panel.contentMarkup == "<section class=\"straylight-sequence\">") panel.contentMarkup.clear();
+        else panel.contentMarkup += "</section>";
+        return;
+    }
     if (state.screen==Screen::Flight && openingMissionRetryEligible(state) &&
         e.decision.pendingId=="opening_retry") {
         panel.modals.clear();
@@ -336,8 +435,10 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
             if (const auto from=displayPlacement(currentBody->id))
                 mapLine(map,"solar-course",from->x,from->y,placement->x+16,placement->y+15);
         }
-        if (placement) map << "<div class=\"solar-wreck\" style=\"left:" << placement->x+16
-            << "dp;top:" << placement->y+15 << "dp;\">W" << w.id << (recommendation.wreckId==w.id ? " *" : "") << "</div>";
+        if (placement) map << "<div class=\"solar-wreck" << (wreckCarriesArtifact(e, w.id) ? " solar-wreck-artifact" : "")
+            << "\" style=\"left:" << placement->x+16 << "dp;top:" << placement->y+15 << "dp;\">"
+            << (wreckCarriesArtifact(e, w.id) ? "&#9670; " : "") << "W" << w.id
+            << (recommendation.wreckId==w.id ? " *" : "") << "</div>";
     }
     map << "</div></div><p class=\"solar-map-help\">"
         << (atOperationalDock
@@ -367,9 +468,11 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         << "</p><p>" << esc(recommendation.detail) << "</p><p>SELECTED WAYPOINT: " << esc(selectedName)
         << (e.coursePlayerSelected ? " / MANUAL OVERRIDE" : " / FOLLOWING MISSION")
         << "</p>" << action("Follow mission","follow_mission",!recommendation.targetId.empty()) << "</section>";
-    for (const auto& w : e.wrecks) map << "<p>Wreck " << w.id << " - "
-        << action("Set waypoint: Wreck " + std::to_string(w.id),"plot:wreck:"+std::to_string(w.id))
-        << action(w.buildRecoverable ? "Recover upgrades and cargo" : "Recover cargo", "recover:" + std::to_string(w.id), canSalvageWreck(e, flight, system, w.id)) << "</p>";
+    for (const auto& w : e.wrecks) map << "<p class=\"" << (wreckCarriesArtifact(e, w.id) ? "wreck-artifact-copy" : "") << "\">"
+        << esc(wreckDisplayName(e, w.id)) << " - "
+        << action("Set waypoint: " + wreckDisplayName(e, w.id),"plot:wreck:"+std::to_string(w.id))
+        << action(wreckCarriesArtifact(e, w.id) ? "Recover artifact and salvage" : w.buildRecoverable ? "Recover upgrades and cargo" : "Recover cargo",
+            "recover:" + std::to_string(w.id), canSalvageWreck(e, flight, system, w.id)) << "</p>";
     map << action(atOperationalDock ? "Back to dock" : "Resume flight", "close");
     if (e.active) map << action("Abandon ship", "abandon");
     map << "</section>";
@@ -397,7 +500,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         const std::string departLabel = !e.course.targetBodyId.empty() && e.course.targetBodyId != e.location.bodyId
             ? "DEPART FOR " + selectedName : "DEPART DOCK";
         home << "<section class=\"expedition-home\"><h2>" << esc(region ? region->name : "Home") << " / ORBITAL DOCK</h2><p>" << esc(state.statusLine)
-            << "</p><p>Upgrades survive docking. Recover your wreck to reclaim lost upgrades.</p>"
+            << "</p>" << bankedArtifactMarkup(e) << "<p>Upgrades survive docking. Recover your wreck to reclaim lost upgrades.</p>"
             << "<section class=\"expedition-dock-status\">"
             << "<div class=\"dock-status-segment\"><span>SHIP FUEL</span><strong>" << num(flight.fuelRemaining) << " / " << num(flight.fuelCapacity) << "</strong></div>"
             << "<div class=\"dock-status-segment\"><span>HULL</span><strong>" << num(flight.hullRemaining) << "</strong></div>"
@@ -434,12 +537,20 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         panel.metadata.legacyContentOwnsLaneGeometry = false;
         panel.runtime.responsiveViewport = true;
     }
+    if (stage == Stage::RevealPending) {
+        panel.contentMarkup += "<section class=\"straylight-contact\"><strong>CONTACT RESOLVED - STRAYLIGHT</strong><p>WAYPOINT SET / Leave Triton when ready.</p></section>";
+    }
+    if (stage == Stage::RetrieveBeacons && atOperationalDock && e.location.bodyId == "earth") {
+        const bool stored = std::any_of(e.batteries.begin(), e.batteries.end(), [](const auto& b) { return b.owner == BatteryOwner::EarthStorage; });
+        panel.contentMarkup += beaconChecklist() + button("Collect stored beacons", "expedition:straylight:collect", stored, "ok");
+    }
     const bool stableMissionContext = c.incomingMessageDeliveryAllowed && !c.miningExtractionActive &&
         e.progression.pendingRunUpgradeChoices == 0 &&
         ((state.screen == Screen::Mining && !state.run.mining.failurePending) ||
          (state.screen == Screen::Flight && !c.surfaceArrivalActive && flight.mode != FlightMode::Landing) || atOperationalDock);
     if (stableMissionContext) {
         for (const auto& mission : c.catalog.solarMissions) {
+            if (mission.bodyId == "triton" && stage != Stage::Hidden) continue;
             const auto claim = solarMissionObjectiveForBody(state, c.catalog, mission.bodyId);
             if (claim.state != ScenarioStepState::ReadyToClaim || claim.action != ScenarioActionKind::ClaimReward) continue;
             const auto* body = systemBody(system, mission.bodyId);
@@ -472,13 +583,16 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         hazardMission +
         action(e.cruise.active ? "Cruise off [C / L3]" : "Cruise [C / L3]", "cruise", flight.active && flight.mode != FlightMode::Landing && !e.undockReady,
             flightDefaultAvailable && !dockReady) +
-        (dockInRange ? "<div class=\"expedition-dock-action\">" + button("DOCK", "expedition:dock", dockReady, "ok", flightDefaultAvailable && dockReady) + "</div>"
+        (dockInRange ? "<div class=\"expedition-dock-action\">" + button(e.course.targetBodyId == "straylight" ? "Dock with Straylight" : "DOCK", "expedition:dock", dockReady, "ok", flightDefaultAvailable && dockReady) + "</div>"
                      : action("Dock", "dock", false));
         for (const auto& wreck : e.wrecks) {
             if (!canSalvageWreck(e, flight, system, wreck.id, false)) continue;
             const bool ready = canSalvageWreck(e, flight, system, wreck.id);
-            panel.contentMarkup += action("Salvage wreck " + std::to_string(wreck.id),
-                "recover:" + std::to_string(wreck.id), ready);
+            panel.contentMarkup += "<p class=\"" + std::string(wreckCarriesArtifact(e, wreck.id) ? "wreck-artifact-copy" : "") + "\">" +
+                esc(wreckDisplayName(e, wreck.id)) + " / " +
+                (ready ? "Ready to salvage. Artifacts and upgrades fit even with a full ore hold." : "Match the wreck's speed to salvage.") + "</p>" +
+                action(wreckCarriesArtifact(e, wreck.id) ? "Salvage artifact / Wreck " + std::to_string(wreck.id) : "Salvage wreck " + std::to_string(wreck.id),
+                    "recover:" + std::to_string(wreck.id), ready);
         }
         panel.contentMarkup += "</div>";
     }

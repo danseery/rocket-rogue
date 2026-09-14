@@ -23,6 +23,7 @@ enum class NativeBenchmarkScenario {
     ExpeditionDock,
     ExpeditionMap,
     ExpeditionFlight,
+    StraylightReveal, StraylightDocking, StraylightAwakening, StraylightBoarding, StraylightDeparture, StraylightApproach,
 };
 
 enum class NativeBenchmarkRenderer {

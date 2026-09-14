@@ -216,6 +216,8 @@ public:
         launchVelocityY = snapshot.launchVelocityY;
         launchFuelRemaining = snapshot.launchFuelRemaining;
         launchThrottle = snapshot.launchThrottle;
+        launchStrafeInput = snapshot.launchStrafeInput;
+        launchSteerInput = snapshot.launchSteerInput;
         landingLocalFrame = snapshot.launchLandingLocalFrame;
         landingAltitude = snapshot.launchLandingAltitude;
         landingVisualX = snapshot.launchPositionX;
@@ -232,6 +234,7 @@ public:
         launchDestinationTier = snapshot.destinationTier;
         launchOriginTier = snapshot.launchOriginTier;
         straylightApproach = snapshot.straylightApproach;
+        straylightElapsed = snapshot.straylightElapsed;
         launchTravelProgress = snapshot.travelProgress;
         launchReturningHome = snapshot.returningHome;
         launchDestructionActive = snapshot.launchDestructionActive;
@@ -313,6 +316,8 @@ public:
     double launchFuelCapacity = 0.0;
     double launchFuelRemaining = 0.0;
     double launchThrottle = 0.0;
+    double launchStrafeInput = 0.0;
+    double launchSteerInput = 0.0;
     bool landingLocalFrame = false;
     double landingAltitude = 0.0;
     double landingVisualX = 0.0, landingVisualY = 0.0;
@@ -326,6 +331,7 @@ public:
     int launchDestinationTier = 0;
     int launchOriginTier = -1;
     bool straylightApproach = false;
+    double straylightElapsed = 0;
     int surfacePushSteps = 0;
     int miningSwarmDepth = -1;
     int miningSwarmWave = 0;
@@ -1441,6 +1447,57 @@ void uranusVectorGenericClaimQueuesNeptune()
     fixture->runner.shutdown();
 }
 
+void straylightSequenceActionsAndArrival()
+{
+    auto fixture = std::make_unique<AppFixture>();
+    assert(fixture->runner.initialize());
+    auto& app=fixture->runner.app();
+    app.debugStartStraylight(0);
+    for (int i=0;i<10;++i) app.advancePresentation(.1);
+    for (int i=0;i<120;++i) app.tick(.03);
+    app.renderScene();
+    assert(std::abs(fixture->renderer.straylightElapsed-1.0)<.00001);
+    fixture->host.now+=.05; fixture->runner.frame();
+    assert(fixture->ui.html.find("Skip animation")!=std::string::npos);
+    assert(fixture->ui.html.find("data-modal=\"system_menu\"")!=std::string::npos);
+    assert(fixture->ui.html.find("data-modal=\"settings\"")!=std::string::npos);
+    fixture->ui.dispatchAction("expedition:straylight:skip");
+    assert(fixture->ui.html.find("Signal recognized. All six fragments accounted for.")!=std::string::npos);
+    fixture->ui.dispatchAction("expedition:straylight:skip");
+    assert(fixture->ui.html.find("Signal recognized.")!=std::string::npos);
+    app.debugStartStraylight(1);
+    fixture->ui.dispatchAction("expedition:straylight:skip");
+    assert(fixture->ui.html.find("beacons left by Straylight")!=std::string::npos);
+    fixture->ui.dispatchAction("expedition:straylight:retrieve");
+    assert(fixture->ui.html.find("Install carried beacons")!=std::string::npos);
+    assert(fixture->ui.html.find("ARTIFACTS BANKED")==std::string::npos);
+    fixture->ui.dispatchAction("expedition:straylight:install");
+    assert(fixture->ui.html.find("ARTIFACTS BANKED")!=std::string::npos);
+    assert(fixture->ui.html.find("Moon, Mars, Io, Titan, Titania, Triton / Installed aboard Straylight")!=std::string::npos);
+    fixture->ui.dispatchAction("expedition:straylight:prepare_online");
+    assert(fixture->ui.html.find("POINT OF NO RETURN")!=std::string::npos);
+    fixture->ui.dispatchAction("expedition:straylight:cancel_online");
+    assert(fixture->ui.html.find("BEACON RECOVERY")!=std::string::npos);
+    fixture->ui.dispatchAction("expedition:straylight:prepare_online");
+    fixture->ui.dispatchAction("expedition:straylight:online");
+    fixture->ui.dispatchAction("expedition:depart");
+    assert(fixture->ui.html.find("Skip animation")!=std::string::npos);
+    fixture->ui.dispatchAction("expedition:straylight:skip");
+    assert(fixture->ui.html.find("Your Sun is dying")!=std::string::npos);
+    fixture->ui.dispatchAction("expedition:straylight:coordinate");
+    fixture->ui.dispatchAction("expedition:straylight:boarding");
+    fixture->ui.dispatchAction("expedition:straylight:skip");
+    assert(fixture->ui.html.find("Secure the Ark")!=std::string::npos);
+    fixture->ui.dispatchAction("expedition:straylight:secure");
+    fixture->ui.dispatchAction("expedition:straylight:depart");
+    fixture->ui.dispatchAction("expedition:straylight:skip");
+    fixture->host.now+=.05; fixture->runner.frame();
+    assert(fixture->ui.html.find("Aaru Vale")!=std::string::npos);
+    fixture->ui.dispatchAction("expedition:straylight:arrived");
+    assert(fixture->ui.html.find("AARU VALE")!=std::string::npos);
+    fixture->runner.shutdown();
+}
+
 void straylightApproachRunsAndEndsActOne()
 {
     auto fixture = std::make_unique<AppFixture>();
@@ -2075,7 +2132,7 @@ void recoveryGuidanceUsesRealDockActions()
     completeTitleLaunch(*fixture);
     fixture->ui.dispatchAction("ack_incoming_message:recovery.wreck.1");
     assert(fixture->ui.html.find("Recover Mars artifact from Wreck 1")!=std::string::npos);
-    assert(fixture->ui.html.find("DEPART FOR Wreck 1")!=std::string::npos);
+    assert(fixture->ui.html.find("DEPART FOR Artifact / Wreck 1")!=std::string::npos);
     fixture->ui.dispatchAction("expedition:plot:venus");
     auto saved=rocket::deserializeSaveData(fixture->saves.value);
     assert(saved && saved->expedition.coursePlayerSelected && saved->expedition.course.targetBodyId=="venus");
@@ -2085,10 +2142,96 @@ void recoveryGuidanceUsesRealDockActions()
     fixture->ui.dispatchAction("expedition:map");
     assert(fixture->ui.html.find("RECOMMENDED OBJECTIVE")!=std::string::npos);
     assert(fixture->ui.html.find("expedition:plot:wreck:1")!=std::string::npos);
+    assert(fixture->ui.html.find("solar-wreck-artifact")!=std::string::npos);
+    assert(fixture->ui.html.find("Set waypoint: Artifact / Wreck 1")!=std::string::npos);
     fixture->runner.shutdown();
 }
 
-int main()
+void uncalibratedLunarImpactCinematic()
+{
+    // Reaching the Moon during the uncalibrated controls lesson freezes the
+    // flight into a visible impact cinematic before the existing red result
+    // modal resolves the destructive collision. The scripted pilot now uses
+    // the shoulder buttons for rotation, retaining controller haptic coverage.
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        fixture.runner.app().debugStartLaunchLesson(1);
+        fixture.controllers.frame.connected = true;
+        fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
+        fixture.controllers.frame.meaningfulInput = true;
+        for (int frame = 0;
+             frame < 1500 && !fixture.renderer.launchDestructionActive;
+             ++frame) {
+            const double steer = std::clamp(
+                -fixture.renderer.launchCourseOffset * 5.5 -
+                    fixture.renderer.launchCourseVelocity * 2.4,
+                -1.0,
+                1.0);
+            fixture.controllers.frame.down.set(static_cast<std::size_t>(rocket::ControllerButton::LeftBumper),steer < -.01);
+            fixture.controllers.frame.down.set(static_cast<std::size_t>(rocket::ControllerButton::RightBumper),steer > .01);
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
+        assert(fixture.renderer.launchDestructionActive);
+        assert(fixture.renderer.launchDestructionCause == rocket::LaunchFailureCause::LunarImpact);
+        assert(fixture.audio.explosions == 1);
+        assert(!fixture.renderer.launchLandingAuthorized);
+        assert(!fixture.renderer.launchLandingLocalFrame);
+        assert(fixture.renderer.sceneFadeToBlack == 0.0);
+        assert(fixture.ui.presentation.contentMarkup.find("rr-hud-launch-status") != std::string::npos);
+        assert(fixture.runner.app().inputContext() == rocket::InputContext::Stamp);
+        assert(fixture.host.hapticCount > 0);
+        const double collisionProgress = fixture.renderer.launchTravelProgress;
+        const double collisionCourse = fixture.renderer.launchCourseOffset;
+
+        fixture.runner.app().launchMove(-1.0, 1.0);
+        fixture.runner.app().returnHome();
+        fixture.runner.app().cutEngines();
+        for (int frame = 0; frame < 20; ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
+        assert(fixture.renderer.launchDestructionActive);
+        assert(fixture.renderer.launchDestructionElapsed > rocket::tuning::session::flightDestructionHoldSeconds);
+        assert(std::abs(fixture.renderer.launchTravelProgress - collisionProgress) < 0.000001);
+        assert(std::abs(fixture.renderer.launchCourseOffset - collisionCourse) < 0.000001);
+
+        for (int frame = 0;
+             frame < 120 &&
+             fixture.renderer.launchDestructionElapsed <
+                 rocket::tuning::session::flightDestructionSequenceSeconds - 2.0 / 60.0;
+             ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
+        assert(fixture.renderer.launchDestructionActive);
+        for (int frame = 0;
+             frame < 5 && fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight);
+             ++frame) {
+            fixture.host.now += 1.0 / 60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Results));
+        assert(!fixture.renderer.launchDestructionActive);
+        assert(fixture.renderer.lastLaunchFailureCause == rocket::LaunchFailureCause::LunarImpact);
+        const auto lunarImpactModal = std::find_if(
+            fixture.ui.presentation.modals.begin(),
+            fixture.ui.presentation.modals.end(),
+            [](const rocket::ModalPresentation& modal) {
+                return modal.id == rocket::ui::modals::launchOutcome;
+            });
+        assert(lunarImpactModal != fixture.ui.presentation.modals.end());
+        assert(lunarImpactModal->tone == rocket::ModalTone::Negative);
+        fixture.runner.shutdown();
+    }
+
+}
+
+int main(int argc, char** argv)
 {
 #if defined(_MSC_VER)
     _set_error_mode(_OUT_TO_STDERR);
@@ -2096,7 +2239,9 @@ int main()
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #endif
+    if (argc > 1 && std::string_view(argv[1]) == "--flight-impact") { uncalibratedLunarImpactCinematic(); return 0; }
     recoveryGuidanceUsesRealDockActions();
+    straylightSequenceActionsAndArrival();
     explicitOrbitalLandingEntersLocalDescent();
     orbitalControllerSelectionOwnsInput();
     asteroidDestructionUsesRenderedUnscaledTime();
@@ -2138,6 +2283,17 @@ int main()
         app.launchMove(0.0, 1.0);
         app.tick(1.0 / 60.0);
         assert(app.thrustAudioLevel() > 0.0);
+        app.launchMove(0.0,0.0,1.0);
+        app.tick(1.0/60.0);
+        app.renderScene();
+        assert(fixture.renderer.launchStrafeInput==1.0 && fixture.renderer.launchSteerInput==0.0);
+        assert(app.thrustAudioLevel()>0.0);
+        app.launchMove(0.0,0.0,0.0);
+        app.tick(1.0/60.0);
+        app.renderScene();
+        assert(fixture.renderer.launchStrafeInput==0.0);
+        app.launchMove(0.0,1.0);
+        app.tick(1.0/60.0);
         fixture.ui.modalOpenValue = true;
         assert(app.thrustAudioLevel() == 0.0);
         fixture.ui.modalOpenValue = false;
@@ -2197,6 +2353,9 @@ int main()
         state.screen = rocket::Screen::Hangar;
         assert(rocket::initializeLiveExpedition(state, catalog));
         state.meta.unlockKeys.push_back(rocket::content::unlock::droneBay);
+        state.run.expedition.batteries[0].owner = rocket::BatteryOwner::EarthStorage;
+        state.run.expedition.batteries[0].researchEarned = true;
+        state.run.expedition.batteries[1].owner = rocket::BatteryOwner::Ship;
         const auto fuel = state.run.flight.fuelRemaining;
         const auto hull = state.run.flight.hullRemaining;
         AppFixture fixture;
@@ -2204,6 +2363,9 @@ int main()
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
         completeTitleLaunch(fixture);
+        assert(fixture.ui.html.find("ARTIFACT BANKED") != std::string::npos);
+        assert(fixture.ui.html.find("Moon / Secured in Earth Storage") != std::string::npos);
+        assert(fixture.ui.html.find("Moon, Mars / Secured") == std::string::npos);
         assert(fixture.ui.html.find("Drone Ops") != std::string::npos);
         fixture.ui.dispatchAction("drone_ops");
         fixture.runner.app().renderUi();
@@ -4000,8 +4162,7 @@ int main()
         fixture.runner.shutdown();
     }
 
-    // Launch steering keeps the controller's screen-space X direction through
-    // routing and app dispatch: stick-left must move the ship left.
+    // Controller X reaches the independent ship-relative lateral thrusters.
     {
         AppFixture fixture;
         assert(fixture.runner.initialize());
@@ -4014,11 +4175,13 @@ int main()
         fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
         fixture.controllers.frame.meaningfulInput = true;
         fixture.controllers.frame.leftX = -0.80;
+        const double beforeStrafeFuel = fixture.renderer.launchFuelRemaining;
         for (int frame = 0; frame < 60; ++frame) {
             fixture.host.now += 1.0 / 60.0;
             fixture.runner.frame();
         }
-        assert(fixture.renderer.launchCourseVelocity < 0.0);
+        assert(fixture.renderer.launchStrafeInput == -0.80 && fixture.renderer.launchSteerInput == 0.0);
+        assert(fixture.renderer.launchFuelRemaining < beforeStrafeFuel);
         fixture.runner.shutdown();
     }
 
@@ -4061,84 +4224,7 @@ int main()
         fixture.runner.shutdown();
     }
 
-    // Reaching the Moon during the uncalibrated controls lesson freezes the
-    // flight into a visible impact cinematic before the existing red result
-    // modal resolves the destructive collision.
-    {
-        AppFixture fixture;
-        assert(fixture.runner.initialize());
-        fixture.runner.app().debugStartLaunchLesson(1);
-        fixture.controllers.frame.connected = true;
-        fixture.controllers.frame.family = rocket::ControllerFamily::Xbox;
-        fixture.controllers.frame.meaningfulInput = true;
-
-        for (int frame = 0;
-             frame < 1500 && !fixture.renderer.launchDestructionActive;
-             ++frame) {
-            const double steer = std::clamp(
-                -fixture.renderer.launchCourseOffset * 5.5 -
-                    fixture.renderer.launchCourseVelocity * 2.4,
-                -1.0,
-                1.0);
-            fixture.controllers.frame.leftX = steer;
-            fixture.host.now += 1.0 / 60.0;
-            fixture.runner.frame();
-        }
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
-        assert(fixture.renderer.launchDestructionActive);
-        assert(fixture.renderer.launchDestructionCause == rocket::LaunchFailureCause::LunarImpact);
-        assert(fixture.audio.explosions == 1);
-        assert(!fixture.renderer.launchLandingAuthorized);
-        assert(!fixture.renderer.launchLandingLocalFrame);
-        assert(fixture.renderer.sceneFadeToBlack == 0.0);
-        assert(fixture.ui.presentation.contentMarkup.find("rr-hud-launch-status") != std::string::npos);
-        assert(fixture.runner.app().inputContext() == rocket::InputContext::Stamp);
-        assert(fixture.host.hapticCount > 0);
-        const double collisionProgress = fixture.renderer.launchTravelProgress;
-        const double collisionCourse = fixture.renderer.launchCourseOffset;
-
-        fixture.runner.app().launchMove(-1.0, 1.0);
-        fixture.runner.app().returnHome();
-        fixture.runner.app().cutEngines();
-        for (int frame = 0; frame < 20; ++frame) {
-            fixture.host.now += 1.0 / 60.0;
-            fixture.runner.frame();
-        }
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
-        assert(fixture.renderer.launchDestructionActive);
-        assert(fixture.renderer.launchDestructionElapsed > rocket::tuning::session::flightDestructionHoldSeconds);
-        assert(std::abs(fixture.renderer.launchTravelProgress - collisionProgress) < 0.000001);
-        assert(std::abs(fixture.renderer.launchCourseOffset - collisionCourse) < 0.000001);
-
-        for (int frame = 0;
-             frame < 120 &&
-             fixture.renderer.launchDestructionElapsed <
-                 rocket::tuning::session::flightDestructionSequenceSeconds - 2.0 / 60.0;
-             ++frame) {
-            fixture.host.now += 1.0 / 60.0;
-            fixture.runner.frame();
-        }
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
-        assert(fixture.renderer.launchDestructionActive);
-        for (int frame = 0;
-             frame < 5 && fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight);
-             ++frame) {
-            fixture.host.now += 1.0 / 60.0;
-            fixture.runner.frame();
-        }
-        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Results));
-        assert(!fixture.renderer.launchDestructionActive);
-        assert(fixture.renderer.lastLaunchFailureCause == rocket::LaunchFailureCause::LunarImpact);
-        const auto lunarImpactModal = std::find_if(
-            fixture.ui.presentation.modals.begin(),
-            fixture.ui.presentation.modals.end(),
-            [](const rocket::ModalPresentation& modal) {
-                return modal.id == rocket::ui::modals::launchOutcome;
-            });
-        assert(lunarImpactModal != fixture.ui.presentation.modals.end());
-        assert(lunarImpactModal->tone == rocket::ModalTone::Negative);
-        fixture.runner.shutdown();
-    }
+    uncalibratedLunarImpactCinematic();
 
     FakeSaveStore saves;
     FakePreferenceStore preferences;

@@ -738,25 +738,27 @@ LaunchFlightStep updateSpaceFlight(
     if (flight.fuelRemaining <= 0.000001) {
         signedThrust = 0.0;
     }
-    if (std::abs(signedThrust) > 0.001) {
+    const double strafe = input.enginesCut || flight.fuelRemaining <= 0.000001 ? 0.0 : std::clamp(input.strafe,-1.0,1.0);
+    const double power = std::abs(signedThrust) + std::abs(strafe)*0.5;
+    if (power > 0.001) {
         const double thrustAssist = system ? 1.0 + launch.flightControlRank * tuning::physicalFlight::flightControlsThrustAssistPerRank : 1.0;
-        flight.velocityX += std::cos(flight.heading) * signedThrust * thrustAcceleration * controlDt * thrustAssist;
-        flight.velocityY += std::sin(flight.heading) * signedThrust * thrustAcceleration * controlDt * thrustAssist;
+        flight.velocityX += (std::cos(flight.heading)*signedThrust + std::sin(flight.heading)*strafe*0.5) * thrustAcceleration * controlDt * thrustAssist;
+        flight.velocityY += (std::sin(flight.heading)*signedThrust - std::cos(flight.heading)*strafe*0.5) * thrustAcceleration * controlDt * thrustAssist;
         flight.fuelRemaining = std::max(
             0.0,
-            flight.fuelRemaining - std::abs(signedThrust) * 0.13 * controlDt);
+            flight.fuelRemaining - power * 0.13 * controlDt);
     }
     flight.selectedThrottle = signedThrust;
     flight.burnRatePerSecond =
-        std::abs(signedThrust) * 0.13 * scaleProfile.controlScale;
+        power * 0.13 * scaleProfile.controlScale;
 
     if (launch.heatEnabled) {
-        if (std::abs(signedThrust) <= 0.001) {
+        if (power <= 0.001) {
             flight.heat = std::max(
                 0.0,
                 flight.heat - launchEngineOffCoolingForRank(launch.coolingRank) * worldDt);
         } else {
-            const double throttleSquared = signedThrust * signedThrust;
+            const double throttleSquared = power * power;
             const double heatInput = tuning::launch::poweredHeatIdleInput +
                 tuning::launch::poweredHeatThrottleInput * throttleSquared;
             flight.heat = std::clamp(
@@ -920,7 +922,7 @@ LaunchFlightStep updateSpaceFlight(
         if (result.asteroidHit || flight.mode != FlightMode::Orbit)
             flight.orbit.confirmationSeconds = 0.0;
         else {
-            const bool confirming = loop.qualifies && std::abs(flight.selectedThrottle) <= 0.001;
+            const bool confirming = loop.qualifies && power <= 0.001;
             flight.orbit.confirmationSeconds = std::clamp(flight.orbit.confirmationSeconds +
                 (confirming ? realDt : -realDt * flight_capture::decayPerSecond),
                 0.0, flight_capture::confirmationSeconds);
@@ -929,7 +931,7 @@ LaunchFlightStep updateSpaceFlight(
     }
     if (!flight.orbit.captured &&
         flight.orbit.confirmationSeconds >= flight_capture::confirmationSeconds &&
-        loop.qualifies && std::abs(flight.selectedThrottle) <= 0.001 && !result.asteroidHit) {
+        loop.qualifies && power <= 0.001 && !result.asteroidHit) {
         flight.orbit.captured = true;
         flight.orbit.grade = loop.perfect
             ? OrbitGrade::Perfect
@@ -1047,17 +1049,19 @@ LaunchFlightStep updateLocalLandingFlight(FlightRunState& flight, const Prepared
         1.0-std::exp(-dt/flight_landing::turnResponseSeconds));
     double thrust=flightThrottleForInput(flight.selectedThrottle,input.enginesCut?0.0:input.throttle,dt,input.analogThrottle);
     if (flight.fuelRemaining<=0.0 && !land.departureActive) thrust=0.0;
+    const double strafe = input.enginesCut || (flight.fuelRemaining<=0.0 && !land.departureActive) ? 0.0 : std::clamp(input.strafe,-1.0,1.0);
+    const double power = std::abs(thrust) + std::abs(strafe)*0.5;
     flight.selectedThrottle=thrust;
-    flight.burnRatePerSecond=land.departureActive ? 0.0 : std::abs(thrust)*0.13;
+    flight.burnRatePerSecond=land.departureActive ? 0.0 : power*0.13;
     flight.fuelRemaining=std::max(0.0,flight.fuelRemaining-flight.burnRatePerSecond*dt);
     if (land.departureActive) {
         // Local ascent cannot build heat or carry a thermal-failure timer into orbit.
         flight.heat = 0.0;
         flight.heatFailureSeconds = 0.0;
     } else if (launch.heatEnabled) {
-        const double powered=std::abs(thrust)>0.001
-            ? (tuning::launch::poweredHeatIdleInput+tuning::launch::poweredHeatThrottleInput*thrust*thrust)*launchPoweredHeatMultiplierForRank(launch.coolingRank) : 0.0;
-        const double cooling=std::abs(thrust)>0.001 ? tuning::launch::poweredHeatCoolingBase : launchEngineOffCoolingForRank(launch.coolingRank);
+        const double powered=power>0.001
+            ? (tuning::launch::poweredHeatIdleInput+tuning::launch::poweredHeatThrottleInput*power*power)*launchPoweredHeatMultiplierForRank(launch.coolingRank) : 0.0;
+        const double cooling=power>0.001 ? tuning::launch::poweredHeatCoolingBase : launchEngineOffCoolingForRank(launch.coolingRank);
         flight.heat=std::clamp(flight.heat+(powered-cooling)*dt,0.0,tuning::telemetry::heatMaximum);
         flight.heatFailureSeconds=flight.heat>=tuning::launch::pilotingCriticalThreshold
             ? flight.heatFailureSeconds+dt : std::max(0.0,flight.heatFailureSeconds-dt*1.5);
@@ -1071,6 +1075,8 @@ LaunchFlightStep updateLocalLandingFlight(FlightRunState& flight, const Prepared
     const double blend=t*t*t*(t*(t*6.0-15.0)+10.0);
     const double acceleration=thrust*std::lerp(0.23*flight_landing::velocityConversion,
         thrust>=0.0 ? flight_landing::forwardAcceleration : flight_landing::reverseAcceleration,blend);
+    const double lateralAcceleration=strafe*0.5*std::lerp(0.23*flight_landing::velocityConversion,
+        flight_landing::forwardAcceleration,blend);
     const double gravity=std::lerp(0.52*0.4*flight_landing::velocityConversion,
         flight_landing::gravityAcceleration,blend);
     // Substeps sweep the entire ship footprint through real terrain, even on
@@ -1082,8 +1088,8 @@ LaunchFlightStep updateLocalLandingFlight(FlightRunState& flight, const Prepared
     for (int i=0;i<steps;++i) {
         const LandingState previousPose=land;
         land.heading+=flight.angularVelocity*step;
-        land.lateralVelocity+=std::cos(land.heading)*acceleration*step;
-        land.verticalVelocity+=(std::sin(land.heading)*acceleration-gravity)*step;
+        land.lateralVelocity+=(std::cos(land.heading)*acceleration+std::sin(land.heading)*lateralAcceleration)*step;
+        land.verticalVelocity+=(std::sin(land.heading)*acceleration-std::cos(land.heading)*lateralAcceleration-gravity)*step;
         land.horizontalPosition+=land.lateralVelocity*step;
         land.altitude+=land.verticalVelocity*step;
         land.surfaceAngle=std::abs(flightWrappedAngleDelta(1.5707963267948966,land.heading));

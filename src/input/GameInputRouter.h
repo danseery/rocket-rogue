@@ -41,6 +41,7 @@ struct RoutedGameInput {
     std::optional<UiDirection> navigation;
     double scroll = 0.0;
     double moveX = 0.0;
+    double strafe = 0.0;
     double moveY = 0.0;
     double aimX = 0.0;
     double aimY = 0.0;
@@ -250,7 +251,9 @@ public:
 
         switch (context) {
         case InputContext::Launch:
-            result.moveX = frame.leftX;
+            result.moveX = (frame.isDown(ControllerButton::RightBumper) ? 1.0 : 0.0) -
+                (frame.isDown(ControllerButton::LeftBumper) ? 1.0 : 0.0);
+            result.strafe = frame.leftX;
             result.moveY = preferences.invertFlightY ? frame.leftY : -frame.leftY;
             result.orbitalHeld = frame.isDown(confirmButton) && !confirmFenced_;
             lastContinuousOutput_ = result.orbitalHeld;

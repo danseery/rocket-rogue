@@ -245,12 +245,13 @@ bool reconcileSolarMissionMessages(GameState& state, const ContentCatalog& catal
     const SolarMissionDefinition* newlyCompletedMain = nullptr;
     for (const auto& mission : catalog.solarMissions) {
         if (!solarMissionClaimed(state, catalog, mission)) continue;
+        if (mission.bodyId == "triton" && state.meta.straylightStage != StraylightStage::Hidden) continue;
         const bool queued = enqueueIncomingMessage(messages, catalog,
             {"campaign.solar." + mission.bodyId + ".complete", mission.completionMessageId, "default"});
         changed |= queued;
         if (queued && !mission.optional) newlyCompletedMain = &mission;
     }
-    if (inFlight && newlyCompletedMain != nullptr) {
+    if (inFlight && newlyCompletedMain != nullptr && state.meta.straylightStage == StraylightStage::Hidden) {
         const bool staleAutomaticCourse =
             !expedition.coursePlayerSelected &&
             (expedition.course.targetBodyId.empty() ||

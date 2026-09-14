@@ -491,6 +491,12 @@
           <button type="button" data-debug-action="hangar">Hangar board</button>
           <button type="button" data-debug-action="incoming-message">Incoming Message</button>
           <button type="button" data-debug-action="expedition">Persistent Expedition</button>
+          <button type="button" data-debug-action="straylight-reveal">Straylight reveal</button>
+          <button type="button" data-debug-action="straylight-dock">Straylight docking</button>
+          <button type="button" data-debug-action="straylight-beacons">Straylight beacon installation</button>
+          <button type="button" data-debug-action="straylight-online">Straylight awakening</button>
+          <button type="button" data-debug-action="straylight-boarding">Straylight boarding</button>
+          <button type="button" data-debug-action="straylight-departure">Straylight departure</button>
           <button type="button" data-debug-action="moon-approach">Earth Launch</button>
           <button type="button" data-debug-action="jupiter-neither">Jupiter: neither</button>
           <button type="button" data-debug-action="jupiter-tanks">Jupiter: tanks</button>
@@ -909,7 +915,7 @@
     window.rr = {
       currentScreen: () => rrCall("rr_current_screen", [], [], "number"),
       startLaunch: () => rrCall("rr_start_launch"),
-      launchMove: (steerAxis, throttleAxis) => rrCall("rr_launch_move", [steerAxis, throttleAxis], ["number", "number"]),
+      launchMove: (steerAxis, throttleAxis, strafeAxis = 0) => rrCall("rr_launch_move", [steerAxis, throttleAxis, strafeAxis], ["number", "number", "number"]),
       deploySurfaceTeam: () => rrCall("rr_deploy_surface_team"),
       orbitalWork: (held) => rrCall("rr_orbital_work", [held ? 1 : 0], ["number"]),
       resumeOrbitalFlight: () => rrCall("rr_resume_orbital_flight"),
@@ -1088,6 +1094,12 @@
       hangar: () => rr.debugHangar(),
       "incoming-message": () => rr.debugIncomingMessage(),
       "expedition": () => rrCall("rr_debug_expedition"),
+      "straylight-reveal": () => rrCall("rr_debug_straylight", [0]),
+      "straylight-dock": () => rrCall("rr_debug_straylight", [1]),
+      "straylight-beacons": () => rrCall("rr_debug_straylight", [2]),
+      "straylight-online": () => rrCall("rr_debug_straylight", [3]),
+      "straylight-boarding": () => rrCall("rr_debug_straylight", [4]),
+      "straylight-departure": () => rrCall("rr_debug_straylight", [5]),
       "moon-approach": () => rrCall("rr_debug_moon_approach"),
       "jupiter-neither": () => rr.debugJupiterOptions(0),
       "jupiter-tanks": () => rr.debugJupiterOptions(1),
@@ -1239,7 +1251,8 @@
       const right = launchKeys.has("d") || launchKeys.has("arrowright");
       const up = launchKeys.has("w") || launchKeys.has("arrowup");
       const down = launchKeys.has("s") || launchKeys.has("arrowdown");
-      rr.launchMove((right ? 1 : 0) - (left ? 1 : 0), (up ? 1 : 0) - (down ? 1 : 0));
+      rr.launchMove((launchKeys.has("e") ? 1 : 0) - (launchKeys.has("q") ? 1 : 0),
+        (up ? 1 : 0) - (down ? 1 : 0), (right ? 1 : 0) - (left ? 1 : 0));
     }
 
     function isMiningActive() {
@@ -1296,7 +1309,7 @@
           if (!event.repeat) rr.orbitalWork(true);
         } else if (key === "escape") {
           rr.resumeOrbitalFlight();
-        } else if (movement.includes(key)) {
+        } else if (movement.includes(key) || key === "q" || key === "e") {
           if (event.repeat && !launchKeys.has(key)) {
             event.preventDefault();
             return true;

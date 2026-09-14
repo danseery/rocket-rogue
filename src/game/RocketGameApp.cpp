@@ -3,6 +3,7 @@
 #include "core/ArtifactProgression.h"
 #include "game/RocketGameApp.h"
 #include "core/ExpeditionSystem.h"
+#include "core/StraylightSequence.h"
 
 #include "core/FlightProgress.h"
 #include "core/FlightInstrumentPresentation.h"
@@ -489,7 +490,7 @@ void RocketGameApp::maybeOpenLevelUpDraft()
         if (state_.run.expedition.progression.pendingRunUpgradeChoices <= 0) {
             return;
         }
-        const bool priorityTransition = state_.screen == Screen::StoryBriefing
+        const bool priorityTransition = straylightOwnsPresentation(state_) || state_.screen == Screen::StoryBriefing
             || state_.screen == Screen::Results
             || state_.screen == Screen::ArrivalFanfare
             || (state_.screen == Screen::Flight &&
@@ -701,7 +702,7 @@ void RocketGameApp::orbitalWorkInput(bool held)
     }
     auto& flight = session_.flight;
     if (!flight.active || flight.mode != FlightMode::Orbit || !flight.orbit.captured ||
-        work.captureDelay > 0.0 || std::abs(flight.selectedThrottle) > 0.001 || !assessOrbitLoop(flight).qualifies) return;
+        work.captureDelay > 0.0 || std::abs(flight.selectedThrottle) > 0.001 || flight.burnRatePerSecond > 0.001 || !assessOrbitLoop(flight).qualifies) return;
     const auto* destination = catalog_.findDestination(flight.destinationId);
     if (!destination || !destinationSupportsSurface(*destination)) return;
     prepareSurfaceArrivalIfNeeded(*destination);
@@ -786,7 +787,7 @@ bool RocketGameApp::advanceOrbitalWork(double seconds, const Destination& destin
     if (session_.flight.mode != FlightMode::Orbit || !session_.flight.active) {
         if (work.active()) resumeOrbitalFlight();
     }
-    if (work.active() && (std::abs(session_.steerInput) > 0.001 || std::abs(session_.throttleInput) > 0.001))
+    if (work.active() && (std::abs(session_.steerInput) > 0.001 || std::abs(session_.strafeInput) > 0.001 || std::abs(session_.throttleInput) > 0.001))
         resumeOrbitalFlight();
     work.overlay = std::clamp(work.overlay + (work.active() ? dt * 3.0 : -dt * 1.5), 0.0, 1.0);
     if (!work.active()) return false;
@@ -1368,6 +1369,7 @@ void RocketGameApp::beginLaunchSession(PreparedLaunch preparedLaunch)
     session_.currentMultiplier = 1.0;
     session_.peakWarning = 0.0;
     session_.steerInput = 0.0;
+    session_.strafeInput = 0.0;
     session_.throttleInput = 0.0;
     session_.asteroidImpactFeedbackSeconds = 0.0;
     session_.destruction = {};
@@ -1698,6 +1700,7 @@ InputContext RocketGameApp::inputContext() const
 
 InputContext RocketGameApp::gameplayInputContext() const
 {
+    if (straylightOwnsPresentation(state_)) return InputContext::Ui;
     if (titleScreenActive_) {
         return InputContext::Ui;
     }
@@ -1854,11 +1857,12 @@ std::vector<GameAudioEvent> RocketGameApp::consumePendingAudioEvents()
 
 double RocketGameApp::thrustAudioLevel() const
 {
+    if (straylightOwnsPresentation(state_)) return 0.0;
     if (titleScreenActive_ || state_.screen != Screen::Flight || !session_.flightArmed ||
         pauseReason_ != PauseReason::None || services_.ui.modalOpen() ||
         session_.destruction.active || session_.controls.actions.cutEnginesActive ||
         !session_.flight.active || session_.flight.fuelRemaining <= 0.0) return 0.0;
-    return std::clamp(std::abs(session_.flight.selectedThrottle), 0.0, 1.0);
+    return std::clamp(std::abs(session_.flight.selectedThrottle)+std::abs(session_.strafeInput)*0.5, 0.0, 1.0);
 }
 
 void RocketGameApp::queueAudioCue(GameAudioCue cue, double pitch)
@@ -1939,6 +1943,7 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
         keyboardDrillPressed_ = false;
     }
     session_.steerInput = 0.0;
+    session_.strafeInput = 0.0;
     session_.throttleInput = 0.0;
     state_.run.mining.moveX = 0.0;
     state_.run.mining.moveY = 0.0;
@@ -1954,13 +1959,15 @@ void RocketGameApp::applyRealtimeInputs()
     const bool orbitalUiOwnsStick = useController && session_.orbitalWork.active();
     const double moveX = orbitalUiOwnsStick ? 0.0 : useController ? controllerRealtimeInput_.moveX : keyboardRealtimeInput_.moveX;
     const double moveY = orbitalUiOwnsStick ? 0.0 : useController ? controllerRealtimeInput_.moveY : keyboardRealtimeInput_.moveY;
+    const double strafe = orbitalUiOwnsStick ? 0.0 : useController ? controllerRealtimeInput_.strafe : keyboardRealtimeInput_.strafe;
 
     switch (state_.screen) {
     case Screen::Flight:
-        if (session_.orbitalWork.active() && (std::abs(moveX) > 0.001 || std::abs(moveY) > 0.001))
+        if (session_.orbitalWork.active() && (std::abs(moveX) > 0.001 || std::abs(moveY) > 0.001 || std::abs(strafe) > 0.001))
             resumeOrbitalFlight();
         if (std::abs(moveY) > 0.01) departureThrustHeld_ = false;
         session_.steerInput = moveX;
+        session_.strafeInput = strafe;
         session_.throttleInput = departureThrustHeld_ ? 1.0 : moveY;
         break;
     case Screen::Mining:
@@ -2138,7 +2145,7 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
 void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGameInput& input)
 {
     if (messageControllerNeutralRequired_ && !services_.ui.modalOpen() && realtimeControllerContext(context)) {
-        if (std::abs(input.moveX) > 0.01 || std::abs(input.moveY) > 0.01 || input.drilling || input.firing || input.operatorToggleProgress > 0.0) return;
+        if (std::abs(input.moveX) > 0.01 || std::abs(input.moveY) > 0.01 || std::abs(input.strafe) > 0.01 || input.drilling || input.firing || input.operatorToggleProgress > 0.0) return;
         messageControllerNeutralRequired_ = false;
     }
     if (miningSceneHandoff_ != MiningSceneHandoff::None) {
@@ -2159,9 +2166,8 @@ void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGa
         return;
     }
 
+    controllerRealtimeInput_.strafe = context == InputContext::Launch ? input.strafe : 0.0;
     if (context == InputContext::Launch) {
-        // Launch steering is lateral: negative moves toward the left side of
-        // the rendered corridor, matching the raw left-stick X convention.
         controllerRealtimeInput_.moveX = input.moveX;
         controllerRealtimeInput_.moveY = input.moveY;
         if (activeInputSource_ == InputSource::Controller) orbitalWorkInput(input.orbitalHeld);
@@ -2445,6 +2451,21 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
 
 void RocketGameApp::tick(double deltaSeconds)
 {
+    if (!titleScreenActive_ && !debugSessionActive_ && reconcileStraylightSequence(state_, catalog_)) {
+        save(); panelDirty_ = true;
+    }
+    if (!titleScreenActive_ && state_.meta.straylightStage == StraylightStage::RevealPending &&
+        state_.screen == Screen::Flight && session_.flight.mode != FlightMode::Landing &&
+        !surfaceBaySequence_.active() && !surfaceArrival_.active() && !sceneTransition_.active()) {
+        state_.meta.straylightStage = StraylightStage::Reveal;
+        services_.ui.closeModal();
+        save(); panelDirty_ = true;
+    }
+    if (!titleScreenActive_ && straylightOwnsPresentation(state_)) {
+        releaseRealtimeInputs(true);
+        if (panelDirty_) refreshPanel();
+        return;
+    }
     // Do not advance physics, mission delivery, or recovery in scaled substeps
     // while the destruction presentation owns the outgoing scene.
     if (session_.destruction.active) return;
@@ -2688,7 +2709,7 @@ void RocketGameApp::tick(double deltaSeconds)
         }
         const FlightInput flightInput {
             session_.steerInput, pilotingThrottle, session_.controls.actions.cutEnginesActive,
-            departureThrustHeld_ || activeInputSource_ == InputSource::Controller};
+            departureThrustHeld_ || activeInputSource_ == InputSource::Controller, session_.strafeInput};
         const bool wasCruiseCooling = state_.run.expedition.cruise.cooling;
         const LaunchFlightStep step = liveExpedition ? advanceExpeditionFlight(
             state_.run.expedition, session_.flight, session_.preparedLaunch, destination,
@@ -2701,7 +2722,7 @@ void RocketGameApp::tick(double deltaSeconds)
                 session_.steerInput,
                 pilotingThrottle,
                 session_.controls.actions.cutEnginesActive,
-                departureThrustHeld_ || activeInputSource_ == InputSource::Controller,
+                departureThrustHeld_ || activeInputSource_ == InputSource::Controller, session_.strafeInput,
             },
             clampedDelta,
             landingSiteView_ ? &landingSiteView_->world : nullptr);
@@ -2879,6 +2900,10 @@ void RocketGameApp::tick(double deltaSeconds)
             const int droneCargoBefore = dronePayloadCount(state_.run.mining);
             const auto contactBefore = state_.run.mining.contactIndicatorSerial;
             updateMiningRun(state_, catalog_, deltaSeconds);
+            if (state_.meta.straylightStage == StraylightStage::RevealPending && artifactBefore != state_.run.mining.stowedArtifacts.size()) {
+                queueAudioCue(GameAudioCue::Orbit);
+                save(); panelDirty_ = true;
+            }
             const MiningRunState& mining = state_.run.mining;
             if (mining.contactIndicatorSerial != contactBefore)
                 queueAudioCue(GameAudioCue::RigImpact);
@@ -2890,7 +2915,22 @@ void RocketGameApp::tick(double deltaSeconds)
             if (mining.stowedArtifacts.size() > artifactBefore) queueAudioCue(GameAudioCue::Reward);
             if ((oxygenBefore > 10 && mining.rigOxygen.current <= 10) ||
                 (suitBefore > 5 && mining.suitOxygen.current <= 5)) queueAudioCue(GameAudioCue::Warning);
-            if (mining.drilling && mining.contactIntensity > .05) queueAudioCue(GameAudioCue::Drill);
+            const auto drillFeedback = miningDrillFeedback(mining, miningDrillStats(state_, catalog_));
+            miningFeedbackAudioCooldown_ = std::max(0.0, miningFeedbackAudioCooldown_ - deltaSeconds);
+            if (drillFeedback.kind != MiningDrillContactKind::None) {
+                if (miningFeedbackAudioCooldown_ <= 0.0) {
+                    const bool hardRock = drillFeedback.kind == MiningDrillContactKind::HardRock;
+                    const bool hazard = drillFeedback.kind == MiningDrillContactKind::Hazard ||
+                        drillFeedback.kind == MiningDrillContactKind::ProtectedHazard;
+                    queueAudioCue(hardRock ? GameAudioCue::RigImpact : hazard ? GameAudioCue::Warning : GameAudioCue::UiError,
+                        hardRock ? 0.8 : hazard ? 1.15 : 0.85);
+                    miningFeedbackAudioCooldown_ = 0.9;
+                }
+            } else if (mining.drilling && mining.contactIntensity > .05) {
+                queueAudioCue(GameAudioCue::Drill);
+            } else {
+                miningFeedbackAudioCooldown_ = 0.0;
+            }
             if (!thermalLockWasActive && mining.drillThermalLock) queueAudioCue(GameAudioCue::Warning);
             if (!failureWasPending &&
                 mining.failurePending &&
@@ -2929,6 +2969,31 @@ void RocketGameApp::tick(double deltaSeconds)
 
 void RocketGameApp::advancePresentation(double deltaSeconds)
 {
+    if (!titleScreenActive_ && straylightOwnsPresentation(state_)) {
+        releaseRealtimeInputs(true);
+        if (pauseReason_ == PauseReason::SystemMenu) return;
+        if (straylightPresentedStage_ != state_.meta.straylightStage) {
+            straylightPresentedStage_ = state_.meta.straylightStage;
+            straylightElapsed_ = 0;
+            if (straylightCinematicDuration(straylightPresentedStage_) > 0)
+                queueAudioCue(straylightPresentedStage_ == StraylightStage::Awakening ? GameAudioCue::Upgrade : GameAudioCue::Orbit);
+        }
+        const double duration = straylightCinematicDuration(state_.meta.straylightStage);
+        const double before = straylightElapsed_;
+        straylightElapsed_ += std::clamp(deltaSeconds, 0.0, .25);
+        if (state_.meta.straylightStage == StraylightStage::Awakening && before < 9 && straylightElapsed_ >= 9)
+            queueAudioCue(GameAudioCue::TakeoffIgnition);
+        if (state_.meta.straylightStage == StraylightStage::Departing && before < 3 && straylightElapsed_ >= 3)
+            queueAudioCue(GameAudioCue::TakeoffIgnition);
+        if (duration > 0 && straylightElapsed_ >= duration) {
+            finishStraylightCinematic(state_, catalog_);
+            straylightElapsed_ = 0;
+            session_.flightArmed = state_.run.flight.active;
+            save();
+            refreshPanel();
+        }
+        return;
+    }
     auto& destruction = session_.destruction;
     if (!destruction.active ||
         controllerPauseStopsSimulation(pauseReason_, gameplayInputContext(), services_.ui.modalOpen())) return;
@@ -3094,16 +3159,17 @@ void RocketGameApp::startLaunch()
     refreshPanel();
 }
 
-void RocketGameApp::launchMove(double steerAxis, double throttleAxis)
+void RocketGameApp::launchMove(double steerAxis, double throttleAxis, double strafeAxis)
 {
     if (messageMoveReleaseRequired_) {
-        if (std::abs(steerAxis) > 0.01 || std::abs(throttleAxis) > 0.01) return;
+        if (std::abs(steerAxis) > 0.01 || std::abs(throttleAxis) > 0.01 || std::abs(strafeAxis) > 0.01) return;
         messageMoveReleaseRequired_ = false;
     }
     if (state_.screen != Screen::Flight || !session_.flightArmed || session_.destruction.active) {
         return;
     }
     keyboardRealtimeInput_.moveX = std::clamp(steerAxis, -1.0, 1.0);
+    keyboardRealtimeInput_.strafe = std::clamp(strafeAxis, -1.0, 1.0);
     keyboardRealtimeInput_.moveY = std::clamp(throttleAxis, -1.0, 1.0);
     applyRealtimeInputs();
 }
@@ -6138,6 +6204,15 @@ RenderSnapshot RocketGameApp::snapshot() const
     }
     const PreparedLaunch flightModel = currentFlightModel();
     result.screen = state_.screen;
+    result.straylightStage = state_.meta.straylightStage;
+    result.straylightElapsed = straylightElapsed_;
+    result.straylightTableau = straylightOwnsPresentation(state_);
+    if (result.straylightTableau) {
+        result.screen = Screen::StoryBriefing;
+        result.arkCondition = state_.meta.ark.condition;
+        result.animationTime = straylightElapsed_;
+        return result;
+    }
     result.sceneFadeToBlack = sceneTransition_.blackoutOpacity();
     result.lastResult = state_.screen == Screen::Results ? state_.lastOutcome.type : LaunchResultType::None;
     result.lastLaunchFailureCause = state_.screen == Screen::Results
@@ -6317,6 +6392,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningScannerRechargeProgress = tuning::mining::scannerRechargePresentationProgress(
             expedition.scannerCooldownSeconds);
         const MiningDrillStats miningStats = miningDrillStats(state_, catalog_);
+        result.miningDrillFeedback = miningDrillFeedback(mining, miningStats);
         result.miningDrillHeadWidthScale = miningStats.headWidthScale;
         result.miningSideCutterReach = miningStats.sideCutterReach;
         if (!surfaceBaySequence_.active() && state_.screen == Screen::Mining) {
@@ -6381,7 +6457,8 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningAnchorX = anchor.x;
         result.miningAnchorY = anchor.y;
         const MiningCell* target = miningCellAt(mining.terrain, mining.targetCellX, mining.targetCellY);
-        const bool targetDrillable = target != nullptr && miningMaterialSolid(target->material) && target->material != MiningCellMaterial::Bedrock;
+        const bool targetDrillable = target != nullptr && miningMaterialSolid(target->material) &&
+            miningDrillContactKind(mining, *target) < MiningDrillContactKind::Bedrock;
         result.miningBounce = mining.contactBounce;
         result.miningTargetDrillable = targetDrillable;
         result.miningDrilling = mining.drilling && targetDrillable;
@@ -6389,6 +6466,8 @@ RenderSnapshot RocketGameApp::snapshot() const
             mining.drillIntegrity > 0.0 && !mining.drillThermalLock) {
             std::array<std::array<double, 3>, 3> contacts {};
             for (const DrillFootprintCell& cell : miningDrillFootprintCells(mining, miningStats)) {
+                const auto* terrainCell = miningCellAt(mining.terrain, cell.x, cell.y);
+                if (!terrainCell || miningDrillContactKind(mining, *terrainCell) >= MiningDrillContactKind::Bedrock) continue;
                 auto& contact = contacts[static_cast<std::size_t>(cell.cutter + 1)];
                 // Emit at the near rock face, not the cell center inside rock.
                 contact[0] += std::clamp(mining.droneX, double(cell.x), cell.x + 1.0);
@@ -6470,6 +6549,8 @@ RenderSnapshot RocketGameApp::snapshot() const
                 return !solarBodyRevealed(state_, catalog_, body.id);
             });
             result.wrecks = state_.run.expedition.wrecks;
+            for (const auto& wreck : result.wrecks)
+                if (wreckCarriesArtifact(state_.run.expedition, wreck.id)) result.artifactWreckIds.push_back(wreck.id);
         }
         result.launchFlightPhase = static_cast<int>(session_.flight.phase);
         result.launchPositionX = session_.flight.positionX;
@@ -6631,6 +6712,8 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.heat = flightModel.heatEnabled ? session_.flight.heat : 0.0;
         result.warning = event.warning;
         result.launchSteerInput = session_.steerInput;
+        result.launchStrafeInput = !session_.controls.actions.cutEnginesActive &&
+            (session_.flight.fuelRemaining > 0.000001 || session_.flight.landing.departureActive) ? session_.strafeInput : 0.0;
         result.launchThrottle = session_.controls.actions.cutEnginesActive ? 0.0 : session_.flight.selectedThrottle;
         result.launchFuel = session_.flight.fuelRemaining / std::max(0.01, session_.flight.fuelCapacity);
         result.launchHullRemaining = session_.flight.hullRemaining;

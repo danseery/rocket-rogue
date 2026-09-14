@@ -1810,6 +1810,12 @@ void discoverArk(GameState& state, const ContentCatalog& catalog)
 
 bool performArkJump(GameState& state, const ContentCatalog& catalog)
 {
+    if (state.meta.straylightStage != StraylightStage::Hidden &&
+        !(state.meta.straylightStage == StraylightStage::Complete &&
+          state.run.expedition.location.systemId != content::postSolarSystem::aaruVale)) {
+        state.statusLine = "Use Straylight's evacuation and departure controls.";
+        return false;
+    }
     if (!arkDiscovered(state)) {
         state.statusLine = "The Ark has not been found yet.";
         return false;

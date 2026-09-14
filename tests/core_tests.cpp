@@ -8153,15 +8153,54 @@ void unifiedPhysicalFlightCapturesOrbitAndResolvesTouchdown()
     FlightRunState leftTurn = beginLaunchFlight(launch, *moon);
     (void)updateLaunchFlight(leftTurn, launch, *moon, {-1.0, 0.0, false}, 0.25);
     require(leftTurn.heading > 0.0,
-        "A, left arrow, and left stick must rotate the physical ship visibly left");
+        "Q and left shoulder must rotate the physical ship visibly left");
     FlightRunState rightTurn = beginLaunchFlight(launch, *moon);
     (void)updateLaunchFlight(rightTurn, launch, *moon, {1.0, 0.0, false}, 0.25);
     require(rightTurn.heading < 0.0,
-        "D, right arrow, and right stick must rotate the physical ship visibly right");
+        "E and right shoulder must rotate the physical ship visibly right");
+
+    for (double heading : {0.0,1.5707963267948966}) for (double side : {-1.0,1.0}) {
+        auto coast = beginLaunchFlight(launch,*moon);
+        coast.mode = FlightMode::Travel;
+        coast.positionX = coast.positionY = 8;
+        coast.heading = heading;
+        auto strafe = coast;
+        updateLaunchFlight(coast,launch,*moon,{},.01);
+        updateLaunchFlight(strafe,launch,*moon,{0,0,false,true,side},.01);
+        const double dx=strafe.velocityX-coast.velocityX, dy=strafe.velocityY-coast.velocityY;
+        require((dx*std::sin(heading)-dy*std::cos(heading))*side>0.0 &&
+            std::abs(dx*std::cos(heading)+dy*std::sin(heading))<.00001 && strafe.heading==coast.heading,
+            "Strafe must accelerate along ship-relative right/left without changing heading or forward thrust");
+        require(strafe.fuelRemaining<coast.fuelRemaining && strafe.selectedThrottle==0.0,
+            "Side thrusters consume fuel independently of the main engine");
+        for (bool cut : {false,true}) {
+            auto idle = beginLaunchFlight(launch,*moon);
+            idle.mode=FlightMode::Travel; idle.positionX=idle.positionY=8;
+            if (!cut) idle.fuelRemaining=0;
+            auto blocked=idle;
+            updateLaunchFlight(idle,launch,*moon,{},.01);
+            updateLaunchFlight(blocked,launch,*moon,{0,0,cut,true,side},.01);
+            require(blocked.velocityX==idle.velocityX && blocked.velocityY==idle.velocityY,
+                "Empty fuel or engine cut must suppress lateral thrust");
+        }
+    }
 
     GameState surfaceState = createNewGame(catalog, 1931);
     const auto prepared = prepareSurfaceLanding(surfaceState, catalog, {moon->id});
     require(prepared.valid, "landing checks require the generated surface site");
+    {
+        auto coast=beginLaunchFlight(launch,*moon);
+        coast.mode=FlightMode::Landing;
+        coast.landing.heading=1.5707963267948966;
+        coast.landing.altitude=30;
+        auto strafe=coast;
+        updateLaunchFlight(coast,launch,*moon,{},.01);
+        updateLaunchFlight(strafe,launch,*moon,{0,0,false,true,1},.01);
+        require(strafe.landing.lateralVelocity>coast.landing.lateralVelocity &&
+            strafe.landing.heading==coast.landing.heading &&
+            std::abs(strafe.landing.verticalVelocity-coast.landing.verticalVelocity)<.00001,
+            "Landing strafe changes lateral velocity independently of rotation and vertical thrust");
+    }
     auto touchdown = [&](double verticalVelocity) {
         FlightRunState landing = beginLaunchFlight(launch, *moon);
         landing.orbit.captured = true;

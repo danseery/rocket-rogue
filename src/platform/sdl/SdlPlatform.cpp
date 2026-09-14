@@ -505,7 +505,8 @@ void SdlPlatform::applyKeyboardState(RocketGameApp& app)
     switch (app.inputContext()) {
     case InputContext::Launch:
     case InputContext::OrbitalWork:
-        app.launchMove((right ? 1.0 : 0.0) - (left ? 1.0 : 0.0), (up ? 1.0 : 0.0) - (down ? 1.0 : 0.0));
+        app.launchMove((state && state[SDL_SCANCODE_E] ? 1.0 : 0.0) - (state && state[SDL_SCANCODE_Q] ? 1.0 : 0.0),
+            (up ? 1.0 : 0.0) - (down ? 1.0 : 0.0), (right ? 1.0 : 0.0) - (left ? 1.0 : 0.0));
         break;
     case InputContext::SurfaceArrival:
         break;

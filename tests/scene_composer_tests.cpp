@@ -1007,7 +1007,7 @@ void testLaunchUsesAttachedAnimatedSideFlames()
     snapshot.launchLandingBlend = 0;
     for (double heading : {0.0,1.57,3.14}) for (double steer : {-1.0,1.0}) {
         snapshot.launchHeading = heading;
-        snapshot.launchSteerInput = steer;
+        snapshot.launchStrafeInput = steer;
         float previousU = -1, previousV = -1;
         for (int frame=0;frame<6;++frame) {
             snapshot.animationTime = (frame+.1)/18.0;
@@ -1033,9 +1033,12 @@ void testLaunchUsesAttachedAnimatedSideFlames()
     snapshot.poweredFlight=false;
     auto coasting=rocket::SceneComposerTestAccess::rocketPacket(composer,snapshot);
     assert(coasting.instances.size()==2); // Steering works without the main engine.
-    snapshot.launchSteerInput=0;
+    snapshot.launchStrafeInput=0;
     auto neutral=rocket::SceneComposerTestAccess::rocketPacket(composer,snapshot);
     assert(neutral.instances.size()==1);
+    snapshot.launchSteerInput=1;
+    auto rotating=rocket::SceneComposerTestAccess::rocketPacket(composer,snapshot);
+    assert(rotating.instances.size()==3); // Opposing fore/aft jets plus the ship.
 }
 
 void testMiningSkyAndTunnelBackdrop()
@@ -2792,6 +2795,23 @@ void testCuttingFeedbackComesFromEveryActiveHead()
     assert(idle[0] == 0 && idle[1] == 0);
 }
 
+void testBlockedDrillHasFeedbackWithoutCuttingParticles()
+{
+    auto mining = miningState(20.0, 20.0);
+    auto snapshot = miningSnapshot(mining);
+    snapshot.miningDrilling = snapshot.miningTargetDrillable = false;
+    snapshot.miningContactIntensity = 0;
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    const auto idleCount = composer.compose(snapshot).instances.size();
+    snapshot.miningDrillFeedback = {rocket::MiningDrillContactKind::Bedrock, 20.0, 22.0};
+    const auto& blocked = composer.compose(snapshot);
+    assertValidDrawRanges(blocked);
+    assert(blocked.instances.size() > idleCount);
+    snapshot.miningDrillFeedback = {};
+    assert(composer.compose(snapshot).instances.size() == idleCount);
+}
+
 void testReturnRingIsCenteredOnTheShip()
 {
     auto mining = miningState(20.0, 20.0);
@@ -3925,6 +3945,33 @@ void testSolarBeltRendering()
     assert(std::hypot(asteroid.axisXx,asteroid.axisXy)>0);
 }
 
+void testArtifactWreckMarkerUsesOwnership()
+{
+    using namespace rocket;
+    SceneComposer composer;
+    composer.setViewport({1280,800,1280,800,1.0F});
+    RenderSnapshot snapshot;
+    snapshot.screen = Screen::Flight;
+    snapshot.launchPhysicalFlight = snapshot.systemTravel = true;
+    snapshot.system = solarSystemDefinition();
+    snapshot.systemLocation.frame = CoordinateFrame::System;
+    snapshot.launchPositionX = 10;
+    WreckState wreck; wreck.id = 420;
+    wreck.location = {"solar", "", CoordinateFrame::System, {12,0}, {}, 0, {}};
+    snapshot.wrecks.push_back(wreck);
+    const auto purpleCount = [](const ScenePacket& packet) {
+        return std::count_if(packet.instances.begin(), packet.instances.end(), [](const auto& packed) {
+            const auto color = unpackSceneInstance(packed).color;
+            return std::abs(color.r-.78F)<.015F && std::abs(color.g-.38F)<.015F && color.b>.99F;
+        });
+    };
+    const auto ordinary = purpleCount(composer.compose(snapshot));
+    snapshot.artifactWreckIds.push_back(420);
+    assert(purpleCount(composer.compose(snapshot)) >= ordinary + 4);
+    snapshot.artifactWreckIds.clear();
+    assert(purpleCount(composer.compose(snapshot)) == ordinary);
+}
+
 void testMiningKeepsContinuousExplorationShadows()
 {
     using namespace rocket;
@@ -4082,6 +4129,7 @@ void testCommittedDepartureRendering()
     bodySnapshot.screen=Screen::Flight;
     bodySnapshot.launchPhysicalFlight=true;
     bodySnapshot.systemTravel=true;
+    bodySnapshot.system.id="solar";
     bodySnapshot.systemLocation.frame=CoordinateFrame::Body;
     bodySnapshot.systemLocation.bodyId="io";
     SystemBodyDefinition io;
@@ -4102,7 +4150,7 @@ void testCommittedDepartureRendering()
 
 } // namespace
 
-int main()
+int main() try
 {
 #if defined(_MSC_VER) && defined(_DEBUG)
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
@@ -4110,6 +4158,7 @@ int main()
 #endif
     testUiViewportLayoutGeometry();
     testSolarBeltRendering();
+    testArtifactWreckMarkerUsesOwnership();
     testCommittedDepartureRendering();
     testMiningViewportReservesBothHudLanes();
     testScreenSurfaceMapping();
@@ -4152,6 +4201,7 @@ int main()
     testMiningDepartureFlameTracksShip();
     testMiningRigStaysVisibleAndTracksHeading();
     testCuttingFeedbackComesFromEveryActiveHead();
+    testBlockedDrillHasFeedbackWithoutCuttingParticles();
     testReturnRingIsCenteredOnTheShip();
     testMiningCollisionIndicatorMarksTheContactedEdge();
     testMiningSurveyPulseRechargeRingPersistsWhenReady();
@@ -4168,4 +4218,8 @@ int main()
     testArrivalCelebrationRestoresImpactAndRadialBursts();
     testFlightDestructionCinematicUsesExplosionFramesAndAccessibleShake();
     return 0;
+}
+catch (const std::exception& error) {
+    std::fprintf(stderr, "Scene composer exception: %s\n", error.what());
+    return 1;
 }

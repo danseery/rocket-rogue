@@ -43,6 +43,8 @@ struct SaveData {
     std::vector<std::string> acknowledgedActivityBriefingIds;
     bool campaignIntroductionAcknowledged = false;
     bool straylightDiscoveryAcknowledged = false;
+    StraylightStage straylightStage = StraylightStage::Hidden;
+    int straylightPlacementVersion = 0;
     bool crewLossPending = false;
     std::string pendingReplacementArchetypeId;
     int replacementSequence = 0;

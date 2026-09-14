@@ -299,10 +299,10 @@ void rr_start_launch()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void rr_launch_move(double steerAxis, double throttleAxis)
+void rr_launch_move(double steerAxis, double throttleAxis, double strafeAxis)
 {
     if (g_app) {
-        g_app->launchMove(steerAxis, throttleAxis);
+        g_app->launchMove(steerAxis, throttleAxis, strafeAxis);
     }
 }
 
@@ -391,6 +391,10 @@ void rr_toggle_cruise() { if (g_app) g_app->toggleCruiseControl(); }
 EMSCRIPTEN_KEEPALIVE
 #endif
 void rr_debug_expedition() { if (g_app) g_app->debugStartExpedition(); }
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_debug_straylight(int stage) { if (g_app) g_app->debugStartStraylight(stage); }
 
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE

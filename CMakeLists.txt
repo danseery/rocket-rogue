@@ -116,6 +116,7 @@ add_library(rocket_core
     src/core/SystemContent.cpp
     src/core/ExpeditionSystem.cpp
     src/core/LiveExpedition.cpp
+    src/core/StraylightSequence.cpp
     src/core/IncomingMessages.cpp
     src/core/LunarDiscoveryMessages.cpp
     src/core/ExpeditionPersistence.cpp
@@ -241,6 +242,8 @@ if(MSVC)
     # states alive while exercising one persistent RmlUi document. The default
     # 1 MiB Windows test stack is too small for that diagnostic fixture.
     target_link_options(rocket_app_services_tests PRIVATE "/STACK:8388608")
+    # Core recovery fixtures likewise nest complete saved and live campaigns.
+    target_link_options(rocket_core_tests PRIVATE "/STACK:8388608")
 endif()
 
 add_executable(rocket_controller_focus_tests tests/controller_focus_tests.cpp)

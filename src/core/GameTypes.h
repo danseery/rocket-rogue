@@ -595,6 +595,13 @@ struct MiningCocoonLayerProgress {
     MiningCocoonRevealPolicy revealPolicy = MiningCocoonRevealPolicy::OnAnyCellDiscovered;
 };
 
+// Transient contact presentation; never serialized as campaign progress.
+enum class MiningDrillContactKind { None, HardRock, Hazard, Bedrock, ProtectedHazard, ProtectedObjective };
+struct MiningDrillFeedback {
+    MiningDrillContactKind kind = MiningDrillContactKind::None;
+    double x = 0.0, y = 0.0;
+};
+
 enum class MiningSiteBiome {
     Default,
     ThermalLava
@@ -610,6 +617,13 @@ enum class MiningSiteObjectivePlacement {
 enum class MiningPassageClass {
     AllActors,
     SuitOnly
+};
+
+// Ordered, objective-relative terrain patches. Existing cached terrain is never restamped.
+struct MiningSiteTerrainPatch {
+    int left = 0, top = 0, right = 0, bottom = 0;
+    MiningCellMaterial material = MiningCellMaterial::Empty;
+    MiningElementalAffinity affinity = MiningElementalAffinity::None;
 };
 
 // An authored site configures reusable mining mechanics. It deliberately has
@@ -629,6 +643,7 @@ struct MiningSiteDefinition {
     double baselineOxygenSeconds = 0.0;
     MiningCocoonDefinition cocoon;
     MiningEnemyTheme enemyTheme = MiningEnemyTheme::Neutral;
+    std::vector<MiningSiteTerrainPatch> terrainPatches;
 };
 
 struct MiningCapabilityProfile {
@@ -1537,7 +1552,14 @@ struct NavigationState {
     std::vector<std::string> discoveredDestinationIds;
 };
 
+enum class StraylightStage {
+    Hidden, RevealPending, Reveal, Invitation, Approach, Docking, FirstContact,
+    RetrieveBeacons, ConfirmOnline, Awakening, Online, EvacuationBriefing,
+    Boarding, Boarded, Secured, Departing, Arrived, Complete
+};
+
 struct MetaProgress {
+    StraylightStage straylightStage = StraylightStage::Hidden;
     CampaignMilestone campaignMilestone = CampaignMilestone::SolarTutorial;
     GameChapter chapter = GameChapter::ProvingGround;
     ArkState ark;
@@ -2123,6 +2145,7 @@ struct FlightInput {
     double throttle = 0.0;
     bool enginesCut = false;
     bool analogThrottle = false;
+    double strafe = 0.0;
 };
 
 enum class FlightPhase {

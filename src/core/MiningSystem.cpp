@@ -1,5 +1,6 @@
 #include "core/RigGeometry.h"
 #include "core/MiningSystem.h"
+#include "core/StraylightSequence.h"
 #include "core/ExpeditionSystem.h"
 #include "core/FlightSystem.h"
 #include "core/ArtifactProgression.h"
@@ -2858,7 +2859,8 @@ std::vector<DrillFootprintCell> drillFootprintCells(
     const MiningRunState& mining,
     const MiningDrillStats& stats,
     double dirX,
-    double dirY)
+    double dirY,
+    bool includeBedrock = false)
 {
     const double length = std::sqrt(dirX * dirX + dirY * dirY);
     if (length < 0.001) {
@@ -2884,7 +2886,7 @@ std::vector<DrillFootprintCell> drillFootprintCells(
     for (int y = minY; y <= maxY; ++y) {
         for (int x = minX; x <= maxX; ++x) {
             const MiningCell* cell = miningCellAt(mining.terrain, x, y);
-            if (!drillableCell(cell)) {
+            if (!drillableCell(cell) && !(includeBedrock && cell && cell->material == MiningCellMaterial::Bedrock)) {
                 continue;
             }
 
@@ -5689,6 +5691,27 @@ void configureProgressionArtifactOnActiveLayer(
             false,
             MiningCellFeature::BranchTunnel);
     }
+    if (siteDefinition && mining.artifact.present) {
+        const int ax = static_cast<int>(std::floor(mining.artifact.x));
+        const int ay = static_cast<int>(std::floor(mining.artifact.y));
+        for (const auto& patch : siteDefinition->terrainPatches) {
+            for (int y = std::max(3, ay + patch.top); y <= std::min(mining.terrain.height - 4, ay + patch.bottom); ++y) {
+                for (int x = std::max(2, ax + patch.left); x <= std::min(mining.terrain.width - 3, ax + patch.right); ++x) {
+                    auto* cell = miningCellAt(mining.terrain, x, y);
+                    if (!cell || cell->material == MiningCellMaterial::ArtifactCache || cell->gateAssociated ||
+                        cell->cocoonLayer >= 0 || cell->suitOnlyPassage ||
+                        (patch.material != MiningCellMaterial::Regolith && std::abs(x - ax) <= 1 && std::abs(y - ay) <= 1)) continue;
+                    // Keep valuable deposits and their reward budget in the scene.
+                    if (cell->material == MiningCellMaterial::RareOre || cell->material == MiningCellMaterial::ExoticVein) continue;
+                    *cell = makeCell(patch.material, mining.depthZone);
+                    cell->hazardAffinity = patch.affinity;
+                    cell->feature = MiningCellFeature::BranchTunnel;
+                    cell->revealed = false;
+                    markDirty(mining.terrain, x, y);
+                }
+            }
+        }
+    }
     // Only the authored artifact layer gets the introductory patrol. Cached
     // layers retain this vector (including defeated units) across revisits.
     if (placement.artifactId == content::protectedObjective::tritonSignalArtifact && mining.artifact.present) {
@@ -7186,6 +7209,48 @@ std::vector<DrillFootprintCell> miningDrillFootprintCells(
     return drillFootprintCells(mining, stats, mining.hullDirX, mining.hullDirY);
 }
 
+MiningDrillContactKind miningDrillContactKind(const MiningRunState& mining, const MiningCell& cell)
+{
+    if (cell.material == MiningCellMaterial::Bedrock) return MiningDrillContactKind::Bedrock;
+    if (cell.material == MiningCellMaterial::HazardPocket)
+        return cell.cocoonLayer >= 0 ? MiningDrillContactKind::ProtectedHazard : MiningDrillContactKind::Hazard;
+    if (cell.material == MiningCellMaterial::ArtifactCache && gateHasHardLock(mining.gate))
+        return MiningDrillContactKind::ProtectedObjective;
+    if (cell.material == MiningCellMaterial::HardRock) return MiningDrillContactKind::HardRock;
+    return MiningDrillContactKind::None;
+}
+
+std::string_view miningDrillFeedbackLabel(MiningDrillContactKind kind)
+{
+    switch (kind) {
+    case MiningDrillContactKind::HardRock: return "HARD ROCK / DRILLABLE";
+    case MiningDrillContactKind::Bedrock: return "BEDROCK / GO AROUND";
+    case MiningDrillContactKind::Hazard: return "HAZARD / TREAT OR AVOID";
+    case MiningDrillContactKind::ProtectedHazard: return "SEALED / HAZARD DRONE";
+    case MiningDrillContactKind::ProtectedObjective: return "ARTIFACT / SEALED";
+    default: return {};
+    }
+}
+
+MiningDrillFeedback miningDrillFeedback(const MiningRunState& mining, const MiningDrillStats& stats)
+{
+    MiningDrillFeedback feedback;
+    if (!mining.active || !mining.drilling || mining.failurePending || mining.drillIntegrity <= 0.0 ||
+        mining.drillThermalLock || (!operatorControlled(mining) && (mining.rigDisabled || mining.rigFuel.current <= 0.0))) return feedback;
+    const auto activeStats = operatorControlled(mining) ? miningOperatorDrillStats() : stats;
+    for (const auto& contact : drillFootprintCells(mining, activeStats, controlledAimX(mining), controlledAimY(mining), true)) {
+        const auto* cell = miningCellAt(mining.terrain, contact.x, contact.y);
+        // Contact may identify ordinary rock, but never reveal a hidden objective or seal.
+        if (!cell || !cocoonCellVisible(mining, *cell) ||
+            (!cell->revealed && (cell->cocoonLayer >= 0 || cell->material == MiningCellMaterial::ArtifactCache))) continue;
+        const auto kind = miningDrillContactKind(mining, *cell);
+        if (kind <= feedback.kind) continue;
+        feedback = {kind, std::clamp(controlledActorX(mining), double(contact.x), contact.x + 1.0),
+            std::clamp(controlledActorY(mining), double(contact.y), contact.y + 1.0)};
+    }
+    return feedback;
+}
+
 MiningDrillStats miningDrillStats(const GameState& state, const ContentCatalog& catalog)
 {
     MiningDrillStats stats;
@@ -8258,6 +8323,15 @@ SurfaceActionOutcome startMiningRun(
             expedition.pendingMiningSiteDefinitionId = binding->siteId;
         }
     }
+    if (progressionCreditEligible && expedition.pendingMiningSiteDefinitionId.empty()) {
+        if (const auto opportunity = unresolvedProgressionArtifactOpportunity(state, catalog,
+                expedition.destinationId, expedition.bodyId, !state.run.expedition.travelInitialized);
+            opportunity && !opportunity->miningSiteDefinitionId.empty()) {
+            expedition.pendingScenarioId = opportunity->scenarioId;
+            expedition.pendingScenarioStepId = opportunity->stepId;
+            expedition.pendingMiningSiteDefinitionId = opportunity->miningSiteDefinitionId;
+        }
+    }
     const MiningSiteDefinition* siteDefinition = nullptr;
     if (!expedition.pendingMiningSiteDefinitionId.empty()) {
         siteDefinition = catalog.findMiningSite(expedition.pendingMiningSiteDefinitionId);
@@ -9109,35 +9183,43 @@ bool translateOrbitalObjective(OrbitalRepairLayer layer, const MiningRunState& m
     return true;
 }
 
-void repairRestoredOrbitalObjectives(PreparedSurfaceLanding& prepared, const MiningRunState& original,
+void repairRestoredOrbitalObjectives(MiningRunState& target, OrbitalSiteProgress& progress, const MiningRunState& original,
     const ContentCatalog& catalog)
 {
-    if (orbitalShaftAvoidsProtectedObjectives(prepared.miningTemplate,prepared.shaftX)) return;
+    if (orbitalShaftAvoidsProtectedObjectives(target,progress.shaftX)) return;
     // Work against a private copy: a later unsupported layer or no-room case
     // must leave every layer, portal and loose object untouched.
-    auto repaired=prepared.miningTemplate;
+    auto repaired=target;
     std::vector<OrbitalRepairLayer> layers;
     layers.push_back({repaired.depthZone,repaired.terrain,repaired.artifact,repaired.gate,repaired.enemies,repaired.looseObjects});
     for (auto& layer : repaired.depthLayers)
         layers.push_back({layer.depthZone,layer.terrain,layer.artifact,layer.gate,layer.enemies,layer.looseObjects});
     for (auto& layer : layers) {
-        if (!protectedShaftOverlap(layer.terrain,layer.artifact,prepared.shaftX)) continue;
-        if (!translateOrbitalObjective(layer,repaired,original,catalog,prepared.shaftX)) {
-            prepared.laserBlocked=true;
+        if (!protectedShaftOverlap(layer.terrain,layer.artifact,progress.shaftX)) continue;
+        if (!translateOrbitalObjective(layer,repaired,original,catalog,progress.shaftX)) {
+            progress.laserBlocked=true;
             return;
         }
     }
-    if (!orbitalShaftAvoidsProtectedObjectives(repaired,prepared.shaftX)) {prepared.laserBlocked=true; return;}
-    prepared.miningTemplate=std::move(repaired);
-    const auto& mining=prepared.miningTemplate;
+    if (!orbitalShaftAvoidsProtectedObjectives(repaired,progress.shaftX)) {progress.laserBlocked=true; return;}
+    target=std::move(repaired);
+    const auto& mining=target;
     const MiningTerrain* terrain=nullptr;
     const MiningArtifactObject* artifact=nullptr;
-    if (mining.depthZone==prepared.laserDepth) {terrain=&mining.terrain; artifact=&mining.artifact;}
-    for (const auto& layer : mining.depthLayers) if (layer.depthZone==prepared.laserDepth) {terrain=&layer.terrain; artifact=&layer.artifact;}
-    prepared.laserBlocked=!terrain || orbitalRowBlocked(*terrain,*artifact,prepared.shaftX,prepared.laserRow,
-        prepared.laserDepth>mining.entryDepthZone);
+    if (mining.depthZone==progress.laserDepth) {terrain=&mining.terrain; artifact=&mining.artifact;}
+    for (const auto& layer : mining.depthLayers) if (layer.depthZone==progress.laserDepth) {terrain=&layer.terrain; artifact=&layer.artifact;}
+    progress.laserBlocked=!terrain || orbitalRowBlocked(*terrain,*artifact,progress.shaftX,progress.laserRow,
+        progress.laserDepth>mining.entryDepthZone);
 }
 } // namespace
+
+void repairSavedOrbitalObjectives(MiningRunState& mining, OrbitalSiteProgress& progress, const ContentCatalog& catalog)
+{
+    if (progress.surveyedDepth < 0 || mining.terrain.cells.empty()) return;
+    // Loading an active deployment must preserve its actors, tethers and
+    // resources. The revisit path resets those before running this repair.
+    repairRestoredOrbitalObjectives(mining,progress,mining,catalog);
+}
 
 void migrateAdjacentCocoonTiles(MiningRunState& mining)
 {
@@ -9508,7 +9590,7 @@ PreparedSurfaceLanding restoreSurfaceLanding(const GameState& state, const Conte
         ensureOrbitalMissionArtifact(state, catalog, p);
         // Eligibility comes from the original snapshot, before the new visit
         // releases old tethers and replaces its actors. Never move live loot.
-        repairRestoredOrbitalObjectives(p,site.mining,catalog);
+        repairRestoredOrbitalObjectives(p.miningTemplate,p,site.mining,catalog);
         if (p.surveyComplete) (void)prepareOrbitalSurvey(state, catalog, p, std::max(0, p.surveyedDepth));
     }
     if (p.valid) {
@@ -10236,6 +10318,7 @@ void updateMiningArtifact(GameState& state, const ContentCatalog& catalog, doubl
             if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, artifactOrigin);
                 mission != nullptr && !mission->batteryId.empty()) {
                 (void)recoverSiteBattery(state.run.expedition, mission->batteryId);
+                (void)revealStraylightOnDelivery(state, catalog);
             }
         }
         if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, artifactOrigin)) {

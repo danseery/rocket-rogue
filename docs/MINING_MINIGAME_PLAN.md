@@ -138,6 +138,8 @@ The controlled actor must reach the parked ship service zone to depart: Rig in R
 - Environmental hazards: revealed physical terrain and encounter threats; protected objectives retain their authored reveal rules.
 - Scanner cooldown: limits how often the player can reveal hidden terrain.
 
+Drilling feedback uses the active Rig or EVA footprint. Hard rock reports `HARD ROCK / DRILLABLE`; bedrock reports `BEDROCK / GO AROUND`; ordinary hazards report `HAZARD / TREAT OR AVOID`; protected hazards report `SEALED / HAZARD DRONE`. A contact symbol and limited-rate mechanical, rejection, or warning sound reinforce the label. Sealed cells do not emit successful cutting particles, and hidden protected layers remain concealed.
+
 ## Terrain And Rewards
 
 Mining terrain is generated from the destination, surface site profile, and depth:

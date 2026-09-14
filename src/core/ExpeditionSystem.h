@@ -5,9 +5,9 @@
 
 namespace rocket
 {
-inline constexpr double expeditionDockRadius = 3.0;
+inline constexpr double expeditionDockRadius = 2.0;
 inline constexpr double expeditionDockSpeed = 1.0;
-inline constexpr double expeditionSalvageRadius = 3.0;
+inline constexpr double expeditionSalvageRadius = 2.0;
 inline constexpr double expeditionSalvageSpeed = 1.0;
 enum class CampaignObjectiveKind { Mission, SecureArtifact, RecoverArtifact, RecoveryUnavailable, Complete };
 struct CampaignObjective {
@@ -19,6 +19,8 @@ struct CampaignObjective {
 const WreckState* courseWreck(const PersistentExpeditionState&, std::string_view target);
 std::optional<SystemLocation> courseTargetLocation(const PersistentExpeditionState&, const SystemDefinition&, std::string_view target);
 std::string courseTargetName(const PersistentExpeditionState&, const SystemDefinition&, std::string_view target);
+bool wreckCarriesArtifact(const PersistentExpeditionState&, std::uint64_t wreckId);
+std::string wreckDisplayName(const PersistentExpeditionState&, std::uint64_t wreckId);
 CampaignObjective recommendedCampaignObjective(const GameState&, const ContentCatalog&);
 bool reconcileCampaignGuidance(GameState&, const ContentCatalog&, bool followNow = false);
 

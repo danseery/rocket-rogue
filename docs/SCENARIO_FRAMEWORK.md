@@ -97,7 +97,8 @@ The following belongs in content and presentation, not in reusable mechanics:
 | Moon: Lunar Prospector Contract | Deliver 20 Moon Common Ore, pulse the anomaly, recover the artifact, and explicitly claim the mission. | Grants Prospector Mk I and Slot 1; reveals Mars and optional Mercury/Venus. |
 | Mars: Bay Expansion | Deliver 8 Mars Common Ore, recover the artifact, and explicitly claim the mission. | Opens Slot 2; reveals Jupiter and the next mission on Io. |
 | Io: Volcanic Descent | Commission Hazard support, cool and excavate the thermal cocoon, recover its artifact, and claim. | Reveals Saturn and Titan. |
-| Titan, Titania, Triton | Survey, recover each world's artifact, and explicitly claim its mission. | Respectively reveal Uranus/Titania, Neptune/Triton, and Straylight. |
+| Titan, Titania | Survey, recover each world's artifact, and explicitly claim its mission. | Respectively reveal Uranus/Titania and Neptune/Triton. |
+| Triton | Deliver the final artifact physically into the ship bay. | Immediately reveal Straylight and set its waypoint; its saved sequence owns contact, beacon retrieval, activation, evacuation, and departure. Claiming does not acknowledge the reveal. |
 | Mercury and Venus | Recover and claim each optional artifact. | Optional rewards; no main-route or battery progress. |
 
 The Io mining-site configuration uses a Thermal biome, a protected artifact and a site-specific oxygen budget. Its detailed seal configuration belongs to the typed site definition. Those facts are configuration for this site, not invariants for every cocoon, artifact, or destination.

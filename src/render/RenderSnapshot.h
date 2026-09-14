@@ -166,6 +166,7 @@ struct RenderSnapshot {
     SystemLocation systemLocation;
     SystemDefinition system;
     std::vector<WreckState> wrecks;
+    std::vector<std::uint64_t> artifactWreckIds;
     Screen screen = Screen::Hangar;
     bool titleScreen = false;
     // A short, presentation-only departure after selecting New Game or
@@ -183,6 +184,7 @@ struct RenderSnapshot {
     double heat = 0.0;
     double warning = 0.0;
     double launchSteerInput = 0.0;
+    double launchStrafeInput = 0.0;
     double launchThrottle = 0.60;
     double launchFuel = 1.0;
     double launchFuelCapacity = 10.0;
@@ -300,6 +302,9 @@ struct RenderSnapshot {
     bool debugSessionActive = false;
     ArkCondition arkCondition = ArkCondition::NotFound;
     bool straylightStoryReveal = false;
+    StraylightStage straylightStage = StraylightStage::Hidden;
+    double straylightElapsed = 0;
+    bool straylightTableau = false;
     bool straylightApproach = false;
     bool campaignStoryIntroduction = false;
     bool frontierTransfer = false;
@@ -344,6 +349,7 @@ struct RenderSnapshot {
     double miningLoad = 0.0;
     double miningLoadSpeedMultiplier = 1.0;
     double miningContactIntensity = 0.0;
+    MiningDrillFeedback miningDrillFeedback;
     double miningContactIndicatorSeconds = 0.0;
     double miningContactIndicatorDirX = 0.0;
     double miningContactIndicatorDirY = 0.0;

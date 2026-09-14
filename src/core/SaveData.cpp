@@ -1,4 +1,5 @@
 #include "core/SaveData.h"
+#include "core/StraylightSequence.h"
 #include "core/ExpeditionPersistence.h"
 #include "core/SystemContent.h"
 #include "core/ContentIds.h"
@@ -2933,6 +2934,8 @@ SaveData captureSaveData(const GameState& state)
     save.incomingMessages = state.incomingMessages;
     save.campaignIntroductionAcknowledged = state.meta.campaignIntroductionAcknowledged;
     save.straylightDiscoveryAcknowledged = state.meta.straylightDiscoveryAcknowledged;
+    save.straylightStage = state.meta.straylightStage;
+    save.straylightPlacementVersion = 1;
     save.crewLossPending = state.meta.crewLossPending;
     save.pendingReplacementArchetypeId = state.meta.pendingReplacementArchetypeId;
     save.replacementSequence = state.meta.replacementSequence;
@@ -3255,7 +3258,20 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     normalizeRestoredMiningHazards(state.run.mining);
     normalizeRestoredHazardDroneAssignments(state.run.mining);
     migrateAdjacentCocoonTiles(state.run.mining);
-    for (auto& site : state.run.expedition.sites) migrateAdjacentCocoonTiles(site.mining);
+    for (auto& site : state.run.expedition.sites) {
+        const auto& location = state.run.expedition.location;
+        const bool activeSite = state.run.mining.active && site.systemId == location.systemId &&
+            site.bodyId == location.bodyId && site.siteId == location.siteId;
+        if (activeSite) {
+            // The live layer snapshot contains the player's latest excavation;
+            // repairing only the dormant copy leaves the on-screen bore unchanged.
+            repairSavedOrbitalObjectives(state.run.mining,site.orbital,catalog);
+            site.mining = state.run.mining;
+        } else {
+            migrateAdjacentCocoonTiles(site.mining);
+            repairSavedOrbitalObjectives(site.mining,site.orbital,catalog);
+        }
+    }
     state.meta.unlockKeys = save.unlockKeys.empty() ? std::vector<std::string>{content::unlock::starter} : save.unlockKeys;
     state.meta.blueprintProgress = save.blueprintProgress;
     state.meta.materials = save.materials;
@@ -3301,6 +3317,25 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.storyBriefing = save.storyBriefing;
     state.meta.campaignIntroductionAcknowledged = save.campaignIntroductionAcknowledged;
     state.meta.straylightDiscoveryAcknowledged = save.straylightDiscoveryAcknowledged;
+    state.meta.straylightStage = save.straylightStage;
+    if (save.straylightPlacementVersion == 0 && state.run.expedition.location.systemId == "solar") {
+        auto& location = state.run.expedition.location;
+        if (location.bodyId == "straylight" && !location.siteId.empty()) {
+            const auto* ark = systemBody(solarSystemDefinition(), "straylight");
+            // Retain the saved displacement from the old berth as both the
+            // station and its corridor move. Old system-frame saves need the
+            // old station origin removed before applying the new dock offset.
+            if (location.frame == CoordinateFrame::System) {
+                location.position.x -= 52.5;
+                location.position.y -= -21.0;
+            }
+            location.frame = CoordinateFrame::Body;
+            location.position.x += ark->dockOffset.x - 1.05;
+            location.position.y += ark->dockOffset.y;
+            restoreSystemLocation(location, state.run.flight);
+        }
+    }
+    reconcileStraylightSequence(state, catalog);
     state.meta.crewLossPending = save.crewLossPending;
     state.meta.pendingReplacementArchetypeId = save.pendingReplacementArchetypeId;
     state.meta.replacementSequence = std::max(0, save.replacementSequence);
@@ -3500,6 +3535,8 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, "incomingMessages", serializeIncomingMessages(save.incomingMessages));
     writeField(out, save_schema::field::campaignIntroductionAcknowledged, save.campaignIntroductionAcknowledged ? 1 : 0);
     writeField(out, save_schema::field::straylightDiscoveryAcknowledged, save.straylightDiscoveryAcknowledged ? 1 : 0);
+    writeField(out, save_schema::field::straylightStage, static_cast<int>(save.straylightStage));
+    writeField(out, save_schema::field::straylightPlacementVersion, save.straylightPlacementVersion);
     writeField(out, save_schema::field::crewLossPending, save.crewLossPending ? 1 : 0);
     writeField(out, save_schema::field::pendingReplacementArchetypeId, save.pendingReplacementArchetypeId);
     writeField(out, save_schema::field::replacementSequence, save.replacementSequence);
@@ -3886,6 +3923,12 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.campaignIntroductionAcknowledged = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::straylightDiscoveryAcknowledged) {
             save.straylightDiscoveryAcknowledged = parseInt(value, 0) != 0;
+        } else if (key == save_schema::field::straylightStage) {
+            const int stage = parseInt(value, -1);
+            if (stage < 0 || stage > static_cast<int>(StraylightStage::Complete)) return std::nullopt;
+            save.straylightStage = static_cast<StraylightStage>(stage);
+        } else if (key == save_schema::field::straylightPlacementVersion) {
+            save.straylightPlacementVersion = parseInt(value, 0);
         } else if (key == save_schema::field::inventory) {
             save.inventoryModuleIds = split(value, save_schema::listDelimiter);
         } else if (key == save_schema::field::equipped) {

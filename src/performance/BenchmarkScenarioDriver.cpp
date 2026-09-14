@@ -16,6 +16,12 @@ Screen expectedScreen(NativeBenchmarkScenario scenario)
         return Screen::Hangar;
     case NativeBenchmarkScenario::Launch:
     case NativeBenchmarkScenario::ExpeditionFlight:
+    case NativeBenchmarkScenario::StraylightReveal:
+    case NativeBenchmarkScenario::StraylightApproach:
+    case NativeBenchmarkScenario::StraylightDocking:
+    case NativeBenchmarkScenario::StraylightAwakening:
+    case NativeBenchmarkScenario::StraylightBoarding:
+    case NativeBenchmarkScenario::StraylightDeparture:
         return Screen::Flight;
     case NativeBenchmarkScenario::Mining:
     case NativeBenchmarkScenario::Message:
@@ -39,6 +45,12 @@ BenchmarkScenarioSetupResult BenchmarkScenarioDriver::setup(
     }
 
     switch (options.scenario) {
+    case NativeBenchmarkScenario::StraylightReveal: app.debugStartStraylight(0); break;
+    case NativeBenchmarkScenario::StraylightApproach: app.debugStartStraylight(6); break;
+    case NativeBenchmarkScenario::StraylightDocking: app.debugStartStraylight(1); break;
+    case NativeBenchmarkScenario::StraylightAwakening: app.debugStartStraylight(3); break;
+    case NativeBenchmarkScenario::StraylightBoarding: app.debugStartStraylight(4); break;
+    case NativeBenchmarkScenario::StraylightDeparture: app.debugStartStraylight(5); break;
     case NativeBenchmarkScenario::ExpeditionDock:
     case NativeBenchmarkScenario::ExpeditionMap:
     case NativeBenchmarkScenario::ExpeditionFlight:

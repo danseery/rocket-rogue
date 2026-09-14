@@ -73,11 +73,16 @@ test("realtime input cannot bypass explicit RmlUi actions", () => {
   const launchMove = functionBody("updateLaunchMove");
   assert.match(keyDown, /if \(isLaunchActive\(\)\)/);
   assert.match(keyDown, /launchKeys\.add\(key\)[\s\S]*updateLaunchMove\(\)/);
-  assert.match(
-    launchMove,
-    /rr\.launchMove\(\(right \? 1 : 0\) - \(left \? 1 : 0\)/,
-    "launch left/right keys must preserve the screen-space steering sign",
-  );
+  const move = new Function("launchKeys", "rr", launchMove);
+  for (const [keys, expected] of [
+    [["a"], [0,0,-1]], [["d"], [0,0,1]], [["q"], [-1,0,0]], [["e"], [1,0,0]],
+    [["q","w","d"], [-1,1,1]], [["arrowleft","s"], [0,-1,-1]],
+    [["q","e","a","d"], [0,0,0]], [[], [0,0,0]],
+  ]) {
+    let actual;
+    move(new Set(keys), {launchMove: (...axes) => { actual=axes; }});
+    assert.deepEqual(actual, expected, `independent flight axes for ${keys}`);
+  }
   assert.match(keyDown, /key === "c"[\s\S]*rr_toggle_cruise/);
   assert.match(keyDown, /key === "m"[\s\S]*rr_open_navigation/);
   assert.doesNotMatch(keyDown, /rr_pressure_relief|rr_jettison|rr_eject/,

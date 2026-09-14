@@ -320,6 +320,7 @@ CoursePlan previewSystemCourse(const SystemLocation &location, const FlightRunSt
 ExpeditionResult plotSystemCourse(PersistentExpeditionState &e, const FlightRunState &f,
                                   const SystemDefinition &s, std::string_view target, const PreparedLaunch* model)
 {
+    if (target == "straylight" && e.travelInitialized && !e.straylightRevealed) return ExpeditionResult::InvalidTarget;
     if (const auto* wreck = courseWreck(e, target)) {
         auto position = e.location;
         captureSystemLocation(position, f);
@@ -347,7 +348,7 @@ ExpeditionResult toggleCruise(PersistentExpeditionState &e)
 FlightInput cruiseInput(PersistentExpeditionState &e, const FlightRunState &flight, const SystemDefinition &s,
                         FlightInput manual, bool heatEnabled)
 {
-    if (std::abs(manual.steer) > .01 || std::abs(manual.throttle) > .01 || manual.enginesCut)
+    if (std::abs(manual.steer) > .01 || std::abs(manual.throttle) > .01 || std::abs(manual.strafe) > .01 || manual.enginesCut)
     {
         e.cruise = {};
         return manual;
@@ -394,7 +395,7 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
     if (!flight.active && !e.undockReady) return {};
     if (e.undockReady) {
         e.cruise.active = false;
-        if (input.throttle <= 0.001) {
+        if (input.throttle <= 0.001 && std::abs(input.strafe) <= 0.001) {
             advanceFlightHeading(flight, input.steer, std::max(0.0, dt));
             e.location.heading = flight.heading;
             return {};

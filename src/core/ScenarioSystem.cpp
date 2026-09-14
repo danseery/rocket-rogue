@@ -517,10 +517,11 @@ void applyReward(
         break;
     }
     case ScenarioRewardKind::CampaignMilestone:
-        state.meta.campaignMilestone = reward.milestone;
+        if (reward.milestone > state.meta.campaignMilestone)
+            state.meta.campaignMilestone = reward.milestone;
         if (reward.milestone == CampaignMilestone::ArkDiscovered) {
             state.run.expedition.straylightRevealed = true;
-            state.meta.straylightDiscoveryAcknowledged = true;
+            // Physical ship delivery owns the reveal; claiming never acknowledges its presentation.
         }
         break;
     }
@@ -678,6 +679,14 @@ bool validateScenarioCatalog(const ContentCatalog& catalog, std::string* error)
             return fail("Mining sites require unique non-empty IDs and a version.");
         }
         miningSiteIds.push_back(site.id);
+        for (const auto& patch : site.terrainPatches) {
+            if (patch.left > patch.right || patch.top > patch.bottom ||
+                patch.left < -16 || patch.right > 16 || patch.top < -12 || patch.bottom > 12 ||
+                (patch.material != MiningCellMaterial::Regolith && patch.material != MiningCellMaterial::HardRock &&
+                 patch.material != MiningCellMaterial::Bedrock && patch.material != MiningCellMaterial::HazardPocket) ||
+                ((patch.material == MiningCellMaterial::HazardPocket) != (patch.affinity != MiningElementalAffinity::None)))
+                return fail("Mining site '" + site.id + "' has an invalid terrain patch.");
+        }
         if (site.cocoon.layers.empty()) {
             continue;
         }
