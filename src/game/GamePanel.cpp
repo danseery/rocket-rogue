@@ -4127,6 +4127,10 @@ std::optional<ModalPresentation> buildIncomingMessageCard(
     const auto* speaker = message ? messageSpeaker(context.catalog, message->speakerId) : nullptr;
     const auto* variant = message ? messageVariant(*message, variantId) : nullptr;
     if (!speaker || !variant) return std::nullopt;
+    const auto recoveryObjective = messageId == "artifact_wreck_recovery"
+        ? recommendedCampaignObjective(context.state, context.catalog) : CampaignObjective{};
+    const std::string recoveryCopy = recoveryObjective.title + ". " + recoveryObjective.detail;
+    if (messageId == "artifact_wreck_recovery") bodyOverride = recoveryCopy;
             std::ostringstream body;
             body << "<section class=\"incoming-message modal-body"
                  << (messageId.starts_with("drone_arrival_") ? " drone-arrival-introduction" : "")
@@ -4624,18 +4628,21 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
     std::ostringstream key;
     if (state.run.expedition.travelInitialized) {
         const auto& e = state.run.expedition;
+        const auto& liveFlight = context.launchFlight ? *context.launchFlight : state.run.flight;
+        const auto recommendation = recommendedCampaignObjective(state,context.catalog);
+        key << e.coursePlayerSelected << ':' << recommendation.targetId << ':' << recommendation.title << '|';
         key << e.location.bodyId << ':' << e.cruise.active << ':' << e.course.targetBodyId << ':'
             << (context.waypointPreviewCourse ? context.waypointPreviewCourse->targetBodyId : std::string{}) << ':'
             << e.decision.pendingId << ':' << e.decision.awaitingAscent << ':'
-            << canDockExpedition(e, state.run.flight, solarSystemDefinition()) << ':'
-            << expeditionDockInRange(e, state.run.flight, solarSystemDefinition()) << '|';
+            << canDockExpedition(e, liveFlight, solarSystemDefinition()) << ':'
+            << expeditionDockInRange(e, liveFlight, solarSystemDefinition()) << '|';
         for (const auto& body : solarSystemDefinition().bodies) {
             if (!body.dock) continue;
             key << expeditionDockInRange(e, context.launchFlight ? *context.launchFlight : state.run.flight,
                 solarSystemDefinition(), body.id) << '|';
         }
-        for (const auto& w : e.wrecks) key << w.id << ':' << canSalvageWreck(e, state.run.flight, solarSystemDefinition(), w.id)
-            << ':' << canSalvageWreck(e, state.run.flight, solarSystemDefinition(), w.id, false) << '|';
+        for (const auto& w : e.wrecks) key << w.id << ':' << canSalvageWreck(e, liveFlight, solarSystemDefinition(), w.id)
+            << ':' << canSalvageWreck(e, liveFlight, solarSystemDefinition(), w.id, false) << '|';
     }
     // A scene handoff deliberately unmounts the panel while the renderer owns
     key << context.incomingMessageDeliveryAllowed << ':' << context.controllerFlightControls << ':';

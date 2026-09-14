@@ -9311,6 +9311,57 @@ void incomingMessageTests();
 
 void rigCompoundCollisionSweepsAndRecovery()
 {
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = createNewGame(catalog, 92932);
+    state.run.destinationIndex = 2;
+    startSurfaceExpedition(state, catalog);
+    prepareMiningSiteForTest(state);
+    require(startMiningRun(state, catalog, {MiningAct::ActOne, 4, 92932}, false).applied,
+        "surface headroom regression should start mining");
+    auto& mining = state.run.mining;
+    clearMiningTerrainForEvaTest(mining);
+    mining.depthZone = mining.rigDepthZone = 0;
+    mining.droneX = 20.0;
+    mining.droneY = 4.0;
+    mining.hullDirX = mining.aimDirX = 0.0;
+    mining.hullDirY = mining.aimDirY = -1.0;
+    const auto airspace = rig_geometry::surfaceProfile(mining, 1.0, 0.0);
+    const double padY = mining.surfaceOriginBound ? mining.surfacePadY : mining.returnZoneY;
+    require(nearlyEqual(airspace.minimumY,
+            padY - tuning::mining::returnZoneCenterHeightCells - tuning::mining::returnZoneRadiusCells),
+        "surface ceiling must align with the top of the ship drop-off radius");
+    setMiningMove(state, 0.0, -1.0);
+    for (int tick = 0; tick < 180; ++tick) updateMiningRun(state, catalog, 1.0 / 60.0);
+    require(mining.droneY < 0.0, "actual rig movement must pass through the former row-zero ceiling");
+    require(mining.droneY - rig_geometry::drillTip >= airspace.minimumY - .001,
+        "upward movement must keep the drill tip inside the raised ceiling");
+    const auto ascent = rig_geometry::sweep(mining.terrain, 20, 4, -1.5707963267948966,
+        20, airspace.minimumY - 5, -1.5707963267948966, airspace);
+    require(ascent.fraction < 1 && nearlyEqual(
+        std::lerp(4.0, airspace.minimumY - 5, ascent.fraction) - rig_geometry::drillTip,
+        airspace.minimumY, .003), "raised ceiling must stop the rig exactly at the ring top");
+    require(rig_geometry::sweep(mining.terrain, 20, -1, 0, 20, -1, -1.5707963267948966,
+        airspace).fraction == 1, "rig must turn freely above the old ceiling");
+    require(rig_geometry::sweep(mining.terrain, 20, -1, 0, -5, -1, 0,
+        airspace).fraction < 1, "surface airspace must retain side boundaries");
+    mining.operatorMode = MiningOperatorMode::Jetpack;
+    mining.operatorPresent = true;
+    mining.operatorX = 20.0;
+    mining.operatorY = 4.0;
+    mining.rigDisabled = true;
+    mining.operatorRigTethered = false;
+    setMiningMove(state, 0.0, -1.0);
+    for (int tick = 0; tick < 360; ++tick) updateMiningRun(state, catalog, 1.0 / 60.0);
+    require(nearlyEqual(mining.operatorY - tuning::mining::operatorColliderRadiusCells,
+            airspace.minimumY, .003), "EVA movement must reach the same raised ceiling as the rig");
+    const double evaX = mining.operatorX;
+    setMiningMove(state, 1.0, 0.0);
+    for (int tick = 0; tick < 60; ++tick) updateMiningRun(state, catalog, 1.0 / 60.0);
+    require(mining.operatorX > evaX + 1.0 && mining.operatorY < 0.0,
+        "EVA must move horizontally above the old ceiling without snapping back");
+    mining.depthZone = 1;
+    require(rig_geometry::surfaceProfile(mining, 1.0, 0.0).minimumY == 0.0,
+        "underground layers must retain their existing ceiling");
     MiningTerrain terrain;terrain.width=20;terrain.height=20;terrain.cells.resize(400);
     for(auto& cell:terrain.cells) cell.material=MiningCellMaterial::Empty;
     for(int y=0;y<20;++y) terrain.cells[y*20+10].material=MiningCellMaterial::HardRock;
@@ -9327,17 +9378,19 @@ void rigCompoundCollisionSweepsAndRecovery()
     terrain.cells[7*20+7].material=MiningCellMaterial::HardRock;
     require(rig_geometry::contacts(terrain,6,6,1,0).empty(),"empty rectangle corners must not block the circular body");
     terrain.cells[7*20+7].material=MiningCellMaterial::Empty;
-    terrain.cells[7*20+8].material=MiningCellMaterial::HardRock;
+    terrain.cells[8*20+6].material=MiningCellMaterial::HardRock;
     require(rig_geometry::contacts(terrain,6,6,1,0).empty() &&
             !rig_geometry::contacts(terrain,6,6,1,0,{1.75,1.5}).empty(),
         "upgraded head and side-cutter dimensions must participate in Rig clearance");
-    terrain.cells[7*20+8].material=MiningCellMaterial::Empty;
+    terrain.cells[8*20+6].material=MiningCellMaterial::Empty;
     terrain.cells[6*20+8].suitOnlyPassage=true;
     require(!rig_geometry::contacts(terrain,6,6,1,0).empty(),"the solid drill must respect EVA-only passage cells");
 }
 
 int main(int argc, char** argv)
 {
+    rigCompoundCollisionSweepsAndRecovery();
+    if (argc > 1 && std::string_view(argv[1]) == "--rig-geometry-only") return 0;
     try { (void)createDefaultContent(); }
     catch (const std::exception& error) { std::cerr << "Content: " << error.what() << '\n'; return 1; }
 #ifdef _MSC_VER

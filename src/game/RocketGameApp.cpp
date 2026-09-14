@@ -1451,19 +1451,7 @@ bool RocketGameApp::enforceLiveExpeditionFlow()
         expedition.progression.runUpgradeReturnScreen = physicalScreen;
         changed = true;
     }
-    if (serviceDock && (expedition.course.targetBodyId.empty() ||
-        expedition.course.targetBodyId == expedition.homeBodyId)) {
-        const std::string lead = recommendedExpeditionLead(state_, catalog_);
-        if (const auto* body = systemBody(solarSystemDefinition(), lead);
-            body && body->id != expedition.homeBodyId && expeditionMapBodyRevealed(state_, *body)) {
-            const auto model = expeditionFlightModel(state_, catalog_);
-            if (plotSystemCourse(expedition, flight, solarSystemDefinition(), body->id, &model) ==
-                ExpeditionResult::Applied) {
-                expedition.cruise.active = false;
-                changed = true;
-            }
-        }
-    }
+    if (serviceDock) changed |= reconcileCampaignGuidance(state_,catalog_);
     return changed;
 }
 
@@ -2515,7 +2503,8 @@ void RocketGameApp::tick(double deltaSeconds)
         panelDirty_ = true;
     }
     const bool solarProgressChanged = reconcileSolarMissionMessages(state_, catalog_);
-    if (solarProgressChanged) {
+    const bool guidanceChanged = reconcileCampaignGuidance(state_, catalog_);
+    if (solarProgressChanged || guidanceChanged) {
         save();
         panelDirty_ = true;
     }

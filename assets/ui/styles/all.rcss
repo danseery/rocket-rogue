@@ -10636,6 +10636,9 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
     background-color: #185b4a; border-color: #62efff; font-size: 18dp; font-weight: bold; line-height: 52dp;
 }
 /* The short flight dock reserves separate space for telemetry and navigation. */
+.expedition-flight-bar .expedition-dock-action button.disabled {
+    background-color: #252b30; border-color: #53616a; color: #819099;
+}
 #rr-document.rr-bottom-dock #rr-panel.live-hud-family-panel .live-hud-header,
 #rr-document.rr-bottom-dock #rr-panel.live-hud-family-panel .rr-objective-strip,
 #rr-document.rr-bottom-dock #rr-panel.live-hud-family-panel .flight-hud { display: none; }

@@ -6,8 +6,88 @@
 #include "core/SolarProgression.h"
 #include <algorithm>
 #include <cmath>
+#include <charconv>
 
 namespace rocket {
+const WreckState* courseWreck(const PersistentExpeditionState& e, std::string_view target) {
+    if (!target.starts_with("wreck:")) return nullptr;
+    target.remove_prefix(6);
+    std::uint64_t id = 0;
+    const auto parsed = std::from_chars(target.data(), target.data()+target.size(), id);
+    if (parsed.ec != std::errc{} || parsed.ptr != target.data()+target.size()) return nullptr;
+    for (const auto& wreck : e.wrecks) if (wreck.id == id) return &wreck;
+    return nullptr;
+}
+std::optional<SystemLocation> courseTargetLocation(const PersistentExpeditionState& e,
+    const SystemDefinition& system, std::string_view target) {
+    if (const auto* wreck = courseWreck(e,target))
+        return convertSystemFrame(wreck->location,CoordinateFrame::System,"",system);
+    if (const auto* body = systemBody(system,target))
+        return SystemLocation{system.id,body->id,CoordinateFrame::System,systemNavigationPosition(*body),body->velocity,0,{}};
+    return std::nullopt;
+}
+std::string courseTargetName(const PersistentExpeditionState& e,const SystemDefinition& system,std::string_view target) {
+    if (const auto* wreck=courseWreck(e,target)) return "Wreck " + std::to_string(wreck->id);
+    if (const auto* body=systemBody(system,target)) return body->name + (body->dock ? " Dock" : "");
+    return "None";
+}
+CampaignObjective recommendedCampaignObjective(const GameState& state,const ContentCatalog& catalog) {
+    const auto& e=state.run.expedition;
+    for (const auto owner : {BatteryOwner::Ship,BatteryOwner::Wreck}) {
+        for (const auto& mission:catalog.solarMissions) {
+            if (mission.optional) continue;
+            for (const auto& battery:e.batteries) {
+                if (battery.id!=mission.bodyId || battery.owner!=owner) continue;
+                const auto* body=systemBody(solarSystemDefinition(),mission.bodyId);
+                const auto name=(body?body->name:mission.bodyId)+" artifact";
+                if (owner==BatteryOwner::Ship)
+                    return {CampaignObjectiveKind::SecureArtifact,"earth",mission.artifactId,
+                        "Return to Earth to secure " + name,"Artifact aboard — not yet banked.",0};
+                const auto target="wreck:"+std::to_string(battery.wreckId);
+                if (!courseWreck(e,target)) return {CampaignObjectiveKind::RecoveryUnavailable,{},mission.artifactId,
+                    "Artifact recovery unavailable","Missing Wreck "+std::to_string(battery.wreckId)+". Artifact ownership retained.",battery.wreckId};
+                return {CampaignObjectiveKind::RecoverArtifact,target,mission.artifactId,
+                    "Recover " + name + " from Wreck " + std::to_string(battery.wreckId),
+                    "Rendezvous within 3 units at 1.0 relative speed or less, then salvage. Return to Earth to secure it.",battery.wreckId};
+            }
+        }
+    }
+    if (const auto* mission=nextSolarMission(state,catalog)) {
+        const auto* body=systemBody(solarSystemDefinition(),mission->bodyId);
+        return {CampaignObjectiveKind::Mission,mission->bodyId,mission->artifactId,
+            "Next mission: "+(body?body->name:mission->bodyId),"Follow the mission marker, or choose a waypoint to explore.",0};
+    }
+    if (arkDiscovered(state)) return {CampaignObjectiveKind::Mission,"straylight",{},"Continue to Straylight","Follow the existing Straylight objective.",0};
+    return {CampaignObjectiveKind::Complete,{},{},"Solar objectives complete",{},0};
+}
+bool reconcileCampaignGuidance(GameState& state,const ContentCatalog& catalog,bool followNow) {
+    auto& e=state.run.expedition;
+    if (!e.travelInitialized || e.location.systemId!="solar") return false;
+    const auto& f=state.run.flight;
+    bool changed=false;
+    const bool docked=operationalHomeDocked(e);
+    const auto* mission=solarMissionForBody(catalog,e.course.targetBodyId);
+    const bool arrived=e.course.targetBodyId==e.location.bodyId &&
+        (f.orbit.captured || f.mode==FlightMode::Landing || !e.location.siteId.empty());
+    if (e.coursePlayerSelected && (followNow || arrived ||
+        (docked && mission && solarMissionClaimed(state,catalog,*mission)))) {
+        e.coursePlayerSelected=false; changed=true;
+    }
+    if (e.course.targetBodyId.starts_with("wreck:") && !courseWreck(e,e.course.targetBodyId)) {
+        e.course={}; e.cruise={}; e.coursePlayerSelected=false; changed=true;
+    }
+    const auto objective=recommendedCampaignObjective(state,catalog);
+    if (!e.coursePlayerSelected && (docked || followNow) && e.course.targetBodyId!=objective.targetId) {
+        if (objective.targetId.empty()) e.course={};
+        else if (plotSystemCourse(e,f,solarSystemDefinition(),objective.targetId)!=ExpeditionResult::Applied) return changed;
+        e.cruise={}; changed=true;
+    }
+    if (docked && objective.kind==CampaignObjectiveKind::RecoverArtifact) {
+        changed |= enqueueIncomingMessage(state.incomingMessages,catalog,
+            {"recovery.wreck."+std::to_string(objective.wreckId),"artifact_wreck_recovery","default"});
+    }
+    return changed;
+}
 FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool laserComplete) {
     const auto& e = state.run.expedition;
     const auto& f = state.run.flight;
@@ -16,10 +96,10 @@ FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool la
     const auto* frame = e.location.frame == CoordinateFrame::Body ? systemBody(system,e.location.bodyId) : nullptr;
     const auto* target = systemBody(system,e.course.targetBodyId);
     const SystemVector offset = frame ? frame->position : SystemVector{};
-    if (target) {
-        const SystemVector destination = systemNavigationPosition(*target);
-        g.targetId = target->id;
-        g.targetName = target->dock ? target->name + " Dock" : target->name;
+    if (const auto pose=courseTargetLocation(e,system,e.course.targetBodyId)) {
+        const SystemVector destination = pose->position;
+        g.targetId = e.course.targetBodyId;
+        g.targetName = courseTargetName(e,system,e.course.targetBodyId);
         g.targetPosition = {destination.x-offset.x,destination.y-offset.y};
         const double dx=g.targetPosition.x-f.positionX,dy=g.targetPosition.y-f.positionY;
         g.targetDistance=std::hypot(dx,dy); g.targetBearing=std::atan2(dy,dx);
@@ -38,6 +118,7 @@ FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool la
         g.nextAction = "Climb away from Earth / follow your " + g.targetName + " marker";
     else if (f.predictedImpact) g.nextAction = "Brake or turn: predicted impact";
     else if (e.cruise.active && e.cruise.cooling) g.nextAction = "Cruise cooling / engines off until 40%";
+    else if (courseWreck(e,e.course.targetBodyId)) g.nextAction = "Rendezvous within 3 units / relative speed 1.0 or less / Salvage wreck";
     else if (frame && f.orbit.captured && g.orbitBodyId == frame->id) g.nextAction = laserComplete ? "Align with the landing gate, then Land" : surveyed ? "Use the orbital laser to prepare your landing" : "Use Pulse Survey to inspect a landing site";
     else if (frame && g.orbitBodyId == frame->id) g.nextAction = f.orbit.confirmationSeconds > 0.0
         ? "Coast to confirm orbit / " + std::to_string(static_cast<int>(orbitConfirmationProgress(f) * 100.0)) + "%"

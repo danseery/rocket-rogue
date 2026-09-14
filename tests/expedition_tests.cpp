@@ -398,9 +398,91 @@ void orbitalObjectiveSafetyTests()
         "Repeated validation must stop new protected overlaps before damage without moving a committed bore");
 }
 } // namespace
+void campaignGuidanceTests()
+{
+    using namespace rocket;
+    {
+        const auto catalog=createDefaultContent();
+        auto state=std::make_unique<GameState>(createNewGame(catalog,811));
+        auto& e=state->run.expedition;
+        e.travelInitialized=true;
+        e.location={"solar","earth",CoordinateFrame::Body,{}, {},0,"earth.dock"};
+        state->screen=Screen::Hangar;
+        WreckState wreck; wreck.id=7;
+        wreck.location={"solar","",CoordinateFrame::System,{12,9},{.1,.2},0,{}};
+        wreck.cargo.materials.common=20;
+        e.wrecks.push_back(wreck);
+        e.nextWreckId=8;
+        e.batteries[1].owner=BatteryOwner::Wreck; e.batteries[1].wreckId=7;
+        e.course.targetBodyId="mars";
+        check(reconcileCampaignGuidance(*state,catalog),"dock should select artifact recovery");
+        check(e.course.targetBodyId=="wreck:7" && state->incomingMessages.pending.size()==1,"recovery gets one notice and a wreck course");
+        acknowledgeIncomingMessage(state->incomingMessages,"recovery.wreck.7");
+        reconcileCampaignGuidance(*state,catalog);
+        check(state->incomingMessages.pending.empty(),"acknowledged wreck notice must not replay");
+        const auto saved=deserializeSaveData(serializeSaveData(captureSaveData(*state)));
+        check(saved && saved->expedition.course.targetBodyId=="wreck:7","wreck target must survive save serialization");
+        auto restored=std::make_unique<GameState>(createNewGame(catalog,1));
+        restoreSaveData(*restored,catalog,*saved);
+        check(courseWreck(restored->run.expedition,"wreck:7")!=nullptr,"restored target resolves actual wreck");
+        const auto pose=courseTargetLocation(e,solarSystemDefinition(),"wreck:7");
+        check(pose && pose->position.x==12 && pose->velocity.y==.2,"wreck guidance preserves position and velocity");
+        e.coursePlayerSelected=true; e.course.targetBodyId="venus";
+        reconcileCampaignGuidance(*state,catalog);
+        check(e.coursePlayerSelected && e.course.targetBodyId=="venus","unvisited exploration override survives docking");
+        e.location.bodyId="venus"; e.location.siteId.clear(); state->run.flight.orbit.captured=false;
+        reconcileCampaignGuidance(*state,catalog);
+        check(e.coursePlayerSelected,"mere influence crossing must not consume override");
+        state->run.flight.orbit.captured=true;
+        reconcileCampaignGuidance(*state,catalog);
+        check(!e.coursePlayerSelected && e.course.targetBodyId=="venus","capture fulfills override without retargeting during visit");
+        e.location=wreck.location;
+        check(salvageWreck(e,7,solarSystemDefinition(),0)==ExpeditionResult::Applied,"artifact salvage succeeds even with full ore hold");
+        reconcileCampaignGuidance(*state,catalog,true);
+        check(e.batteries[1].owner==BatteryOwner::Ship && e.course.targetBodyId=="earth" && !e.wrecks.empty(),
+            "recovered artifact directs home while leftover ore remains optional");
+        e.batteries[1].owner=BatteryOwner::EarthStorage;
+        check(recommendedCampaignObjective(*state,catalog).kind==CampaignObjectiveKind::Mission,"banked artifact stops recovery guidance");
+        e.batteries[1].owner=BatteryOwner::Wreck; e.batteries[1].wreckId=999;
+        e.course.targetBodyId="wreck:999";
+        reconcileCampaignGuidance(*state,catalog,true);
+        check(e.course.targetBodyId.empty() && e.batteries[1].wreckId==999 &&
+            recommendedCampaignObjective(*state,catalog).kind==CampaignObjectiveKind::RecoveryUnavailable,
+            "missing wreck invalidates navigation without erasing artifact ownership");
+        e.batteries[1].owner=BatteryOwner::Ship; e.batteries[1].wreckId=0;
+        e.active=true; e.coursePlayerSelected=true; e.course.targetBodyId="venus";
+        check(loseExpedition(e,state->run.flight,solarSystemDefinition())==ExpeditionResult::Applied,
+            "crash should preserve artifact in a new wreck");
+        check(!e.coursePlayerSelected && e.batteries[1].owner==BatteryOwner::Wreck,
+            "crash clears exploration override without losing artifact ownership");
+        reconcileCampaignGuidance(*state,catalog);
+        check(e.course.targetBodyId=="wreck:"+std::to_string(e.batteries[1].wreckId),
+            "replacement dock must target the new artifact wreck");
+        const auto recoveryNoticeCount=state->incomingMessages.pending.size();
+        reconcileCampaignGuidance(*state,catalog);
+        check(state->incomingMessages.pending.size()==recoveryNoticeCount,"new wreck recovery notice queues exactly once");
+    }
+}
+void salvageSpeedBoundaryTests(rocket::PersistentExpeditionState& e, rocket::FlightRunState& flight,
+    const rocket::SystemDefinition& system)
+{
+    using namespace rocket;
+    e.location.position.x -= 0.002;
+    e.location.velocity.x += expeditionSalvageSpeed;
+    restoreSystemLocation(e.location, flight);
+    check(canSalvageWreck(e, flight, system, 1),
+          "Wreck salvage must allow relative speed exactly 1.0");
+    e.location.velocity.x += 0.001;
+    restoreSystemLocation(e.location, flight);
+    check(!canSalvageWreck(e, flight, system, 1) &&
+              salvageWreck(e, 1, system, 24) == ExpeditionResult::OutOfRange,
+          "Wreck salvage UI and action must reject relative speed above 1.0");
+}
+
 void persistentExpeditionTests()
 {
     using namespace rocket;
+    campaignGuidanceTests();
     orbitalObjectiveSafetyTests();
     {
         const auto catalog = createDefaultContent();
@@ -662,7 +744,7 @@ void persistentExpeditionTests()
         auto& expedition = state.run.expedition;
         auto& flight = state.run.flight;
         expedition.location = {system.id, "", CoordinateFrame::System,
-            {dock.x + expeditionDockRadius, dock.y}, {earth->velocity.x + 1.0, earth->velocity.y}, 0, {}};
+            {dock.x + expeditionDockRadius, dock.y}, {earth->velocity.x + 1.001, earth->velocity.y}, 0, {}};
         restoreSystemLocation(expedition.location, flight);
         flight.active = flight.physicalFlight = true;
         flight.mode = FlightMode::Travel;
@@ -671,6 +753,7 @@ void persistentExpeditionTests()
         check(!canDockExpedition(expedition, flight, system),
             "Being in range must not bypass the matched-speed docking requirement");
         expedition.location.velocity = earth->velocity;
+        expedition.location.velocity.x += 1.0;
         restoreSystemLocation(expedition.location, flight);
         check(canDockExpedition(expedition, flight, system),
             "Matching dock speed at the shared boundary must allow docking");
@@ -1225,11 +1308,12 @@ void persistentExpeditionTests()
     flight.active = flight.physicalFlight = true;
     flight.mode = FlightMode::Travel;
     check(canSalvageWreck(e, flight, system, 1),
-          "Wreck salvage must include the tripled radius boundary");
+          "Wreck salvage must include the 3-unit radius boundary");
     e.location.position.x += 0.002;
     restoreSystemLocation(e.location, flight);
     check(!canSalvageWreck(e, flight, system, 1),
-          "Wreck salvage must remain unavailable just beyond the tripled radius");
+          "Wreck salvage must remain unavailable just beyond 3 units");
+    salvageSpeedBoundaryTests(e, flight, system);
     e.location = e.wrecks[0].location;
     e.cargo.materials.common = 24;
     check(salvageWreck(e, 1, system, 24) == ExpeditionResult::Applied &&

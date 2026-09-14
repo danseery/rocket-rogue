@@ -293,6 +293,8 @@ ContentCatalog createDefaultContent()
     catalog.incomingMessages.push_back({"earth_dock_intro", "mission_control_fennec", "Earth orbital dock", "Understood", false,
         {{"moon_first", "That's Earth's orbital dock. Bring your salvage here to bank it, refuel, repair the ship, and install ship upgrades. For now, head to the Moon and complete your first mining contract. The dock will be here when you return.", {}},
          {"services", "That's Earth's orbital dock. Bring your salvage here to bank it, refuel, repair the ship, and install ship upgrades before your next expedition.", {}}}});
+    catalog.incomingMessages.push_back({"artifact_wreck_recovery", "mission_control_fennec", "Artifact recovery required", "Understood", false,
+        {{"default", "Your unbanked artifact remains in the wreck. Rendezvous and salvage it, then return to Earth to secure it.", {}}}});
     catalog.incomingMessages.push_back({"asteroid_belt_intro", "mission_control_fennec", "Asteroid belt ahead", "Understood", true,
         {{"default", "You're entering the asteroid belt between Mars and Jupiter. Watch your projected path and steer toward the gaps. Slow down early with thrust opposite your motion; coasting does not brake. At Earth's dock, Flight Controls upgrades give you stronger thrust at the same fuel burn rate for course corrections. Hull Plating increases hull integrity and reduces asteroid impact damage. Upgrades help, but avoiding the rocks is still your best defense.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
     const auto addMissionMessages = [&](std::string id, std::string world, std::string objective,

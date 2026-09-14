@@ -2053,6 +2053,41 @@ void asteroidDestructionUsesRenderedUnscaledTime()
     }
 }
 
+void recoveryGuidanceUsesRealDockActions()
+{
+    const auto catalog=rocket::createDefaultContent();
+    auto state=std::make_unique<rocket::GameState>(rocket::createNewGame(catalog,0xC0A57));
+    state->screen=rocket::Screen::Hangar;
+    assert(rocket::initializeLiveExpedition(*state,catalog));
+    state->meta.campaignIntroductionAcknowledged=true;
+    state->meta.unlockKeys.push_back(rocket::content::unlock::routeMars);
+    state->incomingMessages.acknowledgedMessages.push_back("earth_dock_intro");
+    auto& e=state->run.expedition;
+    rocket::WreckState wreck; wreck.id=1;
+    wreck.location={"solar","",rocket::CoordinateFrame::System,{12,9},{},0,{}};
+    e.wrecks.push_back(wreck); e.nextWreckId=2;
+    e.batteries[1].owner=rocket::BatteryOwner::Wreck; e.batteries[1].wreckId=1;
+    e.course.targetBodyId="mars";
+    auto fixture=std::make_unique<AppFixture>();
+    fixture->saves.value=rocket::serializeSaveData(rocket::captureSaveData(*state));
+    assert(fixture->runner.initialize());
+    fixture->ui.dispatchAction("continue_game");
+    completeTitleLaunch(*fixture);
+    fixture->ui.dispatchAction("ack_incoming_message:recovery.wreck.1");
+    assert(fixture->ui.html.find("Recover Mars artifact from Wreck 1")!=std::string::npos);
+    assert(fixture->ui.html.find("DEPART FOR Wreck 1")!=std::string::npos);
+    fixture->ui.dispatchAction("expedition:plot:venus");
+    auto saved=rocket::deserializeSaveData(fixture->saves.value);
+    assert(saved && saved->expedition.coursePlayerSelected && saved->expedition.course.targetBodyId=="venus");
+    fixture->ui.dispatchAction("expedition:follow_mission");
+    saved=rocket::deserializeSaveData(fixture->saves.value);
+    assert(saved && !saved->expedition.coursePlayerSelected && saved->expedition.course.targetBodyId=="wreck:1");
+    fixture->ui.dispatchAction("expedition:map");
+    assert(fixture->ui.html.find("RECOMMENDED OBJECTIVE")!=std::string::npos);
+    assert(fixture->ui.html.find("expedition:plot:wreck:1")!=std::string::npos);
+    fixture->runner.shutdown();
+}
+
 int main()
 {
 #if defined(_MSC_VER)
@@ -2061,6 +2096,7 @@ int main()
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #endif
+    recoveryGuidanceUsesRealDockActions();
     explicitOrbitalLandingEntersLocalDescent();
     orbitalControllerSelectionOwnsInput();
     asteroidDestructionUsesRenderedUnscaledTime();
@@ -2285,7 +2321,8 @@ int main()
         assert(recovered && recovered->expedition.course.targetBodyId == "moon");
         fixture.ui.dispatchAction("continue_game");
         completeTitleLaunch(fixture);
-        assert(fixture.ui.html.find("NEXT MISSION: Moon") != std::string::npos);
+        assert(fixture.ui.html.find("NEXT OBJECTIVE") != std::string::npos);
+        assert(fixture.ui.html.find("Next mission: Moon") != std::string::npos);
         assert(fixture.ui.html.find("WAYPOINT: Moon") != std::string::npos);
         assert(fixture.ui.html.find("DEPART FOR Moon") != std::string::npos);
         fixture.ui.dispatchAction("expedition:map");
@@ -2315,7 +2352,7 @@ int main()
         expedition.course.targetBodyId = "earth";
         expedition.location = {system.id, "", rocket::CoordinateFrame::System,
             {dock.x + rocket::expeditionDockRadius * 0.5, dock.y},
-            {earth->velocity.x + 0.5, earth->velocity.y}, 0, {}};
+            {earth->velocity.x + 1.5, earth->velocity.y}, 0, {}};
         rocket::restoreSystemLocation(expedition.location, flight);
         flight.active = flight.physicalFlight = true;
         flight.mode = rocket::FlightMode::Travel;
@@ -2326,7 +2363,7 @@ int main()
         completeTitleLaunch(fixture);
         assert(fixture.ui.html.find("class=\"expedition-dock-action\"") != std::string::npos);
         assert(fixture.ui.html.find("data-rr-action=\"expedition:dock\" class=\"disabled\" disabled") != std::string::npos);
-        assert(fixture.ui.html.find("slow below 0.20 relative speed") != std::string::npos);
+        assert(fixture.ui.html.find("In range —") == std::string::npos);
         fixture.runner.shutdown();
     }
     {

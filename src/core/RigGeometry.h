@@ -24,7 +24,15 @@ struct Contact { int x = 0, y = 0; double depth = 0; Point normal; bool passage 
 struct Profile {
     double headWidthScale = 1.0;
     double sideCutterReach = 0.0;
+    double minimumY = 0.0;
 };
+inline Profile surfaceProfile(const MiningRunState& mining, double headWidthScale, double sideCutterReach) {
+    const double padY = mining.surfaceOriginBound ? mining.surfacePadY : mining.returnZoneY;
+    const double ceiling = mining.depthZone == 0
+        ? std::min(0.0, padY - tuning::mining::returnZoneCenterHeightCells - tuning::mining::returnZoneRadiusCells)
+        : 0.0;
+    return {headWidthScale, sideCutterReach, ceiling};
+}
 inline double effectiveHalfWidth(Profile profile) {
     return drillHalfWidth * std::max(1.0, profile.headWidthScale) +
         std::max(0.0, profile.sideCutterReach);
@@ -75,8 +83,14 @@ inline std::vector<Contact> contacts(const MiningTerrain& terrain,double x,doubl
     double left=x-bodyRadius,right=x+bodyRadius,top=y-bodyRadius,bottom=y+bodyRadius;
     for(auto p:bit) { left=std::min(left,p.x);right=std::max(right,p.x);top=std::min(top,p.y);bottom=std::max(bottom,p.y); }
     std::vector<Contact> result;
+    // Surface airspace extends above the finite terrain grid. Keep an exact
+    // ceiling plane, including the drill tip, rather than an invisible row-zero wall.
+    if (profile.minimumY < 0.0 && top < profile.minimumY - skin)
+        result.push_back({static_cast<int>(std::floor(x)), static_cast<int>(std::floor(profile.minimumY)) - 1,
+            profile.minimumY - top, {0, 1}});
     for(int cy=static_cast<int>(std::floor(top));cy<=static_cast<int>(std::floor(bottom));++cy)
         for(int cx=static_cast<int>(std::floor(left));cx<=static_cast<int>(std::floor(right));++cx) {
+            if (profile.minimumY < 0.0 && cy < 0 && cx >= 0 && cx < terrain.width) continue;
             const bool outside=cx<0 || cy<0 || cx>=terrain.width || cy>=terrain.height;
             const auto index=static_cast<std::size_t>(std::max(0,cy)*terrain.width+std::max(0,cx));
             const MiningCell* cell=!outside && index<terrain.cells.size() ? &terrain.cells[index]:nullptr;

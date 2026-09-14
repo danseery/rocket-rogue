@@ -7038,6 +7038,17 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         const auto* frame = snapshot.systemLocation.frame == CoordinateFrame::Body ? systemBody(snapshot.system, snapshot.systemLocation.bodyId) : nullptr;
         const SystemVector offset = frame ? frame->position : SystemVector{};
         const auto view = physicalFlightCamera(snapshot, 0);
+        auto ship = snapshot.systemLocation;
+        ship.position = {snapshot.launchPositionX, snapshot.launchPositionY};
+        ship.velocity = {snapshot.launchVelocityX, snapshot.launchVelocityY};
+        ship = convertSystemFrame(ship, CoordinateFrame::System, "", snapshot.system);
+        const auto slowDown = [&](const SystemVector& position, const SystemVector& velocity,
+                                  float x, float y, double radius, double speed) {
+            if (std::hypot(ship.position.x-position.x, ship.position.y-position.y) <= radius &&
+                std::hypot(ship.velocity.x-velocity.x, ship.velocity.y-velocity.y) > speed &&
+                std::fmod(snapshot.animationTime, 0.8) < 0.55)
+                drawPoiLabel(x,y+.12F,.0035F,"SLOW DOWN",PoiGuidanceKind::Ship);
+        };
         for (const auto& body : snapshot.system.bodies) {
             const auto p = view.camera.point(body.position.x - offset.x, body.position.y - offset.y);
             const float radius = static_cast<float>(systemBodyDisplayRadius(body)) * view.camera.scale;
@@ -7081,6 +7092,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                 drawEllipseLine(d.x,d.y,.035F,.035F,{.3F,1,.8F,1},24,0,2*kPi);
                 drawSprite(d.x,d.y,.058F,.058F,{1,1,1,1},static_cast<int>(TextureId::ServiceDock)-1);
                 drawPoiLabel(d.x,d.y+.06F,.003F,"DOCK",PoiGuidanceKind::Ship);
+                slowDown(dock,body.velocity,d.x,d.y,expeditionDockRadius,expeditionDockSpeed);
             }
             if (bodyOffscreen) continue;
             const int asset = systemBodyAsset(body);
@@ -7097,6 +7109,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             const auto p = view.camera.point(w.position.x-offset.x,w.position.y-offset.y);
             drawEllipseLine(p.x,p.y,.04F,.04F,{1,.6F,.2F,1},16,0,2*kPi);
             drawPoiLabel(p.x,p.y+.07F,.003F,"WRECK " + std::to_string(wreck.id),PoiGuidanceKind::Ship);
+            slowDown(w.position,w.velocity,p.x,p.y,expeditionSalvageRadius,expeditionSalvageSpeed);
         }
         drawLaunchAsteroids(snapshot);
         drawRoute(snapshot);

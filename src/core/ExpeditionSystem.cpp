@@ -12,7 +12,7 @@ namespace rocket
 namespace
 {
 constexpr double dockRange = .65;
-constexpr double rendezvousSpeed = .20;
+constexpr double rendezvousSpeed = expeditionDockSpeed;
 double distance(SystemVector a, SystemVector b) { return std::hypot(a.x - b.x, a.y - b.y); }
 SystemLocation absolute(const SystemLocation &p, const SystemDefinition &s)
 {
@@ -320,6 +320,15 @@ CoursePlan previewSystemCourse(const SystemLocation &location, const FlightRunSt
 ExpeditionResult plotSystemCourse(PersistentExpeditionState &e, const FlightRunState &f,
                                   const SystemDefinition &s, std::string_view target, const PreparedLaunch* model)
 {
+    if (const auto* wreck = courseWreck(e, target)) {
+        auto position = e.location;
+        captureSystemLocation(position, f);
+        e.course = {};
+        e.course.targetBodyId = std::string(target);
+        e.course.estimateValid = false;
+        e.course.trajectory = {absolute(position,s).position, absolute(wreck->location,s).position};
+        return ExpeditionResult::Applied;
+    }
     if (!systemBody(s, target))
         return ExpeditionResult::InvalidTarget;
     auto position = e.location;
@@ -347,7 +356,7 @@ FlightInput cruiseInput(PersistentExpeditionState &e, const FlightRunState &flig
         e.cruise.cooling = false;
         return manual;
     }
-    const auto *target = systemBody(s, e.course.targetBodyId);
+    const auto target = courseTargetLocation(e, s, e.course.targetBodyId);
     if (!target)
     {
         e.cruise = {};
@@ -356,7 +365,11 @@ FlightInput cruiseInput(PersistentExpeditionState &e, const FlightRunState &flig
     auto p = e.location;
     captureSystemLocation(p, flight);
     p = absolute(p, s);
-    const SystemVector destination = systemNavigationPosition(*target);
+    const SystemVector destination = target->position;
+    if (courseWreck(e, e.course.targetBodyId) && distance(p.position, destination) <= expeditionSalvageRadius * 3.0) {
+        e.cruise = {};
+        return manual; // Final rendezvous remains manual.
+    }
     const double desired = std::atan2(destination.y - p.position.y, destination.x - p.position.x);
     // Hysteresis keeps engines fully off until there is room for another
     // useful burn. Steering and normal coast physics remain responsive.
@@ -565,6 +578,7 @@ ExpeditionResult dockExpedition(GameState &state, const SystemDefinition &system
     return result;
 }
 bool canDockExpedition(const PersistentExpeditionState& e, const FlightRunState& f, const SystemDefinition& s) {
+    if (e.travelInitialized && f.hullRemaining <= 0) return false;
     if (!expeditionDockInRange(e, f, s)) return false;
     auto p = e.location;
     captureSystemLocation(p, f);
@@ -594,7 +608,7 @@ bool canSalvageWreck(const PersistentExpeditionState& e, const FlightRunState& f
     for (const auto& w : e.wrecks) if (w.id == id) {
         const auto point = absolute(w.location, s);
         return distance(p.position, point.position) <= expeditionSalvageRadius &&
-            (!requireMatchedSpeed || distance(p.velocity, point.velocity) <= rendezvousSpeed);
+            (!requireMatchedSpeed || distance(p.velocity, point.velocity) <= expeditionSalvageSpeed);
     }
     return false;
 }
@@ -664,7 +678,7 @@ ExpeditionResult salvageWreck(PersistentExpeditionState &e, std::uint64_t id, co
     if (it == e.wrecks.end())
         return ExpeditionResult::AlreadyApplied;
     const auto p = absolute(e.location, s), w = absolute(it->location, s);
-    if (distance(p.position, w.position) > expeditionSalvageRadius || distance(p.velocity, w.velocity) > rendezvousSpeed)
+    if (distance(p.position, w.position) > expeditionSalvageRadius || distance(p.velocity, w.velocity) > expeditionSalvageSpeed)
         return ExpeditionResult::OutOfRange;
     for (auto &b : e.batteries)
         if (b.owner == BatteryOwner::Wreck && b.wreckId == id)
@@ -759,6 +773,7 @@ ExpeditionResult loseExpedition(PersistentExpeditionState &e, FlightRunState &f,
     e.cruise.active = false;
     e.undockReady = false;
     e.progression = {};
+    e.coursePlayerSelected = false;
     e.selectedOrbitBody.clear();
     e.selectedOrbitZone = "zone_1";
     e.course.trajectory.clear();

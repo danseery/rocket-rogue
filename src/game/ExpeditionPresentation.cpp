@@ -194,11 +194,12 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         return;
     }
     const auto& system = solarSystemDefinition();
-    const auto& flight = state.run.flight;
+    const auto& flight = c.launchFlight ? *c.launchFlight : state.run.flight;
     auto location = e.location;
     captureSystemLocation(location, flight);
     const auto absolute = convertSystemFrame(location, CoordinateFrame::System, "", system);
-    const auto* target = systemBody(system, e.course.targetBodyId);
+    const auto recommendation = recommendedCampaignObjective(state,c.catalog);
+    const auto selectedName = courseTargetName(e,system,e.course.targetBodyId);
     const CoursePlan& mapCourse = c.waypointPreviewCourse ? *c.waypointPreviewCourse : e.course;
     const auto* proposedMapTarget = systemBody(system, mapCourse.targetBodyId);
     const auto revealed = [&](const SystemBodyDefinition& body) {
@@ -319,7 +320,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         map << "<div class=\"solar-body" << (b.id == mapCourse.targetBodyId ? " solar-selected" : "") << (hazard ? " solar-hazard" : "")
             << (b.kind == SystemBodyKind::Moon ? " solar-moon-label" : "")
             << "\" style=\"left:" << placement->labelX << "dp;top:" << placement->labelY << "dp;width:"
-            << placement->labelWidth << "dp;\">" << action(b.name, "preview:" + b.id, true, b.id == mapDefaultBody) << "</div>";
+            << placement->labelWidth << "dp;\">" << action(b.name + (recommendation.targetId==b.id ? " *" : ""), "preview:" + b.id, true, b.id == mapDefaultBody) << "</div>";
     }
     for (const auto& w : e.wrecks) {
         const auto p = convertSystemFrame(w.location, CoordinateFrame::System, "", system);
@@ -331,8 +332,12 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
             if (candidate < nearestDistance) { nearestDistance = candidate; nearest = &b; }
         }
         const auto placement = nearest ? displayPlacement(nearest->id) : std::nullopt;
+        if (placement && currentBody && e.course.targetBodyId=="wreck:"+std::to_string(w.id)) {
+            if (const auto from=displayPlacement(currentBody->id))
+                mapLine(map,"solar-course",from->x,from->y,placement->x+16,placement->y+15);
+        }
         if (placement) map << "<div class=\"solar-wreck\" style=\"left:" << placement->x+16
-            << "dp;top:" << placement->y+15 << "dp;\">W" << w.id << "</div>";
+            << "dp;top:" << placement->y+15 << "dp;\">W" << w.id << (recommendation.wreckId==w.id ? " *" : "") << "</div>";
     }
     map << "</div></div><p class=\"solar-map-help\">"
         << (atOperationalDock
@@ -345,6 +350,8 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         map << "<section class=\"solar-selection\"><div class=\"solar-selection-copy\"><h3>" << esc(mapTargetName)
             << "</h3><p>" << (alreadyDockedHere ? "Currently docked here. The planet surface is not landable; choose another revealed world" :
                 mapTarget->dock ? "Rendezvous with the service dock; the planet surface is not landable" :
+                (mapTarget->id=="mercury" || mapTarget->id=="venus" ||
+                 (solarMissionForBody(c.catalog,mapTarget->id) && solarMissionForBody(c.catalog,mapTarget->id)->optional)) ? "Optional exploration" :
                 mapTarget->siteId.empty() ? "Orbital exploration" : "Surface expedition")
             << (mapCourse.estimateValid ? " / Approach " + num(mapCourse.approachFuel) + " fuel / Return " + num(mapCourse.returnMargin) : " / Fuel estimate unavailable")
             << "</p><p class=\"expedition-warning\">" << esc(mapTarget->hazard) << "</p></div><div class=\"solar-selection-action\">"
@@ -356,7 +363,13 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     map << "<p class=\"solar-map-manifest\">FUEL " << num(flight.fuelRemaining) << " / " << num(flight.fuelCapacity)
         << " / CARGO " << e.cargo.materials.common << "C " << e.cargo.materials.rare << "R " << e.cargo.materials.exotic
         << "X / " << num(e.cargo.credits) << " UNBANKED</p>";
-    for (const auto& w : e.wrecks) map << "<p>Wreck " << w.id << " - " << action(w.buildRecoverable ? "Recover upgrades and cargo" : "Recover cargo", "recover:" + std::to_string(w.id), canSalvageWreck(e, flight, system, w.id)) << "</p>";
+    map << "<section class=\"expedition-dock-departure\"><h3>RECOMMENDED OBJECTIVE *</h3><p>" << esc(recommendation.title)
+        << "</p><p>" << esc(recommendation.detail) << "</p><p>SELECTED WAYPOINT: " << esc(selectedName)
+        << (e.coursePlayerSelected ? " / MANUAL OVERRIDE" : " / FOLLOWING MISSION")
+        << "</p>" << action("Follow mission","follow_mission",!recommendation.targetId.empty()) << "</section>";
+    for (const auto& w : e.wrecks) map << "<p>Wreck " << w.id << " - "
+        << action("Set waypoint: Wreck " + std::to_string(w.id),"plot:wreck:"+std::to_string(w.id))
+        << action(w.buildRecoverable ? "Recover upgrades and cargo" : "Recover cargo", "recover:" + std::to_string(w.id), canSalvageWreck(e, flight, system, w.id)) << "</p>";
     map << action(atOperationalDock ? "Back to dock" : "Resume flight", "close");
     if (e.active) map << action("Abandon ship", "abandon");
     map << "</section>";
@@ -377,14 +390,12 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     }
     if (atOperationalDock) {
         std::ostringstream home;
-        const std::string waypointName = target ? target->name : "None";
-        const auto* nextMission = nextSolarMission(state, c.catalog);
-        const auto* nextBody = nextMission ? systemBody(system, nextMission->bodyId) : nullptr;
+        const std::string waypointName = selectedName;
         const SolarMissionDefinition* lastCompleted = nullptr;
         for (const auto& mission : c.catalog.solarMissions)
             if (!mission.optional && solarMissionClaimed(state, c.catalog, mission)) lastCompleted = &mission;
-        const std::string departLabel = target && target->id != e.location.bodyId
-            ? "DEPART FOR " + target->name : "DEPART DOCK";
+        const std::string departLabel = !e.course.targetBodyId.empty() && e.course.targetBodyId != e.location.bodyId
+            ? "DEPART FOR " + selectedName : "DEPART DOCK";
         home << "<section class=\"expedition-home\"><h2>" << esc(region ? region->name : "Home") << " / ORBITAL DOCK</h2><p>" << esc(state.statusLine)
             << "</p><p>Upgrades survive docking. Recover your wreck to reclaim lost upgrades.</p>"
             << "<section class=\"expedition-dock-status\">"
@@ -396,10 +407,10 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
             const auto* completedBody = systemBody(system, lastCompleted->bodyId);
             home << "<p>MISSION COMPLETE: " << esc(completedBody ? completedBody->name : lastCompleted->bodyId) << "</p>";
         }
-        home << "<p>NEXT MISSION: "
-            << esc(nextBody ? nextBody->name : (arkDiscovered(state) ? "Straylight" : "Complete"))
-            << "</p><p>WAYPOINT: " << esc(waypointName)
-            << "</p>" << action(departLabel, "depart", true, true) << "</section><div class=\"action-row\">" << action("Change waypoint", "map");
+        home << "<h3>NEXT OBJECTIVE</h3><p>" << esc(recommendation.title) << "</p><p>" << esc(recommendation.detail)
+            << "</p><p>SELECTED WAYPOINT: " << esc(waypointName) << (e.coursePlayerSelected ? " / MANUAL OVERRIDE" : " / FOLLOWING MISSION")
+            << "</p>" << action(departLabel, "depart", true, true) << "</section><div class=\"action-row\">"
+            << action("Follow mission","follow_mission",!recommendation.targetId.empty()) << action("Change waypoint", "map");
         if (operationalHomeDocked(e) && droneBayUnlocked(state))
             home << button("Drone Ops", ui::actions::droneOps);
         home << "</div>";
@@ -455,35 +466,19 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         const std::string hazardMission = hazardDroneMissionMarkup(c);
         panel.contentMarkup += "<div class=\"expedition-flight-bar" +
         std::string(hazardMission.empty() ? "" : " expedition-flight-mission-flow") + "\"><p>" + esc(region ? region->name : "Solar space") +
-        " / Target: " + esc(target ? target->name : "None") + " / " + (e.cruise.active ?
-            (e.cruise.cooling ? "CRUISE COOLING" : "CRUISE ACTIVE") : "MANUAL") + "</p><p>" + esc(objective.available ? objective.goal : "Explore, mine, and return to Earth") + "</p>" +
+        " / Target: " + esc(selectedName) + " / " + (e.cruise.active ?
+            (e.cruise.cooling ? "CRUISE COOLING" : "CRUISE ACTIVE") : "MANUAL") + "</p><p>" + esc(recommendation.title) + "</p><p>" + esc(objective.available ? objective.goal : recommendation.detail) + "</p>" +
         solarMissionChecklist(state, c.catalog, e.location.bodyId) +
         hazardMission +
         action(e.cruise.active ? "Cruise off [C / L3]" : "Cruise [C / L3]", "cruise", flight.active && flight.mode != FlightMode::Landing && !e.undockReady,
             flightDefaultAvailable && !dockReady) +
         (dockInRange ? "<div class=\"expedition-dock-action\">" + button("DOCK", "expedition:dock", dockReady, "ok", flightDefaultAvailable && dockReady) + "</div>"
                      : action("Dock", "dock", false));
-        if (flight.active && flight.mode != FlightMode::Landing) {
-            auto position = e.location;
-            captureSystemLocation(position, flight);
-            position = convertSystemFrame(position, CoordinateFrame::System, "", system);
-            for (const auto& body : system.bodies) {
-                if (!body.dock) continue;
-                const auto dock = systemDockPosition(body);
-                const double range = std::hypot(position.position.x-dock.x,position.position.y-dock.y);
-                if (range > expeditionDockRadius) continue;
-                panel.contentMarkup += dockReady
-                    ? "<p>In range — press Dock.</p>"
-                    : "<p>In range — slow below 0.20 relative speed, then press Dock.</p>";
-                break;
-            }
-        }
         for (const auto& wreck : e.wrecks) {
             if (!canSalvageWreck(e, flight, system, wreck.id, false)) continue;
             const bool ready = canSalvageWreck(e, flight, system, wreck.id);
             panel.contentMarkup += action("Salvage wreck " + std::to_string(wreck.id),
                 "recover:" + std::to_string(wreck.id), ready);
-            if (!ready) panel.contentMarkup += "<p>Wreck in range. Slow down and match its drift to salvage.</p>";
         }
         panel.contentMarkup += "</div>";
     }

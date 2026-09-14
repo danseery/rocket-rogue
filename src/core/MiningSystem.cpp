@@ -1037,8 +1037,10 @@ bool canOccupyActor(
     double x,
     double y,
     double colliderRadius,
-    bool allowSuitOnlyPassage)
+    bool allowSuitOnlyPassage,
+    double minimumY = 0.0)
 {
+    if (minimumY < 0.0 && y - colliderRadius < minimumY - 1e-8) return false;
     constexpr std::array<std::pair<double, double>, 9> samples {{
         {0.0, 0.0},
         {1.0, 0.0},
@@ -1053,6 +1055,7 @@ bool canOccupyActor(
     for (const auto& [sampleX, sampleY] : samples) {
         const int cellX = static_cast<int>(std::floor(x + sampleX * colliderRadius));
         const int cellY = static_cast<int>(std::floor(y + sampleY * colliderRadius));
+        if (minimumY < 0.0 && cellY < 0 && cellX >= 0 && cellX < terrain.width) continue;
         const MiningCell* cell = miningCellAt(terrain, cellX, cellY);
         if (cell == nullptr || miningMaterialSolid(cell->material) ||
             (cell->suitOnlyPassage && !allowSuitOnlyPassage)) {
@@ -1088,7 +1091,7 @@ bool canOccupyControlledActor(
             x,
             y,
             tuning::mining::operatorColliderRadiusCells,
-            true)
+            true, profile.minimumY)
         : canOccupyRigHull(terrain, x, y, hullDirX, hullDirY, profile);
 }
 
@@ -6456,17 +6459,18 @@ double advanceActorToCollisionBoundary(
     bool allowSuitOnlyPassage,
     bool rigHull = false,
     double hullDirX = 0.0,
-    double hullDirY = 1.0)
+    double hullDirY = 1.0,
+    rig_geometry::Profile profile = {})
 {
     const auto canOccupyProbe = [&](double probeX, double probeY) {
         return rigHull
-            ? canOccupyRigHull(terrain, probeX, probeY, hullDirX, hullDirY)
+            ? canOccupyRigHull(terrain, probeX, probeY, hullDirX, hullDirY, profile)
             : canOccupyActor(
                 terrain,
                 probeX,
                 probeY,
                 colliderRadius,
-                allowSuitOnlyPassage);
+                allowSuitOnlyPassage, profile.minimumY);
     };
     if (!canOccupyProbe(startX, startY)) {
         return 0.0;
@@ -6581,13 +6585,14 @@ void simulateMiningActorMotion(
     }
     clampActorSpeed(velocityX, velocityY, maximumSpeed);
 
+    const auto geometry = rig_geometry::surfaceProfile(mining, drillStats.headWidthScale, drillStats.sideCutterReach);
     const double boundaryExtent = suit
         ? colliderRadius
         : tuning::mining::rigHullHalfLengthCells;
     const double minimumX = 1.0 + boundaryExtent;
     const double maximumX =
         static_cast<double>(mining.terrain.width - 1) - boundaryExtent;
-    const double minimumY = 1.0 + boundaryExtent;
+    const double minimumY = (geometry.minimumY < 0.0 ? geometry.minimumY : 1.0) + boundaryExtent;
     const double maximumY =
         static_cast<double>(mining.terrain.height - 1) - boundaryExtent;
     const double nextX = suit ? std::clamp(positionX + velocityX * dt, minimumX, maximumX) : positionX + velocityX * dt;
@@ -6598,7 +6603,6 @@ void simulateMiningActorMotion(
 
     if (!suit) {
         const double angle=std::atan2(mining.hullDirY,mining.hullDirX);
-        const rig_geometry::Profile geometry {drillStats.headWidthScale, drillStats.sideCutterReach};
         const auto horizontal=rig_geometry::sweep(mining.terrain,positionX,positionY,angle,nextX,positionY,angle,geometry);
         positionX=std::lerp(positionX,nextX,horizontal.fraction);
         if(horizontal.fraction<1) {
@@ -6619,7 +6623,7 @@ void simulateMiningActorMotion(
             positionY,
             suit,
             mining.hullDirX,
-            mining.hullDirY)) {
+            mining.hullDirY, geometry)) {
         positionX = nextX;
     } else {
         const double advance = advanceActorToCollisionBoundary(
@@ -6632,7 +6636,7 @@ void simulateMiningActorMotion(
             allowSuitOnlyPassage,
             !suit,
             mining.hullDirX,
-            mining.hullDirY);
+            mining.hullDirY, geometry);
         positionX += (nextX - positionX) * advance;
         velocityX = 0.0;
         mining.contactIntensity = std::max(mining.contactIntensity, 0.45);
@@ -6644,7 +6648,7 @@ void simulateMiningActorMotion(
             nextY,
             suit,
             mining.hullDirX,
-            mining.hullDirY)) {
+            mining.hullDirY, geometry)) {
         positionY = nextY;
     } else {
         const double advance = advanceActorToCollisionBoundary(
@@ -6657,7 +6661,7 @@ void simulateMiningActorMotion(
             allowSuitOnlyPassage,
             !suit,
             mining.hullDirX,
-            mining.hullDirY);
+            mining.hullDirY, geometry);
         positionY += (nextY - positionY) * advance;
         velocityY = 0.0;
         mining.contactIntensity = std::max(mining.contactIntensity, 0.45);
@@ -10496,7 +10500,8 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
             mining.terrain,
             controlledActorX(mining) + mining.contactIndicatorDirX * .12,
             controlledActorY(mining) + mining.contactIndicatorDirY * .12,
-            operatorControlled(mining), mining.hullDirX, mining.hullDirY)) {
+            operatorControlled(mining), mining.hullDirX, mining.hullDirY,
+            rig_geometry::surfaceProfile(mining, stats.headWidthScale, stats.sideCutterReach))) {
         mining.contactIndicatorLatched = false;
     }
     mining.scannerPulseSeconds = std::max(0.0, mining.scannerPulseSeconds - dt);
@@ -10518,7 +10523,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     if (!mining.rigGeometryValidated && mining.rigDepthZone == mining.depthZone) {
         rig_geometry::recoverOverlap(
             mining.terrain,mining.droneX,mining.droneY,std::atan2(mining.hullDirY,mining.hullDirX),
-            {stats.headWidthScale,stats.sideCutterReach});
+            rig_geometry::surfaceProfile(mining, stats.headWidthScale, stats.sideCutterReach));
         mining.rigGeometryValidated=true;
     }
     if (!suitActive && !mining.rigDisabled && mining.rigFuel.current>0.0) {
@@ -10527,7 +10532,8 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         const double delta=std::remainder(desired-angle,6.283185307179586)*
             (1.0-std::exp(-tuning::mining::visualHeadingSlerpPerSecond*dt));
         const auto turn=rig_geometry::sweep(mining.terrain,mining.droneX,mining.droneY,angle,
-            mining.droneX,mining.droneY,angle+delta,{stats.headWidthScale,stats.sideCutterReach});
+            mining.droneX,mining.droneY,angle+delta,
+            rig_geometry::surfaceProfile(mining, stats.headWidthScale, stats.sideCutterReach));
         mining.hullDirX=std::cos(angle+delta*turn.fraction);
         mining.hullDirY=std::sin(angle+delta*turn.fraction);
         if(turn.fraction<1) {recordRigContact(mining,turn.contact);recordMiningMovementCollision(mining,-turn.contact.normal.x,-turn.contact.normal.y);}
