@@ -2917,6 +2917,12 @@ void testMiningRigStaysVisibleAndTracksHeading()
     const ScenePacket& firstPacket = composer.compose(snapshot);
     const SceneInstance first = miningRigInstance(firstPacket);
     const SceneInstance firstDrill = miningDrillBitInstance(firstPacket);
+    const auto pointer = firstPacket.flightPointer;
+    assert(pointer.active);
+    assert(std::abs(pointer.shipX - (firstPacket.transform.pixelCenterX + first.centerX * firstPacket.transform.worldUnitX)) < 1.0);
+    assert(std::abs(pointer.shipY - (800 - firstPacket.transform.pixelCenterY - first.centerY * firstPacket.transform.worldUnitY)) < 1.0);
+    assert(!pointer.angleTo(pointer.shipX, pointer.shipY));
+    assert(std::abs(*pointer.angleTo(pointer.shipX + 40, pointer.shipY)) < 0.001);
     assert(std::isfinite(first.centerX) && std::isfinite(first.centerY));
     assert(first.textured);
     assert(first.shape == SceneInstanceShape::Rectangle);

@@ -8898,6 +8898,65 @@ int LandingSiteView::topRow(int depth) const
     return 0;
 }
 
+void updateMiningShipSupport(MiningRunState& mining, double deltaSeconds)
+{
+    if (!mining.active || !std::isfinite(deltaSeconds) || deltaSeconds <= 0.0) return;
+    std::vector<std::pair<int, const MiningTerrain*>> layers{{mining.depthZone, &mining.terrain}};
+    for (const auto& layer : mining.depthLayers) layers.emplace_back(layer.depthZone, &layer.terrain);
+    std::sort(layers.begin(), layers.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    int shipTop = 0, totalRows = 0;
+    bool foundShip = false;
+    for (const auto& [depth, terrain] : layers) {
+        if (depth == mining.shipDepthZone) { shipTop = totalRows; foundShip = true; }
+        totalRows += terrain->height;
+    }
+    if (!foundShip || totalRows <= 0 || !std::isfinite(mining.returnZoneY)) return;
+    const double bottom = shipTop + mining.returnZoneY;
+    const double dt = std::min(deltaSeconds, 0.08);
+    const double gravity = flight_landing::gravityAcceleration / flight_landing::metersPerCell;
+    const double velocity = std::isfinite(mining.shipFallVelocity) ? std::max(0.0, mining.shipFallVelocity) : 0.0;
+    const double proposed = bottom + velocity * dt + 0.5 * gravity * dt * dt;
+    // The parked hull is upright. Sweeping its entire lower edge is the exact
+    // vertical sweep of the landing rectangle, including narrow ledges.
+    const double halfWidth = flight_landing::hullHalfWidth / flight_landing::metersPerCell;
+    const int left = static_cast<int>(std::floor(mining.returnZoneX + 0.5 - halfWidth + 1e-8));
+    const int right = static_cast<int>(std::floor(mining.returnZoneX + 0.5 + halfWidth - 1e-8));
+    double floorRow = totalRows; // The edge of cached terrain is a physical boundary.
+    int top = 0;
+    for (const auto& [depth, terrain] : layers) {
+        const int firstRow = std::max(0, static_cast<int>(std::floor(bottom + 1e-8)) - top);
+        const int lastRow = std::min(terrain->height - 1, static_cast<int>(std::floor(proposed)) - top);
+        for (int y = firstRow; y <= lastRow; ++y) {
+            bool supported = false;
+            for (int x = std::max(0, left); x <= std::min(terrain->width - 1, right); ++x) {
+                const auto* cell = miningCellAt(*terrain, x, y);
+                if (cell && cell->material != MiningCellMaterial::Empty && cell->remainingToughness > 0.0) {
+                    supported = true; break;
+                }
+            }
+            if (supported) { floorRow = std::min(floorRow, static_cast<double>(top + y)); break; }
+        }
+        top += terrain->height;
+    }
+    const double next = std::max(bottom, std::min(proposed, floorRow));
+    mining.shipFallVelocity = proposed >= floorRow ? 0.0 : velocity + gravity * dt;
+    if (next > bottom && !mining.surfaceOriginBound) {
+        mining.surfacePadX = mining.returnZoneX;
+        mining.surfacePadY = bottom;
+        mining.surfaceOriginBound = true;
+    }
+    top = 0;
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        const auto& [depth, terrain] = layers[i];
+        if (next < top + terrain->height || i + 1 == layers.size()) {
+            mining.shipDepthZone = depth;
+            mining.returnZoneY = next - top;
+            break;
+        }
+        top += terrain->height;
+    }
+}
+
 bool activateLandingLayer(MiningRunState& mining, int depth)
 {
     if (mining.depthZone == depth) return true;
@@ -9708,7 +9767,7 @@ bool enterMiningSwarmArenaForDebug(GameState& state, const ContentCatalog& catal
     return true;
 }
 
-void setMiningMove(GameState& state, double xAxis, double yAxis)
+void setMiningMove(GameState& state, double xAxis, double yAxis, bool faceMovement)
 {
     MiningRunState& mining = state.run.mining;
     if (!mining.active) {
@@ -9723,11 +9782,27 @@ void setMiningMove(GameState& state, double xAxis, double yAxis)
     mining.moveX = std::clamp(xAxis, -1.0, 1.0);
     mining.moveY = std::clamp(yAxis, -1.0, 1.0);
     const double moveLength = std::sqrt(mining.moveX * mining.moveX + mining.moveY * mining.moveY);
-    if (moveLength > 0.01 && !operatorControlled(mining)) {
+    if (faceMovement && moveLength > 0.01 && !operatorControlled(mining)) {
         setAimDirection(mining, mining.moveX, mining.moveY);
 
         refreshTargetCell(mining);
     }
+}
+
+void setMiningRigPiloting(GameState& state, double turn, double forward, double strafe)
+{
+    auto& mining = state.run.mining;
+    if (!mining.active || operatorControlled(mining)) return;
+    if (!activeMiningArenaRules(mining).mechanics.movement) turn = forward = strafe = 0.0;
+    // Mining coordinates are Y-down: clockwise right is (-forwardY, forwardX).
+    setMiningMove(state, mining.hullDirX * forward - mining.hullDirY * strafe,
+        mining.hullDirY * forward + mining.hullDirX * strafe, false);
+    const double angle = std::atan2(mining.hullDirY, mining.hullDirX) + std::clamp(turn, -1.0, 1.0) * 0.5;
+    // The existing damped, swept hull turn resolves this request against terrain.
+    // Continuous steering must not use the legacy movement-direction quantizer.
+    mining.aimDirX = std::cos(angle);
+    mining.aimDirY = std::sin(angle);
+    refreshTargetCell(mining);
 }
 
 void setMiningAim(GameState& state, double normalizedX, double normalizedY)
@@ -10425,7 +10500,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     if (!mining.active) {
         return;
     }
-    // The accepted touchdown owns the ship location, including underground.
+    // Excavation may remove the terrain supporting the parked ship.
     const double dt = std::clamp(deltaSeconds, 0.0, 0.08);
     mining.depthTransitionCooldownSeconds = std::max(0.0, mining.depthTransitionCooldownSeconds - dt);
     mining.artifactTetherDeniedFlashSeconds = std::max(0.0, mining.artifactTetherDeniedFlashSeconds - dt);
@@ -10440,6 +10515,7 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         mining.drilling = false;
         return;
     }
+    updateMiningShipSupport(mining, dt);
     const MiningSiteDefinition* authoredSite =
         attachActiveAuthoredMiningSite(state, catalog);
     const MiningDrillStats stats = miningDrillStats(state, catalog);

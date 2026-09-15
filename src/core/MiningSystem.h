@@ -167,6 +167,7 @@ struct LandingSiteView {
 bool prepareLandingLayers(const GameState&, const ContentCatalog&, MiningRunState&, int throughDepth);
 bool activateLandingLayer(MiningRunState&, int depth);
 LandingSiteView buildLandingSiteView(const MiningRunState&);
+void updateMiningShipSupport(MiningRunState&, double deltaSeconds);
 bool positionSurfaceLandingTeam(MiningRunState&, const LandingSiteView&, double shipX, double siteRow);
 bool revealLandingSurroundings(MiningRunState&, const LandingSiteView&, double gridX, double siteRow);
 
@@ -285,7 +286,8 @@ SurfaceActionOutcome startMiningRun(
     bool progressionCreditEligible,
     std::string_view artifactSector = {});
 bool enterMiningSwarmArenaForDebug(GameState& state, const ContentCatalog& catalog);
-void setMiningMove(GameState& state, double xAxis, double yAxis);
+void setMiningMove(GameState& state, double xAxis, double yAxis, bool faceMovement = true);
+void setMiningRigPiloting(GameState& state, double turn, double forward, double strafe);
 void setMiningAim(GameState& state, double normalizedX, double normalizedY);
 void setMiningDrilling(GameState& state, bool drilling);
 void setMiningFire(GameState& state, bool firing);

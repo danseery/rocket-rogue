@@ -35,6 +35,23 @@
 
 namespace rocket {
 struct OrbitalLandingTestAccess {
+    static void fallenShipDepartsFromCurrentPosition(RocketGameApp& app) {
+        app.debugStartMining();
+        auto& mining = app.state_.run.mining;
+        auto& land = app.session_.flight.landing;
+        mining.surfaceOriginBound = true;
+        mining.surfacePadX = mining.returnZoneX;
+        mining.surfacePadY = mining.returnZoneY;
+        land.siteBound = land.siteCommitted = true;
+        land.padGridX = land.touchdownGridX = mining.returnZoneX;
+        land.padGridY = land.touchdownGridY = mining.returnZoneY;
+        mining.returnZoneY += 5.0;
+        const double fallenRow = mining.returnZoneY;
+        app.beginManualSurfaceAscent();
+        assert(std::abs(land.touchdownGridY - fallenRow) < 1e-8);
+        assert(std::abs(land.altitude - (-20.0 + 0.001)) < 1e-8);
+        assert(land.departureActive && !mining.active);
+    }
     static void setOrbit(RocketGameApp& app, double radius, const PlanetLandingZone& zone, double direction) {
         auto& expedition = app.state_.run.expedition;
         expedition.travelInitialized = true;
@@ -207,6 +224,10 @@ public:
         sceneFadeToBlack = snapshot.sceneFadeToBlack;
         shipDamage = snapshot.shipDamage;
         miningHeat = snapshot.miningHeat;
+        miningMoveX = snapshot.miningMoveX;
+        miningMoveY = snapshot.miningMoveY;
+        miningHullX = snapshot.miningHullDirX;
+        miningHullY = snapshot.miningHullDirY;
         miningOperatorRigTethered = snapshot.miningOperatorRigTethered;
         miningEvaDeathActive = snapshot.miningEvaDeathActive;
         miningEvaDeathProgress = snapshot.miningEvaDeathProgress;
@@ -308,6 +329,7 @@ public:
     double animationTime = 0.0;
     double shipDamage = 0.0;
     double miningHeat = 0.0;
+    double miningMoveX = 0.0, miningMoveY = 0.0, miningHullX = 0.0, miningHullY = 1.0;
     double miningEvaDeathProgress = 0.0;
     double miningExtractionProgress = 0.0;
     double flybyInputY = 0.0;
@@ -2281,6 +2303,41 @@ void shiftMouseFlightInput()
     fixture.runner.shutdown();
 }
 
+void shiftRigInput()
+{
+    AppFixture fixture;
+    fixture.controllers.source = rocket::InputSource::KeyboardPointer;
+    assert(fixture.runner.initialize());
+    auto& app = fixture.runner.app();
+    app.debugStartMining();
+    fixture.host.now += 1.0 / 60.0; fixture.runner.frame();
+    assert(app.inputContext() == rocket::InputContext::MiningActive);
+    const double initialX = fixture.renderer.miningHullX, initialY = fixture.renderer.miningHullY;
+    app.miningMove(0, -1); app.renderScene();
+    assert(std::abs(fixture.renderer.miningMoveX - initialX) < 1e-6);
+    assert(std::abs(fixture.renderer.miningMoveY - initialY) < 1e-6);
+    app.miningMove(1, 0); app.renderScene();
+    assert(fixture.renderer.miningMoveX == 0 && fixture.renderer.miningMoveY == 0);
+    app.flightMouseFacing(true); app.miningMove(1, 0); app.renderScene();
+    assert(std::abs(fixture.renderer.miningMoveX + initialY) < 1e-6);
+    assert(std::abs(fixture.renderer.miningMoveY - initialX) < 1e-6);
+    app.flightMouseFacing(false); app.miningMove(1, 0); app.renderScene();
+    assert(fixture.renderer.miningMoveX == 0 && fixture.renderer.miningMoveY == 0);
+    app.miningMove(0, 0);
+    fixture.renderer.pointerPresentation = {true,{0,0,1280,800},640,400,0,-1};
+    app.flightPointerMove(840,400,false); app.flightMouseFacing(true);
+    app.tick(1.0 / 60.0); app.renderScene();
+    assert(fixture.renderer.miningHullX > initialX); // Down-facing rig turns toward screen-right.
+    fixture.ui.modalOpenValue = true;
+    fixture.host.now += 1.0 / 60.0; fixture.runner.frame();
+    fixture.ui.modalOpenValue = false;
+    fixture.host.now += 1.0 / 60.0; fixture.runner.frame();
+    const double heldX = fixture.renderer.miningHullX;
+    app.flightMouseFacing(true); app.tick(1.0 / 60.0); app.renderScene();
+    assert(std::abs(fixture.renderer.miningHullX - heldX) < 1e-8);
+    fixture.runner.shutdown();
+}
+
 int main(int argc, char** argv)
 {
 #if defined(_MSC_VER)
@@ -2289,8 +2346,16 @@ int main(int argc, char** argv)
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #endif
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        rocket::OrbitalLandingTestAccess::fallenShipDepartsFromCurrentPosition(fixture.runner.app());
+        fixture.runner.shutdown();
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--ship-support-only") return 0;
     if (argc > 1 && std::string_view(argv[1]) == "--flight-impact") { uncalibratedLunarImpactCinematic(); return 0; }
-    if (argc > 1 && std::string_view(argv[1]) == "--shift-flight") { shiftMouseFlightInput(); return 0; }
+    if (argc > 1 && std::string_view(argv[1]) == "--shift-flight") { shiftMouseFlightInput(); shiftRigInput(); return 0; }
+    shiftRigInput();
     shiftMouseFlightInput();
     recoveryGuidanceUsesRealDockActions();
     straylightSequenceActionsAndArrival();

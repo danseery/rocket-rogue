@@ -5924,7 +5924,8 @@ void miningOxygenDrainsRigHealthBeforeEmergencyEjection()
         "mining should start for oxygen drain test with oxygen pressure enabled");
 
     clearMiningTerrainForEvaTest(state.run.mining);
-    state.run.mining.droneY += tuning::mining::returnZoneRadiusCells + 2.0;
+    // Stay outside service horizontally, even when the unsupported ship falls.
+    state.run.mining.droneX += tuning::mining::returnZoneRadiusCells + 2.0;
     state.run.mining.rigOxygen.current = 0.0;
     state.run.mining.suitOxygen.current = 5.0;
     const double healthBefore = state.run.mining.droneHealth;
@@ -8153,13 +8154,13 @@ void unifiedPhysicalFlightCapturesOrbitAndResolvesTouchdown()
     FlightRunState leftTurn = beginLaunchFlight(launch, *moon);
     (void)updateLaunchFlight(leftTurn, launch, *moon, {-1.0, 0.0, false}, 0.25);
     require(leftTurn.heading > 0.0,
-        "Q and left shoulder must rotate the physical ship visibly left");
+        "Negative steering must rotate the physical ship visibly left");
     FlightRunState rightTurn = beginLaunchFlight(launch, *moon);
     (void)updateLaunchFlight(rightTurn, launch, *moon, {1.0, 0.0, false}, 0.25);
     require(rightTurn.heading < 0.0,
-        "E and right shoulder must rotate the physical ship visibly right");
+        "Positive steering must rotate the physical ship visibly right");
 
-    for (double heading : {0.0,1.5707963267948966}) for (double side : {-1.0,1.0}) {
+    for (double heading : {0.0,1.5707963267948966,3.141592653589793,-1.5707963267948966}) for (double side : {-1.0,1.0}) {
         auto coast = beginLaunchFlight(launch,*moon);
         coast.mode = FlightMode::Travel;
         coast.positionX = coast.positionY = 8;
@@ -9426,8 +9427,71 @@ void rigCompoundCollisionSweepsAndRecovery()
     require(!rig_geometry::contacts(terrain,6,6,1,0).empty(),"the solid drill must respect EVA-only passage cells");
 }
 
+void parkedShipLosesExcavatedSupport()
+{
+    const auto catalog = createDefaultContent();
+    auto state = std::make_unique<GameState>(createNewGame(catalog, 1977));
+    auto& mining = state->run.mining;
+    mining.active = true;
+    mining.returnZoneX = 10; mining.returnZoneY = 6;
+    mining.terrain.width = mining.terrain.height = 20;
+    mining.terrain.cells.resize(400);
+    const auto floorAt = [](MiningTerrain& terrain, int row) {
+        for (int x = 0; x < terrain.width; ++x) {
+            auto& cell = terrain.cells[row * terrain.width + x];
+            cell.material = MiningCellMaterial::HardRock;
+            cell.remainingToughness = cell.maxToughness = 1;
+        }
+    };
+    for (auto& cell : mining.terrain.cells) cell.material = MiningCellMaterial::Empty;
+    floorAt(mining.terrain, 6); floorAt(mining.terrain, 12);
+    for (int i = 0; i < 30; ++i) updateMiningShipSupport(mining, 1.0 / 60);
+    require(mining.returnZoneY == 6 && mining.shipFallVelocity == 0, "solid support holds the parked ship steady");
+    mining.terrain.cells[6 * 20 + 10].material = MiningCellMaterial::Empty;
+    updateMiningShipSupport(mining, 1.0 / 60);
+    require(mining.returnZoneY == 6, "a narrow excavation must not let the full-width hull pass through a ledge");
+    mining.terrain.cells[6 * 20 + 9].material = MiningCellMaterial::Empty;
+    mining.terrain.cells[6 * 20 + 11].material = MiningCellMaterial::Empty;
+    updateMiningShipSupport(mining, 1.0 / 60);
+    require(mining.returnZoneY > 6 && mining.returnZoneY < 6.01 && mining.shipFallVelocity > 0,
+        "removing all support starts a gradual gravitational fall");
+    const auto save = deserializeSaveData(serializeSaveData(captureSaveData(*state)));
+    require(save.has_value() && save->mining.shipFallVelocity == mining.shipFallVelocity &&
+        nearlyEqual(save->mining.returnZoneY, mining.returnZoneY, 0.00001), "mid-fall position and velocity must round trip");
+    auto resumed = std::make_unique<MiningRunState>(save->mining);
+    for (int i = 0; i < 360; ++i) {
+        updateMiningShipSupport(mining, 1.0 / 60);
+        updateMiningShipSupport(*resumed, 1.0 / 60);
+    }
+    require(mining.returnZoneY == 12 && mining.shipFallVelocity == 0 && resumed->returnZoneY == 12,
+        "the falling ship and reloaded ship settle exactly on the next floor");
+    require(mining.surfacePadY == 6, "falling must preserve the original flight surface reference");
+    mining.returnZoneY = 6; mining.shipFallVelocity = 500;
+    updateMiningShipSupport(mining, 0.08);
+    require(mining.returnZoneY == 12 && mining.shipFallVelocity == 0, "a fast fall cannot tunnel through a one-cell floor");
+    for (auto& cell : mining.terrain.cells) cell.material = MiningCellMaterial::Empty;
+    MiningDepthLayerState lower;
+    lower.depthZone = 1; lower.terrain = mining.terrain;
+    floorAt(lower.terrain, 5);
+    mining.depthLayers.push_back(lower);
+    mining.returnZoneY = 19; mining.shipFallVelocity = 0;
+    for (int i = 0; i < 360; ++i) updateMiningShipSupport(mining, 1.0 / 60);
+    require(mining.shipDepthZone == 1 && mining.returnZoneY == 5 && mining.shipFallVelocity == 0,
+        "falling across a cached layer seam moves the real ship and service location");
+    mining.droneX = mining.returnZoneX + tuning::mining::returnZoneCenterOffsetX;
+    mining.droneY = mining.returnZoneY - tuning::mining::returnZoneCenterHeightCells;
+    mining.rigDepthZone = mining.depthZone = 1;
+    require(miningAtReturnZone(mining), "ship services must follow the fallen ship");
+}
+
 int main(int argc, char** argv)
 {
+    parkedShipLosesExcavatedSupport();
+    if (argc > 1 && std::string_view(argv[1]) == "--ship-support-only") return 0;
+    if (argc > 1 && std::string_view(argv[1]) == "--flight-controls-only") {
+        unifiedPhysicalFlightCapturesOrbitAndResolvesTouchdown();
+        return 0;
+    }
     rigCompoundCollisionSweepsAndRecovery();
     if (argc > 1 && std::string_view(argv[1]) == "--rig-geometry-only") return 0;
     try { (void)createDefaultContent(); }

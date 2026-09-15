@@ -1177,9 +1177,17 @@ void RocketGameApp::completeUndeployedTakeoff()
 
 void RocketGameApp::beginManualSurfaceAscent()
 {
+    refreshLandingSiteView(true);
     manualAscentCameraSeconds_=surfaceBaySequence_.kind==SurfaceBaySequenceKind::Extract ? 0.0 : flight_landing::handoffSeconds;
     auto& flight=session_.flight;
     auto& land=flight.landing;
+    if (landingSiteView_ && land.siteCommitted) {
+        const auto& mining = state_.run.mining;
+        land.touchdownGridX = mining.returnZoneX;
+        land.touchdownGridY = mining.returnZoneY + landingSiteView_->topRow(mining.shipDepthZone);
+        land.horizontalPosition = (land.touchdownGridX - land.padGridX) * flight_landing::metersPerCell;
+        land.depthZone = mining.shipDepthZone;
+    }
     // Packing changes ownership, not position. The original surface basis and
     // departure altitude remain fixed even when the shuttle is far underground.
     flight.active=true;
@@ -1957,7 +1965,10 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
 
 void RocketGameApp::applyRealtimeInputs()
 {
-    if (flightMouseFacingActive_ && (inputContext() != InputContext::Launch || session_.orbitalWork.active())) {
+    const bool rigPiloting = state_.screen == Screen::Mining &&
+        state_.run.mining.operatorMode != MiningOperatorMode::Jetpack &&
+        (inputContext() == InputContext::MiningActive || inputContext() == InputContext::MiningService);
+    if (flightMouseFacingActive_ && ((!rigPiloting && inputContext() != InputContext::Launch) || session_.orbitalWork.active())) {
         flightMouseFacingActive_ = false;
         flightShiftReleaseRequired_ = true;
     }
@@ -1982,13 +1993,22 @@ void RocketGameApp::applyRealtimeInputs()
         session_.throttleInput = departureThrustHeld_ ? 1.0 : moveY;
         break;
     case Screen::Mining:
-        setMiningMove(state_, moveX, moveY);
         {
             const RealtimeInputState& miningInput = useController
                 ? controllerRealtimeInput_
                 : keyboardRealtimeInput_;
             const bool operatorActive =
                 state_.run.mining.operatorMode == MiningOperatorMode::Jetpack;
+            if (operatorActive) {
+                setMiningMove(state_, moveX, moveY);
+            } else {
+                double turn = useController ? miningInput.aimX : flightShiftDown_ ? 0.0 : moveX;
+                if (!useController && flightMouseFacingActive_ && flightPointerValid_) {
+                    if (const auto angle = services_.renderer.flightPointerPresentation().angleTo(flightPointerX_, flightPointerY_))
+                        turn = std::clamp(-*angle / 0.5, -1.0, 1.0);
+                }
+                setMiningRigPiloting(state_, turn, -moveY, useController || flightShiftDown_ ? moveX : 0.0);
+            }
             if (std::hypot(miningInput.aimX, miningInput.aimY) > 0.01) {
                 setMiningAim(state_, miningInput.aimX, miningInput.aimY);
             }
@@ -2911,6 +2931,7 @@ void RocketGameApp::tick(double deltaSeconds)
             };
             const int droneCargoBefore = dronePayloadCount(state_.run.mining);
             const auto contactBefore = state_.run.mining.contactIndicatorSerial;
+            applyRealtimeInputs();
             updateMiningRun(state_, catalog_, deltaSeconds);
             if (state_.meta.straylightStage == StraylightStage::RevealPending && artifactBefore != state_.run.mining.stowedArtifacts.size()) {
                 queueAudioCue(GameAudioCue::Orbit);
@@ -3193,7 +3214,10 @@ void RocketGameApp::flightMouseFacing(bool held)
         flightShiftReleaseRequired_ = false;
         flightMouseFacingActive_ = false;
     } else {
-        const bool allowed = inputContext() == InputContext::Launch && session_.flightArmed &&
+        const bool rigPiloting = state_.screen == Screen::Mining &&
+            state_.run.mining.operatorMode != MiningOperatorMode::Jetpack && !surfaceBaySequence_.active() &&
+            (inputContext() == InputContext::MiningActive || inputContext() == InputContext::MiningService);
+        const bool allowed = ((inputContext() == InputContext::Launch && session_.flightArmed) || rigPiloting) &&
             !session_.orbitalWork.active() && !session_.destruction.active &&
             pauseReason_ == PauseReason::None && !services_.ui.modalOpen() &&
             activeInputSource_ != InputSource::Controller;
@@ -3791,6 +3815,10 @@ void RocketGameApp::miningOperatorToggle()
         return;
     }
     const bool toggled = toggleMiningOperator(state_);
+    if (toggled) {
+        flightMouseFacingActive_ = false;
+        flightShiftReleaseRequired_ = flightShiftDown_;
+    }
     keyboardRealtimeInput_.firing = false;
     keyboardRealtimeInput_.drilling = false;
     controllerRealtimeInput_.firing = false;
@@ -6388,8 +6416,16 @@ RenderSnapshot RocketGameApp::snapshot() const
                 if (layer.depth==depth) result.miningFrameHeight=layer.height;
         }
         const auto& land=session_.flight.landing;
+        const auto depthTop = [&](int depth) {
+            int top = mining.depthZone < depth ? mining.terrain.height : 0;
+            for (const auto& layer : mining.depthLayers)
+                if (layer.depthZone < depth) top += layer.terrain.height;
+            return top;
+        };
+        const double shipSiteRow = mining.returnZoneY +
+            (state_.screen == Screen::Mining ? depthTop(mining.shipDepthZone) : 0);
         const double dx=(mining.returnZoneX-land.padGridX)*flight_landing::metersPerCell;
-        const double altitude=(land.padGridY-mining.returnZoneY)*flight_landing::metersPerCell;
+        const double altitude=(land.padGridY-shipSiteRow)*flight_landing::metersPerCell;
         const double nx=std::cos(land.basisAngle),ny=std::sin(land.basisAngle);
         const double radial=flight_geometry::bodyRadius+altitude/flight_landing::metersPerOrbitUnit;
         result.surfaceAnchorX=nx*radial+ny*dx/flight_landing::metersPerOrbitUnit;
@@ -6407,8 +6443,10 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningDrillIntegrity = mining.drillIntegrity;
         result.miningDroneHealth = mining.droneHealth;
         result.miningReturnZoneX = mining.returnZoneX;
-        result.miningReturnZoneY = mining.returnZoneY;
-        result.miningShipPresent = state_.screen == Screen::Flight || mining.depthZone == mining.shipDepthZone;
+        result.miningReturnZoneY = shipSiteRow - (state_.screen == Screen::Mining ? depthTop(mining.depthZone) : 0);
+        const double shipHeight = 2.0 * flight_landing::hullHalfHeight / flight_landing::metersPerCell;
+        result.miningShipPresent = state_.screen == Screen::Flight ||
+            (result.miningReturnZoneY >= 0.0 && result.miningReturnZoneY - shipHeight <= mining.terrain.height);
         result.miningAtReturnZone = miningAtReturnZone(mining);
         const MiningLoadStats loadStats = surfaceArrival_.prepared.has_value()
             ? MiningLoadStats {}

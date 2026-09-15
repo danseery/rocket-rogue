@@ -131,6 +131,27 @@ test("held movement transfers immediately and both Shift keys release independen
   assert.equal(facing, true);
 });
 
+test("mining observes either Shift key without changing EVA movement axes", () => {
+  const launchKeys = new Set(), miningKeys = new Set();
+  let axes, facing;
+  const rr = { miningMove: (...value) => { axes = value; }, flightMouseFacing: value => { facing = value; } };
+  const updateMiningMove = () => new Function("miningKeys", "rr", functionBody("updateMiningMove"))(miningKeys, rr);
+  const down = new Function("event", "miningKeys", "rr", "updateMiningMove", "isLaunchActive", "isSurfaceArrivalActive", "isMiningActive", functionBody("handleRealtimeKeyDown"));
+  const up = new Function("event", "launchKeys", "miningKeys", "rr", "updateMiningMove", "isMiningActive", functionBody("handleRealtimeKeyUp"));
+  const press = (key, code = key) => down({key, code, preventDefault() {}}, miningKeys, rr, updateMiningMove, () => false, () => false, () => true);
+  const release = (key, code = key) => up({key, code}, launchKeys, miningKeys, rr, updateMiningMove, () => true);
+  press("a"); press("w");
+  assert.deepEqual(axes, [-1, -1]);
+  press("Shift", "ShiftLeft"); press("Shift", "ShiftRight");
+  assert.equal(facing, true);
+  release("Shift", "ShiftRight");
+  assert.equal(facing, true);
+  assert.deepEqual(axes, [-1, -1]);
+  release("Shift", "ShiftLeft");
+  assert.equal(facing, false);
+  assert.deepEqual(axes, [-1, -1]);
+});
+
 test("retired activity shortcuts stay out of the web input surface", () => {
   for (const retiredIdentifier of [
     "isFlybyActive",

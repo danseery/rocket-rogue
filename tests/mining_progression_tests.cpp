@@ -1188,6 +1188,31 @@ void environmentalEncountersHaveSafeBypassesAndPersist()
 
 int main()
 {
+    {
+        auto state = std::make_unique<GameState>();
+        auto& rig = state->run.mining;
+        rig.active = true;
+        rig.terrain.width = rig.terrain.height = 40;
+        rig.terrain.cells.resize(1600);
+        rig.droneX = rig.droneY = 20;
+        for (double heading : {0.0, 1.5707963267948966, 3.141592653589793, -1.5707963267948966}) {
+            rig.hullDirX = std::cos(heading); rig.hullDirY = std::sin(heading);
+            setMiningRigPiloting(*state, 0, -1, 0);
+            require(std::abs(rig.moveX + rig.hullDirX) < 1e-8 && std::abs(rig.moveY + rig.hullDirY) < 1e-8,
+                "reverse thrust must not turn the rig around");
+            require(std::abs(rig.aimDirX - rig.hullDirX) < 1e-8 && std::abs(rig.aimDirY - rig.hullDirY) < 1e-8,
+                "neutral steering retains hull heading");
+            setMiningRigPiloting(*state, 0, 0, 1);
+            require(std::abs(rig.moveX + rig.hullDirY) < 1e-8 && std::abs(rig.moveY - rig.hullDirX) < 1e-8,
+                "rig right strafe uses the clockwise perpendicular in Y-down coordinates");
+            for (double turn : {-1.0, -0.2, 0.2, 1.0}) {
+                setMiningRigPiloting(*state, turn, 0, 0);
+                const double error = std::remainder(std::atan2(rig.aimDirY, rig.aimDirX) - heading, 6.283185307179586);
+                require(std::abs(error - turn * 0.5) < 1e-8, "rig turning remains proportional without snapping to drill directions");
+                require(rig.moveX == 0 && rig.moveY == 0, "rotation alone does not apply translation");
+            }
+        }
+    }
     blockedDrillFeedbackDistinguishesTerrainAndRespectsVisibility();
     environmentalEncountersHaveSafeBypassesAndPersist();
     allActLevelContractsResolve();

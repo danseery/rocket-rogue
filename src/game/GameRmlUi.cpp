@@ -1883,7 +1883,9 @@ std::string inputPromptBar(
                     + describedItem("Drill", "Right click")
                     + describedItem("Scan", "E");
             } else {
-                prompt += describedItem("Move", "WASD / Arrows")
+                prompt += describedItem("Rotate", "A/D")
+                    + describedItem("Thrust / Reverse", "W/S")
+                    + describedItem("Face mouse + A/D strafe", "Hold Shift")
                     + describedItem("Drill", "Space / Left click")
                     + describedItem("Scan", "E");
             }
@@ -1920,7 +1922,8 @@ std::string inputPromptBar(
                 + describedItem("Drill", labels.leftTrigger)
                 + describedItem("Scan", labels.west);
         } else {
-            prompt += describedItem("Move", "L-stick")
+            prompt += describedItem("Thrust / Strafe", "L-stick")
+                + describedItem("Rotate", "R-stick left/right")
                 + describedItem("Drill", labels.rightTrigger)
                 + describedItem("Scan", labels.west);
         }

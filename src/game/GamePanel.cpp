@@ -476,7 +476,7 @@ void collectSharedUtilityModals()
         "<div><strong>Flight controller</strong><span>Right stick left/right rotates. Left stick left/right strafes; up/down applies forward/reverse thrust (subject to flight-Y inversion). Release thrust and strafe to coast.</span></div>"
         "<div><strong>Orbital work</strong><span>After Scan, left stick or D-pad selects Scan, Drill, Land, or Resume Flight. Hold Confirm on Drill. Resume Flight or Back returns to piloting.</span></div>"
         "<div><strong>Action selection</strong><span>Press D-pad during flight or mining to pause and select UI actions. Back returns to gameplay after sticks and action buttons are released.</span></div>"
-        "<div><strong>Mining rig</strong><span>Left stick moves. Right trigger drills. West scans. North tethers. Tap South to stow cargo or leave; hold South for 0.6 seconds to exit.</span></div>"
+        "<div><strong>Mining rig</strong><span>A/D or Left/Right rotate; W/S or Up/Down thrust and reverse. Hold Shift to face the mouse and strafe with A/D. On controller, left stick thrusts and strafes; right stick left/right rotates. Space or left click drills; right trigger drills on controller. West scans. North tethers. Tap South to stow cargo or leave; hold South for 0.6 seconds to exit.</span></div>"
         "<div><strong>Jetpack EVA</strong><span>Left stick thrusts. Right stick aims. Right trigger fires. Left trigger drills. West scans. North tethers. Hold South for 0.6 seconds to enter.</span></div>"
         "</div>";
     const std::string systemMenuBody =

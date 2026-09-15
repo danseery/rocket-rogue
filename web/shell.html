@@ -1267,6 +1267,7 @@
     }
 
     function updateMiningMove() {
+      rr.flightMouseFacing(miningKeys.has("ShiftLeft") || miningKeys.has("ShiftRight"));
       const left = miningKeys.has("a") || miningKeys.has("arrowleft");
       const right = miningKeys.has("d") || miningKeys.has("arrowright");
       const up = miningKeys.has("w") || miningKeys.has("arrowup");
@@ -1336,7 +1337,10 @@
         return true;
       }
       if (!isMiningActive()) return false;
-      if (movement.includes(key)) {
+      if (key === "shift") {
+        if (!event.repeat) miningKeys.add(event.code);
+        updateMiningMove();
+      } else if (movement.includes(key)) {
         if (event.repeat && !miningKeys.has(key)) {
           event.preventDefault();
           return true;
@@ -1366,7 +1370,9 @@
       const key = event.key.toLowerCase();
       if (key === "shift") {
         launchKeys.delete(event.code);
-        updateLaunchMove();
+        miningKeys.delete(event.code);
+        if (isMiningActive()) updateMiningMove();
+        else updateLaunchMove();
       }
       if (key === " " || key === "enter") rr.orbitalWork(false);
       if (launchKeys.delete(key)) updateLaunchMove();

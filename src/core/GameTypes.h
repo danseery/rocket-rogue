@@ -2050,6 +2050,7 @@ struct MiningRunState {
     double droneHealth = 1.0;
     double returnZoneX = 0.0;
     double returnZoneY = 0.0;
+    double shipFallVelocity = 0.0; // Cells per second, downward; parked hull remains upright.
     double contactIntensity = 0.0;
     // Transient presentation state for a player-driven collision. Unlike
     // contactIntensity, this remembers which edge of the active vehicle hit

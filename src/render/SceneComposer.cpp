@@ -4300,6 +4300,12 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
     miningVisualHeadingInitialized_ = true;
     miningVisualHeadingTime_ = visualHeadingTime;
     const Vec2 hullDirection {miningVisualHeadingX_, miningVisualHeadingY_};
+    if (snapshot.screen == Screen::Mining && !snapshot.miningOperatorActive) {
+        packet_.flightPointer = {true, packet_.logicalSceneClip,
+            scenePixelCenterX_ + drone.x * sceneWorldUnitX_,
+            sceneCssHeight_ - (scenePixelCenterY_ + drone.y * sceneWorldUnitY_),
+            hullDirection.x, hullDirection.y};
+    }
     const Vec2 operatorAimDirection = normalize({
         static_cast<float>(snapshot.miningOperatorAimX) * cellW,
         -static_cast<float>(snapshot.miningOperatorAimY) * cellH

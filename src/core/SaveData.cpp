@@ -2703,7 +2703,8 @@ std::string serializeMiningDepthRoute(const MiningRunState& mining)
         << save_schema::crewFieldDelimiter << mining.shipDepthZone
         << save_schema::crewFieldDelimiter << mining.surfacePadX
         << save_schema::crewFieldDelimiter << mining.surfacePadY
-        << save_schema::crewFieldDelimiter << mining.surfaceOriginBound;
+        << save_schema::crewFieldDelimiter << mining.surfaceOriginBound
+        << save_schema::crewFieldDelimiter << mining.shipFallVelocity;
     return out.str();
 }
 
@@ -2718,6 +2719,7 @@ void parseMiningDepthRoute(std::string_view text, MiningRunState& mining)
     if (fields.size() > 5) mining.surfacePadX = parseDouble(fields[5], 0.0);
     if (fields.size() > 6) mining.surfacePadY = parseDouble(fields[6], 0.0);
     if (fields.size() > 7) mining.surfaceOriginBound = parseInt(fields[7], 0) != 0;
+    if (fields.size() > 8) mining.shipFallVelocity = std::max(0.0, parseDouble(fields[8], 0.0));
 }
 
 std::string serializeMiningDepthLayers(const std::vector<MiningDepthLayerState>& layers)
