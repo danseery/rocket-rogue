@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/GameTypes.h"
+#include "core/FlightPointerInput.h"
 #include "core/UiViewportLayout.h"
 #include "input/ControllerInput.h"
 #include "platform/FrameLimitPolicy.h"
@@ -285,6 +286,7 @@ public:
     virtual ~IGameRenderer() = default;
     virtual bool initialize() = 0;
     virtual void render(const RenderSnapshot& snapshot) = 0;
+    virtual FlightPointerPresentation flightPointerPresentation() const { return {}; }
     // Explicit-API backends finish the shared scene/UI command buffer and
     // present here. WebGL leaves this as a no-op because the browser commits
     // the immediate-mode commands from its main-loop callback.

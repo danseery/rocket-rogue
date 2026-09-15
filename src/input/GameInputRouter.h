@@ -251,8 +251,7 @@ public:
 
         switch (context) {
         case InputContext::Launch:
-            result.moveX = (frame.isDown(ControllerButton::RightBumper) ? 1.0 : 0.0) -
-                (frame.isDown(ControllerButton::LeftBumper) ? 1.0 : 0.0);
+            result.moveX = frame.rightX;
             result.strafe = frame.leftX;
             result.moveY = preferences.invertFlightY ? frame.leftY : -frame.leftY;
             result.orbitalHeld = frame.isDown(confirmButton) && !confirmFenced_;

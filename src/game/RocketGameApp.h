@@ -62,6 +62,8 @@ public:
     void prepareForLaunch();
     void startLaunch();
     void launchMove(double steerAxis, double throttleAxis, double strafeAxis = 0.0);
+    void flightMouseFacing(bool held);
+    void flightPointerMove(double viewportX, double viewportY, bool overUi);
     void returnHome();
     void arrivalOps();
     void acknowledgeStoryBriefing();
@@ -453,6 +455,11 @@ private:
     bool miningSceneHandoffCommitted_ = false;
     LevelUpSessionState levelUp_;
     RealtimeInputState keyboardRealtimeInput_;
+    bool flightShiftDown_ = false;
+    bool flightShiftReleaseRequired_ = false;
+    bool flightMouseFacingActive_ = false;
+    bool flightPointerValid_ = false;
+    double flightPointerX_ = 0.0, flightPointerY_ = 0.0;
     RealtimeInputState controllerRealtimeInput_;
     MiningDrillMode miningDrillMode_ = MiningDrillMode::Toggle;
     bool firstTimeIntroductionsEnabled_ = true;

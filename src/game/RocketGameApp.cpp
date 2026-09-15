@@ -1934,6 +1934,8 @@ bool RocketGameApp::realtimeControllerContext(InputContext context) const
 
 void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
 {
+    flightMouseFacingActive_ = false;
+    flightShiftReleaseRequired_ = flightShiftDown_;
     departureThrustHeld_ = false;
     session_.orbitalWork.held = false;
     session_.orbitalWork.releaseRequired = true;
@@ -1955,6 +1957,10 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
 
 void RocketGameApp::applyRealtimeInputs()
 {
+    if (flightMouseFacingActive_ && (inputContext() != InputContext::Launch || session_.orbitalWork.active())) {
+        flightMouseFacingActive_ = false;
+        flightShiftReleaseRequired_ = true;
+    }
     const bool useController = activeInputSource_ == InputSource::Controller;
     const bool orbitalUiOwnsStick = useController && session_.orbitalWork.active();
     const double moveX = orbitalUiOwnsStick ? 0.0 : useController ? controllerRealtimeInput_.moveX : keyboardRealtimeInput_.moveX;
@@ -1967,6 +1973,11 @@ void RocketGameApp::applyRealtimeInputs()
             resumeOrbitalFlight();
         if (std::abs(moveY) > 0.01) departureThrustHeld_ = false;
         session_.steerInput = moveX;
+        if (!useController && flightMouseFacingActive_ && flightPointerValid_ &&
+            !session_.orbitalWork.active() && inputContext() == InputContext::Launch) {
+            if (const auto angle = services_.renderer.flightPointerPresentation().angleTo(flightPointerX_,flightPointerY_))
+                session_.steerInput = flightPointerSteer(*angle,session_.flight.angularVelocity);
+        }
         session_.strafeInput = strafe;
         session_.throttleInput = departureThrustHeld_ ? 1.0 : moveY;
         break;
@@ -2700,6 +2711,7 @@ void RocketGameApp::tick(double deltaSeconds)
             departureThrustHeld_ = false;
             session_.throttleInput = 0.0;
         }
+        applyRealtimeInputs();
         double pilotingThrottle = session_.throttleInput;
         if (departureThrustHeld_) {
             constexpr double assistedClimbSpeed = 8.0;
@@ -3172,6 +3184,30 @@ void RocketGameApp::launchMove(double steerAxis, double throttleAxis, double str
     keyboardRealtimeInput_.strafe = std::clamp(strafeAxis, -1.0, 1.0);
     keyboardRealtimeInput_.moveY = std::clamp(throttleAxis, -1.0, 1.0);
     applyRealtimeInputs();
+}
+
+void RocketGameApp::flightMouseFacing(bool held)
+{
+    if (!held) {
+        flightShiftDown_ = false;
+        flightShiftReleaseRequired_ = false;
+        flightMouseFacingActive_ = false;
+    } else {
+        const bool allowed = inputContext() == InputContext::Launch && session_.flightArmed &&
+            !session_.orbitalWork.active() && !session_.destruction.active &&
+            pauseReason_ == PauseReason::None && !services_.ui.modalOpen() &&
+            activeInputSource_ != InputSource::Controller;
+        if (!allowed) { flightMouseFacingActive_ = false; flightShiftReleaseRequired_ = true; }
+        else if (!flightShiftDown_ && !flightShiftReleaseRequired_) flightMouseFacingActive_ = true;
+        flightShiftDown_ = true;
+    }
+}
+
+void RocketGameApp::flightPointerMove(double viewportX, double viewportY, bool overUi)
+{
+    flightPointerX_ = viewportX;
+    flightPointerY_ = viewportY;
+    flightPointerValid_ = !overUi && std::isfinite(viewportX) && std::isfinite(viewportY);
 }
 
 void RocketGameApp::returnHome()

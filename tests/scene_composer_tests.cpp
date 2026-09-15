@@ -1041,6 +1041,69 @@ void testLaunchUsesAttachedAnimatedSideFlames()
     assert(rotating.instances.size()==3); // Opposing fore/aft jets plus the ship.
 }
 
+void testFlightPointerMatchesRenderedShip()
+{
+    for (const int width : {1280,1920}) for (const double landing : {0.0,0.4,1.0})
+    for (const double departure : {-1.0,0.0,0.4,0.9})
+    for (const double heading : {-3.13,-1.57,0.0,1.57,3.13}) {
+        SceneComposer composer;
+        composer.setViewport({width,800,width,800,1});
+        composer.setTextureReady(TextureId::RocketClosed,true);
+        RenderSnapshot snapshot;
+        snapshot.screen = rocket::Screen::Flight;
+        snapshot.launchPhysicalFlight = true;
+        snapshot.launchPositionX = 0.1; snapshot.launchPositionY = 0.25;
+        snapshot.launchHeading = heading;
+        snapshot.launchLandingBlend = landing;
+        snapshot.launchApproachBlend = 0.5;
+        snapshot.launchLandingBasisAngle = 0.9;
+        snapshot.launchLandingAltitude = 12;
+        snapshot.surfaceArrivalPrepared = landing > 0;
+        snapshot.launchLandingLocalFrame = landing == 1;
+        snapshot.miningWidth = 64; snapshot.miningHeight = 30;
+        snapshot.miningReturnZoneX = snapshot.launchLandingPadX = 30;
+        snapshot.miningReturnZoneY = snapshot.launchLandingPadY = 2;
+        if (departure >= 0.0) {
+            snapshot.surfaceArrivalPrepared = true;
+            snapshot.launchLandingLocalFrame = false;
+            snapshot.launchHandoffFrom = static_cast<int>(rocket::FlightMode::Landing);
+            snapshot.launchHandoffProgress = departure;
+            snapshot.manualAscentCameraProgress = departure;
+        }
+        composer.compose(snapshot);
+        const auto packet = rocket::SceneComposerTestAccess::rocketPacket(composer,snapshot);
+        const auto pose = packet.flightPointer;
+        assert(pose.active);
+        const auto ship = rocket::unpackSceneInstance(packet.instances.back());
+        const auto& t = packet.transform;
+        assert(std::abs(pose.shipX-(t.pixelCenterX+ship.centerX*t.worldUnitX))<1.0);
+        assert(std::abs(pose.shipY-(800-t.pixelCenterY-ship.centerY*t.worldUnitY))<1.0);
+        assert(!pose.angleTo(pose.shipX,pose.shipY));
+        assert(!pose.angleTo(-10,-10));
+        // Remove clipping only for directional math; some transition shots
+        // intentionally place part of the ship outside the scene.
+        auto unbounded = pose; unbounded.viewport = {-10000,-10000,20000,20000};
+        const double x = pose.shipX+pose.forwardX*100, y=pose.shipY-pose.forwardY*100;
+        assert(std::abs(*unbounded.angleTo(x,y))<0.00001);
+        for (const double angle : {-3.13,-1.57,1.57,3.13}) {
+            const double dx=std::cos(angle)*pose.forwardX-std::sin(angle)*pose.forwardY;
+            const double dy=std::sin(angle)*pose.forwardX+std::cos(angle)*pose.forwardY;
+            assert(std::abs(*unbounded.angleTo(pose.shipX+dx*100,pose.shipY-dy*100)-angle)<0.00001);
+        }
+    }
+    // The feedback law converges through +/-pi without snapping or overshoot.
+    double heading=3.0, velocity=0;
+    const double target=-3.0, dt=1.0/60.0;
+    for(int i=0;i<600;++i) {
+        const double error=std::remainder(target-heading,2*3.141592653589793);
+        const double steer=rocket::flightPointerSteer(error,velocity);
+        velocity-=steer*rocket::flight_controls::turnAcceleration*dt;
+        velocity*=std::exp(-5.2*dt);
+        heading+=velocity*dt;
+    }
+    assert(std::abs(std::remainder(target-heading,2*3.141592653589793))<0.001);
+}
+
 void testMiningSkyAndTunnelBackdrop()
 {
     for (int width : {800, 1600}) for (int depth : {0, 2}) {
@@ -4157,6 +4220,7 @@ int main() try
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
 #endif
     testUiViewportLayoutGeometry();
+    testFlightPointerMatchesRenderedShip();
     testSolarBeltRendering();
     testArtifactWreckMarkerUsesOwnership();
     testCommittedDepartureRendering();

@@ -195,6 +195,8 @@ public:
 
 class FakeRenderer final : public rocket::IGameRenderer {
 public:
+    rocket::FlightPointerPresentation pointerPresentation;
+    rocket::FlightPointerPresentation flightPointerPresentation() const override { return pointerPresentation; }
     bool initialize() override { initialized = true; return true; }
     void render(const rocket::RenderSnapshot& snapshot) override
     {
@@ -2168,8 +2170,7 @@ void uncalibratedLunarImpactCinematic()
                     fixture.renderer.launchCourseVelocity * 2.4,
                 -1.0,
                 1.0);
-            fixture.controllers.frame.down.set(static_cast<std::size_t>(rocket::ControllerButton::LeftBumper),steer < -.01);
-            fixture.controllers.frame.down.set(static_cast<std::size_t>(rocket::ControllerButton::RightBumper),steer > .01);
+            fixture.controllers.frame.rightX = steer < -.01 ? -1.0 : steer > .01 ? 1.0 : 0.0;
             fixture.host.now += 1.0 / 60.0;
             fixture.runner.frame();
         }
@@ -2231,6 +2232,55 @@ void uncalibratedLunarImpactCinematic()
 
 }
 
+void shiftMouseFlightInput()
+{
+    AppFixture fixture;
+    fixture.controllers.source = rocket::InputSource::KeyboardPointer;
+    assert(fixture.runner.initialize());
+    auto& app = fixture.runner.app();
+    app.debugStartLaunchLesson(2);
+    fixture.host.now += 1.0/60.0;
+    fixture.runner.frame();
+    fixture.renderer.pointerPresentation = {true,{0,0,1280,800},640,400,0,1};
+    // A fresh first press works after entering flight without an artificial key-up.
+    app.flightPointerMove(840,400,false);
+    app.flightMouseFacing(true);
+    app.launchMove(0,0,1);
+    app.tick(1.0/60.0); app.renderScene();
+    assert(fixture.renderer.launchSteerInput>0 && fixture.renderer.launchStrafeInput==1);
+    app.flightPointerMove(840,400,true);
+    app.tick(1.0/60.0); app.renderScene();
+    assert(fixture.renderer.launchSteerInput==0);
+    app.flightPointerMove(440,400,false);
+    app.tick(1.0/60.0); app.renderScene();
+    assert(fixture.renderer.launchSteerInput<0);
+    app.flightMouseFacing(false);
+    app.launchMove(1,0,0);
+    app.tick(1.0/60.0); app.renderScene();
+    assert(fixture.renderer.launchSteerInput==1 && fixture.renderer.launchStrafeInput==0);
+    app.launchMove(0,0,0);
+    app.flightMouseFacing(true);
+    fixture.ui.modalOpenValue = true;
+    fixture.host.now += 1.0/60.0; fixture.runner.frame();
+    fixture.ui.modalOpenValue = false;
+    fixture.host.now += 1.0/60.0; fixture.runner.frame();
+    app.flightMouseFacing(true);
+    app.tick(1.0/60.0); app.renderScene();
+    assert(fixture.renderer.launchSteerInput==0);
+    app.flightMouseFacing(false); app.flightMouseFacing(true);
+    app.tick(1.0/60.0); app.renderScene();
+    assert(fixture.renderer.launchSteerInput<0);
+    app.setActiveInputSource(rocket::InputSource::Controller);
+    app.setActiveInputSource(rocket::InputSource::KeyboardPointer);
+    app.flightMouseFacing(true);
+    app.tick(1.0/60.0); app.renderScene();
+    assert(fixture.renderer.launchSteerInput==0);
+    app.flightMouseFacing(false); app.flightMouseFacing(true);
+    app.tick(1.0/60.0); app.renderScene();
+    assert(fixture.renderer.launchSteerInput<0);
+    fixture.runner.shutdown();
+}
+
 int main(int argc, char** argv)
 {
 #if defined(_MSC_VER)
@@ -2240,6 +2290,8 @@ int main(int argc, char** argv)
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #endif
     if (argc > 1 && std::string_view(argv[1]) == "--flight-impact") { uncalibratedLunarImpactCinematic(); return 0; }
+    if (argc > 1 && std::string_view(argv[1]) == "--shift-flight") { shiftMouseFlightInput(); return 0; }
+    shiftMouseFlightInput();
     recoveryGuidanceUsesRealDockActions();
     straylightSequenceActionsAndArrival();
     explicitOrbitalLandingEntersLocalDescent();

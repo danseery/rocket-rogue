@@ -75,11 +75,11 @@ bool surfaceHudForContext(const PanelRenderContext& context)
 std::string physicalFlightControlHint(const PanelRenderContext& context)
 {
     if (!context.controllerFlightControls) {
-        return "Q/E rotate · A/D strafe · W thrust · S reverse.";
+        return "A/D rotate · W/S thrust/reverse · Hold Shift: face mouse + A/D strafe.";
     }
     return context.invertFlightY
-        ? "LB/RB rotate · L-stick: left/right strafe · down thrust · up reverse"
-        : "LB/RB rotate · L-stick: left/right strafe · up thrust · down reverse";
+        ? "R-stick left/right rotates · L-stick: left/right strafe · down thrust · up reverse"
+        : "R-stick left/right rotates · L-stick: left/right strafe · up thrust · down reverse";
 }
 
 std::string landingControlHint(const PanelRenderContext& context)
@@ -472,8 +472,8 @@ void collectSharedUtilityModals()
         "<div class=\"detail-stack rr-detail-stack modal-body controller-controls\">"
         "<div><strong>Menus</strong><span>Left stick or D-pad navigates. Confirm selects the highlighted action; Back returns. Right stick scrolls. Confirm and Back follow your controller settings.</span></div>"
         "<div><strong>Shortcuts</strong><span>Menu opens this pause menu. View opens Map. North opens Inventory outside real-time play.</span></div>"
-        "<div><strong>Flight keyboard</strong><span>Q/E rotate. A/D or Left/Right strafe. W/S or Up/Down apply forward/reverse thrust.</span></div>"
-        "<div><strong>Flight controller</strong><span>Left/right shoulders rotate. Left stick left/right strafes; up/down applies forward/reverse thrust (subject to flight-Y inversion). Release thrust to coast.</span></div>"
+        "<div><strong>Flight keyboard</strong><span>A/D or Left/Right rotate. Hold either Shift to face the mouse and use A/D or Left/Right to strafe. Release Shift to resume keyboard rotation. W/S or Up/Down apply forward/reverse thrust.</span></div>"
+        "<div><strong>Flight controller</strong><span>Right stick left/right rotates. Left stick left/right strafes; up/down applies forward/reverse thrust (subject to flight-Y inversion). Release thrust and strafe to coast.</span></div>"
         "<div><strong>Orbital work</strong><span>After Scan, left stick or D-pad selects Scan, Drill, Land, or Resume Flight. Hold Confirm on Drill. Resume Flight or Back returns to piloting.</span></div>"
         "<div><strong>Action selection</strong><span>Press D-pad during flight or mining to pause and select UI actions. Back returns to gameplay after sticks and action buttons are released.</span></div>"
         "<div><strong>Mining rig</strong><span>Left stick moves. Right trigger drills. West scans. North tethers. Tap South to stow cargo or leave; hold South for 0.6 seconds to exit.</span></div>"
@@ -4153,7 +4153,7 @@ std::optional<ModalPresentation> buildIncomingMessageCard(
                 case MessageHint::ExitRig: label = pad ? "Exit Rig: hold A / South" : "Exit Rig: F"; break;
                 case MessageHint::Drill: label = pad ? "Hand drill: LT" : "Hand drill: Space"; break;
                 case MessageHint::Tether: label = pad ? "Tether: Y / North" : "Tether: T"; break;
-                case MessageHint::FlightSteer: label = pad ? "Rotate: LB / RB · Strafe: left stick left / right" : "Rotate: Q / E · Strafe: A / D or Left / Right"; break;
+                case MessageHint::FlightSteer: label = pad ? "Rotate: right stick left / right · Strafe: left stick left / right" : "Rotate: A / D · Hold Shift: face mouse + A / D strafe (arrows also work)"; break;
                 case MessageHint::FlightThrust: label = pad ? (context.invertFlightY ? "Thrust / reverse: left stick down / up" : "Thrust / reverse: left stick up / down") : "Thrust / reverse: W / S or Up / Down"; break;
                 }
                 body << "<p>" << label << "</p>";

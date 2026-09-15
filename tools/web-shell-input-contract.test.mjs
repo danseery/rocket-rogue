@@ -75,12 +75,14 @@ test("realtime input cannot bypass explicit RmlUi actions", () => {
   assert.match(keyDown, /launchKeys\.add\(key\)[\s\S]*updateLaunchMove\(\)/);
   const move = new Function("launchKeys", "rr", launchMove);
   for (const [keys, expected] of [
-    [["a"], [0,0,-1]], [["d"], [0,0,1]], [["q"], [-1,0,0]], [["e"], [1,0,0]],
-    [["q","w","d"], [-1,1,1]], [["arrowleft","s"], [0,-1,-1]],
+    [["a"], [-1,0,0]], [["d"], [1,0,0]], [["q"], [0,0,0]], [["e"], [0,0,0]],
+    [["ShiftLeft","w","d"], [0,1,1]], [["arrowleft","s"], [-1,-1,0]],
+    [["ShiftRight","arrowleft","s"], [0,-1,-1]],
+    [["ShiftLeft","ShiftRight","a"], [0,0,-1]],
     [["q","e","a","d"], [0,0,0]], [[], [0,0,0]],
   ]) {
     let actual;
-    move(new Set(keys), {launchMove: (...axes) => { actual=axes; }});
+    move(new Set(keys), {launchMove: (...axes) => { actual=axes; }, flightMouseFacing: () => {}});
     assert.deepEqual(actual, expected, `independent flight axes for ${keys}`);
   }
   assert.match(keyDown, /key === "c"[\s\S]*rr_toggle_cruise/);
@@ -90,6 +92,43 @@ test("realtime input cannot bypass explicit RmlUi actions", () => {
   assert.match(keyDown, /if \(!isMiningActive\(\)\) return false/);
   assert.doesNotMatch(keyDown, /flybyContinue|orbitContinue/);
   assert.match(functionBody("releaseRealtimeInputs"), /launchKeys\.clear\(\)[\s\S]*updateLaunchMove\(\)/);
+});
+
+test("held movement transfers immediately and both Shift keys release independently", () => {
+  const launchKeys = new Set();
+  const miningKeys = new Set();
+  let axes;
+  let facing;
+  const rr = {
+    launchMove: (...value) => { axes = value; },
+    flightMouseFacing: (value) => { facing = value; },
+  };
+  const updateLaunchMove = () => new Function("launchKeys", "rr", functionBody("updateLaunchMove"))(launchKeys, rr);
+  const down = new Function("event", "launchKeys", "rr", "updateLaunchMove", "isLaunchActive", "isSurfaceArrivalActive", functionBody("handleRealtimeKeyDown"));
+  const up = new Function("event", "launchKeys", "miningKeys", "rr", "updateLaunchMove", "isMiningActive", functionBody("handleRealtimeKeyUp"));
+  const press = (key, code = key, repeat = false) => down({key, code, repeat, preventDefault() {}}, launchKeys, rr, updateLaunchMove, () => true, () => false);
+  const release = (key, code = key) => up({key, code}, launchKeys, miningKeys, rr, updateLaunchMove, () => false);
+  press("a");
+  assert.deepEqual(axes, [-1, 0, 0]);
+  press("Shift", "ShiftLeft");
+  assert.deepEqual(axes, [0, 0, -1]);
+  assert.equal(facing, true);
+  press("Shift", "ShiftRight");
+  release("Shift", "ShiftLeft");
+  assert.equal(facing, true);
+  assert.deepEqual(axes, [0, 0, -1]);
+  release("Shift", "ShiftRight");
+  assert.equal(facing, false);
+  assert.deepEqual(axes, [-1, 0, 0]);
+  // A blocking transition clears keys; OS repeat cannot reactivate held inputs.
+  launchKeys.clear();
+  updateLaunchMove();
+  press("Shift", "ShiftLeft", true);
+  press("a", "KeyA", true);
+  assert.equal(facing, false);
+  assert.deepEqual(axes, [0, 0, 0]);
+  press("Shift", "ShiftLeft");
+  assert.equal(facing, true);
 });
 
 test("retired activity shortcuts stay out of the web input surface", () => {

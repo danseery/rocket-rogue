@@ -916,6 +916,8 @@
       currentScreen: () => rrCall("rr_current_screen", [], [], "number"),
       startLaunch: () => rrCall("rr_start_launch"),
       launchMove: (steerAxis, throttleAxis, strafeAxis = 0) => rrCall("rr_launch_move", [steerAxis, throttleAxis, strafeAxis], ["number", "number", "number"]),
+      flightMouseFacing: (held) => rrCall("rr_flight_mouse_facing", [held ? 1 : 0], ["number"]),
+      flightPointerMove: (x, y, overUi) => rrCall("rr_flight_pointer_move", [x, y, overUi ? 1 : 0], ["number", "number", "number"]),
       deploySurfaceTeam: () => rrCall("rr_deploy_surface_team"),
       orbitalWork: (held) => rrCall("rr_orbital_work", [held ? 1 : 0], ["number"]),
       resumeOrbitalFlight: () => rrCall("rr_resume_orbital_flight"),
@@ -1251,8 +1253,10 @@
       const right = launchKeys.has("d") || launchKeys.has("arrowright");
       const up = launchKeys.has("w") || launchKeys.has("arrowup");
       const down = launchKeys.has("s") || launchKeys.has("arrowdown");
-      rr.launchMove((launchKeys.has("e") ? 1 : 0) - (launchKeys.has("q") ? 1 : 0),
-        (up ? 1 : 0) - (down ? 1 : 0), (right ? 1 : 0) - (left ? 1 : 0));
+      const shift = launchKeys.has("ShiftLeft") || launchKeys.has("ShiftRight");
+      rr.flightMouseFacing(shift);
+      rr.launchMove(shift ? 0 : (right ? 1 : 0) - (left ? 1 : 0),
+        (up ? 1 : 0) - (down ? 1 : 0), shift ? (right ? 1 : 0) - (left ? 1 : 0) : 0);
     }
 
     function isMiningActive() {
@@ -1309,7 +1313,10 @@
           if (!event.repeat) rr.orbitalWork(true);
         } else if (key === "escape") {
           rr.resumeOrbitalFlight();
-        } else if (movement.includes(key) || key === "q" || key === "e") {
+        } else if (key === "shift") {
+          if (!event.repeat) launchKeys.add(event.code);
+          updateLaunchMove();
+        } else if (movement.includes(key)) {
           if (event.repeat && !launchKeys.has(key)) {
             event.preventDefault();
             return true;
@@ -1357,6 +1364,10 @@
 
     function handleRealtimeKeyUp(event) {
       const key = event.key.toLowerCase();
+      if (key === "shift") {
+        launchKeys.delete(event.code);
+        updateLaunchMove();
+      }
       if (key === " " || key === "enter") rr.orbitalWork(false);
       if (launchKeys.delete(key)) updateLaunchMove();
       if (miningKeys.delete(key)) updateMiningMove();
@@ -1413,6 +1424,7 @@
 
     canvas.addEventListener("pointermove", (event) => {
       const overRmlUi = rr.rmlMouseMove(event.clientX, event.clientY);
+      rr.flightPointerMove(event.clientX, event.clientY, overRmlUi);
       if (isMiningActive() && !overRmlUi) {
         rr.miningPointerAim(event.clientX, event.clientY);
       }
@@ -1435,6 +1447,7 @@
     });
 
     canvas.addEventListener("pointercancel", releaseMiningDrill);
+    canvas.addEventListener("pointerleave", () => rr.flightPointerMove(0, 0, true));
     canvas.addEventListener("lostpointercapture", releaseMiningDrill);
     canvas.addEventListener("wheel", (event) => {
       if (rr.rmlWheel(event.clientX, event.clientY, event.deltaY || 0)) {

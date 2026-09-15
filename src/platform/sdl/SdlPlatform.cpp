@@ -284,6 +284,7 @@ bool SdlPlatform::processEvents(RocketGameApp& app)
         const bool overUi = app.uiMouseMove(
             static_cast<int>(mouseX_),
             static_cast<int>(mouseY_));
+        app.flightPointerMove(mouseX_, mouseY_, overUi);
         if (!overUi
             && (app.inputContext() == InputContext::MiningActive
                 || app.inputContext() == InputContext::MiningService)) {
@@ -292,6 +293,7 @@ bool SdlPlatform::processEvents(RocketGameApp& app)
     };
 
     const auto dispatchEvent = [&](const SDL_Event& event) {
+        if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE) app.flightPointerMove(0, 0, true);
         if (benchmarkMode_
             && (event.type == SDL_EVENT_MOUSE_MOTION
                 || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN
@@ -502,11 +504,13 @@ void SdlPlatform::applyKeyboardState(RocketGameApp& app)
     const bool right = keyDown(state, SDL_SCANCODE_D, SDL_SCANCODE_RIGHT);
     const bool up = keyDown(state, SDL_SCANCODE_W, SDL_SCANCODE_UP);
     const bool down = keyDown(state, SDL_SCANCODE_S, SDL_SCANCODE_DOWN);
+    const bool shift = keyDown(state, SDL_SCANCODE_LSHIFT, SDL_SCANCODE_RSHIFT);
+    app.flightMouseFacing(shift);
     switch (app.inputContext()) {
     case InputContext::Launch:
     case InputContext::OrbitalWork:
-        app.launchMove((state && state[SDL_SCANCODE_E] ? 1.0 : 0.0) - (state && state[SDL_SCANCODE_Q] ? 1.0 : 0.0),
-            (up ? 1.0 : 0.0) - (down ? 1.0 : 0.0), (right ? 1.0 : 0.0) - (left ? 1.0 : 0.0));
+        app.launchMove(shift ? 0.0 : (right ? 1.0 : 0.0) - (left ? 1.0 : 0.0),
+            (up ? 1.0 : 0.0) - (down ? 1.0 : 0.0), shift ? (right ? 1.0 : 0.0) - (left ? 1.0 : 0.0) : 0.0);
         break;
     case InputContext::SurfaceArrival:
         break;

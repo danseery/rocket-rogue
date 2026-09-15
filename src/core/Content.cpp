@@ -309,7 +309,11 @@ ContentCatalog createDefaultContent()
             {{"default", "Artifact secured. " + std::move(next) +
                 " Earth service is recommended, or continue manually from the system map.", {}}}});
     };
-    addMissionMessages("moon_mission", "Moon", "Recover 20 Common Ore, then pulse the anomaly, excavate it, and tether the artifact to the ship.", "Prospector support and drone slot one are online. Mars, Mercury, and Venus are now charted.");
+    addMissionMessages("moon_mission", "Moon",
+        "Your first contract is 20 Common Ore. First, establish orbit: approach the Moon's orbit bands, turn to point along them, and use short thrust pulses to bend your projected path into a loop around the Moon. If the path crosses the surface, thrust opposite your motion to slow down and adjust your course. Once the loop stays clear of the surface, release thrust, reverse and strafe. Coast in a safe loop for two seconds to confirm orbit, then select SCAN to survey a landing site. After landing, recover the ore, pulse the anomaly, excavate it, and tether the artifact to the ship.",
+        "Prospector support and drone slot one are online. Mars, Mercury, and Venus are now charted.");
+    catalog.incomingMessages[catalog.incomingMessages.size() - 2].variants.front().hints =
+        {MessageHint::FlightSteer, MessageHint::FlightThrust};
     addMissionMessages("mars_mission", "Mars", "Recover 8 Common Ore, pulse the terrain, and return the Martian artifact to the ship.", "Drone slot two is online. Jupiter and Io are now charted; Io is the next mission.");
     addMissionMessages("io_mission", "Io", "Commission Hazard support, cool the thermal seal, excavate all four segments, and recover the artifact.", "The Io battery is secured. Saturn and Titan are now charted; Titan is the next mission.");
     addMissionMessages("titan_mission", "Titan", "Survey the landing site, pulse the buried signal, and recover the artifact.", "The Titan battery is secured. Uranus and Titania are now charted; Titania is the next mission.");

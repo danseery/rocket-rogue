@@ -551,12 +551,20 @@ void launchUsesExplicitFocusOwnership()
             std::abs(pilotingInput.moveY - 0.60) < 0.000001,
         "left stick must strafe without rotation and retain proportional forward thrust");
     frame.down.set(index(ControllerButton::RightBumper));
-    require(router.route(InputContext::Launch,frame,preferences).moveX==1.0,"right shoulder rotates clockwise");
+    require(router.route(InputContext::Launch,frame,preferences).moveX==0.0,"bumpers no longer steer flight");
     frame.down.set(index(ControllerButton::LeftBumper));
     require(router.route(InputContext::Launch,frame,preferences).moveX==0.0,"opposing shoulders cancel rotation");
     frame.down.reset(index(ControllerButton::RightBumper));
-    require(router.route(InputContext::Launch,frame,preferences).moveX==-1.0,"left shoulder rotates counterclockwise");
+    require(router.route(InputContext::Launch,frame,preferences).moveX==0.0,"left bumper no longer steers flight");
     frame.down.reset(index(ControllerButton::LeftBumper));
+    for (const double turn : {-1.0, -0.35, 0.0, 0.45, 1.0}) {
+        frame.rightX = turn;
+        frame.rightY = 0.9;
+        const auto result = router.route(InputContext::Launch,frame,preferences);
+        require(result.moveX == turn && result.strafe == frame.leftX,
+            "right horizontal stick rotates proportionally, independently of left stick and vertical right stick");
+    }
+    frame.rightX = frame.rightY = 0.0;
     preferences.invertFlightY = true;
     const RoutedGameInput invertedPilotingInput = router.route(InputContext::Launch, frame, preferences);
     require(std::abs(invertedPilotingInput.moveY + 0.60) < 0.000001,

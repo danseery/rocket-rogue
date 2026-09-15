@@ -1,5 +1,6 @@
 #pragma once
 #include "render/SurfaceCameraPresentation.h"
+#include "core/FlightPointerInput.h"
 
 #include "core/UiViewportLayout.h"
 
@@ -473,6 +474,7 @@ struct SceneTransform {
 // Frame-lifetime view into SceneComposer-owned storage. A backend must consume
 // this packet synchronously before the next compose() call.
 struct ScenePacket {
+    FlightPointerPresentation flightPointer;
     SurfaceCameraPresentation surfaceCamera;
     std::span<const PackedSceneVertex> vertices;
     std::span<const PackedSceneVertex> miningTerrainVertices;

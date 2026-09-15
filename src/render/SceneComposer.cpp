@@ -1709,6 +1709,7 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
     droppedFrameInstances_ = 0;
     miningTerrainStreamUsed_ = false;
     packet_.droppedFrameInstances = 0;
+    packet_.flightPointer = {};
     const double cssWidth = std::max(1, viewport_.logicalWidth);
     const double cssHeight = std::max(1, viewport_.logicalHeight);
 
@@ -6805,6 +6806,12 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
     const float hangarLift = snapshot.screen == Screen::Hangar ? 0.02F : 0.0F;
     const float cx = route.x;
     const float cy = route.y + hangarLift;
+    if (snapshot.screen == Screen::Flight && snapshot.launchPhysicalFlight) {
+        packet_.flightPointer = {true, packet_.logicalSceneClip,
+            scenePixelCenterX_ + cx*sceneWorldUnitX_,
+            sceneCssHeight_ - (scenePixelCenterY_ + cy*sceneWorldUnitY_),
+            forward.x, forward.y};
+    }
     // Body encounters change the camera's approach blend. Keep the ship's
     // readable flight size independent of that frame-local zoom.
     float scale = snapshot.launchPhysicalFlight

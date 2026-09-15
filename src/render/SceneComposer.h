@@ -30,6 +30,7 @@ public:
     void setRigCollisionDebug(bool enabled) noexcept { rigCollisionDebug_ = enabled; }
     void setTextureReady(TextureId texture, bool ready) noexcept;
     const ScenePacket& compose(const RenderSnapshot& snapshot);
+    FlightPointerPresentation flightPointerPresentation() const { return packet_.flightPointer; }
     void reset();
 
 private:

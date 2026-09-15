@@ -604,6 +604,22 @@ void rr_mining_aim(double normalizedX, double normalizedY)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_flight_pointer_move(double viewportX, double viewportY, int overUi)
+{
+    if (g_app) g_app->flightPointerMove(viewportX, viewportY, overUi != 0);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void rr_flight_mouse_facing(int held)
+{
+    if (g_app) g_app->flightMouseFacing(held != 0);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_mining_pointer_aim(double viewportX, double viewportY)
 {
     if (g_app) {
