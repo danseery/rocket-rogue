@@ -1984,11 +1984,6 @@ void RocketGameApp::applyRealtimeInputs()
             resumeOrbitalFlight();
         if (std::abs(moveY) > 0.01) departureThrustHeld_ = false;
         session_.steerInput = moveX;
-        if (!useController && flightMouseFacingActive_ && flightPointerValid_ &&
-            !session_.orbitalWork.active() && inputContext() == InputContext::Launch) {
-            if (const auto angle = services_.renderer.flightPointerPresentation().angleTo(flightPointerX_,flightPointerY_))
-                session_.steerInput = flightPointerSteer(*angle,session_.flight.angularVelocity);
-        }
         session_.strafeInput = strafe;
         session_.throttleInput = departureThrustHeld_ ? 1.0 : moveY;
         break;
@@ -2001,13 +1996,13 @@ void RocketGameApp::applyRealtimeInputs()
                 state_.run.mining.operatorMode == MiningOperatorMode::Jetpack;
             if (operatorActive) {
                 setMiningMove(state_, moveX, moveY);
+            } else if (useController) {
+                // Left stick follows the screen; drill heading only affects rotation.
+                setMiningRigPiloting(state_, miningInput.aimX, 0.0, 0.0);
+                setMiningMove(state_, moveX, moveY, false);
             } else {
-                double turn = useController ? miningInput.aimX : flightShiftDown_ ? 0.0 : moveX;
-                if (!useController && flightMouseFacingActive_ && flightPointerValid_) {
-                    if (const auto angle = services_.renderer.flightPointerPresentation().angleTo(flightPointerX_, flightPointerY_))
-                        turn = std::clamp(-*angle / 0.5, -1.0, 1.0);
-                }
-                setMiningRigPiloting(state_, turn, -moveY, useController || flightShiftDown_ ? moveX : 0.0);
+                const double turn = flightShiftDown_ ? 0.0 : moveX;
+                setMiningRigPiloting(state_, turn, -moveY, flightShiftDown_ ? moveX : 0.0);
             }
             if (std::hypot(miningInput.aimX, miningInput.aimY) > 0.01) {
                 setMiningAim(state_, miningInput.aimX, miningInput.aimY);

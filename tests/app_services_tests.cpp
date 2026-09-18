@@ -31,10 +31,35 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocket {
 struct OrbitalLandingTestAccess {
+    static void rigControllerMovementFollowsScreen(RocketGameApp& app) {
+        app.debugStartMining();
+        app.setActiveInputSource(InputSource::Controller);
+        auto& mining = app.state_.run.mining;
+        for (const double heading : {0.0, 1.5707963267948966, 3.141592653589793, -1.5707963267948966}) {
+            mining.hullDirX = std::cos(heading);
+            mining.hullDirY = std::sin(heading);
+            for (const auto axes : {std::pair{0.0, -0.7}, std::pair{0.0, 0.7},
+                                   std::pair{-0.7, 0.0}, std::pair{0.7, 0.0}, std::pair{0.4, -0.4}}) {
+                RoutedGameInput input;
+                input.moveX = axes.first;
+                input.moveY = axes.second;
+                input.aimX = 0.6;
+                app.dispatchControllerInput(InputContext::MiningActive, input);
+                assert(std::abs(mining.moveX - axes.first) < 1e-8);
+                assert(std::abs(mining.moveY - axes.second) < 1e-8);
+                // Right-stick rotation remains independent of left-stick direction.
+                assert(std::abs(mining.aimDirX - std::cos(heading + 0.3)) < 1e-8);
+                assert(std::abs(mining.aimDirY - std::sin(heading + 0.3)) < 1e-8);
+            }
+        }
+        app.dispatchControllerInput(InputContext::MiningActive, {});
+        assert(mining.moveX == 0.0 && mining.moveY == 0.0);
+    }
     static void fallenShipDepartsFromCurrentPosition(RocketGameApp& app) {
         app.debugStartMining();
         auto& mining = app.state_.run.mining;
@@ -2254,7 +2279,7 @@ void uncalibratedLunarImpactCinematic()
 
 }
 
-void shiftMouseFlightInput()
+void shiftStrafeFlightInput()
 {
     AppFixture fixture;
     fixture.controllers.source = rocket::InputSource::KeyboardPointer;
@@ -2264,18 +2289,18 @@ void shiftMouseFlightInput()
     fixture.host.now += 1.0/60.0;
     fixture.runner.frame();
     fixture.renderer.pointerPresentation = {true,{0,0,1280,800},640,400,0,1};
-    // A fresh first press works after entering flight without an artificial key-up.
+    // Shift strafes without steering toward the cursor, including across UI and device switches.
     app.flightPointerMove(840,400,false);
     app.flightMouseFacing(true);
     app.launchMove(0,0,1);
     app.tick(1.0/60.0); app.renderScene();
-    assert(fixture.renderer.launchSteerInput>0 && fixture.renderer.launchStrafeInput==1);
+    assert(fixture.renderer.launchSteerInput==0 && fixture.renderer.launchStrafeInput==1);
     app.flightPointerMove(840,400,true);
     app.tick(1.0/60.0); app.renderScene();
     assert(fixture.renderer.launchSteerInput==0);
     app.flightPointerMove(440,400,false);
     app.tick(1.0/60.0); app.renderScene();
-    assert(fixture.renderer.launchSteerInput<0);
+    assert(fixture.renderer.launchSteerInput==0);
     app.flightMouseFacing(false);
     app.launchMove(1,0,0);
     app.tick(1.0/60.0); app.renderScene();
@@ -2291,7 +2316,7 @@ void shiftMouseFlightInput()
     assert(fixture.renderer.launchSteerInput==0);
     app.flightMouseFacing(false); app.flightMouseFacing(true);
     app.tick(1.0/60.0); app.renderScene();
-    assert(fixture.renderer.launchSteerInput<0);
+    assert(fixture.renderer.launchSteerInput==0);
     app.setActiveInputSource(rocket::InputSource::Controller);
     app.setActiveInputSource(rocket::InputSource::KeyboardPointer);
     app.flightMouseFacing(true);
@@ -2299,7 +2324,7 @@ void shiftMouseFlightInput()
     assert(fixture.renderer.launchSteerInput==0);
     app.flightMouseFacing(false); app.flightMouseFacing(true);
     app.tick(1.0/60.0); app.renderScene();
-    assert(fixture.renderer.launchSteerInput<0);
+    assert(fixture.renderer.launchSteerInput==0);
     fixture.runner.shutdown();
 }
 
@@ -2327,7 +2352,14 @@ void shiftRigInput()
     fixture.renderer.pointerPresentation = {true,{0,0,1280,800},640,400,0,-1};
     app.flightPointerMove(840,400,false); app.flightMouseFacing(true);
     app.tick(1.0 / 60.0); app.renderScene();
-    assert(fixture.renderer.miningHullX > initialX); // Down-facing rig turns toward screen-right.
+    assert(std::abs(fixture.renderer.miningHullX - initialX) < 1e-8);
+    assert(std::abs(fixture.renderer.miningHullY - initialY) < 1e-8); // Cursor does not turn the rig.
+    app.miningMove(1, 0);
+    app.flightPointerMove(440,400,false);
+    app.tick(1.0 / 60.0); app.renderScene();
+    assert(std::abs(fixture.renderer.miningHullX - initialX) < 1e-8);
+    assert(std::abs(fixture.renderer.miningMoveX + initialY) < 1e-6);
+    app.miningMove(0, 0);
     fixture.ui.modalOpenValue = true;
     fixture.host.now += 1.0 / 60.0; fixture.runner.frame();
     fixture.ui.modalOpenValue = false;
@@ -2354,9 +2386,15 @@ int main(int argc, char** argv)
     }
     if (argc > 1 && std::string_view(argv[1]) == "--ship-support-only") return 0;
     if (argc > 1 && std::string_view(argv[1]) == "--flight-impact") { uncalibratedLunarImpactCinematic(); return 0; }
-    if (argc > 1 && std::string_view(argv[1]) == "--shift-flight") { shiftMouseFlightInput(); shiftRigInput(); return 0; }
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        rocket::OrbitalLandingTestAccess::rigControllerMovementFollowsScreen(fixture.runner.app());
+        fixture.runner.shutdown();
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--shift-flight") { shiftStrafeFlightInput(); shiftRigInput(); return 0; }
     shiftRigInput();
-    shiftMouseFlightInput();
+    shiftStrafeFlightInput();
     recoveryGuidanceUsesRealDockActions();
     straylightSequenceActionsAndArrival();
     explicitOrbitalLandingEntersLocalDescent();
