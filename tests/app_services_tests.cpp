@@ -1734,6 +1734,11 @@ void missionScanPresentationAndNavigation()
         assert(html.find(phase == 29 ? "Land at mission site" : "Resume flight to mission sector") != std::string::npos);
         assert((html.find("Land here instead") != std::string::npos) == (phase == 30));
         assert(fixture->ui.presentation.missionTrackerMarkup.find("Land at the mission site in Sector 1") != std::string::npos);
+        assert(fixture->ui.presentation.missionTrackerMarkup.find("mission-checkbox") != std::string::npos);
+        assert(fixture->ui.presentation.missionTrackerMarkup.find("Establish Moon orbit") != std::string::npos);
+        assert(fixture->ui.presentation.missionTrackerMarkup.find("Deliver Common Ore 0/20") != std::string::npos);
+        assert(fixture->ui.presentation.missionTrackerMarkup.find("Bring artifact aboard") != std::string::npos);
+        assert(fixture->ui.presentation.missionTrackerMarkup.find("Ore delivered 0/20 / Artifact") == std::string::npos);
         if (phase == 29) for (const auto size : {std::pair{1280,800}, std::pair{1920,1080}}) {
             FakePreferenceStore preferences;
             FakeHost host;

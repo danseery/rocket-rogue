@@ -6,6 +6,7 @@ namespace rocket {
 struct MissionRequirementView {
     std::string text;
     bool complete = false;
+    std::string detail = {};
 };
 // Read-only projection. Scenarios and physical payload ownership remain authoritative.
 struct MissionView {
@@ -16,6 +17,7 @@ struct MissionView {
     std::uint64_t wreckId = 0;
     std::vector<std::string> progress;
     std::vector<MissionRequirementView> requirements;
+    std::vector<MissionRequirementView> trackerGoals;
 };
 MissionView missionView(const GameState&, const ContentCatalog&, std::string_view missionId,
     const FlightRunState* flight = nullptr, bool currentSurveyComplete = false);

@@ -600,9 +600,25 @@ void appendMissionPresentation(const PanelRenderContext& c, PanelDocumentPresent
         std::any_of(panel.modals.begin(), panel.modals.end(), [](const auto& modal) { return modal.autoOpen; })) return;
     std::string tracker = "<section id=\"rr-mission-tracker\" class=\"mission-tracker" +
         std::string(c.missionChanged ? " mission-changed" : "") + "\"><strong>" + esc(v.location + " / " + v.title) +
-        "</strong><p class=\"mission-next\">" + esc(v.instruction) + "</p><p class=\"mission-progress\">";
-    for (std::size_t i = 0; i < v.progress.size() && i < 2; ++i) tracker += (i ? " / " : "") + esc(v.progress[i]);
-    tracker += "</p><div class=\"mission-tracker-actions\">" + button("Missions", "expedition:missions");
+        "</strong>";
+    if (!v.trackerGoals.empty()) {
+        tracker += "<div class=\"mission-goals\" role=\"list\">";
+        for (const auto& goal : v.trackerGoals) {
+            tracker += "<div role=\"listitem\" class=\"mission-goal " + std::string(goal.complete ? "mission-done" : "mission-pending") +
+                "\"><span class=\"mission-checkbox\" aria-label=\"" + (goal.complete ? "Complete" : "Incomplete") + "\">" +
+                (goal.complete ? "x" : "") + "</span><div class=\"mission-goal-copy\">" + esc(goal.text);
+            if (!goal.detail.empty()) tracker += "<small>" + esc(goal.detail) + "</small>";
+            tracker += "</div></div>";
+        }
+        tracker += "</div>";
+        if (v.stepId != "ore" && v.stepId != "orbit" && v.stepId != "complete")
+            tracker += "<p class=\"mission-next\">" + esc(v.instruction) + "</p>";
+    } else {
+        tracker += "<p class=\"mission-next\">" + esc(v.instruction) + "</p><p class=\"mission-progress\">";
+        for (std::size_t i = 0; i < v.progress.size() && i < 2; ++i) tracker += (i ? " / " : "") + esc(v.progress[i]);
+        tracker += "</p>";
+    }
+    tracker += "<div class=\"mission-tracker-actions\">" + button("Missions", "expedition:missions");
     if (e.coursePlayerSelected && e.course.targetBodyId != v.targetId && !v.targetId.empty())
         tracker += button("Return to mission", "expedition:follow_mission");
     tracker += "</div></section>";

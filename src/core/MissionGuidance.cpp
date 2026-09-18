@@ -98,7 +98,15 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
         if (s.run.mining.bodyId == m->bodyId) inspect(s.run.mining);
         for (const auto& site : e.sites) if (site.bodyId == m->bodyId) inspect(site.mining);
     }
-    v.sectorKnown = (e.location.bodyId == m->bodyId && surveyed) ||
+    const auto& f = liveFlight ? *liveFlight : s.run.flight;
+    const auto& mining = s.run.mining;
+    const bool surfaceBodyMatches = mining.bodyId == m->bodyId ||
+        (mining.bodyId.empty() && mining.postSolarSystemId.empty() &&
+            (mining.scenarioId == m->scenarioId ||
+                (mining.scenarioId.empty() && mining.destinationId == m->bodyId)));
+    const bool miningHere = s.screen == Screen::Mining && mining.active && surfaceBodyMatches;
+    const bool atBody = miningHere || e.location.bodyId == m->bodyId;
+    v.sectorKnown = (atBody && surveyed) ||
         std::any_of(e.sites.begin(), e.sites.end(), [&](const auto& site) { return site.bodyId == m->bodyId && site.orbital.surveyComplete; });
     v.artifactLocated = revealed || aboard || banked || wreck;
     if (required) v.progress.push_back("Ore delivered " + std::to_string(std::min(delivered, required)) + "/" + std::to_string(required));
@@ -106,6 +114,22 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
     v.progress.push_back("Artifact: " + artifactState);
     v.requirements.push_back({"Recover the artifact and bring it aboard", aboard || banked});
     v.requirements.push_back({"Claim mission reward", v.complete});
+    const bool orbitComplete = miningHere || v.sectorKnown || physicallyRecovered || delivered > 0 || v.complete ||
+        (atBody && (f.orbit.captured || f.mode == FlightMode::Landing));
+    v.trackerGoals.push_back({"Establish " + body->name + " orbit", orbitComplete});
+    if (required) v.trackerGoals.push_back({"Deliver Common Ore " + std::to_string(std::min(delivered, required)) +
+        "/" + std::to_string(required), delivered >= required, "To your ship"});
+    for (const auto& row : v.requirements) {
+        if (row.text.starts_with("Deliver ") || row.text == "Recover the artifact and bring it aboard" || row.text == "Claim mission reward") continue;
+        v.trackerGoals.push_back(row);
+    }
+    v.trackerGoals.push_back({"Bring artifact aboard", aboard || banked,
+        wreck ? "Recover from Wreck " + std::to_string(battery->wreckId) :
+        banked ? "Banked" : aboard ? "Aboard ship" : tethered ? "Tethered - return to ship" :
+        exposed ? "Exposed - recover it" : revealed ? "Located - recover it" :
+        !prerequisites ? (required && delivered < required ? "After ore delivery" : "After mission requirements") : "Use the surface scanner"});
+    if (claim.state == ScenarioStepState::ReadyToClaim || v.complete)
+        v.trackerGoals.push_back({"Claim mission reward", v.complete});
     const auto set = [&](std::string step, std::string instruction) { v.stepId = std::move(step); v.instruction = std::move(instruction); };
     if (wreck) {
         v.kind = CampaignObjectiveKind::RecoverArtifact; v.wreckId = battery->wreckId;
@@ -124,10 +148,9 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
         set("bank", "Return to Earth to bank the " + body->name + " artifact"); return v;
     }
     if (v.complete) { set("complete", "Mission complete"); return v; }
-    const auto& f = liveFlight ? *liveFlight : s.run.flight;
-    if (e.location.bodyId != m->bodyId) { set("travel", "Reach " + body->name + " and establish orbit"); return v; }
-    if (s.screen == Screen::Mining && s.run.mining.active) {
-        if (v.sectorKnown && !e.location.siteId.ends_with(v.sectorId))
+    if (!atBody) { set("travel", orbitComplete ? "Return to " + body->name : "Reach " + body->name + " and establish orbit"); return v; }
+    if (miningHere) {
+        if (v.sectorKnown && e.location.bodyId == m->bodyId && !e.location.siteId.empty() && !e.location.siteId.ends_with(v.sectorId))
             set("wrong_site", "Return to orbit and land in " + missionSectorName(v.sectorId));
         else if (required && delivered < required) set("ore", "Deliver Common Ore to your ship");
         else if (!prerequisites) {

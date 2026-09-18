@@ -10546,6 +10546,13 @@ body.controller-focus-visible .rr-controller-focus .rr-controller-confirm-glyph 
 .mission-tracker strong { display: block; font-size: 13dp; color: #c7a9ef; }
 .mission-tracker p { margin: 4dp 0; line-height: 1.2; }
 .mission-tracker .mission-progress { font-size: 12dp; color: #a8becb; }
+.mission-goals { margin: 8dp 0; }
+.mission-goal { display: flex; align-items: flex-start; margin: 6dp 0; line-height: 1.25; }
+.mission-checkbox { display: block; flex-shrink: 0; width: 12dp; height: 12dp; margin: 2dp 8dp 0 0; border: 1dp #a8becb; font-size: 12dp; line-height: 12dp; text-align: center; }
+.mission-done .mission-checkbox { border-color: #92d5b8; background-color: #12362e; }
+.mission-goal-copy { display: block; flex: 1; }
+.mission-goal-copy small { display: block; font-size: 12dp; color: #a8becb; margin-top: 2dp; }
+.mission-tracker .mission-next { font-size: 12dp; color: #a8becb; margin: 6dp 0; }
 .mission-tracker.mission-changed { border-left-color: #f4e4ff; background-color: #17273fee; }
 .mission-tracker-actions { display: flex; gap: 8dp; }
 .mission-tracker-actions button { pointer-events: auto; min-width: 0dp; min-height: 24dp; width: auto; padding: 3dp 7dp; margin: 0; font-size: 12dp; }

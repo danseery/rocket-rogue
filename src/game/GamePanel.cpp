@@ -4655,6 +4655,7 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
         key << mission.id << ':' << mission.stepId << ':' << mission.instruction << ':'
             << static_cast<int>(e.missionScanIntro) << ':' << context.missionChanged << '|';
         for (const auto& progress : mission.progress) key << progress << '|';
+        for (const auto& goal : mission.trackerGoals) key << goal.text << ':' << goal.complete << ':' << goal.detail << '|';
         key << e.coursePlayerSelected << ':' << recommendation.targetId << ':' << recommendation.title << '|';
         key << e.location.bodyId << ':' << e.cruise.active << ':' << e.course.targetBodyId << ':'
             << (context.waypointPreviewCourse ? context.waypointPreviewCourse->targetBodyId : std::string{}) << ':'

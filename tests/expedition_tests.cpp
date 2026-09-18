@@ -685,6 +685,8 @@ void missionGuidanceTests()
         auto& e = s.run.expedition;
         auto view = trackedMissionView(s, catalog);
         check(view.id == "moon" && view.stepId == "travel", "Fresh campaign tracks the Moon journey");
+        check(view.trackerGoals.size() == 3 && !view.trackerGoals[0].complete &&
+            !view.trackerGoals[1].complete && !view.trackerGoals[2].complete, "Tracker exposes three independent incomplete goals");
         check(missionLog(s, catalog).size() == 1, "Unrevealed missions stay out of the log");
         e.location.bodyId = "moon"; e.location.siteId.clear();
         s.screen = Screen::Flight; s.run.flight.orbit.captured = true;
@@ -701,11 +703,18 @@ void missionGuidanceTests()
         s.run.mining.cargo = 20;
         view = trackedMissionView(s, catalog);
         check(view.stepId == "ore" && view.progress.front() == "Ore delivered 0/20", "Carried ore does not count as ship delivery");
+        e.location.bodyId = "earth"; // Stale travel frame must not override active surface ownership.
+        view = trackedMissionView(s, catalog);
+        check(view.stepId == "ore" && view.trackerGoals[0].complete && !view.trackerGoals[1].complete,
+            "Active mining marks orbit complete even with a stale travel location");
+        e.location.bodyId = "moon";
         recordScenarioEvent(s, catalog, {ScenarioEventKind::SafeMaterialDelivered, content::scenario::lunarProspector,"delivery","moon","common",8,0});
         check(trackedMissionView(s, catalog).progress.front() == "Ore delivered 8/20", "Tracker follows actual scenario delivery counts");
         recordScenarioEvent(s, catalog, {ScenarioEventKind::SafeMaterialDelivered, content::scenario::lunarProspector,"delivery","moon","common",12,0});
         view = trackedMissionView(s, catalog);
         check(view.stepId == "scan_artifact", "Ore delivery unlocks the scanner instruction");
+        check(view.trackerGoals[1].complete && !view.trackerGoals[2].complete,
+            "Ore and artifact remain independent checklist goals");
         auto& artifact = s.run.mining.artifact;
         artifact.present = artifact.revealed = true;
         artifact.state = MiningArtifactState::Loose;
@@ -715,12 +724,24 @@ void missionGuidanceTests()
         check(view.stepId == "carry" && !view.requirements[view.requirements.size()-2].complete, "Tethered artifact remains incomplete");
         e.batteries[0].owner = BatteryOwner::Ship;
         check(trackedMissionView(s, catalog).progress.back() == "Artifact: aboard ship", "Physical capture is shown as aboard ship");
+        check(trackedMissionView(s, catalog).trackerGoals[2].complete, "Artifact checkbox requires physical delivery");
         e.batteries[0].owner = BatteryOwner::EarthStorage;
         check(trackedMissionView(s, catalog).progress.back() == "Artifact: banked", "Banked ownership takes precedence over stale site snapshots");
         recordScenarioEvent(s,catalog,{ScenarioEventKind::ProtectedObjectiveExtracted, content::scenario::lunarProspector,"anomaly","moon",content::miningSite::lunarAnomalyCrevice,1,0});
         check(trackedMissionView(s, catalog).stepId == "claim", "Completed recovery waits for the explicit claim");
         performScenarioAction(s,catalog,content::scenario::lunarProspector,"anomaly",ScenarioActionKind::ClaimReward);
         check(trackedMissionView(s, catalog).id == "mars", "Claim advances the campaign tracker");
+        s.run.mining.bodyId = "mars";
+        const auto mars = trackedMissionView(s, catalog);
+        check(mars.stepId == "ore" && mars.trackerGoals[0].complete &&
+            mars.trackerGoals[1].text == "Deliver Common Ore 0/8" && !mars.trackerGoals[2].complete,
+            "Mars surface checklist shows completed orbit and separate ore and artifact goals");
+        const auto oldScenario = s.run.mining.scenarioId;
+        s.run.mining.bodyId.clear(); s.run.mining.scenarioId = content::scenario::marsBayExpansion;
+        check(trackedMissionView(s, catalog).stepId == "ore",
+            "Legacy mining sessions without a body ID use their actual mission scenario");
+        s.run.mining.scenarioId = oldScenario;
+        s.run.mining.bodyId = "moon";
         e.batteries[0].owner = BatteryOwner::Ship;
         e.trackedMissionId = "moon";
         check(trackedMissionView(s, catalog).id == "mars", "Claim advances even before Earth banking");

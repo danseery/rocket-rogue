@@ -52,6 +52,8 @@ Main-ship destruction or abandonment returns directly to the Earth dock with a f
 
 Completed mission objectives expose an explicit claim in Mining, Flight, and the dock. Claiming grants its reward once and leaves control in the current activity. The objective then reads **MISSION COMPLETE**; old briefing, failure, and retry actions cannot reopen it. The dock separates the next mission from the selected waypoint and keeps departure prominent. Recovery and reload guardrails derive screens from the actual ship state and retire instructions for deployments that have ended.
 
+The compact solar mission tracker lists separate read-only checkboxes for establishing orbit, delivering the required Common Ore to the ship, and bringing the artifact aboard. Active mining and saved survey/site progress count as evidence of the completed orbit. Ore counts advance on delivery, and exposing or tethering an artifact does not check off its recovery. A lost artifact becomes an incomplete wreck-recovery goal. Short contextual instructions remain below the checklist when needed; the Missions button opens the detailed log.
+
 ## Retired activity migration
 
 The separate Flyby, Orbit, pulse-timing Scan and Push Deeper activities are removed from simulation, rendering, input, debug and scenario routing. Orbital work uses physical Flight; surface preparation leads directly to Rig/EVA mining without a survey or dig timing gate. Solar progression advances through explicit artifact mission claims and ordinary physical travel.
