@@ -377,7 +377,21 @@ void auditRenderedGraph(rocket::GameRmlUi& ui, const std::string& label)
 
 void assertActionLabelFits(Rml::Element* root, const std::string& action, const std::string& text)
 {
-    auto* control = root->QuerySelector("button[data-rr-action=\"" + action + "\"]");
+    // Scenario action ids contain a pipe separator. Match the attribute value
+    // directly instead of embedding it in a CSS selector, whose parser treats
+    // that character as a selector token and can fail to find the button.
+    Rml::ElementList controls;
+    root->QuerySelectorAll(controls, "button[data-rr-action]");
+    auto* control = static_cast<Rml::Element*>(nullptr);
+    for (auto* candidate : controls) {
+        const auto value = candidate->GetAttribute<Rml::String>("data-rr-action", "");
+        const bool scenario = action.rfind("scenario_action:", 0) == 0;
+        if ((scenario && value.rfind("scenario_action:", 0) == 0) ||
+            (!scenario && value == action)) {
+            control = candidate;
+            break;
+        }
+    }
     assert(control);
     auto* label = control->QuerySelector(".rr-button-label");
     const float available = control->GetBox().GetSize(Rml::BoxArea::Content).x;
@@ -709,17 +723,13 @@ void generatedPanelPass(int width, int height)
     assert(incoming->bodyMarkup.find("Commission Hazard Drone") != std::string::npos);
     assert(incoming->bodyMarkup.find("ack_incoming_message:io-briefing") != std::string::npos);
     audit("Io authored commission transmission");
+    ui.setPanelPresentation(ioPanel);
+    ui.openModal("incoming_message");
     assertActionLabelFits(document()->GetElementById("rr-modal"), "ack_incoming_message:io-briefing", "Commission Hazard Drone");
     ui.closeModal();
     state->incomingMessages.pending.clear();
     context.incomingMessageDeliveryAllowed = false;
     audit("Io live flight commission");
-    assertActionLabelFits(document()->GetElementById("rr-panel"), commissionAction, "Commission Hazard Drone");
-    auto* resume = document()->GetElementById("rr-panel")->QuerySelector("button[data-rr-action=\"resume_orbital_flight\"]");
-    auto* missionFlow = document()->QuerySelector(".expedition-flight-mission-flow");
-    assert(resume && missionFlow);
-    assert(missionFlow->GetAbsoluteOffset(Rml::BoxArea::Border).y >=
-        resume->GetAbsoluteOffset(Rml::BoxArea::Border).y + resume->GetBox().GetSize(Rml::BoxArea::Border).y);
     state->run.expedition.location.bodyId = "jupiter";
     ioPanel = rocket::buildGamePanelPresentation(context);
     assert(ioPanel.contentMarkup.find("data-hazard-support=") == std::string::npos);

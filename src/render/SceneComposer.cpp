@@ -4911,6 +4911,39 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             {1.0F, 0.22F, 0.14F, 0.58F + disabledPulse * 0.24F},
             2.2F);
     }
+    const float rigScannerRingRadius = cellW * static_cast<float>(snapshot.miningOreAttractionRadius);
+    const float operatorScannerRingRadius = operatorSize * 0.68F;
+    const auto drawRingCrosshair = [&](Vec2 ringCenter, float ringRadius, Vec2 aim, float firePulse) {
+        const Vec2 direction = normalize(aim);
+        const Vec2 center {ringCenter.x + direction.x * ringRadius,
+            ringCenter.y + direction.y * ringRadius};
+        constexpr float scale = 0.75F;
+        const float radius = cellSize * 0.34F * scale;
+        const float gap = cellSize * 0.18F * scale;
+        const float arm = cellSize * 0.34F * scale;
+        const Color yellow {1.0F, 209.0F / 255.0F, 71.0F / 255.0F,
+            0.70F + std::clamp(firePulse, 0.0F, 1.0F) * 0.25F};
+        // General HUD lines have a one-pixel minimum. Scale only this circle's
+        // stroke geometry so its original one-pixel stroke becomes 0.75 px.
+        for (int segment = 0; segment < 24; ++segment) {
+            const float start = segment * kPi * 2.0F / 24.0F;
+            const float end = (segment + 1) * kPi * 2.0F / 24.0F;
+            const SceneVertex a {center.x + std::cos(start) * radius, center.y + std::sin(start) * radius,
+                yellow.r, yellow.g, yellow.b, yellow.a * drawOpacity_};
+            const SceneVertex b {center.x + std::cos(end) * radius, center.y + std::sin(end) * radius,
+                yellow.r, yellow.g, yellow.b, yellow.a * drawOpacity_};
+            SceneInstance line;
+            if (makeUniformLineInstance(line, a, b, 1.0F, CoordinateSpace::World)) {
+                line.axisXx *= scale;
+                line.axisXy *= scale;
+                submitInstance(line, TextureId::None, CoordinateSpace::World);
+            }
+        }
+        drawLine(center.x - gap - arm, center.y, center.x - gap, center.y, yellow, 1.6F * scale);
+        drawLine(center.x + gap, center.y, center.x + gap + arm, center.y, yellow, 1.6F * scale);
+        drawLine(center.x, center.y - gap - arm, center.x, center.y - gap, yellow, 1.6F * scale);
+        drawLine(center.x, center.y + gap, center.x, center.y + gap + arm, yellow, 1.6F * scale);
+    };
     if (!snapshot.miningExtractionActive &&
         !snapshot.miningEvaDeathActive &&
         snapshot.miningScannerPulse <= 0.0 &&
@@ -4919,8 +4952,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             std::clamp(snapshot.miningScannerRechargeProgress, 0.0, 1.0));
         const bool operatorActive = snapshot.miningOperatorPresent && snapshot.miningOperatorActive;
         const Vec2 pulseCenter = operatorActive ? operatorPosition : drone;
-        const float pulseRadius = operatorActive ? operatorSize * 0.68F
-            : cellW * static_cast<float>(snapshot.miningOreAttractionRadius);
+        const float pulseRadius = operatorActive ? operatorScannerRingRadius
+            : rigScannerRingRadius;
         constexpr Color pulseTrack {0.025F, 0.14F, 0.18F, 0.72F};
         constexpr Color pulseCyan {0.18F, 0.96F, 1.0F, 0.96F};
         drawEllipseLine(
@@ -4941,6 +4974,15 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             42,
             -kPi * 0.5F,
             -kPi * 0.5F + kPi * 2.0F * rechargeProgress);
+    }
+    if (snapshot.miningControllerAimVisible && snapshot.miningRigPresent &&
+        !snapshot.miningOperatorActive && !snapshot.miningExtractionActive &&
+        !snapshot.miningEvaDeathActive) {
+        // The reticle follows the requested heading, not the turning hull.
+        // Mining input Y points down; scene Y points up.
+        const Vec2 aim = normalize({static_cast<float>(snapshot.miningControllerAimX),
+            -static_cast<float>(snapshot.miningControllerAimY)});
+        drawRingCrosshair(drone, rigScannerRingRadius, aim, 0.0F);
     }
     if (snapshot.miningRigPresent && !snapshot.miningExtractionActive) {
         const float toggleProgress = static_cast<float>(
@@ -5053,20 +5095,8 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
     if (!snapshot.miningExtractionActive &&
         snapshot.miningOperatorActive &&
         !snapshot.miningEvaDeathActive) {
-        const float reticleRadius = cellSize * 0.34F;
-        const float reticleGap = cellSize * 0.18F;
-        const float reticleArm = cellSize * 0.34F;
-        const Color reticleColor {
-            0.30F,
-            0.96F,
-            1.0F,
-            0.70F + static_cast<float>(std::clamp(snapshot.miningOperatorFirePulse, 0.0, 1.0)) * 0.25F
-        };
-        drawEllipseLine(target.x, target.y, reticleRadius, reticleRadius, reticleColor, 24, 0.0F, kPi * 2.0F);
-        drawLine(target.x - reticleGap - reticleArm, target.y, target.x - reticleGap, target.y, reticleColor, 1.6F);
-        drawLine(target.x + reticleGap, target.y, target.x + reticleGap + reticleArm, target.y, reticleColor, 1.6F);
-        drawLine(target.x, target.y - reticleGap - reticleArm, target.x, target.y - reticleGap, reticleColor, 1.6F);
-        drawLine(target.x, target.y + reticleGap, target.x, target.y + reticleGap + reticleArm, reticleColor, 1.6F);
+        drawRingCrosshair(operatorPosition, operatorScannerRingRadius, operatorAimDirection,
+            static_cast<float>(snapshot.miningOperatorFirePulse));
         const float firePulse = static_cast<float>(std::clamp(snapshot.miningOperatorFirePulse, 0.0, 1.0));
         if (firePulse > 0.001F) {
             const Vec2 muzzle {
@@ -7052,7 +7082,33 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
 void SceneComposer::drawOrbitalArtifactSignal(const RenderSnapshot& snapshot, float x, float y,
     float radius, float alpha, float approachBlend)
 {
-    if (!snapshot.orbitalArtifactHint || snapshot.launchLandingLocalFrame) return;
+    if (snapshot.launchLandingLocalFrame) return;
+    if (snapshot.missionSectorVisible) {
+        const auto point = [&](double bearing, float scale) {
+            const auto d = physicalFlightVector(snapshot, std::cos(bearing), std::sin(bearing), approachBlend);
+            const float length = std::max(0.00001F, std::hypot(d.x, d.y));
+            return Vec2{x + radius * scale * d.x / length, y + radius * scale * d.y / length};
+        };
+        const auto& zone = snapshot.missionSector;
+        const Color color{0.89F, 0.72F, 1.0F, alpha};
+        auto previous = point(zone.centerBearing - zone.halfAngle, 1.04F);
+        for (int i = 1; i <= 24; ++i) {
+            const auto next = point(zone.centerBearing - zone.halfAngle + 2 * zone.halfAngle * i / 24, 1.04F);
+            drawLine(previous.x, previous.y, next.x, next.y, color, 2.0F);
+            previous = next;
+        }
+        for (const double bearing : {zone.centerBearing-zone.halfAngle, zone.centerBearing+zone.halfAngle}) {
+            const auto a = point(bearing, .94F), b = point(bearing, 1.10F);
+            drawLine(a.x,a.y,b.x,b.y,color,2.0F);
+        }
+        const auto anchor = point(zone.centerBearing, 1.10F);
+        const auto label = point(zone.centerBearing, 1.55F);
+        drawLine(anchor.x, anchor.y, label.x, label.y, color, 1.5F);
+        drawCircle(anchor.x,anchor.y,.012F,color,4);
+        drawPoiLabel(std::clamp(label.x,-.62F,.62F),std::clamp(label.y,-.75F,.75F),.004F,
+            snapshot.missionSectorLabel,PoiGuidanceKind::Artifact);
+    }
+    if (!snapshot.orbitalArtifactHint) return;
     const auto direction = physicalFlightVector(snapshot, std::cos(snapshot.orbitalArtifactBearing),
         std::sin(snapshot.orbitalArtifactBearing), approachBlend);
     const float length = std::max(0.00001F, std::hypot(direction.x, direction.y));
@@ -7063,7 +7119,7 @@ void SceneComposer::drawOrbitalArtifactSignal(const RenderSnapshot& snapshot, fl
     const float pulse = 0.85F + 0.15F*std::sin(static_cast<float>(snapshot.animationTime)*2.0F);
     drawRadialGlow(x,y,radius*0.28F,{0.74F,0.28F,1.0F,0.34F*pulse*alpha},32);
     drawRadialGlow(x,y,radius*0.11F,{0.82F,0.58F,1.0F,0.46F*pulse*alpha},24);
-    if (snapshot.orbitalArtifactLocalized) {
+    if (snapshot.orbitalArtifactLocalized && !snapshot.missionSectorVisible) {
         drawCircle(x,y,0.008F,{0.90F,0.72F,1.0F,alpha},16);
         drawPoiLabel(x,y-0.05F,0.0028F,"ARTIFACT / DEPTH +" +
             std::to_string(static_cast<int>(snapshot.orbitalArtifactDepth)),PoiGuidanceKind::Ship);
@@ -7338,7 +7394,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         }
 
         if (snapshot.orbitalOverlay > 0.001 ||
-            ((snapshot.orbitalZoneSurveyed || snapshot.orbitalArtifactHint || !snapshot.orbitalExistingShafts.empty()) &&
+            ((snapshot.orbitalZoneSurveyed || snapshot.orbitalArtifactHint || snapshot.missionSectorVisible || !snapshot.orbitalExistingShafts.empty()) &&
                 !snapshot.launchLandingLocalFrame)) {
             const float alpha = static_cast<float>(snapshot.orbitalOverlay);
             const float radius = destinationSize * 0.46F;

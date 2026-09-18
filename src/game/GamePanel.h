@@ -58,6 +58,8 @@ struct PanelRenderContext {
     bool incomingMessageDeliveryAllowed = true;
     const CoursePlan* waypointPreviewCourse = nullptr;
     bool orbitalLandingEligible = false;
+    bool missionChanged = false;
+    bool showCompletedMissions = false;
 };
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);

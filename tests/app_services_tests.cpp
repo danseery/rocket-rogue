@@ -12,6 +12,7 @@
 #include "core/SaveData.h"
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
+#include "core/MissionGuidance.h"
 #include "core/Tuning.h"
 #include "core/FlightSystem.h"
 #include "platform/AppServices.h"
@@ -36,6 +37,23 @@
 
 namespace rocket {
 struct OrbitalLandingTestAccess {
+    static void reloadMissionScan(RocketGameApp& app) {
+        const auto snapshot = app.snapshot();
+        assert(snapshot.missionSectorVisible && snapshot.missionSector.id == "zone_1");
+        assert(!snapshot.orbitalArtifactLocalized);
+        assert(std::none_of(snapshot.orbitalSurveyLayers.begin(), snapshot.orbitalSurveyLayers.end(),
+            [](const auto& layer) { return layer.artifact; }));
+        app.storeOrbitalSite();
+        const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(app.state_)));
+        assert(saved);
+        restoreSaveData(app.state_, app.catalog_, *saved);
+        app.surfaceArrival_ = {};
+        app.session_.orbitalWork = {};
+        app.prepareSurfaceArrivalIfNeeded(currentDestination(app.state_, app.catalog_));
+        assert(app.session_.orbitalWork.active());
+        assert(app.state_.run.expedition.missionScanIntro == MissionScanIntro::Showing);
+        app.refreshPanel();
+    }
     static void rigControllerMovementFollowsScreen(RocketGameApp& app) {
         app.debugStartMining();
         app.setActiveInputSource(InputSource::Controller);
@@ -49,16 +67,112 @@ struct OrbitalLandingTestAccess {
                 input.moveX = axes.first;
                 input.moveY = axes.second;
                 input.aimX = 0.6;
+                input.firing = true;
                 app.dispatchControllerInput(InputContext::MiningActive, input);
                 assert(std::abs(mining.moveX - axes.first) < 1e-8);
                 assert(std::abs(mining.moveY - axes.second) < 1e-8);
-                // Right-stick rotation remains independent of left-stick direction.
-                assert(std::abs(mining.aimDirX - std::cos(heading + 0.3)) < 1e-8);
-                assert(std::abs(mining.aimDirY - std::sin(heading + 0.3)) < 1e-8);
+                assert(mining.drilling);
+                // Right-stick aiming approaches screen-right independently of movement.
+                const double requested = std::atan2(mining.aimDirY, mining.aimDirX);
+                assert(std::abs(requested) <= std::abs(heading) + 1e-8);
+                assert(std::abs(std::remainder(requested - heading, 6.283185307179586)) <= 0.5 + 1e-8);
             }
         }
         app.dispatchControllerInput(InputContext::MiningActive, {});
         assert(mining.moveX == 0.0 && mining.moveY == 0.0);
+        app.setActiveInputSource(InputSource::KeyboardPointer);
+        for (const double heading : {0.0, 1.5707963267948966, 3.141592653589793, -1.5707963267948966}) {
+            mining.hullDirX = std::cos(heading);
+            mining.hullDirY = std::sin(heading);
+            for (const auto axes : {std::pair{0.0, -1.0}, std::pair{0.0, 1.0},
+                                   std::pair{-1.0, 0.0}, std::pair{1.0, 0.0}, std::pair{1.0, -1.0}}) {
+                app.miningMove(axes.first, axes.second);
+                assert(mining.moveX == axes.first && mining.moveY == axes.second);
+            }
+        }
+    }
+    static void rigControllerDirectionalAim(RocketGameApp& app) {
+        app.debugStartMining();
+        app.setActiveInputSource(InputSource::Controller);
+        auto& m = app.state_.run.mining;
+        constexpr double pi = 3.141592653589793;
+        for (auto& cell : m.terrain.cells) cell.material = MiningCellMaterial::Empty;
+        m.enemies.clear();
+        m.droneX = m.terrain.width * 0.5;
+        m.droneY = m.terrain.height * 0.5;
+        m.rigFuel.current = m.rigFuel.capacity;
+        const auto aim = [&](double x, double y) {
+            RoutedGameInput input;
+            input.aimX = x; input.aimY = y;
+            app.dispatchControllerInput(InputContext::MiningActive, input);
+        };
+        const auto angle = [&] { return std::atan2(m.hullDirY, m.hullDirX); };
+        const auto resetHeading = [&](double heading) {
+            m.hullDirX = m.aimDirX = std::cos(heading);
+            m.hullDirY = m.aimDirY = std::sin(heading);
+        };
+        for (double heading : {0.0, pi / 2, pi, -pi / 2, pi - .02, -pi + .02}) {
+            for (int direction = 0; direction < 8; ++direction) {
+                const double target = direction * pi / 4;
+                m.rigOxygen.current = m.rigOxygen.capacity;
+                resetHeading(heading);
+                aim(std::cos(target), std::sin(target));
+                assert(std::abs(std::remainder(angle() - heading, 2*pi)) < 1e-8); // No snapping.
+                const double requestX = m.aimDirX, requestY = m.aimDirY;
+                aim(.2 * std::cos(target), .2 * std::sin(target));
+                assert(std::abs(m.aimDirX - requestX) < 1e-8 && std::abs(m.aimDirY - requestY) < 1e-8);
+                for (int step = 0; step < 60; ++step) {
+                    // Keep this steering check in open space rather than letting
+                    // gravity carry the test rig into the terrain boundary.
+                    m.droneX = m.terrain.width * .5;
+                    m.droneY = m.terrain.height * .5;
+                    m.rigVelocityX = m.rigVelocityY = 0;
+                    const double before = std::abs(std::remainder(target - angle(), 2*pi));
+                    aim(std::cos(target), std::sin(target));
+                    updateMiningRun(app.state_, app.catalog_, .05);
+                    const double after = std::abs(std::remainder(target - angle(), 2*pi));
+                    assert(after <= before + 1e-8);
+                }
+                if (std::abs(std::remainder(target - angle(), 2*pi)) >= .01)
+                    std::cerr << "Rig aim failed heading=" << heading << " target=" << target << " actual=" << angle()
+                        << " fuel=" << m.rigFuel.current << " disabled=" << m.rigDisabled << " active=" << m.active << '\n';
+                assert(std::abs(std::remainder(target - angle(), 2*pi)) < .01);
+            }
+        }
+        resetHeading(0);
+        aim(-1, -0.0);
+        assert(m.aimDirY > 0); // Opposite targets choose clockwise even with signed zero.
+        updateMiningRun(app.state_, app.catalog_, .05);
+        aim(0,0);
+        const double released = angle();
+        updateMiningRun(app.state_, app.catalog_, .05);
+        assert(std::abs(angle() - released) < 1e-8);
+        for (bool disabled : {false, true}) {
+            resetHeading(0);
+            m.rigDisabled = disabled;
+            m.rigFuel.current = disabled ? 100 : 0;
+            aim(0,1);
+            updateMiningRun(app.state_, app.catalog_, .05);
+            assert(std::abs(angle()) < 1e-8);
+        }
+        m.rigDisabled = false; m.rigFuel.current = 100;
+        resetHeading(0);
+        aim(0,1);
+        app.releaseRealtimeInputs(true);
+        assert(m.aimDirX == m.hullDirX && m.aimDirY == m.hullDirY);
+        app.messageControllerNeutralRequired_ = true;
+        aim(0,1);
+        assert(app.messageControllerNeutralRequired_ && m.aimDirY == 0);
+        aim(0,0);
+        assert(!app.messageControllerNeutralRequired_);
+        aim(0,1);
+        assert(m.aimDirY > 0);
+        app.setActiveInputSource(InputSource::KeyboardPointer);
+        app.applyRealtimeInputs();
+        assert(std::abs(m.aimDirY - m.hullDirY) < 1e-8);
+        app.setActiveInputSource(InputSource::Controller);
+        app.applyRealtimeInputs();
+        assert(std::abs(m.aimDirY - m.hullDirY) < 1e-8);
     }
     static void fallenShipDepartsFromCurrentPosition(RocketGameApp& app) {
         app.debugStartMining();
@@ -872,7 +986,8 @@ void liveMissionClaimPresentationAndDockRecovery()
         assert(std::none_of(claimed.modals.begin(), claimed.modals.end(), [&](const auto& modal) {
             return modal.autoOpen && modal.bodyMarkup.find(claimAction) != std::string::npos;
         }));
-        assert(claimed.contentMarkup.find("COMPLETE") != std::string::npos);
+        const auto log = std::find_if(claimed.modals.begin(), claimed.modals.end(), [](const auto& modal) { return modal.id == "missions"; });
+        assert(log != claimed.modals.end() && log->bodyMarkup.find("Show completed") != std::string::npos);
         assert(rocket::nextSolarMission(*state, catalog)->bodyId == "io");
     }
 
@@ -1596,6 +1711,78 @@ void straylightApproachRunsAndEndsActOne()
 }
 
 } // namespace
+
+void missionScanPresentationAndNavigation()
+{
+    for (const int phase : {29, 30}) {
+        auto fixture = std::make_unique<AppFixture>();
+        assert(fixture->runner.initialize());
+        auto& app = fixture->runner.app();
+        app.debugStartSurfaceArrival(0, phase);
+        app.tick(.05);
+        app.orbitalWorkInput(false);
+        app.orbitalWorkInput(true);
+        app.orbitalWorkInput(false);
+        for (int i=0; i<45; ++i) app.tick(.05);
+        app.renderScene();
+        app.renderUi();
+        const auto& html = fixture->ui.html;
+        assert(html.find("YOUR MISSION / Moon") != std::string::npos);
+        assert(html.find("Land in Sector 1, marked MISSION LANDING SITE. Deliver 20 Common Ore to your ship, then") != std::string::npos);
+        assert(html.find("Optional: prepare a shaft") != std::string::npos);
+        assert(html.find("expedition-flight-bar") == std::string::npos);
+        assert(html.find(phase == 29 ? "Land at mission site" : "Resume flight to mission sector") != std::string::npos);
+        assert((html.find("Land here instead") != std::string::npos) == (phase == 30));
+        assert(fixture->ui.presentation.missionTrackerMarkup.find("Land at the mission site in Sector 1") != std::string::npos);
+        if (phase == 29) for (const auto size : {std::pair{1280,800}, std::pair{1920,1080}}) {
+            FakePreferenceStore preferences;
+            FakeHost host;
+            host.metrics = {size.first,size.second,size.first,size.second,1.0F};
+            FakeUiBridge bridge;
+            NullRmlRenderHost renderHost;
+            std::string activated;
+            rocket::GameRmlUi ui(preferences,host,bridge,renderHost,repositoryRootForRmlTests());
+            assert(ui.initialize([&](const std::string& action) { activated = action; }));
+            ui.setPanelPresentation(fixture->ui.presentation);
+            ui.refresh();
+            ui.requestFocus("action:expedition:missions");
+            ui.refresh();
+            assert(ui.focusedId() == "action:expedition:missions");
+            assert(ui.activateFocused() && activated == "expedition:missions");
+            bool clicked = false;
+            for (int y=60; y<310 && !clicked; y+=8) for (int x=400; x<800 && !clicked; x+=8) {
+                activated.clear();
+                ui.mouseDown(x,y,0); ui.mouseUp(x,y,0); ui.render();
+                clicked = activated == "expedition:missions";
+            }
+            assert(clicked);
+            ui.openModal("missions");
+            ui.requestFocus("action:expedition:missions_close");
+            ui.refresh();
+            assert(ui.focusedId() == "action:expedition:missions_close");
+            assert(ui.activateFocused() && activated == "expedition:missions_close");
+            ui.shutdown();
+        }
+        rocket::OrbitalLandingTestAccess::reloadMissionScan(app);
+        assert(fixture->ui.html.find("YOUR MISSION / Moon") != std::string::npos);
+        fixture->ui.dispatchAction("expedition:missions");
+        assert(fixture->ui.lastOpenedModal == "missions");
+        assert(fixture->ui.html.find("Recover the artifact and bring it aboard") != std::string::npos);
+        fixture->ui.dispatchAction("expedition:missions_close");
+        app.resumeOrbitalFlight();
+        app.tick(.05);
+        app.renderUi();
+        assert(fixture->ui.html.find("YOUR MISSION / Moon") == std::string::npos ||
+            fixture->ui.html.find("<p>Mission site is Sector 1.") != std::string::npos);
+        fixture->ui.dispatchAction("expedition:plot:earth");
+        app.tick(.05);
+        assert(fixture->ui.presentation.missionTrackerMarkup.find("Return to mission") != std::string::npos);
+        fixture->ui.dispatchAction("expedition:follow_mission");
+        app.tick(.05);
+        assert(fixture->ui.presentation.missionTrackerMarkup.find("Return to mission") == std::string::npos);
+        fixture->runner.shutdown();
+    }
+}
 
 void explicitOrbitalLandingEntersLocalDescent()
 {
@@ -2328,7 +2515,7 @@ void shiftStrafeFlightInput()
     fixture.runner.shutdown();
 }
 
-void shiftRigInput()
+void mouseRigInput()
 {
     AppFixture fixture;
     fixture.controllers.source = rocket::InputSource::KeyboardPointer;
@@ -2336,37 +2523,34 @@ void shiftRigInput()
     auto& app = fixture.runner.app();
     app.debugStartMining();
     fixture.host.now += 1.0 / 60.0; fixture.runner.frame();
-    assert(app.inputContext() == rocket::InputContext::MiningActive);
-    const double initialX = fixture.renderer.miningHullX, initialY = fixture.renderer.miningHullY;
-    app.miningMove(0, -1); app.renderScene();
-    assert(std::abs(fixture.renderer.miningMoveX - initialX) < 1e-6);
-    assert(std::abs(fixture.renderer.miningMoveY - initialY) < 1e-6);
-    app.miningMove(1, 0); app.renderScene();
-    assert(fixture.renderer.miningMoveX == 0 && fixture.renderer.miningMoveY == 0);
-    app.flightMouseFacing(true); app.miningMove(1, 0); app.renderScene();
-    assert(std::abs(fixture.renderer.miningMoveX + initialY) < 1e-6);
-    assert(std::abs(fixture.renderer.miningMoveY - initialX) < 1e-6);
-    app.flightMouseFacing(false); app.miningMove(1, 0); app.renderScene();
-    assert(fixture.renderer.miningMoveX == 0 && fixture.renderer.miningMoveY == 0);
-    app.miningMove(0, 0);
+    const double initialX = fixture.renderer.miningHullX;
     fixture.renderer.pointerPresentation = {true,{0,0,1280,800},640,400,0,-1};
-    app.flightPointerMove(840,400,false); app.flightMouseFacing(true);
-    app.tick(1.0 / 60.0); app.renderScene();
-    assert(std::abs(fixture.renderer.miningHullX - initialX) < 1e-8);
-    assert(std::abs(fixture.renderer.miningHullY - initialY) < 1e-8); // Cursor does not turn the rig.
-    app.miningMove(1, 0);
-    app.flightPointerMove(440,400,false);
-    app.tick(1.0 / 60.0); app.renderScene();
-    assert(std::abs(fixture.renderer.miningHullX - initialX) < 1e-8);
-    assert(std::abs(fixture.renderer.miningMoveX + initialY) < 1e-6);
-    app.miningMove(0, 0);
-    fixture.ui.modalOpenValue = true;
-    fixture.host.now += 1.0 / 60.0; fixture.runner.frame();
-    fixture.ui.modalOpenValue = false;
-    fixture.host.now += 1.0 / 60.0; fixture.runner.frame();
+    // No Shift: mouse rotates independently of screen-relative movement.
+    app.flightPointerMove(840,400,false);
+    app.miningMove(0,-1);
+    app.tick(1.0/60.0); app.renderScene();
+    assert(fixture.renderer.miningHullX > initialX);
+    assert(fixture.renderer.miningMoveX == 0 && fixture.renderer.miningMoveY == -1);
+    for (bool shift : {false, true, false}) {
+        app.flightMouseFacing(shift);
+        app.miningMove(1,0); app.renderScene();
+        assert(fixture.renderer.miningMoveX == 1 && fixture.renderer.miningMoveY == 0);
+    }
+    app.miningMove(0,0);
+    app.flightPointerMove(440,400,true); // UI hover suspends aiming.
     const double heldX = fixture.renderer.miningHullX;
-    app.flightMouseFacing(true); app.tick(1.0 / 60.0); app.renderScene();
+    app.tick(1.0/60.0); app.renderScene();
     assert(std::abs(fixture.renderer.miningHullX - heldX) < 1e-8);
+    app.flightPointerMove(440,400,false);
+    app.tick(1.0/60.0); app.renderScene();
+    assert(fixture.renderer.miningHullX < heldX);
+    fixture.ui.modalOpenValue = true;
+    fixture.host.now += 1.0/60.0; fixture.runner.frame();
+    fixture.ui.modalOpenValue = false;
+    fixture.host.now += 1.0/60.0; fixture.runner.frame();
+    const double afterModalX = fixture.renderer.miningHullX;
+    app.tick(1.0/60.0); app.renderScene();
+    assert(std::abs(fixture.renderer.miningHullX - afterModalX) < 1e-8);
     fixture.runner.shutdown();
 }
 
@@ -2385,17 +2569,21 @@ int main(int argc, char** argv)
         fixture.runner.shutdown();
     }
     if (argc > 1 && std::string_view(argv[1]) == "--ship-support-only") return 0;
+    if (argc > 1 && std::string_view(argv[1]) == "--missions-only") { missionScanPresentationAndNavigation(); orbitalControllerSelectionOwnsInput(); return 0; }
     if (argc > 1 && std::string_view(argv[1]) == "--flight-impact") { uncalibratedLunarImpactCinematic(); return 0; }
     {
         AppFixture fixture;
         assert(fixture.runner.initialize());
         rocket::OrbitalLandingTestAccess::rigControllerMovementFollowsScreen(fixture.runner.app());
+        rocket::OrbitalLandingTestAccess::rigControllerDirectionalAim(fixture.runner.app());
         fixture.runner.shutdown();
     }
-    if (argc > 1 && std::string_view(argv[1]) == "--shift-flight") { shiftStrafeFlightInput(); shiftRigInput(); return 0; }
-    shiftRigInput();
+    if (argc > 1 && std::string_view(argv[1]) == "--shift-flight") { shiftStrafeFlightInput(); mouseRigInput(); return 0; }
+    if (argc > 1 && std::string_view(argv[1]) == "--rig-aim") { mouseRigInput(); shiftStrafeFlightInput(); controllerOwnershipFencesUiHolds(); return 0; }
+    mouseRigInput();
     shiftStrafeFlightInput();
     recoveryGuidanceUsesRealDockActions();
+    missionScanPresentationAndNavigation();
     straylightSequenceActionsAndArrival();
     explicitOrbitalLandingEntersLocalDescent();
     orbitalControllerSelectionOwnsInput();
@@ -2638,8 +2826,20 @@ int main(int argc, char** argv)
         assert(recovered && recovered->expedition.course.targetBodyId == "moon");
         fixture.ui.dispatchAction("continue_game");
         completeTitleLaunch(fixture);
-        assert(fixture.ui.html.find("NEXT OBJECTIVE") != std::string::npos);
-        assert(fixture.ui.html.find("Next mission: Moon") != std::string::npos);
+        for (int remaining = 3; remaining > 0; --remaining) {
+            const auto& modals = fixture.ui.presentation.modals;
+            const auto message = std::find_if(modals.begin(), modals.end(), [](const auto& modal) {
+                return modal.autoOpen && modal.closeAction.starts_with("ack_incoming_message:");
+            });
+            if (message == modals.end()) break;
+            assert(fixture.ui.html.find("rr-mission-tracker") == std::string::npos);
+            const auto acknowledge = message->closeAction;
+            fixture.ui.dispatchAction(acknowledge);
+            fixture.runner.app().tick(.01);
+            fixture.runner.app().renderUi();
+        }
+        assert(fixture.ui.html.find("rr-mission-tracker") != std::string::npos);
+        assert(fixture.ui.html.find("Reach Moon and establish orbit") != std::string::npos);
         assert(fixture.ui.html.find("WAYPOINT: Moon") != std::string::npos);
         assert(fixture.ui.html.find("DEPART FOR Moon") != std::string::npos);
         fixture.ui.dispatchAction("expedition:map");

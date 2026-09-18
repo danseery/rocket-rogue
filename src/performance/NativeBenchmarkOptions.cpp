@@ -77,6 +77,8 @@ std::optional<NativeBenchmarkScenario> parseScenario(std::string_view text)
     if (text == "expedition-dock") return NativeBenchmarkScenario::ExpeditionDock;
     if (text == "expedition-map") return NativeBenchmarkScenario::ExpeditionMap;
     if (text == "expedition-flight") return NativeBenchmarkScenario::ExpeditionFlight;
+    if (text == "mission-scan") return NativeBenchmarkScenario::MissionScan;
+    if (text == "mission-wrong-sector") return NativeBenchmarkScenario::MissionWrongSector;
     if (text == "straylight-reveal") return NativeBenchmarkScenario::StraylightReveal;
     if (text == "straylight-approach") return NativeBenchmarkScenario::StraylightApproach;
     if (text == "straylight-docking") return NativeBenchmarkScenario::StraylightDocking;
@@ -430,6 +432,7 @@ std::string nativeBenchmarkHelpText(std::string_view executableName)
         << "Required benchmark options:\n"
         << "  --benchmark-scenario <title|hangar|launch|mining|message|expedition-dock|expedition-map|expedition-flight>\n"
         << "                       Also: straylight-reveal|straylight-docking|straylight-awakening|straylight-boarding|straylight-departure\n"
+        << "                       Mission layouts: mission-scan|mission-wrong-sector\n"
         << "  --benchmark-json <path>             Machine-readable report destination.\n"
         << "  --benchmark-profile-dir <path>      Dedicated save/preferences directory.\n\n"
         << "Capture options:\n"
@@ -459,6 +462,8 @@ std::string_view nativeBenchmarkScenarioName(NativeBenchmarkScenario scenario)
     case NativeBenchmarkScenario::ExpeditionDock: return "expedition-dock";
     case NativeBenchmarkScenario::ExpeditionMap: return "expedition-map";
     case NativeBenchmarkScenario::ExpeditionFlight: return "expedition-flight";
+    case NativeBenchmarkScenario::MissionScan: return "mission-scan";
+    case NativeBenchmarkScenario::MissionWrongSector: return "mission-wrong-sector";
     case NativeBenchmarkScenario::StraylightReveal: return "straylight-reveal";
     case NativeBenchmarkScenario::StraylightApproach: return "straylight-approach";
     case NativeBenchmarkScenario::StraylightDocking: return "straylight-docking";

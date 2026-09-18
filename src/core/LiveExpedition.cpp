@@ -1,4 +1,5 @@
 #include "core/ExpeditionSystem.h"
+#include "core/MissionGuidance.h"
 #include "core/StraylightSequence.h"
 #include "core/FlightSystem.h"
 #include "core/ContentIds.h"
@@ -41,48 +42,17 @@ std::string courseTargetName(const PersistentExpeditionState& e,const SystemDefi
     return "None";
 }
 CampaignObjective recommendedCampaignObjective(const GameState& state,const ContentCatalog& catalog) {
-    if (const auto objective = straylightObjective(state)) return *objective;
-    const auto& e=state.run.expedition;
-    for (const auto owner : {BatteryOwner::Ship,BatteryOwner::Wreck}) {
-        for (const auto& mission:catalog.solarMissions) {
-            if (mission.optional) continue;
-            for (const auto& battery:e.batteries) {
-                if (battery.id!=mission.bodyId || battery.owner!=owner) continue;
-                const auto* body=systemBody(solarSystemDefinition(),mission.bodyId);
-                const auto name=(body?body->name:mission.bodyId)+" artifact";
-                if (owner==BatteryOwner::Ship)
-                    return {CampaignObjectiveKind::SecureArtifact,"earth",mission.artifactId,
-                        "Return to Earth to secure " + name,"Artifact aboard — not yet banked.",0};
-                const auto target="wreck:"+std::to_string(battery.wreckId);
-                if (!courseWreck(e,target)) return {CampaignObjectiveKind::RecoveryUnavailable,{},mission.artifactId,
-                    "Artifact recovery unavailable","Missing Wreck "+std::to_string(battery.wreckId)+". Artifact ownership retained.",battery.wreckId};
-                return {CampaignObjectiveKind::RecoverArtifact,target,mission.artifactId,
-                    "Recover " + name + " from Wreck " + std::to_string(battery.wreckId),
-                    "Rendezvous within 3 units at 1.0 relative speed or less, then salvage. Return to Earth to secure it.",battery.wreckId};
-            }
-        }
-    }
-    if (const auto* mission=nextSolarMission(state,catalog)) {
-        const auto* body=systemBody(solarSystemDefinition(),mission->bodyId);
-        return {CampaignObjectiveKind::Mission,mission->bodyId,mission->artifactId,
-            "Next mission: "+(body?body->name:mission->bodyId),"Follow the mission marker, or choose a waypoint to explore.",0};
-    }
-    if (arkDiscovered(state)) return {CampaignObjectiveKind::Mission,"straylight",{},"Continue to Straylight","Follow the existing Straylight objective.",0};
-    return {CampaignObjectiveKind::Complete,{},{},"Solar objectives complete",{},0};
+    const auto view = trackedMissionView(state, catalog);
+    if (view.available) return {view.kind, view.targetId, view.artifactId, view.instruction, view.purpose, view.wreckId};
+    return {CampaignObjectiveKind::Complete, {}, {}, "Explore the system", "Choose a destination on the map.", 0};
 }
 bool reconcileCampaignGuidance(GameState& state,const ContentCatalog& catalog,bool followNow) {
     auto& e=state.run.expedition;
     if (!e.travelInitialized || e.location.systemId!="solar") return false;
     const auto& f=state.run.flight;
-    bool changed=false;
+    bool changed=reconcileTrackedMission(state,catalog);
     const bool docked=operationalHomeDocked(e);
-    const auto* mission=solarMissionForBody(catalog,e.course.targetBodyId);
-    const bool arrived=e.course.targetBodyId==e.location.bodyId &&
-        (f.orbit.captured || f.mode==FlightMode::Landing || !e.location.siteId.empty());
-    if (e.coursePlayerSelected && (followNow || arrived ||
-        (docked && mission && solarMissionClaimed(state,catalog,*mission)))) {
-        e.coursePlayerSelected=false; changed=true;
-    }
+    if (e.coursePlayerSelected && followNow) { e.coursePlayerSelected=false; changed=true; }
     if (e.course.targetBodyId.starts_with("wreck:") && !courseWreck(e,e.course.targetBodyId)) {
         e.course={}; e.cruise={}; e.coursePlayerSelected=false; changed=true;
     }
@@ -102,7 +72,7 @@ bool reconcileCampaignGuidance(GameState& state,const ContentCatalog& catalog,bo
     }
     return changed;
 }
-FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool laserComplete) {
+FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool /*laserComplete*/) {
     const auto& e = state.run.expedition;
     const auto& f = state.run.flight;
     const auto& system = solarSystemDefinition();
@@ -132,12 +102,12 @@ FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool la
         g.nextAction = "Climb away from Earth / follow your " + g.targetName + " marker";
     else if (f.predictedImpact) g.nextAction = "Brake or turn: predicted impact";
     else if (e.cruise.active && e.cruise.cooling) g.nextAction = "Cruise cooling / engines off until 40%";
-    else if (courseWreck(e,e.course.targetBodyId)) g.nextAction = "Rendezvous within 3 units / relative speed 1.0 or less / Salvage wreck";
-    else if (frame && f.orbit.captured && g.orbitBodyId == frame->id) g.nextAction = laserComplete ? "Align with the landing gate, then Land" : surveyed ? "Use the orbital laser to prepare your landing" : "Use Pulse Survey to inspect a landing site";
+    else if (courseWreck(e,e.course.targetBodyId)) g.nextAction = "Rendezvous within " + std::to_string(static_cast<int>(expeditionSalvageRadius)) + "U and match speed / Salvage wreck";
+    else if (frame && f.orbit.captured && g.orbitBodyId == frame->id) g.nextAction = surveyed ? "Land in the surveyed sector / drilling is optional" : "Scan a landing sector";
     else if (frame && g.orbitBodyId == frame->id) g.nextAction = f.orbit.confirmationSeconds > 0.0
         ? "Coast to confirm orbit / " + std::to_string(static_cast<int>(orbitConfirmationProgress(f) * 100.0)) + "%"
         : "Shape your trajectory into the orbit bands";
-    else if (target && target->dock) g.nextAction = "Approach the dock marker and slow to dock";
+    else if (target && target->dock) g.nextAction = "Approach within " + std::to_string(static_cast<int>(expeditionDockRadius)) + "U of the dock marker and slow to dock";
     else g.nextAction = target ? "Approach " + target->name + " / establish orbit" : "Plot a destination or fly manually";
     return g;
 }

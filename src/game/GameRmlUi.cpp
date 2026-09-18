@@ -1883,9 +1883,8 @@ std::string inputPromptBar(
                     + describedItem("Drill", "Right click")
                     + describedItem("Scan", "E");
             } else {
-                prompt += describedItem("Rotate", "A/D")
-                    + describedItem("Thrust / Reverse", "W/S")
-                    + describedItem("A/D strafe", "Hold Shift")
+                prompt += describedItem("Move", "WASD / Arrows")
+                    + describedItem("Face cursor", "Mouse")
                     + describedItem("Drill", "Space / Left click")
                     + describedItem("Scan", "E");
             }
@@ -2927,6 +2926,7 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
         && presentation_.runtime.miningTetherAvailable == presentation.runtime.miningTetherAvailable
         && presentation_.runtime.miningAbortAvailable == presentation.runtime.miningAbortAvailable
         && presentation_.runtime.overlayValue == presentation.runtime.overlayValue
+        && presentation_.missionTrackerMarkup == presentation.missionTrackerMarkup
         && presentation_.runtime.expeditionLevel == presentation.runtime.expeditionLevel
         && presentation_.runtime.expeditionExperienceCurrent == presentation.runtime.expeditionExperienceCurrent
         && presentation_.runtime.expeditionExperienceRequired == presentation.runtime.expeditionExperienceRequired
@@ -3241,7 +3241,8 @@ bool GameRmlUi::hitTest(int x, int y) const
         const Rml::Vector2f point {static_cast<float>(x), static_cast<float>(y)};
         return buttonElementAtPoint(*g_context, point) != nullptr;
     }
-    if (presentation_.metadata.overlay == PanelOverlayKind::PreflightLaunch && g_context) {
+    if ((presentation_.metadata.overlay == PanelOverlayKind::PreflightLaunch ||
+         !presentation_.missionTrackerMarkup.empty()) && g_context) {
         const Rml::Vector2f point {static_cast<float>(x), static_cast<float>(y)};
         if (buttonElementAtPoint(*g_context, point) != nullptr) {
             return true;
@@ -4112,7 +4113,21 @@ bool GameRmlUi::rebuildOverlayHost()
         return false;
     }
     const ModalPresentation* activeModal = findModal(presentation_.modals, openModalId_);
-    overlayHost->SetInnerRML(activeModal ? std::string {} : nativeSceneOverlayMarkup(presentation_));
+    std::string overlays = nativeSceneOverlayMarkup(presentation_);
+    if (!presentation_.missionTrackerMarkup.empty()) {
+        // Landed flight also uses the mining HUD. Anchor to that presentation,
+        // rather than the gameplay screen's flight-sidebar geometry.
+        const bool surfaceHud = presentation_.metadata.surface == PanelSurfaceKind::Mining;
+        const auto layout = resolveUiViewportLayout(std::max(1, rr_rml_viewport_width()),
+            std::max(1, rr_rml_viewport_height()), surfaceHud ? UiSurfaceKind::Mining : uiSurfaceKindForScreen(presentation_.metadata.screen));
+        // The surface XP strip occupies the first 38px of the scene; leave a
+        // 12px gap below it and align with the other HUD elements' left edge.
+        overlays += "<div class=\"mission-overlay\" style=\"left:" + std::to_string(layout.sceneRect.x + (surfaceHud ? 0 : 12)) +
+            "px;top:" + std::to_string(layout.sceneRect.y + (surfaceHud ? 50 : 64)) + "px;width:" +
+            std::to_string(std::min(330, std::max(240, layout.sceneRect.width / 3))) + "px;\">" +
+            presentation_.missionTrackerMarkup + "</div>";
+    }
+    overlayHost->SetInnerRML(activeModal ? std::string {} : overlays);
     return true;
 }
 

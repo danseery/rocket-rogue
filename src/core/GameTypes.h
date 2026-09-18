@@ -2376,6 +2376,7 @@ struct ExpeditionDecisionState {
     std::vector<std::string> acknowledgedIds;
     bool awaitingAscent = false;
 };
+enum class MissionScanIntro { Unseen, Showing, Complete };
 struct PersistentExpeditionState {
     bool travelInitialized = false;
     bool openingInitialized = false;
@@ -2397,6 +2398,9 @@ struct PersistentExpeditionState {
     std::vector<PersistentSiteState> sites;
     std::string selectedOrbitBody, selectedOrbitZone = "zone_1";
     std::string moonTutorialZone;
+    std::string trackedMissionId;
+    MissionScanIntro missionScanIntro = MissionScanIntro::Unseen;
+    bool missionGuidanceLoaded = true; // Transient compatibility marker for older saves.
     std::array<BeaconBatteryState, 6> batteries {{
         {"moon", "moon.beacon"}, {"mars", "mars.beacon"},
         {"io", "io.beacon"}, {"titan", "titan.beacon"},

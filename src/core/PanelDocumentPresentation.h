@@ -116,6 +116,7 @@ struct PanelDocumentPresentation {
     PanelPresentationMetadata metadata;
     PanelRuntimeHints runtime;
     std::string contentMarkup;
+    std::string missionTrackerMarkup;
     std::vector<ModalPresentation> modals;
 };
 

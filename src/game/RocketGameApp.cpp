@@ -3,6 +3,7 @@
 #include "core/ArtifactProgression.h"
 #include "game/RocketGameApp.h"
 #include "core/ExpeditionSystem.h"
+#include "core/MissionGuidance.h"
 #include "core/StraylightSequence.h"
 
 #include "core/FlightProgress.h"
@@ -627,9 +628,14 @@ void RocketGameApp::resumeOrbitalFlight()
 {
     auto& work = session_.orbitalWork;
     if (work.phase == OrbitalWorkPhase::LandingAlignment) return;
+    if (state_.run.expedition.missionScanIntro == MissionScanIntro::Showing) {
+        state_.run.expedition.missionScanIntro = MissionScanIntro::Complete;
+    }
     work.phase = OrbitalWorkPhase::Inactive;
     work.held = false;
     work.releaseRequired = true;
+    storeOrbitalSite();
+    save();
     if (pauseReason_ == PauseReason::ControllerUiFocus && !services_.ui.modalOpen())
         clearControllerPause();
     if (activeInputSource_ == InputSource::Controller) {
@@ -655,6 +661,8 @@ void RocketGameApp::landFromOrbit()
     if (services_.ui.modalOpen() || !orbitalLandingEligible() ||
         work.phase == OrbitalWorkPhase::LandingAlignment) return;
 
+    if (state_.run.expedition.missionScanIntro == MissionScanIntro::Showing)
+        state_.run.expedition.missionScanIntro = MissionScanIntro::Complete;
     // An explicit arcade deorbit command, not an ongoing braking assist.
     // Hold the current position while the nose turns along the shortest arc.
     work.phase = OrbitalWorkPhase::LandingAlignment;
@@ -799,6 +807,12 @@ bool RocketGameApp::advanceOrbitalWork(double seconds, const Destination& destin
             surfaceArrival_.prepared->surveyComplete = true;
             work.phase = OrbitalWorkPhase::LaserReady;
             work.releaseRequired = work.held;
+            if (surfaceArrival_.prepared->bodyId == "moon" &&
+                state_.run.expedition.missionScanIntro == MissionScanIntro::Unseen) {
+                state_.run.expedition.missionScanIntro = MissionScanIntro::Showing;
+                storeOrbitalSite();
+                save();
+            }
             panelDirty_ = true;
         }
     } else if (work.phase == OrbitalWorkPhase::Firing && work.held && !work.releaseRequired) {
@@ -940,6 +954,12 @@ void RocketGameApp::prepareSurfaceArrivalIfNeeded(const Destination& destination
         work.preparationKey = p.preparationKey;
         work.surveyComplete = p.surveyComplete;
         work.surveyDepth = std::max(0, p.surveyedDepth);
+        if (p.bodyId == "moon" && p.surveyComplete &&
+            expedition.missionScanIntro == MissionScanIntro::Showing &&
+            session_.flight.mode != FlightMode::Landing) {
+            work.phase = OrbitalWorkPhase::LaserReady;
+            work.releaseRequired = true;
+        }
         if (!p.surveyComplete && p.surveyedDepth >= 0) {
             work.phase = OrbitalWorkPhase::Surveying;
             work.elapsed = p.surveyElapsed;
@@ -1942,6 +1962,7 @@ bool RocketGameApp::realtimeControllerContext(InputContext context) const
 
 void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
 {
+    flightPointerValid_ = false;
     flightMouseFacingActive_ = false;
     flightShiftReleaseRequired_ = flightShiftDown_;
     departureThrustHeld_ = false;
@@ -1957,6 +1978,7 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
     session_.throttleInput = 0.0;
     state_.run.mining.moveX = 0.0;
     state_.run.mining.moveY = 0.0;
+    setMiningRigPiloting(state_, 0.0, 0.0, 0.0);
     state_.run.mining.drilling = false;
     setMiningFire(state_, false);
     setMiningOperatorToggleProgress(state_, 0.0);
@@ -1997,12 +2019,30 @@ void RocketGameApp::applyRealtimeInputs()
             if (operatorActive) {
                 setMiningMove(state_, moveX, moveY);
             } else if (useController) {
-                // Left stick follows the screen; drill heading only affects rotation.
-                setMiningRigPiloting(state_, miningInput.aimX, 0.0, 0.0);
+                double turn = 0.0;
+                // Both axes already passed through the shared radial deadzone.
+                // Aim in screen coordinates, independently of left-stick movement.
+                if (miningInput.aimX != 0.0 || miningInput.aimY != 0.0) {
+                    const auto& mining = state_.run.mining;
+                    const double desired = std::atan2(miningInput.aimY, miningInput.aimX);
+                    const double heading = std::atan2(mining.hullDirY, mining.hullDirX);
+                    double error = std::remainder(desired - heading, 2.0 * math::pi);
+                    if (std::abs(std::abs(error) - math::pi) < 1e-10) error = math::pi;
+                    // Preserve the existing maximum 0.5-radian steering request;
+                    // the mining simulation still smooths and collision-sweeps it.
+                    turn = std::clamp(error / 0.5, -1.0, 1.0);
+                }
+                setMiningRigPiloting(state_, turn, 0.0, 0.0);
                 setMiningMove(state_, moveX, moveY, false);
             } else {
-                const double turn = flightShiftDown_ ? 0.0 : moveX;
-                setMiningRigPiloting(state_, turn, -moveY, flightShiftDown_ ? moveX : 0.0);
+                double turn = 0.0;
+                if (rigPiloting && flightPointerValid_ && pauseReason_ == PauseReason::None &&
+                    !services_.ui.modalOpen() && !surfaceBaySequence_.active()) {
+                    if (const auto angle = services_.renderer.flightPointerPresentation().angleTo(flightPointerX_, flightPointerY_))
+                        turn = std::clamp(-*angle / 0.5, -1.0, 1.0);
+                }
+                setMiningRigPiloting(state_, turn, 0.0, 0.0);
+                setMiningMove(state_, moveX, moveY, false);
             }
             if (std::hypot(miningInput.aimX, miningInput.aimY) > 0.01) {
                 setMiningAim(state_, miningInput.aimX, miningInput.aimY);
@@ -2171,7 +2211,8 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
 void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGameInput& input)
 {
     if (messageControllerNeutralRequired_ && !services_.ui.modalOpen() && realtimeControllerContext(context)) {
-        if (std::abs(input.moveX) > 0.01 || std::abs(input.moveY) > 0.01 || std::abs(input.strafe) > 0.01 || input.drilling || input.firing || input.operatorToggleProgress > 0.0) return;
+        if (std::abs(input.moveX) > 0.01 || std::abs(input.moveY) > 0.01 || std::abs(input.strafe) > 0.01 ||
+            std::abs(input.aimX) > 0.01 || std::abs(input.aimY) > 0.01 || input.drilling || input.firing || input.operatorToggleProgress > 0.0) return;
         messageControllerNeutralRequired_ = false;
     }
     if (miningSceneHandoff_ != MiningSceneHandoff::None) {
@@ -2551,6 +2592,16 @@ void RocketGameApp::tick(double deltaSeconds)
     }
     const bool solarProgressChanged = reconcileSolarMissionMessages(state_, catalog_);
     const bool guidanceChanged = reconcileCampaignGuidance(state_, catalog_);
+    const auto mission = trackedMissionView(state_, catalog_, &session_.flight, session_.orbitalWork.surveyComplete);
+    const std::string missionKey = mission.id + ":" + mission.stepId;
+    if (missionKey != missionStepKey_) {
+        missionChangeSeconds_ = missionStepKey_.empty() ? 0 : 2.5;
+        missionStepKey_ = missionKey;
+        panelDirty_ = true;
+    }
+    const bool highlighted = missionChangeSeconds_ > 0;
+    missionChangeSeconds_ = std::max(0.0, missionChangeSeconds_ - deltaSeconds);
+    if (highlighted != (missionChangeSeconds_ > 0)) panelDirty_ = true;
     if (solarProgressChanged || guidanceChanged) {
         save();
         panelDirty_ = true;
@@ -4717,6 +4768,34 @@ void RocketGameApp::debugStartLaunchLesson(int lessonIndex)
 
 void RocketGameApp::debugStartSurfaceArrival(int destinationIndex, int phaseIndex)
 {
+    if (phaseIndex == 29 || phaseIndex == 30) {
+        // Real mission rules in an isolated sandbox; no campaign save writes.
+        debugStartSurfaceArrival(0, 23);
+        auto& e = state_.run.expedition;
+        e.travelInitialized = e.active = true;
+        e.openingInitialized = true;
+        e.location = {"solar", "moon", CoordinateFrame::Body, {}, {}, 0.0, ""};
+        e.course.targetBodyId = e.trackedMissionId = "moon";
+        e.selectedOrbitBody = "moon";
+        e.selectedOrbitZone = phaseIndex == 29 ? "zone_1" : "zone_3";
+        e.moonTutorialZone = "zone_1";
+        e.missionScanIntro = MissionScanIntro::Unseen;
+        state_.meta.unlockKeys.clear();
+        const auto* mission = solarMissionForBody(catalog_, "moon");
+        acceptSolarMission(state_, catalog_, *mission);
+        state_.incomingMessages.pending.clear();
+        state_.incomingMessages.acknowledgedMessages.push_back(mission->briefingMessageId);
+        const auto* zone = planetLandingZone(e.selectedOrbitZone);
+        auto& flight = session_.flight;
+        flight.positionX = .70 * std::cos(zone->centerBearing);
+        flight.positionY = .70 * std::sin(zone->centerBearing);
+        flight.velocityX = -.33 * std::sin(zone->centerBearing);
+        flight.velocityY = .33 * std::cos(zone->centerBearing);
+        surfaceArrival_ = {};
+        prepareSurfaceArrivalIfNeeded(currentDestination(state_, catalog_), zone->id);
+        panelDirty_ = realtimeHudDirty_ = true;
+        return;
+    }
     const bool mars = destinationIndex == 1;
     const bool io = destinationIndex == 2;
     if ((destinationIndex != 0 && !mars && !io) || phaseIndex < 0 || phaseIndex > 28) {
@@ -5856,6 +5935,8 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
             && (!earthLaunchReady(state_.run.expedition) || session_.launchQueued),
         session_.waypointPreviewCourse.targetBodyId.empty() ? nullptr : &session_.waypointPreviewCourse,
         orbitalLandingEligible(),
+        missionChangeSeconds_ > 0,
+        showCompletedMissions_,
     };
 }
 
@@ -6499,6 +6580,15 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningMoveY = mining.moveY;
         result.miningHullDirX = mining.hullDirX;
         result.miningHullDirY = mining.hullDirY;
+        result.miningControllerAimVisible = activeInputSource_ == InputSource::Controller &&
+            state_.screen == Screen::Mining && pauseReason_ == PauseReason::None &&
+            !services_.ui.modalOpen() && !surfaceBaySequence_.active() &&
+            mining.operatorMode != MiningOperatorMode::Jetpack;
+        const double stickLength = std::hypot(controllerRealtimeInput_.aimX, controllerRealtimeInput_.aimY);
+        result.miningControllerAimX = stickLength > 0.0
+            ? controllerRealtimeInput_.aimX / stickLength : mining.hullDirX;
+        result.miningControllerAimY = stickLength > 0.0
+            ? controllerRealtimeInput_.aimY / stickLength : mining.hullDirY;
         result.miningOperatorPresent = mining.operatorPresent;
         result.miningOperatorActive =
             mining.operatorMode == MiningOperatorMode::Jetpack &&
@@ -6659,6 +6749,20 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.orbitalArtifactBearing = signal.bearing;
         result.orbitalArtifactLocalized = signal.localized;
         result.orbitalArtifactDepth = signal.depth;
+        const auto mission = trackedMissionView(state_, catalog_, &session_.flight, work.surveyComplete);
+        const auto localMission = mission.id == activeExpedition.location.bodyId ? mission :
+            missionView(state_, catalog_, activeExpedition.location.bodyId, &session_.flight, work.surveyComplete);
+        result.orbitalArtifactLocalized = signal.localized && localMission.artifactLocated;
+        if (mission.available && mission.sectorKnown && mission.id == activeExpedition.location.bodyId &&
+            mission.targetId == mission.id && !mission.complete && mission.stepId != "claim") {
+            if (const auto* zone = planetLandingZone(mission.sectorId)) {
+                result.missionSectorVisible = true;
+                result.missionSector = *zone;
+                result.missionSectorLabel = "MISSION LANDING SITE / " + missionSectorName(mission.sectorId);
+                if (result.orbitalZone.id == mission.sectorId && work.surveyComplete && work.phase != OrbitalWorkPhase::Firing)
+                    result.orbitalZoneLabel.clear();
+            }
+        }
         for (const auto& site : activeExpedition.sites) {
             if (site.systemId != activeExpedition.location.systemId ||
                 site.bodyId != activeExpedition.location.bodyId ||
@@ -6690,6 +6794,8 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.orbitalLaserFiring = work.phase == OrbitalWorkPhase::Firing && work.held && !work.releaseRequired;
         if (surfaceArrival_.prepared && (work.surveyComplete || work.active()))
             result.orbitalSurveyLayers = surfaceArrival_.prepared->surveyLayers;
+        if (!localMission.artifactLocated)
+            for (auto& layer : result.orbitalSurveyLayers) layer.artifact = false;
         if (surfaceArrival_.prepared) result.orbitalLaserDepth =
             surfaceArrival_.prepared->laserDepth - surfaceArrival_.prepared->miningTemplate.entryDepthZone +
             static_cast<double>(surfaceArrival_.prepared->laserRow) /

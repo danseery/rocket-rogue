@@ -397,7 +397,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
             "Controls",
             evaActive
                 ? std::string("WASD/left stick thrusts; mouse/right stick aims; left click/R2 fires; right click/L2 drills; E/X scans; T/Y tethers; F or hold A enters the rig.")
-                : std::string("WASD/left stick thrusts and steers the rig drill; left click/R2 drills; E/X scans; T/Y tethers; F or hold A exits for EVA.")),
+                : std::string("WASD/left stick moves in screen directions; mouse/right stick aims the rig drill; center the stick to hold heading; left click/R2 drills; E/X scans; T/Y tethers; F or hold A exits for EVA.")),
         detailPresentationRow("Site", std::string(surfaceSiteProfileName(state.run.planetaryExpedition.siteProfile))),
         detailPresentationRow("Rig health", presentation.rigHealth),
         detailPresentationRow("Rig O2", miningOxygenValue(mining.rigOxygen.current) + " / " + miningOxygenValue(rigOxygenCapacity)),

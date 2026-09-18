@@ -459,6 +459,9 @@ private:
     bool flightShiftReleaseRequired_ = false;
     bool flightMouseFacingActive_ = false;
     bool flightPointerValid_ = false;
+    std::string missionStepKey_;
+    double missionChangeSeconds_ = 0;
+    bool showCompletedMissions_ = false;
     double flightPointerX_ = 0.0, flightPointerY_ = 0.0;
     RealtimeInputState controllerRealtimeInput_;
     MiningDrillMode miningDrillMode_ = MiningDrillMode::Toggle;

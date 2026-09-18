@@ -10928,3 +10928,29 @@ body.controller-focus-visible .rr-controller-focus .rr-controller-confirm-glyph 
 .straylight-beacons p { margin: 3dp 0dp; }
 .straylight-checklist { margin-top: 10dp; color: #aacbd6; }
 .straylight-contact { padding: 12dp; background-color: #103c4aed; color: #a0f8ff; }
+/* One shared mission tracker. Text is quiet; only step transitions accent the border. */
+.mission-overlay { position: absolute; pointer-events: none; }
+.mission-tracker, .mission-scan-result, .mission-log-entry { display: block; }
+.mission-tracker { width: 330dp; max-width: 100%; padding: 8dp 10dp; margin: 0 0 8dp; background-color: #06131ddd; border-left: 2dp #9277b6; color: #d6e7ef; font-size: 14dp; }
+.mission-overlay .mission-tracker { width: auto; }
+.mission-tracker strong { display: block; font-size: 13dp; color: #c7a9ef; }
+.mission-tracker p { margin: 4dp 0; line-height: 1.2; }
+.mission-tracker .mission-progress { font-size: 12dp; color: #a8becb; }
+.mission-tracker.mission-changed { border-left-color: #f4e4ff; background-color: #17273fee; }
+.mission-tracker-actions { display: flex; gap: 8dp; }
+.mission-tracker-actions button { pointer-events: auto; min-width: 0dp; min-height: 24dp; width: auto; padding: 3dp 7dp; margin: 0; font-size: 12dp; }
+.mission-overlay button * { pointer-events: auto; }
+.mission-scan-result { padding: 10dp; margin: 8dp 0; border-left: 3dp #c7a9ef; background-color: #132234; }
+.mission-scan-result strong { color: #ead9ff; }
+.mission-scan-result p { margin: 6dp 0; }
+.mission-scan-result small { color: #9edfc6; }
+.mission-log-entry { padding: 12dp 0; border-bottom: 1dp #284653; }
+.mission-log-entry h3 { margin: 0 0 6dp; }
+.mission-log-entry p { margin: 5dp 0; }
+.mission-log-entry li { margin: 6dp 0; }
+.mission-done { color: #92d5b8; }
+.mission-pending { color: #d6e7ef; }
+.mission-reward { color: #92d5b8; }
+.mission-tabs { margin-bottom: 12dp; }
+#rr-panel .orbit-action-panel button { font-size: 16dp; white-space: normal; min-height: 42dp; padding: 6dp 8dp; margin-top: 6dp; margin-bottom: 6dp; }
+#rr-modal.modal-missions { width: 704dp; max-width: 94%; }

@@ -225,6 +225,9 @@ struct RenderSnapshot {
     PlanetLandingZone orbitalZone;
     double orbitalShaftBearing = 0.0;
     bool orbitalArtifactHint = false;
+    bool missionSectorVisible = false;
+    PlanetLandingZone missionSector;
+    std::string missionSectorLabel;
     double orbitalArtifactBearing = 0.0;
     bool orbitalArtifactLocalized = false;
     double orbitalArtifactDepth = 0.0;
@@ -369,6 +372,9 @@ struct RenderSnapshot {
     double miningMoveY = 0.0;
     double miningHullDirX = 0.0;
     double miningHullDirY = 1.0;
+    bool miningControllerAimVisible = false;
+    double miningControllerAimX = 0.0;
+    double miningControllerAimY = 1.0;
     bool miningOperatorPresent = false;
     bool miningOperatorActive = false;
     double miningOperatorX = 0.0;

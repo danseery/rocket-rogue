@@ -168,6 +168,7 @@ std::string serializeExpedition(const PersistentExpeditionState &e)
                 << ' ' << layer.radiation << ' ' << layer.toxic;
     }
     out << " cruise1 " << e.cruise.cooling;
+    out << " missions1 " << std::quoted(e.trackedMissionId) << ' ' << static_cast<int>(e.missionScanIntro);
     return out.str();
 }
 std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view input)
@@ -297,6 +298,16 @@ std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view 
         if (!(in >> extension >> e.cruise.cooling) || extension != "cruise1") return std::nullopt;
         in >> std::ws;
     }
+    e.missionGuidanceLoaded = false;
+    if (!in.eof()) {
+        std::string extension;
+        int intro;
+        if (!(in >> extension >> std::quoted(e.trackedMissionId) >> intro) || extension != "missions1" ||
+            intro < 0 || intro > 2 || e.trackedMissionId.size() > 128) return std::nullopt;
+        e.missionScanIntro = static_cast<MissionScanIntro>(intro);
+        e.missionGuidanceLoaded = true;
+        in >> std::ws;
+    } else if (!e.sites.empty()) e.missionScanIntro = MissionScanIntro::Complete;
     if (e.undockReady && (e.active || !e.location.siteId.ends_with(".dock"))) return std::nullopt;
     if (!in.eof() || !validBatteryOwnership(e))
         return std::nullopt;

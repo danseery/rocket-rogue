@@ -215,7 +215,7 @@ for (const token of [
   "rr_rml_set_frame_limit_preference",
   "selectCurrentFrameLimit",
   "const ModalPresentation* activeModal",
-  "overlayHost->SetInnerRML(activeModal ? std::string {} : nativeSceneOverlayMarkup(presentation_));"
+  "overlayHost->SetInnerRML(activeModal ? std::string {} : overlays);"
 ]) {
   if (!gameRmlUi.includes(token)) {
     console.error(`native RmlUi frame-limit preference missing token: ${token}`);

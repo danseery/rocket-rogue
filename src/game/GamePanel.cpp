@@ -2,6 +2,7 @@
 #include "game/GamePanel.h"
 #include "game/ExpeditionPresentation.h"
 #include "core/ExpeditionSystem.h"
+#include "core/MissionGuidance.h"
 #include "core/CrewPresentation.h"
 #include "core/FlightInstrumentPresentation.h"
 #include "core/FlightSystem.h"
@@ -476,7 +477,7 @@ void collectSharedUtilityModals()
         "<div><strong>Flight controller</strong><span>Right stick left/right rotates. Left stick left/right strafes; up/down applies forward/reverse thrust (subject to flight-Y inversion). Release thrust and strafe to coast.</span></div>"
         "<div><strong>Orbital work</strong><span>After Scan, left stick or D-pad selects Scan, Drill, Land, or Resume Flight. Hold Confirm on Drill. Resume Flight or Back returns to piloting.</span></div>"
         "<div><strong>Action selection</strong><span>Press D-pad during flight or mining to pause and select UI actions. Back returns to gameplay after sticks and action buttons are released.</span></div>"
-        "<div><strong>Mining rig</strong><span>A/D or Left/Right rotate; W/S or Up/Down thrust and reverse. Hold Shift to strafe with A/D while keeping your heading. On controller, left stick moves in screen directions regardless of drill heading; right stick left/right rotates. Space or left click drills; right trigger drills on controller. West scans. North tethers. Tap South to stow cargo or leave; hold South for 0.6 seconds to exit.</span></div>"
+        "<div><strong>Mining rig</strong><span>WASD or arrows move in screen directions regardless of drill heading. The rig turns toward the mouse; no Shift required. On controller, left stick moves in screen directions; point the right stick to aim the drill in any direction. Center it to hold the current heading. Space or left click drills; right trigger drills on controller. West scans. North tethers. Tap South to stow cargo or leave; hold South for 0.6 seconds to exit.</span></div>"
         "<div><strong>Jetpack EVA</strong><span>Left stick thrusts. Right stick aims. Right trigger fires. Left trigger drills. West scans. North tethers. Hold South for 0.6 seconds to enter.</span></div>"
         "</div>";
     const std::string systemMenuBody =
@@ -2474,6 +2475,7 @@ std::string buildGamePanelMarkup(
         "Controller",
         std::string_view("Left stick or D-pad navigates menus; Confirm selects; Back returns; Menu pauses. Confirm and Back follow controller settings. D-pad pauses live flight or mining for action selection.")));
     settingsBody << detailStack(settingsDetails);
+    settingsBody << "<h3>Missions</h3><p>The tracker shows your next step. Open Missions on the tracker or beside Map for ordered requirements and rewards. Track mission changes guidance without engaging cruise. A manual waypoint stays selected until you choose Return to mission.</p>";
     settingsBody << "<section class=\"settings-control\" data-resolution-settings>"
         << "<div><h3>" << htmlEscape("Display resolution") << "</h3>"
         << "<p>" << htmlEscape("Choose the render target. Auto follows the current display and pixel density.") << "</p></div>"
@@ -2870,7 +2872,7 @@ std::string buildGamePanelMarkup(
         out << "<section class=\"live-hud-header\"><div><h2>" << htmlEscape(launchPanel.sectionTitle)
             << "</h2></div></section>";
         const bool physicalFlight = context.launchFlight != nullptr && context.launchFlight->physicalFlight;
-        if (!orbitalWorkVisible(context))
+        if (!state.run.expedition.travelInitialized && !orbitalWorkVisible(context))
         out << "<section class=\"objective-strip rr-objective-strip\"><span>"
             << (physicalFlight ? "FLIGHT" : "Lesson") << "</span><strong>"
             << htmlEscape(launchPanel.objectiveTitle) << "</strong><p>"
@@ -2901,6 +2903,17 @@ std::string buildGamePanelMarkup(
         if (orbitalWorkVisible(context)) {
             out << "<section class=\"orbit-action-panel\">";
             const auto& w = *context.orbitalWork;
+            const auto mission = trackedMissionView(state, catalog, context.launchFlight, w.surveyComplete);
+            const bool missionScan = w.surveyComplete && mission.available && !mission.complete &&
+                mission.id == state.run.expedition.location.bodyId && mission.targetId == mission.id && mission.stepId != "claim";
+            const bool missionSlice = missionScan && state.run.expedition.selectedOrbitZone == mission.sectorId;
+            if (missionScan) {
+                out << "<section class=\"mission-scan-result\"><strong>YOUR MISSION / " << htmlEscape(mission.location) << "</strong>";
+                if (mission.id == "moon" && state.run.expedition.missionScanIntro == MissionScanIntro::Showing)
+                    out << "<p>" << htmlEscape(firstMoonMissionInstructions(state, catalog)) << "</p><small>" << htmlEscape(mission.reward) << "</small>";
+                else out << "<p>Mission site is " << htmlEscape(missionSectorName(mission.sectorId)) << ". Recover the artifact and complete the mission requirements.</p>";
+                out << "</section>";
+            }
             if (w.phase == OrbitalWorkPhase::LandingAlignment) {
                 out << "<p class=\"phase-copy\">ALIGNING FOR DESCENT</p>";
             } else {
@@ -2912,14 +2925,20 @@ std::string buildGamePanelMarkup(
                 const bool canDrill = ready && w.surveyComplete && !outside &&
                     !context.orbitalLaserBlocked && !context.orbitalLaserComplete;
                 const bool canLand = context.orbitalLandingEligible;
-                const bool workDefault = canScan || canDrill;
+                const bool workDefault = canScan || (canDrill && !missionScan);
+                if (missionScan) {
+                    if (missionSlice && canLand)
+                        out << button("Land at mission site", ui::actions::landFromOrbit, "ok", true);
+                    else if (w.active())
+                        out << button("Resume flight to mission sector", ui::actions::resumeOrbitalFlight, "ok", true);
+                }
                 out << "<div data-orbital-work=\"1\" class=\"orbit-primary-action\">";
                 if (canScan) {
                     out << button("SCAN", ui::actions::orbitalWork, "ok", true, "action:orbital_scan");
                 } else if (canDrill) {
                     // Distinct identities prevent a held Scan confirm from turning
                     // into a Drill hold when the survey refreshes the panel.
-                    out << button("DRILL", ui::actions::orbitalWork, "ok", true,
+                    out << button(missionScan ? "Optional: prepare a shaft" : "DRILL", ui::actions::orbitalWork, missionScan ? "ghost" : "ok", !missionScan,
                         "action:orbital_drill", "continuous");
                 } else {
                     const std::string_view status = scanning ? "SCANNING..."
@@ -2933,9 +2952,9 @@ std::string buildGamePanelMarkup(
                     << (w.surveyComplete ? orbitalLaserHint(context)
                         : "Scan depth " + std::to_string(surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray)))
                     << "</p>";
-                if (canLand) out << button("LAND", ui::actions::landFromOrbit, "ok", !workDefault);
-                if (w.active())
-                    out << button("RESUME FLIGHT", ui::actions::resumeOrbitalFlight, "ghost", !workDefault && !canLand);
+                if (canLand && !(missionScan && missionSlice)) out << button(missionScan ? "Land here instead" : "LAND", ui::actions::landFromOrbit, missionScan ? "ghost" : "ok", !missionScan && !workDefault);
+                if (w.active() && (!missionScan || missionSlice))
+                    out << button("RESUME FLIGHT", ui::actions::resumeOrbitalFlight, "ghost", !missionScan && !workDefault && !canLand);
             }
             out << "</section>";
         }
@@ -3143,7 +3162,7 @@ std::string buildGamePanelMarkup(
             << "</strong><span class=\"mining-run-objective\" id=\"rr-hud-mining-objective-title\">"
             << htmlEscape(context.miningExtractionActive
                     ? std::string("BAY SECURED · IGNITION SEQUENCE")
-                    : (scenarioMining ? compactMiningScenarioObjective(state, catalog) : miningHud.objective))
+                    : (state.run.expedition.travelInitialized ? "MINING SITE" : scenarioMining ? compactMiningScenarioObjective(state, catalog) : miningHud.objective))
             << "</span></div><section class=\"mining-vitals ui-kpi-strip rr-metric-strip\">";
         for (std::size_t index = 0; index < miningHud.vitals.size(); ++index) {
             const MiningHudTilePresentation& tile = miningHud.vitals[index];
@@ -4320,6 +4339,7 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
         }
     }
     appendExpeditionPresentation(context, result);
+    appendMissionPresentation(context, result);
     return result;
 }
 
@@ -4559,7 +4579,7 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
         context.miningExtractionActive
             ? std::string("BAY SECURED \xC2\xB7 IGNITION SEQUENCE")
             : (scenarioMining
-                   ? compactMiningScenarioObjective(state, catalog) + " \xE2\x80\xA2 " + depthRoute
+                   ? (state.run.expedition.travelInitialized ? std::string("MINING SITE") : compactMiningScenarioObjective(state, catalog)) + " \xE2\x80\xA2 " + depthRoute
                    : miningHud.objective));
     const std::array<std::string_view, 4> vitalValueIds {
         "rr-hud-mining-oxygen-value",
@@ -4630,6 +4650,11 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
         const auto& e = state.run.expedition;
         const auto& liveFlight = context.launchFlight ? *context.launchFlight : state.run.flight;
         const auto recommendation = recommendedCampaignObjective(state,context.catalog);
+        const auto mission = trackedMissionView(state, context.catalog, context.launchFlight,
+            context.orbitalWork && context.orbitalWork->surveyComplete);
+        key << mission.id << ':' << mission.stepId << ':' << mission.instruction << ':'
+            << static_cast<int>(e.missionScanIntro) << ':' << context.missionChanged << '|';
+        for (const auto& progress : mission.progress) key << progress << '|';
         key << e.coursePlayerSelected << ':' << recommendation.targetId << ':' << recommendation.title << '|';
         key << e.location.bodyId << ':' << e.cruise.active << ':' << e.course.targetBodyId << ':'
             << (context.waypointPreviewCourse ? context.waypointPreviewCourse->targetBodyId : std::string{}) << ':'

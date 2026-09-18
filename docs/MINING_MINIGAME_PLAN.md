@@ -93,7 +93,7 @@ Tether mass swings under gravity and transfers bounded force to the active actor
 ### Standard controller
 
 - Left stick: actor thrust.
-- Right stick: independent operator aim; it does not steer the rig drill.
+- Right stick: screen-direction aiming for the rig drill, or independent operator aim in EVA. Center the stick to hold the rig's current heading.
 - Right trigger (R2/RT): operator sidearm; rig drill remains on the existing rig mapping.
 - Left trigger (L2/LT): operator hand drill.
 - West (X/Square): pulse scanner.

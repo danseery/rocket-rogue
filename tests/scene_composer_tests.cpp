@@ -1539,6 +1539,21 @@ void testExistingOrbitalShaftsRemainVisibleOutsideTheirActiveWedge()
     assert(std::abs(changedSlice[0].centerY - hint[0].centerY) < 0.0001F);
     snapshot.orbitalArtifactHint = false;
     assert(artifactGlows(shaftComposer.compose(snapshot)).empty());
+    const auto withoutMission = shaftComposer.compose(snapshot).instances.size();
+    snapshot.missionSectorVisible = true;
+    snapshot.missionSector = snapshot.landingZones[0];
+    snapshot.missionSectorLabel = "MISSION LANDING SITE / Sector 1";
+    const ScenePacket mission = shaftComposer.compose(snapshot);
+    assert(mission.instances.size() > withoutMission + 26U);
+    // Selecting another scan wedge must not move the mission outline.
+    snapshot.orbitalZone = snapshot.landingZones[4];
+    const ScenePacket otherWedge = shaftComposer.compose(snapshot);
+    assert(otherWedge.instances.size() == mission.instances.size());
+    for (std::size_t i = 0; i < mission.instances.size(); ++i) {
+        const auto a = rocket::unpackSceneInstance(mission.instances[i]);
+        const auto b = rocket::unpackSceneInstance(otherWedge.instances[i]);
+        assert(std::abs(a.centerX-b.centerX) < .00001F && std::abs(a.centerY-b.centerY) < .00001F);
+    }
 }
 
 
@@ -3128,6 +3143,58 @@ void testMiningSurveyPulseRechargeRingPersistsWhenReady()
     assert(cyanTrackCount(extracting) == 0 && cyanArcLength(extracting) < 0.001F);
 }
 
+void testMiningControllerReticleFollowsScannerRing()
+{
+    for (const auto size : {std::pair{1280, 800}, std::pair{1920, 1080}}) {
+        SceneComposer composer;
+        composer.setViewport({size.first, size.second, size.first, size.second, 1.0F});
+        RenderSnapshot snapshot;
+        snapshot.screen = rocket::Screen::Mining;
+        snapshot.miningWidth = 16; snapshot.miningHeight = 12;
+        snapshot.miningDroneX = snapshot.miningOperatorX = 8;
+        snapshot.miningDroneY = snapshot.miningOperatorY = 6;
+        snapshot.miningRigPresent = snapshot.miningOperatorPresent = true;
+        snapshot.miningControllerAimVisible = true;
+        snapshot.miningScannerRechargeProgress = 1.0;
+        for (bool eva : {false, true}) for (double pulse : {0.0, 0.5}) {
+            snapshot.miningOperatorActive = eva;
+            snapshot.miningScannerPulse = pulse;
+            snapshot.miningOperatorFirePulse = pulse;
+            for (int direction = 0; direction < 8; ++direction) {
+                const double angle = direction * 3.141592653589793 / 4;
+                snapshot.miningControllerAimX = snapshot.miningOperatorAimX = std::cos(angle);
+                snapshot.miningControllerAimY = snapshot.miningOperatorAimY = std::sin(angle);
+                const ScenePacket packet = composer.compose(snapshot);
+                const float cell = std::min(packet.surfaceCamera.cellWidth, packet.surfaceCamera.cellHeight);
+                const float radius = eva ? cell * 2.45F * .68F
+                    : packet.surfaceCamera.cellWidth * snapshot.miningOreAttractionRadius;
+                const float expectedX = packet.surfaceCamera.left + 8 * packet.surfaceCamera.cellWidth + radius * std::cos(angle);
+                const float expectedY = packet.surfaceCamera.top - 6 * packet.surfaceCamera.cellHeight - radius * std::sin(angle);
+                float centerX = 0, centerY = 0, extent = 0;
+                int segments = 0;
+                for (const auto& packed : packet.instances) {
+                    const auto instance = rocket::unpackSceneInstance(packed);
+                    if (std::abs(instance.color.r - 1.0F) > .001F ||
+                        std::abs(instance.color.g - 209.0F / 255.0F) > .001F ||
+                        std::abs(instance.color.b - 71.0F / 255.0F) > .001F) continue;
+                    ++segments;
+                    const float stroke = 2 * std::hypot(instance.axisXx * packet.transform.worldUnitX,
+                        instance.axisXy * packet.transform.worldUnitY);
+                    assert(std::abs(stroke - (segments <= 24 ? .75F : 1.2F)) < .01F);
+                    centerX += instance.centerX; centerY += instance.centerY;
+                    extent = std::max(extent, std::max(std::abs(instance.centerX - expectedX),
+                        std::abs(instance.centerY - expectedY)));
+                    assert(std::abs(instance.color.a - (.70F + (eva ? pulse * .25F : 0))) < .002F);
+                }
+                assert(segments == 28); // One 24-segment circle and four crosshair arms.
+                assert(std::abs(centerX / segments - expectedX) < .001F);
+                assert(std::abs(centerY / segments - expectedY) < .001F);
+                assert(std::abs(extent - cell * (.18F + .34F / 2) * .75F) < .001F);
+            }
+        }
+    }
+}
+
 void testMiningSurveyPulseWaveReachesItsRealRadiusThenFades()
 {
     struct WaveMetrics {
@@ -4275,6 +4342,7 @@ int main() try
     testReturnRingIsCenteredOnTheShip();
     testMiningCollisionIndicatorMarksTheContactedEdge();
     testMiningSurveyPulseRechargeRingPersistsWhenReady();
+    testMiningControllerReticleFollowsScannerRing();
     testMiningSurveyPulseWaveReachesItsRealRadiusThenFades();
     testMiningSurveyPulseProgressivelyRevealsNewTerrain();
     testMiningRigDrillStaysMountedThroughRecoilAndExtension();

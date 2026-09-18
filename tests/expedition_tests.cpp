@@ -13,6 +13,7 @@
 #include "core/SolarProgression.h"
 #include "core/StraylightSequence.h"
 #include "core/PostSolarSystem.h"
+#include "core/MissionGuidance.h"
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
@@ -627,7 +628,7 @@ void campaignGuidanceTests()
         check(e.coursePlayerSelected,"mere influence crossing must not consume override");
         state->run.flight.orbit.captured=true;
         reconcileCampaignGuidance(*state,catalog);
-        check(!e.coursePlayerSelected && e.course.targetBodyId=="venus","capture fulfills override without retargeting during visit");
+        check(e.coursePlayerSelected && e.course.targetBodyId=="venus","manual waypoint persists until Return to mission, including after orbit capture");
         e.location=wreck.location;
         check(salvageWreck(e,7,solarSystemDefinition(),0)==ExpeditionResult::Applied,"artifact salvage succeeds even with full ore hold");
         reconcileCampaignGuidance(*state,catalog,true);
@@ -673,11 +674,80 @@ void salvageSpeedBoundaryTests(rocket::PersistentExpeditionState& e, rocket::Fli
           "Wreck salvage UI and action must reject relative speed above 1.0");
 }
 
+void missionGuidanceTests()
+{
+    using namespace rocket;
+    const auto catalog = createDefaultContent();
+    for (const auto seed : {7, 32, 918}) {
+        auto state = std::make_unique<GameState>(createNewGame(catalog, seed));
+        auto& s = *state;
+        initializeLiveExpedition(s, catalog);
+        auto& e = s.run.expedition;
+        auto view = trackedMissionView(s, catalog);
+        check(view.id == "moon" && view.stepId == "travel", "Fresh campaign tracks the Moon journey");
+        check(missionLog(s, catalog).size() == 1, "Unrevealed missions stay out of the log");
+        e.location.bodyId = "moon"; e.location.siteId.clear();
+        s.screen = Screen::Flight; s.run.flight.orbit.captured = true;
+        check(trackedMissionView(s, catalog).stepId == "survey", "Captured orbit asks for a scan");
+        const auto sector = artifactSectorForBody(s, "solar", "moon");
+        view = trackedMissionView(s, catalog, nullptr, true);
+        check(view.sectorKnown && view.sectorId == sector && view.stepId == "land", "First survey identifies the actual artifact sector");
+        check(firstMoonMissionInstructions(s, catalog).find(missionSectorName(sector)) != std::string::npos &&
+            firstMoonMissionInstructions(s, catalog).find("20 Common Ore to your ship, then") != std::string::npos,
+            "First scan spells out the sector and ore-before-artifact order");
+        s.screen = Screen::Mining; s.run.mining.active = true; s.run.mining.bodyId = "moon";
+        e.location.siteId = "moon.surface:" + sector;
+        performScenarioAction(s, catalog, content::scenario::lunarProspector, "briefing", ScenarioActionKind::AcknowledgeBriefing);
+        s.run.mining.cargo = 20;
+        view = trackedMissionView(s, catalog);
+        check(view.stepId == "ore" && view.progress.front() == "Ore delivered 0/20", "Carried ore does not count as ship delivery");
+        recordScenarioEvent(s, catalog, {ScenarioEventKind::SafeMaterialDelivered, content::scenario::lunarProspector,"delivery","moon","common",8,0});
+        check(trackedMissionView(s, catalog).progress.front() == "Ore delivered 8/20", "Tracker follows actual scenario delivery counts");
+        recordScenarioEvent(s, catalog, {ScenarioEventKind::SafeMaterialDelivered, content::scenario::lunarProspector,"delivery","moon","common",12,0});
+        view = trackedMissionView(s, catalog);
+        check(view.stepId == "scan_artifact", "Ore delivery unlocks the scanner instruction");
+        auto& artifact = s.run.mining.artifact;
+        artifact.present = artifact.revealed = true;
+        artifact.state = MiningArtifactState::Loose;
+        check(trackedMissionView(s, catalog).progress.back() == "Artifact: exposed", "Exposed is not recovered");
+        artifact.tethered = true;
+        view = trackedMissionView(s, catalog);
+        check(view.stepId == "carry" && !view.requirements[view.requirements.size()-2].complete, "Tethered artifact remains incomplete");
+        e.batteries[0].owner = BatteryOwner::Ship;
+        check(trackedMissionView(s, catalog).progress.back() == "Artifact: aboard ship", "Physical capture is shown as aboard ship");
+        e.batteries[0].owner = BatteryOwner::EarthStorage;
+        check(trackedMissionView(s, catalog).progress.back() == "Artifact: banked", "Banked ownership takes precedence over stale site snapshots");
+        recordScenarioEvent(s,catalog,{ScenarioEventKind::ProtectedObjectiveExtracted, content::scenario::lunarProspector,"anomaly","moon",content::miningSite::lunarAnomalyCrevice,1,0});
+        check(trackedMissionView(s, catalog).stepId == "claim", "Completed recovery waits for the explicit claim");
+        performScenarioAction(s,catalog,content::scenario::lunarProspector,"anomaly",ScenarioActionKind::ClaimReward);
+        check(trackedMissionView(s, catalog).id == "mars", "Claim advances the campaign tracker");
+        e.batteries[0].owner = BatteryOwner::Ship;
+        e.trackedMissionId = "moon";
+        check(trackedMissionView(s, catalog).id == "mars", "Claim advances even before Earth banking");
+        e.trackedMissionId = "venus"; e.course.targetBodyId = "mars"; e.coursePlayerSelected = true;
+        reconcileCampaignGuidance(s, catalog);
+        check(e.trackedMissionId == "venus" && e.course.targetBodyId == "mars", "Optional tracking preserves a manual exploration waypoint");
+        for (const auto intro : {MissionScanIntro::Unseen, MissionScanIntro::Showing, MissionScanIntro::Complete}) {
+            e.missionScanIntro = intro;
+            const auto encoded = serializeExpedition(e);
+            const auto restored = deserializeExpedition(encoded);
+            check(restored && restored->trackedMissionId == "venus" && restored->missionScanIntro == intro,
+                "Tracked mission and all scan introduction stages survive reload");
+            const auto legacy = deserializeExpedition(encoded.substr(0, encoded.rfind(" missions1 ")));
+            check(legacy && !legacy->missionGuidanceLoaded, "Legacy expeditions accept the absent mission extension");
+        }
+        e.trackedMissionId = "removed_mission";
+        reconcileTrackedMission(s, catalog);
+        check(e.trackedMissionId == "mars", "Unknown saved mission IDs fall back to current campaign progress");
+    }
+}
+
 void persistentExpeditionTests()
 {
     straylightSequenceTests();
     using namespace rocket;
     campaignGuidanceTests();
+    missionGuidanceTests();
     orbitalObjectiveSafetyTests();
     {
         const auto catalog = createDefaultContent();

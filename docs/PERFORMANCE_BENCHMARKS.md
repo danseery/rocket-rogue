@@ -14,6 +14,8 @@ Use `build/native-release/bin/RocketRogue.exe` for timing. The `native-profile` 
 
 The save-isolated `expedition-dock`, `expedition-map`, and `expedition-flight` scenarios exercise Earth servicing, paused spatial navigation, and physical departure through the shared application. Use them with the same screenshot and resolution options for native layout checks; they do not replace complete journey playtests.
 
+`mission-scan` and `mission-wrong-sector` capture the paused first Moon survey with the matching or a different sector selected. Use these to review the mission explanation, landing marker, and primary/secondary actions at desktop and 1280x800 resolutions.
+
 ```powershell
 build\native-release\bin\RocketRogue.exe `
   --benchmark-scenario mining `

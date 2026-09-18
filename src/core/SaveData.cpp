@@ -1,5 +1,6 @@
 #include "core/SaveData.h"
 #include "core/StraylightSequence.h"
+#include "core/MissionGuidance.h"
 #include "core/ExpeditionPersistence.h"
 #include "core/SystemContent.h"
 #include "core/ContentIds.h"
@@ -3286,6 +3287,9 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.meta.prospectorCommonOreRecovered = std::clamp(save.prospectorCommonOreRecovered, 0, tuning::research::prospectorCommonOreGoal);
     state.meta.lunarMiningBriefingAcknowledged = save.lunarMiningBriefingAcknowledged;
     state.meta.lunarProspectorClaimed = save.lunarProspectorClaimed;
+    if (!state.run.expedition.missionGuidanceLoaded &&
+        (save.lunarProspectorClaimed || save.prospectorCommonOreRecovered > 0 || !save.mining.terrain.cells.empty()))
+        state.run.expedition.missionScanIntro = MissionScanIntro::Complete;
     if (state.run.expedition.moonTutorialZone.empty() &&
         (save.lunarProspectorClaimed || (save.mining.destinationId == "moon" && !save.mining.terrain.cells.empty())))
         state.run.expedition.moonTutorialZone = "zone_1";
@@ -3470,6 +3474,9 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
         }
     }
     syncLaunchConfig(state, catalog);
+    // Resolve legacy or removed mission IDs before the first gameplay tick.
+    // Presentation migration must not cause a save on an immediately fatal frame.
+    reconcileTrackedMission(state, catalog);
 }
 
 std::string serializeSaveData(const SaveData& save)

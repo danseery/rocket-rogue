@@ -116,6 +116,7 @@ add_library(rocket_core
     src/core/SystemContent.cpp
     src/core/ExpeditionSystem.cpp
     src/core/LiveExpedition.cpp
+    src/core/MissionGuidance.cpp
     src/core/StraylightSequence.cpp
     src/core/IncomingMessages.cpp
     src/core/LunarDiscoveryMessages.cpp

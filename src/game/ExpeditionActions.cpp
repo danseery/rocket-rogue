@@ -1,5 +1,6 @@
 #include "game/RocketGameApp.h"
 #include "core/ExpeditionSystem.h"
+#include "core/MissionGuidance.h"
 #include "core/StraylightSequence.h"
 #include "core/PayloadTransfer.h"
 #include "core/ResearchSystem.h"
@@ -21,6 +22,20 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
     if (!action.starts_with("expedition:")) return false;
     auto& e = state_.run.expedition;
     if (!e.travelInitialized) return true;
+    if (action == "expedition:missions" || action == "expedition:mission_history") {
+        if (action == "expedition:mission_history") showCompletedMissions_ = !showCompletedMissions_;
+        releaseRealtimeInputs(true);
+        if (action == "expedition:missions") services_.ui.closeModal();
+        refreshPanel();
+        services_.ui.openModal("missions");
+        return true;
+    }
+    if (action == "expedition:missions_close") {
+        services_.ui.closeModal();
+        releaseRealtimeInputs(true);
+        clearControllerPause();
+        return true;
+    }
     if (action.starts_with("expedition:straylight:")) {
         if (applyStraylightAction(state_, catalog_, std::string_view(action).substr(22))) {
             if (action == "expedition:straylight:install")
@@ -77,6 +92,15 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         reconcileCampaignGuidance(state_,catalog_,true);
         close(); save(); panelDirty_=true; refreshPanel(); return true;
     }
+    if (action.starts_with("expedition:track:")) {
+        const auto mission = missionView(state_, catalog_, std::string_view(action).substr(17));
+        if (mission.available && !mission.complete) {
+            e.trackedMissionId = mission.id;
+            if (!e.coursePlayerSelected) reconcileCampaignGuidance(state_, catalog_, true);
+            close(); save(); panelDirty_ = true; refreshPanel();
+        }
+        return true;
+    }
     if (action == "expedition:retry_opening") {
         if (retryOpeningMission(state_,catalog_) == ExpeditionResult::Applied) {
             resetExpeditionSessionAfterRecovery();
@@ -92,6 +116,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         session_.waypointPreviewCourse = {};
         if (!e.course.targetBodyId.empty()) preview(e.course.targetBodyId);
         release();
+        services_.ui.closeModal();
         refreshPanel();
         services_.ui.openModal("map");
         return true;

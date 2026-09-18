@@ -16,6 +16,8 @@ Screen expectedScreen(NativeBenchmarkScenario scenario)
         return Screen::Hangar;
     case NativeBenchmarkScenario::Launch:
     case NativeBenchmarkScenario::ExpeditionFlight:
+    case NativeBenchmarkScenario::MissionScan:
+    case NativeBenchmarkScenario::MissionWrongSector:
     case NativeBenchmarkScenario::StraylightReveal:
     case NativeBenchmarkScenario::StraylightApproach:
     case NativeBenchmarkScenario::StraylightDocking:
@@ -45,6 +47,15 @@ BenchmarkScenarioSetupResult BenchmarkScenarioDriver::setup(
     }
 
     switch (options.scenario) {
+    case NativeBenchmarkScenario::MissionScan:
+    case NativeBenchmarkScenario::MissionWrongSector:
+        app.debugStartSurfaceArrival(0, options.scenario == NativeBenchmarkScenario::MissionScan ? 29 : 30);
+        app.tick(.05);
+        app.orbitalWorkInput(false);
+        app.orbitalWorkInput(true);
+        app.orbitalWorkInput(false);
+        for (int frame = 0; frame < 45; ++frame) app.tick(.05);
+        break;
     case NativeBenchmarkScenario::StraylightReveal: app.debugStartStraylight(0); break;
     case NativeBenchmarkScenario::StraylightApproach: app.debugStartStraylight(6); break;
     case NativeBenchmarkScenario::StraylightDocking: app.debugStartStraylight(1); break;
