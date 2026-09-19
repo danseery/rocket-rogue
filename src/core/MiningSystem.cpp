@@ -9109,13 +9109,13 @@ bool protectedShaftOverlap(const MiningTerrain& terrain, const MiningArtifactObj
 }
 
 bool orbitalRowBlocked(const MiningTerrain& terrain, const MiningArtifactObject& artifact,
-    int shaftX, int y, bool deeperLayer)
+    int shaftX, int y)
 {
     for (int x=shaftX-orbital_laser::shaftLeftCells; x<=shaftX+orbital_laser::shaftRightCells; ++x) {
         const auto* cell = miningCellAt(terrain,x,y);
-        if (orbitalProtectedCell(terrain,artifact,x,y) || !cell ||
-            cell->material == MiningCellMaterial::FuelPocket || cell->material == MiningCellMaterial::OxygenPocket ||
-            (cell->material == MiningCellMaterial::Bedrock && y<terrain.height-3 && !(deeperLayer && y<3))) return true;
+        // A selected orbital bore vaporizes ordinary terrain. Only an
+        // objective-protection footprint or invalid terrain may stop it.
+        if (orbitalProtectedCell(terrain,artifact,x,y) || !cell) return true;
     }
     return false;
 }
@@ -9123,7 +9123,12 @@ bool orbitalRowBlocked(const MiningTerrain& terrain, const MiningArtifactObject&
 void validateOrbitalShaft(PreparedSurfaceLanding& prepared)
 {
     auto& mining = prepared.miningTemplate;
-    if (orbitalShaftAvoidsProtectedObjectives(mining,prepared.shaftX)) return;
+    if (orbitalShaftAvoidsProtectedObjectives(mining,prepared.shaftX)) {
+        // laserBlocked was persisted by older builds for ordinary terrain
+        // obstructions. A safe shaft is immediately usable after reload.
+        prepared.laserBlocked=false;
+        return;
+    }
     prepared.laserBlocked = true;
     if (prepared.shaftCommitted) return;
     const int halfWidth = std::max(orbital_laser::shaftLeftCells,orbital_laser::shaftRightCells);
@@ -9148,6 +9153,28 @@ void validateOrbitalShaft(PreparedSurfaceLanding& prepared)
         prepared.laserBlocked=false;
         return;
     }
+}
+
+void refreshOrbitalLaserBlocked(const MiningRunState& mining, OrbitalSiteProgress& progress)
+{
+    if (progress.laserComplete) {
+        progress.laserBlocked=false;
+        return;
+    }
+    const MiningTerrain* terrain=nullptr;
+    const MiningArtifactObject* artifact=nullptr;
+    if (mining.depthZone==progress.laserDepth) {
+        terrain=&mining.terrain;
+        artifact=&mining.artifact;
+    }
+    for (const auto& layer : mining.depthLayers) {
+        if (layer.depthZone!=progress.laserDepth) continue;
+        terrain=&layer.terrain;
+        artifact=&layer.artifact;
+        break;
+    }
+    progress.laserBlocked=!terrain ||
+        orbitalRowBlocked(*terrain,*artifact,progress.shaftX,progress.laserRow);
 }
 
 struct OrbitalRepairLayer {
@@ -9287,7 +9314,10 @@ bool translateOrbitalObjective(OrbitalRepairLayer layer, const MiningRunState& m
 void repairRestoredOrbitalObjectives(MiningRunState& target, OrbitalSiteProgress& progress, const MiningRunState& original,
     const ContentCatalog& catalog)
 {
-    if (orbitalShaftAvoidsProtectedObjectives(target,progress.shaftX)) return;
+    if (orbitalShaftAvoidsProtectedObjectives(target,progress.shaftX)) {
+        refreshOrbitalLaserBlocked(target,progress);
+        return;
+    }
     // Work against a private copy: a later unsupported layer or no-room case
     // must leave every layer, portal and loose object untouched.
     auto repaired=target;
@@ -9304,13 +9334,7 @@ void repairRestoredOrbitalObjectives(MiningRunState& target, OrbitalSiteProgress
     }
     if (!orbitalShaftAvoidsProtectedObjectives(repaired,progress.shaftX)) {progress.laserBlocked=true; return;}
     target=std::move(repaired);
-    const auto& mining=target;
-    const MiningTerrain* terrain=nullptr;
-    const MiningArtifactObject* artifact=nullptr;
-    if (mining.depthZone==progress.laserDepth) {terrain=&mining.terrain; artifact=&mining.artifact;}
-    for (const auto& layer : mining.depthLayers) if (layer.depthZone==progress.laserDepth) {terrain=&layer.terrain; artifact=&layer.artifact;}
-    progress.laserBlocked=!terrain || orbitalRowBlocked(*terrain,*artifact,progress.shaftX,progress.laserRow,
-        progress.laserDepth>mining.entryDepthZone);
+    refreshOrbitalLaserBlocked(target,progress);
 }
 } // namespace
 
@@ -9640,7 +9664,7 @@ void excavateOrbitalShaft(PreparedSurfaceLanding& prepared, int maximumDepth, do
             prepared.laserRow = 0;
             continue;
         }
-        if (orbitalRowBlocked(mining.terrain,mining.artifact,prepared.shaftX,y,prepared.laserDepth>entry)) {
+        if (orbitalRowBlocked(mining.terrain,mining.artifact,prepared.shaftX,y)) {
             prepared.laserBlocked=true;
             break;
         }

@@ -335,6 +335,43 @@ void orbitalObjectiveSafetyTests()
             check(!prepared.shaftCommitted || prepared.shaftX==locked,"Started bore cannot silently switch columns");
         }
 
+    // These Titan seeds previously put a fuel or oxygen pocket in the bore,
+    // permanently setting laserBlocked. The orbital laser must now vaporize
+    // ordinary terrain through the artifact layer.
+    for (std::uint64_t seed : {11U,12U,24U,137U}) {
+        auto titan=createNewGame(catalog,seed);
+        titan.meta.unlockKeys.push_back(content::unlock::routeSaturn);
+        titan.run.expedition.travelInitialized=true;
+        titan.run.expedition.location.systemId="solar";
+        titan.run.expedition.location.bodyId="titan";
+        SurfaceLandingBuildRequest titanRequest;
+        titanRequest.destinationId="saturn";
+        titanRequest.bodyId="titan";
+        titanRequest.zoneId=artifactSectorForBody(titan,"solar","titan");
+        titanRequest.siteSeed=seed;
+        auto titanBore=prepareSurfaceLanding(titan,catalog,titanRequest);
+        check(titanBore.valid && prepareOrbitalSurvey(titan,catalog,titanBore,2),
+            "Known Titan blocker seeds must prepare a depth-two bore");
+        excavateOrbitalShaft(titanBore,2,10.0);
+        check(titanBore.laserComplete && !titanBore.laserBlocked,
+            "Ordinary Titan terrain must never stop the orbital laser");
+        const int entry=titanBore.miningTemplate.entryDepthZone;
+        for (int depth=entry; depth<=entry+2; ++depth) {
+            const MiningTerrain* terrain=depth==titanBore.miningTemplate.depthZone
+                ? &titanBore.miningTemplate.terrain : nullptr;
+            for (const auto& layer : titanBore.miningTemplate.depthLayers)
+                if (layer.depthZone==depth) {terrain=&layer.terrain; break;}
+            check(terrain!=nullptr,"Every bored Titan depth must remain cached");
+            const int firstRow=depth==entry ? 4 : 0;
+            const int lastRow=terrain->height-(depth==entry+2 ? 4 : 1);
+            for (int y=firstRow; y<=lastRow; ++y)
+                for (int x=titanBore.shaftX-orbital_laser::shaftLeftCells;
+                    x<=titanBore.shaftX+orbital_laser::shaftRightCells; ++x)
+                    check(miningCellAt(*terrain,x,y)->material==MiningCellMaterial::Empty,
+                        "The completed Titan bore must leave a continuous traversable shaft");
+        }
+    }
+
     auto state=createNewGame(catalog,0x105CA);
     state.meta.unlockKeys.push_back(content::unlock::routeJupiter);
     state.run.expedition.travelInitialized=true;
@@ -545,9 +582,12 @@ void orbitalObjectiveSafetyTests()
     }
     auto obstructed=saved;
     at(objectiveLayer(obstructed.mining).terrain,oldX,saved.orbital.laserRow).material=MiningCellMaterial::FuelPocket;
-    const auto guarded=restore(obstructed);
-    check(objectiveLayer(guarded.miningTemplate).artifact.x!=objective.artifact.x && guarded.laserBlocked,
-        "Successful artifact repair must retain unrelated supply-pocket laser blockers");
+    auto guarded=restore(obstructed);
+    check(objectiveLayer(guarded.miningTemplate).artifact.x!=objective.artifact.x && !guarded.laserBlocked,
+        "Saved supply-pocket obstructions must no longer block a repaired bore");
+    excavateOrbitalShaft(guarded,2,1.0);
+    check(at(objectiveLayer(guarded.miningTemplate).terrain,oldX,guarded.laserRow-1).material==MiningCellMaterial::Empty,
+        "The resumed orbital laser must vaporize a saved supply pocket");
 
     // A new protected object added to a committed preview must halt before any
     // excavation. Revalidation is defensive, not a relocation during flight.
