@@ -543,6 +543,11 @@ inline constexpr double oxygenDroneDamagePerSecond = 0.055;
 inline constexpr double emergencyRecallHazardPenalty = 0.20;
 inline constexpr double miningExtractionSequenceSeconds = 3.40;
 inline constexpr double scannerRevealRadius = 5.5;
+// Artifact signals are easier to acquire than ordinary terrain echoes. This
+// small amount of scanner grace keeps the introductory shaft forgiving without
+// changing the visible pulse radius or revealing surrounding terrain farther
+// away.
+inline constexpr double artifactDetectionRadius = 8.0;
 inline constexpr double scannerProbeBonus = 2.0;
 inline constexpr double scannerCooldownSeconds = 4.0;
 inline constexpr double scannerPulseSeconds = 0.64;

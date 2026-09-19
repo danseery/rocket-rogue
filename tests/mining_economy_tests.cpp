@@ -382,7 +382,13 @@ void lunarContractActivatesScannerLedEvaArtifactInSameRun()
     toggleMiningTether(state);
     require(mining.artifact.tethered, "EVA should be able to tether the exposed lunar anomaly");
     const int passageX = static_cast<int>(mining.gate.anchorX);
-    const int passageTop = std::max(2, static_cast<int>(mining.gate.anchorY) - 6);
+    int passageTop = mining.terrain.height;
+    for (int y = 0; y < mining.terrain.height; ++y) {
+        const MiningCell* cell = miningCellAt(mining.terrain, passageX, y);
+        if (cell != nullptr && cell->suitOnlyPassage) passageTop = std::min(passageTop, y);
+    }
+    require(passageTop < mining.terrain.height,
+        "the authored passage should expose its suit-only route");
     MiningCell* seal = miningCellAt(mining.terrain, passageX, passageTop + 1);
     require(seal != nullptr, "the authored passage should have a hand-drill seal");
     seal->material = MiningCellMaterial::Empty;

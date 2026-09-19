@@ -946,7 +946,12 @@ MiningCellMaterial generatedMaterial(
     return MiningCellMaterial::Regolith;
 }
 
-void revealAround(MiningRunState& mining, double centerX, double centerY, double radius)
+void revealAround(
+    MiningRunState& mining,
+    double centerX,
+    double centerY,
+    double radius,
+    double artifactDetectionRadius = 0.0)
 {
     const int minX = std::max(0, static_cast<int>(std::floor(centerX - radius)));
     const int maxX = std::min(mining.terrain.width - 1, static_cast<int>(std::ceil(centerX + radius)));
@@ -982,7 +987,12 @@ void revealAround(MiningRunState& mining, double centerX, double centerY, double
          mining.gate.surveyComplete)) {
         const double dx = mining.artifact.x - centerX;
         const double dy = mining.artifact.y - centerY;
-        if (dx * dx + dy * dy <= radiusSq) {
+        // Keep ordinary terrain tied to the pulse radius, but give the
+        // objective signal a generous acquisition margin. The artifact can
+        // therefore be detected from above the introductory shaft instead of
+        // requiring a tedious side approach.
+        const double artifactRadius = std::max(radius, artifactDetectionRadius);
+        if (dx * dx + dy * dy <= artifactRadius * artifactRadius) {
             mining.artifact.revealed = true;
         }
     }
@@ -2720,7 +2730,12 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
                 if (agent.taskProgressSeconds < tuning::mining::surveyDroneScanDwellSeconds) {
                     break;
                 }
-                revealAround(mining, agent.x, agent.y, tuning::mining::surveyDroneScanRadiusCells);
+                revealAround(
+                    mining,
+                    agent.x,
+                    agent.y,
+                    tuning::mining::surveyDroneScanRadiusCells,
+                    tuning::mining::artifactDetectionRadius);
                 agent.surveyPulseSeconds = tuning::mining::surveyDronePulseSeconds;
                 surveyCoordinator.releaseAssignment(agent);
                 agent.actionCooldownSeconds = tuning::mining::surveyDroneRechargeSeconds;
@@ -2750,7 +2765,12 @@ void updateMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
                     dt,
                     MiniDroneArrivalStyle::DeliberateSurvey)) {
                 agent.behavior = MiningMiniDroneBehavior::Scouting;
-                revealAround(mining, agent.x, agent.y, tuning::mining::surveyDroneScanRadiusCells);
+                revealAround(
+                    mining,
+                    agent.x,
+                    agent.y,
+                    tuning::mining::surveyDroneScanRadiusCells,
+                    tuning::mining::artifactDetectionRadius);
                 agent.surveyPulseSeconds = tuning::mining::surveyDronePulseSeconds;
                 agent.actionCooldownSeconds = tuning::mining::surveyDroneRechargeSeconds;
             }
@@ -4042,6 +4062,11 @@ void setupMiningGate(
         siteDefinition->objectivePlacement == MiningSiteObjectivePlacement::EntryCentered;
     const bool centeredArtifactGate = entryCentered || !definition.endurancePlacement;
     const int objectiveOffsetX = siteDefinition == nullptr ? 0 : siteDefinition->objectiveHorizontalOffset;
+    constexpr std::string_view lunarAnomalySiteId = "lunar_anomaly_crevice";
+    const bool introductoryShortShaft =
+        (siteDefinition != nullptr && siteDefinition->id == lunarAnomalySiteId) ||
+        (progressionPlacement != nullptr &&
+         progressionPlacement->artifactId == content::protectedObjective::lunarSignalArtifact);
     const int anchorX = progressionPlacement != nullptr
         ? std::clamp(
             mining.terrain.width / 2 + progressionPlacement->horizontalOffset + objectiveOffsetX,
@@ -4050,7 +4075,9 @@ void setupMiningGate(
         : centeredArtifactGate
         ? std::clamp(mining.terrain.width / 2 + objectiveOffsetX, 4, mining.terrain.width - 5)
         : std::clamp(mining.terrain.width * 4 / 5, 8, mining.terrain.width - 6);
-    const int anchorY = progressionPlacement != nullptr
+    const int anchorY = introductoryShortShaft
+        ? std::clamp(12, 5, mining.terrain.height - 5)
+        : progressionPlacement != nullptr
         ? std::clamp(
             4 + progressionPlacement->verticalOffset,
             5,
@@ -4060,15 +4087,30 @@ void setupMiningGate(
         // ten cells below it so the opening route is direct and readable.
         ? std::clamp(14, 5, mining.terrain.height - 5)
         : std::clamp(mining.terrain.height - 6, 9, mining.terrain.height - 5);
+    if (introductoryShortShaft) {
+        // This marker distinguishes the compact lunar crevice from the
+        // original persisted layout. It deliberately reuses the saved gate
+        // definition fields because this objective has no layered cocoon.
+        mining.gate.cocoonDefinitionId = "lunar_signal_crevice";
+        mining.gate.cocoonDefinitionVersion = 2;
+    }
+    // The first mission keeps the top framing two cells closer to the rig and
+    // pulls the artifact/lower floor up two more cells. The artifact's glow
+    // occupies one visible passage cell, so this renders as three cells from
+    // the drillable seal to the artifact rather than four.
+    const int artifactAnchorY = std::clamp(
+        anchorY - (introductoryShortShaft ? 2 : 0),
+        5,
+        mining.terrain.height - 5);
     mining.gate.anchorX = static_cast<double>(anchorX) + 0.5;
-    mining.gate.anchorY = static_cast<double>(anchorY) + 0.5;
+    mining.gate.anchorY = static_cast<double>(artifactAnchorY) + 0.5;
     const MiningCellFeature gateFeature = miningRoomFeatureAllowed(rules, MiningCellFeature::TreasureVault)
         ? MiningCellFeature::TreasureVault
         : MiningCellFeature::BranchTunnel;
     relocateMiningArtifact(
         mining,
         anchorX,
-        anchorY,
+        artifactAnchorY,
         cocoon == nullptr && !definition.requiresSurveyTriangulation,
         gateFeature);
     mining.artifact.id = mining.gate.artifactId;
@@ -4094,7 +4136,7 @@ void setupMiningGate(
         // fits and the bulky rig does not. Scanner reveal owns visibility;
         // collision consumes the same cell metadata as the renderer.
         const int passageTop = std::max(2, anchorY - 6);
-        for (int y = passageTop; y <= anchorY + 1; ++y) {
+        for (int y = passageTop; y <= artifactAnchorY + 1; ++y) {
             for (const int wallX : {anchorX - 1, anchorX + 1}) {
                 MiningCell* wall = miningCellAt(mining.terrain, wallX, y);
                 if (wall == nullptr) {
@@ -4125,7 +4167,7 @@ void setupMiningGate(
             seal->revealed = false;
             markDirty(mining.terrain, anchorX, passageTop + 1);
         }
-        if (MiningCell* floor = miningCellAt(mining.terrain, anchorX, anchorY + 2)) {
+        if (MiningCell* floor = miningCellAt(mining.terrain, anchorX, artifactAnchorY + 2)) {
             *floor = makeCell(MiningCellMaterial::Bedrock, mining.depthZone);
             floor->feature = MiningCellFeature::BranchTunnel;
             floor->revealed = false;
@@ -9282,6 +9324,140 @@ void repairSavedOrbitalObjectives(MiningRunState& mining, OrbitalSiteProgress& p
 
 void migrateAdjacentCocoonTiles(MiningRunState& mining)
 {
+    constexpr std::string_view lunarAnomalySiteId = "lunar_anomaly_crevice";
+    const auto migrateLunarCrevice = [&](OrbitalRepairLayer layer) {
+        auto& artifact = layer.artifact;
+        auto& gate = layer.gate;
+        if (mining.miningSiteDefinitionId != lunarAnomalySiteId ||
+            artifact.id != content::protectedObjective::lunarSignalArtifact ||
+            !artifact.present || artifact.state != MiningArtifactState::Embedded || artifact.tethered ||
+            gate.siteId != lunarAnomalySiteId ||
+            gate.type != MiningGateType::FragileExcavation ||
+            gate.objectivePassage != MiningPassageClass::SuitOnly ||
+            gate.cocoonDefinitionVersion >= 2) {
+            return;
+        }
+
+        const int ax = static_cast<int>(std::floor(artifact.x));
+        const int oldArtifactY = static_cast<int>(std::floor(artifact.y));
+        const int oldTop = oldArtifactY - 6;
+        const int newTop = oldTop - 2;
+        const int newArtifactY = oldArtifactY - 4;
+        const int oldFloor = oldArtifactY + 2;
+        if (ax < 1 || ax + 1 >= layer.terrain.width || newTop < 0 ||
+            oldFloor >= layer.terrain.height ||
+            std::abs(gate.anchorX - artifact.x) > 0.001 ||
+            std::abs(gate.anchorY - artifact.y) > 0.001) {
+            return;
+        }
+
+        const auto cellAt = [&](int x, int y) -> const MiningCell* {
+            return miningCellAt(layer.terrain, x, y);
+        };
+        const auto authoredWall = [&](int x, int y) {
+            const MiningCell* cell = cellAt(x, y);
+            return cell != nullptr && cell->material == MiningCellMaterial::Bedrock &&
+                cell->feature == MiningCellFeature::BranchTunnel;
+        };
+        const auto authoredPassage = [&](int y, bool seal) {
+            const MiningCell* cell = cellAt(ax, y);
+            if (cell == nullptr) return false;
+            if (seal) {
+                return cell->material == MiningCellMaterial::Regolith ||
+                    cell->material == MiningCellMaterial::Empty;
+            }
+            return cell->material == MiningCellMaterial::Empty;
+        };
+        const MiningCell* artifactCell = cellAt(ax, oldArtifactY);
+        const MiningCell* floorCell = cellAt(ax, oldFloor);
+        if (artifactCell == nullptr || artifactCell->material != MiningCellMaterial::ArtifactCache ||
+            floorCell == nullptr || floorCell->material != MiningCellMaterial::Bedrock ||
+            !authoredPassage(oldTop, false) || !authoredPassage(oldTop + 1, true) ||
+            !authoredPassage(oldArtifactY + 1, false)) {
+            return;
+        }
+        for (int y = oldTop; y <= oldArtifactY + 1; ++y) {
+            if (!authoredWall(ax - 1, y) || !authoredWall(ax + 1, y)) return;
+            if (y >= oldTop + 2 && y < oldArtifactY && !authoredPassage(y, false)) return;
+        }
+
+        const auto insideRepair = [&](double x, double y) {
+            return x >= ax - 1.0 && x < ax + 2.0 &&
+                y >= static_cast<double>(newTop) && y < static_cast<double>(oldFloor + 1);
+        };
+        if (layer.depth == mining.depthZone) {
+            if ((mining.rigDepthZone == layer.depth && insideRepair(mining.droneX, mining.droneY)) ||
+                (mining.operatorPresent && insideRepair(mining.operatorX, mining.operatorY)) ||
+                (mining.shipDepthZone == layer.depth && insideRepair(mining.returnZoneX, mining.returnZoneY))) {
+                return;
+            }
+            for (const MiningMiniDroneAgent& drone : mining.miniDrones) {
+                if (insideRepair(drone.x, drone.y)) return;
+            }
+        }
+        for (const MiningEnemy& enemy : layer.enemies) {
+            if (enemy.active && insideRepair(enemy.x, enemy.y)) return;
+        }
+        for (const MiningLooseObject& object : layer.objects) {
+            if (object.active && insideRepair(object.x, object.y)) return;
+        }
+
+        struct SavedCell { int x = 0; int y = 0; MiningCell cell; };
+        std::vector<SavedCell> saved;
+        saved.reserve(static_cast<std::size_t>((oldFloor - newTop + 1) * 3));
+        for (int y = newTop; y <= oldFloor; ++y) {
+            for (int x = ax - 1; x <= ax + 1; ++x) {
+                if (const MiningCell* cell = cellAt(x, y)) saved.push_back({x, y, *cell});
+            }
+        }
+        const auto savedCell = [&](int x, int y) -> const MiningCell& {
+            const auto found = std::find_if(saved.begin(), saved.end(),
+                [&](const SavedCell& value) { return value.x == x && value.y == y; });
+            return found->cell;
+        };
+        const auto write = [&](int x, int y, const MiningCell& cell) {
+            if (MiningCell* target = miningCellAt(layer.terrain, x, y)) {
+                *target = cell;
+                markDirty(layer.terrain, x, y);
+            }
+        };
+
+        // Preserve the exact old seal/excavation state while removing the two
+        // middle rows that made the cache read as a four-cell approach.
+        const std::array<int, 6> sourceRows {{
+            oldTop, oldTop + 1, oldTop + 2, oldTop + 3,
+            oldArtifactY, oldArtifactY + 1
+        }};
+        for (int row = 0; row < static_cast<int>(sourceRows.size()); ++row) {
+            for (int x = ax - 1; x <= ax + 1; ++x) {
+                write(x, newTop + row, savedCell(x, sourceRows[static_cast<std::size_t>(row)]));
+            }
+        }
+        write(ax, newArtifactY + 2, savedCell(ax, oldFloor));
+
+        // The compact shaft occupies two previously natural rows. Move those
+        // six original cells into the vacated tail so ore and terrain are not
+        // deleted by the save repair.
+        for (int x = ax - 1; x <= ax + 1; ++x) {
+            write(x, oldArtifactY, savedCell(x, newTop));
+            write(x, oldArtifactY + 1, savedCell(x, newTop + 1));
+        }
+        for (const auto& [x, y] : std::array<std::pair<int, int>, 6>{{
+                 {ax - 1, oldTop + 4}, {ax + 1, oldTop + 4},
+                 {ax - 1, oldTop + 5}, {ax, oldTop + 5}, {ax + 1, oldTop + 5},
+                 {ax, oldFloor}}}) {
+            write(x, y, makeCell(MiningCellMaterial::Regolith, layer.depth));
+        }
+
+        artifact.x = static_cast<double>(ax) + 0.5;
+        artifact.y = static_cast<double>(newArtifactY) + 0.5;
+        gate.anchorX = artifact.x;
+        gate.anchorY = artifact.y;
+        gate.cocoonDefinitionId = "lunar_signal_crevice";
+        gate.cocoonDefinitionVersion = 2;
+        gate.derivedStateDirty = true;
+    };
+
     const auto migrate = [&](OrbitalRepairLayer layer) {
         auto& gate=layer.gate;
         const auto& artifact=layer.artifact;
@@ -9336,6 +9512,9 @@ void migrateAdjacentCocoonTiles(MiningRunState& mining)
         gate.cocoonDefinitionVersion=3;
         gate.derivedStateDirty=true;
     };
+    migrateLunarCrevice({mining.depthZone,mining.terrain,mining.artifact,mining.gate,mining.enemies,mining.looseObjects});
+    for (auto& layer : mining.depthLayers)
+        migrateLunarCrevice({layer.depthZone,layer.terrain,layer.artifact,layer.gate,layer.enemies,layer.looseObjects});
     migrate({mining.depthZone,mining.terrain,mining.artifact,mining.gate,mining.enemies,mining.looseObjects});
     for (auto& layer : mining.depthLayers)
         migrate({layer.depthZone,layer.terrain,layer.artifact,layer.gate,layer.enemies,layer.looseObjects});
@@ -10187,7 +10366,12 @@ MiningScannerResult pulseMiningScanner(GameState& state, const ContentCatalog& c
         revealCocoonLayer(mining, 0);
         protectedObjectiveSignal = true;
     }
-    revealAround(mining, originX, originY, scannerRadius);
+    revealAround(
+        mining,
+        originX,
+        originY,
+        scannerRadius,
+        tuning::mining::artifactDetectionRadius);
     protectedObjectiveSignal = protectedObjectiveSignal ||
         (!artifactRevealedBefore && mining.artifact.revealed);
     const bool surveyCompleteBeforePulse = mining.gate.surveyComplete;
@@ -10211,7 +10395,12 @@ MiningScannerResult pulseMiningScanner(GameState& state, const ContentCatalog& c
     for (const MiningMiniDroneAgent& agent : mining.miniDrones) {
         if (agent.role == MiniDroneRole::Survey) {
             surveyDronePresent = true;
-            revealAround(mining, agent.x, agent.y, scannerRadius);
+            revealAround(
+                mining,
+                agent.x,
+                agent.y,
+                scannerRadius,
+                tuning::mining::artifactDetectionRadius);
             activateGateMarkers(agent.x, agent.y, scannerRadius * 1.45);
             for (const DroneFrameModuleAssignment& assignment : state.run.expedition.progression.droneModuleAssignments) {
                 if (assignment.module == DroneModuleKind::PulseStrike &&

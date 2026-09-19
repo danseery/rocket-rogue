@@ -584,7 +584,8 @@ void progressionArtifactPlacementDeepensByMissionStage()
         require(placement.targetDepth == expectedDepth,
             "main artifacts must follow the readable depth-one through depth-four mission staircase");
         if (mission.optional || mission.progressionOrdinal == 0) {
-            require(placement.horizontalOffset == 0 && placement.verticalOffset == 10,
+            const int expectedOffset = mission.optional ? 10 : 8;
+            require(placement.horizontalOffset == 0 && placement.verticalOffset == expectedOffset,
                 "the Moon and optional inner-world artifacts should use the centered introductory placement");
         } else {
             const int magnitude = std::abs(placement.horizontalOffset);
@@ -594,6 +595,182 @@ void progressionArtifactPlacementDeepensByMissionStage()
             require(placement.verticalOffset == 10 + (mission.progressionOrdinal % 2) * 4,
                 "the later artifact sharing a depth layer should sit visibly below the earlier one");
         }
+    }
+}
+
+GameState freshLunarAnomaly(const ContentCatalog& catalog)
+{
+    GameState state = createNewGame(catalog, 0x4C554E4152ULL);
+    require(performScenarioAction(
+                state,
+                catalog,
+                content::scenario::lunarProspector,
+                "briefing",
+                ScenarioActionKind::AcknowledgeBriefing)
+                .applied,
+        "the lunar fixture should accept its briefing");
+    state.run.planetaryExpedition = {};
+    state.run.planetaryExpedition.active = true;
+    state.run.planetaryExpedition.destinationId = content::destination::moon;
+    state.run.planetaryExpedition.bodyId = "moon";
+    state.run.planetaryExpedition.rigFuel = 4.0;
+    state.run.planetaryExpedition.rigFuelCapacity = 4.0;
+    state.run.planetaryExpedition.miningSitePrepared = true;
+    require(startMiningRun(state, catalog, {MiningAct::ActOne, 1, 0x4C554E4152ULL}, true).applied,
+        "the lunar mining fixture should start");
+    state.run.mining.droneX = state.run.mining.returnZoneX;
+    state.run.mining.droneY = state.run.mining.returnZoneY;
+    state.run.mining.temporaryMaterials.common = 20;
+    state.run.mining.cargo = 20;
+    require(bankMiningPayloadAtShip(state, catalog),
+        "the lunar fixture should deliver the introductory ore contract");
+    updateMiningRun(state, catalog, 0.01);
+    require(state.run.mining.miningSiteDefinitionId == content::miningSite::lunarAnomalyCrevice &&
+            state.run.mining.artifact.id == content::protectedObjective::lunarSignalArtifact,
+        "the lunar fixture should generate the authored anomaly crevice");
+    return state;
+}
+
+void lunarCreviceHasThreeVisibleCellsAndScansFromTheTop()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState state = freshLunarAnomaly(catalog);
+    MiningRunState& mining = state.run.mining;
+    const int artifactX = static_cast<int>(std::floor(mining.artifact.x));
+    const int artifactY = static_cast<int>(std::floor(mining.artifact.y));
+    int sealY = -1;
+    int passageTop = mining.terrain.height;
+    for (int y = 0; y < artifactY; ++y) {
+        const MiningCell* cell = miningCellAt(mining.terrain, artifactX, y);
+        if (cell == nullptr || !cell->suitOnlyPassage) continue;
+        passageTop = std::min(passageTop, y);
+        if (cell->material == MiningCellMaterial::Regolith) sealY = y;
+    }
+    require(sealY >= 0 && passageTop == sealY - 1,
+        "the lunar crevice should retain one open framed cell above its drillable seal");
+    require(artifactY - sealY == 3,
+        "the rendered lunar approach should contain exactly three cells from the seal to the artifact");
+    for (int y = sealY + 1; y < artifactY; ++y) {
+        const MiningCell* cell = miningCellAt(mining.terrain, artifactX, y);
+        require(cell != nullptr && cell->material == MiningCellMaterial::Empty && cell->suitOnlyPassage,
+            "the compact lunar shaft should retain an unobstructed suit-only route");
+    }
+
+    mining.operatorMode = MiningOperatorMode::Jetpack;
+    mining.operatorPresent = true;
+    mining.operatorX = mining.artifact.x;
+    mining.operatorY = static_cast<double>(passageTop) - 1.5;
+    mining.artifact.revealed = false;
+    if (MiningCell* artifactCell = miningCellAt(mining.terrain, artifactX, artifactY)) {
+        artifactCell->revealed = false;
+    }
+    const int terrainProbeX = artifactX + 6;
+    const int terrainProbeY = static_cast<int>(std::floor(mining.operatorY));
+    MiningCell* terrainProbe = miningCellAt(mining.terrain, terrainProbeX, terrainProbeY);
+    require(terrainProbe != nullptr, "the lunar scan regression needs an in-bounds terrain probe");
+    terrainProbe->revealed = false;
+    state.run.planetaryExpedition.scannerCooldownSeconds = 0.0;
+    const MiningScannerResult result = pulseMiningScanner(state, catalog);
+    require(result.pulsed && mining.artifact.revealed &&
+            result.discoveredObjectiveId == content::protectedObjective::lunarSignalArtifact,
+        "an EVA scanner pulse from the top of the compact shaft should detect the lunar artifact");
+    require(!terrainProbe->revealed,
+        "artifact coyote distance must not enlarge the normal terrain pulse radius");
+}
+
+void oldLunarCreviceSaveMigratesWithoutLosingTerrain()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    GameState oldState = freshLunarAnomaly(catalog);
+    MiningRunState& mining = oldState.run.mining;
+    const int artifactX = static_cast<int>(std::floor(mining.artifact.x));
+    const int compactArtifactY = static_cast<int>(std::floor(mining.artifact.y));
+    const int oldArtifactY = compactArtifactY + 4;
+    const int oldTop = oldArtifactY - 6;
+    const int oldFloor = oldArtifactY + 2;
+
+    const auto authoredCell = [&](MiningCellMaterial material, bool suitOnly = false) {
+        MiningCell cell;
+        cell.material = material;
+        cell.maxToughness = material == MiningCellMaterial::Regolith ? 2.1 : 1.0;
+        cell.remainingToughness = cell.maxToughness;
+        cell.feature = MiningCellFeature::BranchTunnel;
+        cell.suitOnlyPassage = suitOnly;
+        return cell;
+    };
+    for (int y = oldTop - 2; y <= oldFloor; ++y) {
+        for (int x = artifactX - 1; x <= artifactX + 1; ++x) {
+            if (MiningCell* cell = miningCellAt(mining.terrain, x, y)) {
+                *cell = authoredCell(MiningCellMaterial::Regolith);
+            }
+        }
+    }
+    for (int y = oldTop; y <= oldArtifactY + 1; ++y) {
+        *miningCellAt(mining.terrain, artifactX - 1, y) = authoredCell(MiningCellMaterial::Bedrock);
+        *miningCellAt(mining.terrain, artifactX + 1, y) = authoredCell(MiningCellMaterial::Bedrock);
+        *miningCellAt(mining.terrain, artifactX, y) = authoredCell(MiningCellMaterial::Empty, true);
+    }
+    MiningCell& oldSeal = *miningCellAt(mining.terrain, artifactX, oldTop + 1);
+    oldSeal = authoredCell(MiningCellMaterial::Regolith, true);
+    oldSeal.remainingToughness = oldSeal.maxToughness * 0.5;
+    oldSeal.revealed = true;
+    MiningCell& oldArtifactCell = *miningCellAt(mining.terrain, artifactX, oldArtifactY);
+    oldArtifactCell = authoredCell(MiningCellMaterial::ArtifactCache, true);
+    oldArtifactCell.gateAssociated = true;
+    *miningCellAt(mining.terrain, artifactX, oldFloor) = authoredCell(MiningCellMaterial::Bedrock);
+    MiningCell& displacedOre = *miningCellAt(mining.terrain, artifactX - 1, oldTop - 2);
+    displacedOre = authoredCell(MiningCellMaterial::CommonOre);
+    displacedOre.remainingToughness = 0.75;
+    MiningCell& unrelated = *miningCellAt(mining.terrain, artifactX + 4, oldTop);
+    unrelated = authoredCell(MiningCellMaterial::RareOre);
+    unrelated.remainingToughness = 0.42;
+
+    mining.artifact.x = static_cast<double>(artifactX) + 0.5;
+    mining.artifact.y = static_cast<double>(oldArtifactY) + 0.5;
+    mining.artifact.health = 0.63;
+    mining.artifact.revealed = false;
+    mining.gate.anchorX = mining.artifact.x;
+    mining.gate.anchorY = mining.artifact.y;
+    mining.gate.cocoonDefinitionId.clear();
+    mining.gate.cocoonDefinitionVersion = 0;
+
+    const double oldSealRemaining = oldSeal.remainingToughness;
+    const SaveData captured = captureSaveData(oldState);
+    const std::optional<SaveData> parsed = deserializeSaveData(serializeSaveData(captured));
+    require(parsed.has_value(), "the old lunar shaft fixture should serialize");
+    GameState restored = createNewGame(catalog, 7);
+    restoreSaveData(restored, catalog, *parsed);
+    const MiningRunState& migrated = restored.run.mining;
+    const int migratedArtifactY = static_cast<int>(std::floor(migrated.artifact.y));
+    require(migratedArtifactY == compactArtifactY && migrated.gate.anchorY == migrated.artifact.y &&
+            migrated.gate.cocoonDefinitionVersion == 2,
+        "an unfinished public-build lunar shaft should migrate once to the compact layout");
+    require(std::abs(migrated.artifact.health - 0.63) < 0.0001,
+        "the lunar shaft repair should preserve artifact condition");
+    const MiningCell* migratedSeal = miningCellAt(migrated.terrain, artifactX, oldTop - 1);
+    require(migratedSeal != nullptr && migratedSeal->material == MiningCellMaterial::Regolith &&
+            migratedSeal->revealed && std::abs(migratedSeal->remainingToughness - oldSealRemaining) < 0.0001,
+        "the lunar shaft repair should preserve partial seal excavation and visibility");
+    const MiningCell* preservedOre = miningCellAt(migrated.terrain, artifactX - 1, oldArtifactY);
+    require(preservedOre != nullptr && preservedOre->material == MiningCellMaterial::CommonOre &&
+            std::abs(preservedOre->remainingToughness - 0.75) < 0.0001,
+        "terrain displaced by the compact shaft should be retained in the vacated tail");
+    const MiningCell* preservedUnrelated = miningCellAt(migrated.terrain, artifactX + 4, oldTop);
+    require(preservedUnrelated != nullptr && preservedUnrelated->material == MiningCellMaterial::RareOre &&
+            std::abs(preservedUnrelated->remainingToughness - 0.42) < 0.0001,
+        "the lunar shaft repair should not modify unrelated terrain");
+
+    for (const MiningArtifactState protectedState : {
+             MiningArtifactState::Loose,
+             MiningArtifactState::Delivered,
+             MiningArtifactState::Destroyed}) {
+        MiningRunState excluded = oldState.run.mining;
+        excluded.artifact.state = protectedState;
+        excluded.artifact.tethered = protectedState == MiningArtifactState::Loose;
+        migrateAdjacentCocoonTiles(excluded);
+        require(static_cast<int>(std::floor(excluded.artifact.y)) == oldArtifactY &&
+                excluded.gate.cocoonDefinitionVersion == 0,
+            "the lunar save repair must not move recovered, tethered, or destroyed artifacts");
     }
 }
 
@@ -1223,6 +1400,8 @@ int main()
     progressionSaveFieldsRoundTripAndLegacyDefault();
     miningGateContractsAndRuntimeAreDeterministic();
     progressionArtifactPlacementDeepensByMissionStage();
+    lunarCreviceHasThreeVisibleCellsAndScansFromTheTop();
+    oldLunarCreviceSaveMigratesWithoutLosingTerrain();
     solarCampaignClaimsAdvanceToStraylight();
     authoredArtifactLayerIsPrebuiltAtResolvedDepth();
     thermalSiteRulesAreContentDriven();

@@ -323,6 +323,13 @@ ProgressionArtifactPlacement resolveProgressionArtifactPlacement(
     if (placement.ordinal <= 0) {
         placement.targetDepth = 1;
         placement.withinDepthSlot = 0;
+        if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, bodyId);
+            mission && !mission->optional) {
+            // Move the introductory shaft's top reference two cells closer to
+            // the rig. Its artifact anchor gets the additional one-cell
+            // shortening in the authored passage geometry.
+            placement.verticalOffset = 8;
+        }
         return placement;
     }
 
