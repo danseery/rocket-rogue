@@ -6,15 +6,20 @@
 #include "core/SaveData.h"
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
+#include "core/ArtifactProgression.h"
 #include "game/GamePanel.h"
 #include <algorithm>
 #include <stdexcept>
+#include <iostream>
+#include <cstdlib>
 
 void incomingMessageTests() {
     using namespace rocket;
     const auto check = [](bool condition, const char *message) {
-        if (!condition)
-            throw std::runtime_error(message);
+        if (!condition) {
+            std::cerr << "FAILED: " << message << std::endl;
+            std::exit(3);
+        }
     };
     auto catalog = createDefaultContent();
     for (const auto& drone : catalog.miniDrones) {
@@ -62,8 +67,16 @@ void incomingMessageTests() {
     const auto moonReturnMessage = incomingMessage(catalog, "moon_mission_complete");
     check(moonReturnMessage != nullptr && moonReturnMessage->campaignOnce &&
               moonReturnMessage->context == MessageDeliveryContext::Any &&
-              moonReturnMessage->variants.front().body.find("Mars, Mercury, and Venus are now charted") != std::string::npos,
+              moonReturnMessage->variants.front().body.find("Mars is your next mission") != std::string::npos &&
+              moonReturnMessage->variants.front().body.find("Mercury and Venus are also charted for optional exploration") != std::string::npos,
           "Moon completion guidance must report its reward and newly charted worlds");
+    for (const auto* id : {"moon_mission_complete", "mars_mission_complete", "io_mission_complete",
+                           "titan_mission_complete", "titania_mission_complete"}) {
+        const auto* message = incomingMessage(catalog, id);
+        check(message && message->variants.front().body.starts_with("Artifact delivered to the Earth dock. Mission complete.") &&
+                  message->variants.front().body.find("Earth service is recommended") == std::string::npos,
+              "Artifact completion messages must acknowledge the completed dock hand-in");
+    }
     auto invalid = catalog;
     invalid.incomingMessages.back().speakerId = "missing";
     check(!validateIncomingMessages(invalid), "Missing speaker references must fail validation");
@@ -186,6 +199,12 @@ void incomingMessageTests() {
                      step.eventTargetId, step.requiredProgress, step.requiredGrade}),
                     "Mission objective event must apply");
             if (!step.claimRequired) continue;
+            // Completion is now an explicit dock hand-in, not field recovery.
+            campaign.run.expedition.location.bodyId = "earth";
+            campaign.run.expedition.location.siteId = "earth.dock";
+            campaign.run.expedition.active = false;
+            campaign.run.flight.active = false;
+            bankMissionArtifacts(campaign, catalog);
             auto* instance = findScenarioInstance(campaign.meta, scenario->id);
             auto* progress = findScenarioStepProgress(*instance, step.id);
             progress->failureSeen = true;

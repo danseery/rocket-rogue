@@ -274,10 +274,10 @@ ContentCatalog createDefaultContent()
     };
     catalog.incomingMessages = {
         {"lunar_scan", "mission_control_fennec", "Use your tools", "On it", true,
-            {{"default", "Contract delivery confirmed. There may be something else down there. Send out a scanner pulse and let's see what comes back.", {MessageHint::Scanner}}}},
+            {{"default", "Common Ore collection confirmed. There may be something else down there. Send out a scanner pulse and let's see what comes back.", {MessageHint::Scanner}}}},
         {"lunar_recovery", "mission_control_fennec", "Anomaly found", "Understood", true,
-            {{"default", "There it is - an anomalous signal. That crevice is too narrow for the Rig. Head out on EVA, clear the seal with your hand drill, then tether the artifact and bring it back to the ship.", {MessageHint::ExitRig, MessageHint::Drill, MessageHint::Tether}},
-             {"eva", "There it is - an anomalous signal. Your suit can fit through that crevice. Clear the seal with your hand drill, then tether the artifact and bring it back to the ship.", {MessageHint::Drill, MessageHint::Tether}}}}
+            {{"default", "There it is - an anomalous signal. That crevice is too narrow for the Rig. Head out on EVA, clear the seal with your hand drill, then Collect Artifact and return to ship.", {MessageHint::ExitRig, MessageHint::Drill, MessageHint::Tether}},
+             {"eva", "There it is - an anomalous signal. Your suit can fit through that crevice. Clear the seal with your hand drill, then Collect Artifact and return to ship.", {MessageHint::Drill, MessageHint::Tether}}}}
     };
     for (auto& message : catalog.incomingMessages) message.context = MessageDeliveryContext::Mining;
     catalog.incomingMessages.push_back({"lunar_approach", "mission_control_fennec", "Earth launch clearance", "Ready to launch", true,
@@ -291,12 +291,12 @@ ContentCatalog createDefaultContent()
 
     catalog.incomingMessages.back().concerned = true;
     catalog.incomingMessages.push_back({"earth_dock_intro", "mission_control_fennec", "Earth orbital dock", "Understood", false,
-        {{"moon_first", "That's Earth's orbital dock. Bring your salvage here to bank it, refuel, repair the ship, and install ship upgrades. For now, head to the Moon and complete your first mining contract. The dock will be here when you return.", {}},
-         {"services", "That's Earth's orbital dock. Bring your salvage here to bank it, refuel, repair the ship, and install ship upgrades before your next expedition.", {}}}});
+        {{"moon_first", "That's Earth's orbital dock. Bring your salvage here to secure it, complete missions, refuel, repair the ship, and install ship upgrades. For now, head to the Moon and complete your first mining contract. The dock will be here when you return.", {}},
+         {"services", "That's Earth's orbital dock. Bring your salvage here to secure it, complete missions, refuel, repair the ship, and install ship upgrades before your next expedition.", {}}}});
     catalog.incomingMessages.push_back({"wreck_salvage_intro", "mission_control_fennec", "Recover your wreck", "Understood", true,
-        {{"default", "Your replacement ship is ready at the Earth dock. Carried cargo, unbanked credits, upgrades and artifacts remain in your wreck. Earth Storage is safe. Open Change waypoint and select the wreck. Approach slowly, then use Salvage. Purple diamond markers identify wrecks carrying artifacts. Artifacts and upgrades can be recovered even with a full ore hold; excess ore stays in the wreck.", {}}}});
+        {{"default", "Your replacement ship is ready at the Earth dock. Carried cargo, unsecured credits, upgrades and artifacts remain in your wreck. Earth Storage is safe. Open Change waypoint and select the wreck. Approach slowly, then use Salvage. Purple diamond markers identify wrecks carrying artifacts. Artifacts and upgrades can be recovered even with a full ore hold; excess ore stays in the wreck.", {}}}});
     catalog.incomingMessages.push_back({"artifact_wreck_recovery", "mission_control_fennec", "Artifact recovery required", "Understood", false,
-        {{"default", "Your unbanked artifact remains in the wreck. Rendezvous and salvage it, then return to Earth to secure it.", {}}}});
+        {{"default", "Your unsecured artifact remains in the wreck. Rendezvous and salvage it, then return to the Earth dock to complete the mission.", {}}}});
     catalog.incomingMessages.push_back({"asteroid_belt_intro", "mission_control_fennec", "Asteroid belt ahead", "Understood", true,
         {{"default", "You're entering the asteroid belt between Mars and Jupiter. Watch your projected path and steer toward the gaps. Slow down early with thrust opposite your motion; coasting does not brake. At Earth's dock, Flight Controls upgrades give you stronger thrust at the same fuel burn rate for course corrections. Hull Plating increases hull integrity and reduces asteroid impact damage. Upgrades help, but avoiding the rocks is still your best defense.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
     const auto addMissionMessages = [&](std::string id, std::string world, std::string objective,
@@ -306,19 +306,28 @@ ContentCatalog createDefaultContent()
             {{"default", std::move(objective), {}}}});
         catalog.incomingMessages.push_back({id + "_complete", "mission_control_fennec",
             world + " mission complete", "Understood", true,
-            {{"default", "Artifact secured. " + std::move(next) +
-                " Earth service is recommended, or continue manually from the system map.", {}}}});
+            {{"default", "Artifact delivered to the Earth dock. Mission complete. " + std::move(next) +
+                " Prepare your ship here, then depart when ready. Use Change waypoint to choose another destination.", {}}}});
     };
+    for (const auto body : {"moon", "mars"}) {
+        const bool mars = std::string_view(body) == "mars";
+        catalog.incomingMessages.push_back({std::string(body) + "_arrival_complete", "mission_control_fennec",
+            "Arrival complete", "Continue", true,
+            {{"default", std::string(mars ? "Welcome to Mars. Collect 8 Common Ore." : "Welcome to the Moon. Collect 20 Common Ore.") +
+                " Return the ore to your ship, then use the surface scanner to locate the artifact. " +
+                (mars ? "The artifact is underground. Excavate toward the signal; if you landed without a shaft, use your surface tools to reach it. Bring the artifact aboard. " : "Clear the artifact's crevice and bring it aboard. ") +
+                "Return with the artifact to Earth dock and choose Complete Mission. Cargo aboard your ship is at risk until you reach the dock.", {}}}});
+    }
     addMissionMessages("moon_mission", "Moon",
-        "Your first contract is 20 Common Ore. First, establish orbit: approach the Moon's orbit bands, turn to point along them, and use short thrust pulses to bend your projected path into a loop around the Moon. If the path crosses the surface, thrust opposite your motion to slow down and adjust your course. Once the loop stays clear of the surface, release thrust, reverse and strafe. Coast in a safe loop for two seconds to confirm orbit, then select SCAN to survey a landing site. After landing, recover the ore, pulse the anomaly, excavate it, and tether the artifact to the ship.",
-        "Prospector support and drone slot one are online. Mars, Mercury, and Venus are now charted.");
+        "First, establish orbit: approach the Moon's orbit bands, turn to point along them, and use short thrust pulses to bend your projected path into a loop around the Moon. If the path crosses the surface, thrust opposite your motion to slow down and adjust your course. Once the loop stays clear of the surface, release thrust, reverse and strafe. Coast in a safe loop for two seconds to confirm orbit, then select SCAN in the mission sector and land there. Mission Control will brief you on recovery after touchdown.",
+        "Prospector support and drone slot one are online. Mars is your next mission. Mercury and Venus are also charted for optional exploration.");
     catalog.incomingMessages[catalog.incomingMessages.size() - 2].variants.front().hints =
         {MessageHint::FlightSteer, MessageHint::FlightThrust};
-    addMissionMessages("mars_mission", "Mars", "Recover 8 Common Ore, pulse the terrain, and return the Martian artifact to the ship.", "Drone slot two is online. Jupiter and Io are now charted; Io is the next mission.");
-    addMissionMessages("io_mission", "Io", "Commission Hazard support, cool the thermal seal, excavate all four segments, and recover the artifact.", "The Io battery is secured. Saturn and Titan are now charted; Titan is the next mission.");
-    addMissionMessages("titan_mission", "Titan", "Survey the landing site, pulse the buried signal, and recover the artifact.", "The Titan battery is secured. Uranus and Titania are now charted; Titania is the next mission.");
-    addMissionMessages("titania_mission", "Titania", "Survey the landing site, pulse the buried signal, and recover the artifact.", "The Titania battery is secured. Neptune and Triton are now charted; Triton is the next mission.");
-    addMissionMessages("triton_mission", "Triton", "Survey the landing site, pulse the buried signal, and recover the final artifact.", "The sixth battery is secured. An impossible contact beyond Neptune has been revealed: Straylight.");
+    addMissionMessages("mars_mission", "Mars", "Mars's artifact is underground. Establish Mars orbit, scan the mission sector, hold Drill to prepare a shaft, then land. Mission Control will brief you on recovery after touchdown.", "Drone slot two is online. Jupiter and Io are now charted; Io is the next mission.");
+    addMissionMessages("io_mission", "Io", "Commission Hazard support, cool the thermal seal, excavate all four segments, and Collect Artifact.", "The Io battery is secured. Saturn and Titan are now charted; Titan is the next mission.");
+    addMissionMessages("titan_mission", "Titan", "Survey the landing site, pulse the buried signal, and Collect Artifact.", "The Titan battery is secured. Uranus and Titania are now charted; Titania is the next mission.");
+    addMissionMessages("titania_mission", "Titania", "Survey the landing site, pulse the buried signal, and Collect Artifact.", "The Titania battery is secured. Neptune and Triton are now charted; Triton is the next mission.");
+    addMissionMessages("triton_mission", "Triton", "Survey the landing site, pulse the buried signal, and Collect the final Artifact.", "The sixth battery is secured. An impossible contact beyond Neptune has been revealed: Straylight.");
     // Only the post-mission contact belongs to the unidentified ship AI.
     // Keep the mission briefing and reward claim with Mission Control.
     catalog.incomingMessages.back().speakerId = "straylight_ai";
@@ -333,8 +342,8 @@ ContentCatalog createDefaultContent()
         {{"default", "Evacuation shuttles are approaching. The docking corridor is open. Bring them aboard before securing the Ark for departure.", {}}}});
     catalog.incomingMessages.push_back({"straylight_arrival", "straylight_ai", "Aaru Vale", "Acknowledge arrival", true,
         {{"default", "We have reached Aaru Vale. The evacuation is complete, and Straylight is our home among the stars. The ship is safely holding here while we prepare for the next journey.", {}}}});
-    addMissionMessages("mercury_mission", "Mercury", "Optional recovery: pulse the surface signal and return its artifact to the ship.", "The optional recovery reward is secured.");
-    addMissionMessages("venus_mission", "Venus", "Optional recovery: pulse the surface signal and return its artifact to the ship.", "The optional recovery reward is secured.");
+    addMissionMessages("mercury_mission", "Mercury", "Optional recovery: pulse the surface signal and Collect Artifact.", "The optional recovery reward is secured.");
+    addMissionMessages("venus_mission", "Venus", "Optional recovery: pulse the surface signal and Collect Artifact.", "The optional recovery reward is secured.");
 
     catalog.incomingMessages.push_back({"triton_attack_drone", "mission_control_fennec", "A little insurance", "Understood", true,
         {{"default", "Those flying security drones are defending the artifact. We stowed away a secret Attack Drone, just in case something like this happened. It's yours now. With a free bay it is assigned automatically; otherwise use Drone Ops at ship service to assign it before deploying. Stay close and let it engage while you mine. The rest of our helpers can wait for the next system.", {}}}});
@@ -589,7 +598,7 @@ ContentCatalog createDefaultContent()
         } else if (destination.id == content::destination::uranus) {
             destination.approachBriefTitle = "LAST CHARTED DEPARTURE";
             destination.approachBriefDetail =
-                "Neptune is the last charted world. Recover the Uranus artifact, then complete a stable Orbit to solve its vector.";
+                "Neptune is the last charted world. Collect the Uranus artifact, then complete a stable Orbit to solve its vector.";
         }
         // The current catalog begins its outward-only expedition at Saturn.
         // This is content policy: recovery and transfer mechanics consume the
@@ -629,7 +638,7 @@ ContentCatalog createDefaultContent()
     lunarAnomalyCrevice.objectivePlacement = MiningSiteObjectivePlacement::EntryCentered;
     lunarAnomalyCrevice.objectiveHorizontalOffset = 6;
     lunarAnomalyCrevice.objectivePassage = MiningPassageClass::SuitOnly;
-    lunarAnomalyCrevice.activationMessage = "20 ORE DELIVERED — lunar anomaly detected. Pulse scanner; exit Rig for EVA recovery.";
+    lunarAnomalyCrevice.activationMessage = "20 COMMON ORE COLLECTED — lunar anomaly detected. Pulse scanner; exit Rig for EVA recovery.";
     lunarAnomalyCrevice.completeOnShipCapture = true;
     lunarAnomalyCrevice.securedMessage =
         "ARTIFACT SECURED — similar signatures are scattered across the solar system.";
@@ -726,21 +735,19 @@ ContentCatalog createDefaultContent()
             content::destination::moon,
             {
                 {"briefing", {}, "MOON", "Lunar Prospector Contract",
-                    std::string("Most regolith is inert. Recover ") +
-                        std::to_string(tuning::research::prospectorCommonOreGoal) +
-                        " gray-seamed Common Ore deposits and return them safely.",
-                    "DELIVER ORE, THEN RECOVER THE ARTIFACT TO EARN YOUR PROSPECTOR", "Accept Contract", {},
+                    "Establish Moon orbit, scan the mission landing sector, and land there. Mission Control will brief you on recovery after touchdown.",
+                    "ARRIVAL // ORBIT, SCAN, LAND", "Accept Contract", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"delivery", {"briefing"}, "MOON", "Lunar Prospector Contract",
-                    "Return 20 Common Ore to the ship. The contract allocation does not use permanent hold space.",
-                    "ORE DELIVERED // INVESTIGATE THE ANOMALY", "Pulse Scanner", {},
+                    "Collect 20 Common Ore at the ship. The contract allocation does not use permanent hold space.",
+                    "COMMON ORE COLLECTED // INVESTIGATE THE ANOMALY", "Pulse Scanner", {},
                     ScenarioEventKind::SafeMaterialDelivered, content::destination::moon, "common",
                     tuning::research::prospectorCommonOreGoal, 0, false, false, false,
                     ScenarioActionKind::None, {},
                     {{ScenarioRewardKind::FrontierReadiness, {}, 0, false}}},
                 {"anomaly", {"delivery"}, "MOON", "Anomalous Return",
-                    "Mission Control is picking up a second signal. Pulse the scanner and recover its source.",
+                    "Mission Control is picking up a second signal. Pulse the scanner and Collect Artifact.",
                     "REWARD // PROSPECTOR MK I + SLOT 1 + MARS ROUTE", "Confirm Recovery", {},
                     ScenarioEventKind::ProtectedObjectiveExtracted, {}, content::miningSite::lunarAnomalyCrevice,
                     1, 0, false, true, false,
@@ -758,20 +765,19 @@ ContentCatalog createDefaultContent()
             content::destination::mars,
             {
                 {"briefing", {}, "MARS", "Bay Expansion",
-                    std::string("Recover ") + std::to_string(tuning::research::marsBayCommonOreGoal) +
-                        " Martian Common Ore. Oxygen, drill heat, integrity, repairs, and the return decision are now live.",
-                    "DELIVER ORE, THEN RECOVER THE ARTIFACT", "Accept Contract", {},
+                    "Establish Mars orbit, scan the mission sector, hold Drill to prepare a shaft, then land. Mars's artifact is underground. Mission Control will brief you on recovery after touchdown.",
+                    "ARRIVAL // ORBIT, SCAN, DRILL, LAND", "Accept Contract", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"delivery", {"briefing"}, "MARS", "Bay Expansion",
-                    std::string("Deliver ") + std::to_string(tuning::research::marsBayCommonOreGoal) +
-                        " Mars Common Ore loaded onto the Ship. Normal departure returns all Ship ore. The reward opens an empty slot. No second Support Drone is required.",
-                    "ORE DELIVERED // RECOVER THE ARTIFACT", "Pulse Scanner", {},
+                    std::string("Collect ") + std::to_string(tuning::research::marsBayCommonOreGoal) +
+                        " Mars Common Ore at the ship. Normal departure returns all Ship ore. The reward opens an empty slot. No second Support Drone is required.",
+                    "COMMON ORE COLLECTED // COLLECT THE ARTIFACT", "Pulse Scanner", {},
                     ScenarioEventKind::SafeMaterialDelivered, content::destination::mars, "common",
                     tuning::research::marsBayCommonOreGoal, 0, false, false, false,
                     ScenarioActionKind::None, {}, {}},
                 {"artifact", {"delivery"}, "MARS", "Martian Artifact",
-                    "Pulse the terrain signal, excavate the cache, and tether the artifact to the ship.",
+                    "Pulse the terrain signal, excavate the cache, and Collect Artifact.",
                     "REWARD // EMPTY SUPPORT DRONE SLOT 2 + IO ROUTE", "Claim Mars Mission", {},
                     ScenarioEventKind::ArtifactRecovered, "mars", content::protectedObjective::marsSignalArtifact,
                     1, 0, false, true, false, ScenarioActionKind::ClaimReward, {},
@@ -796,7 +802,7 @@ ContentCatalog createDefaultContent()
                      {ScenarioRewardKind::UnlockKey, content::unlock::ioHazardDrone, 0, false},
                      {ScenarioRewardKind::SupportDrone, content::drone::hazardDrone, 1, true}}},
                 {"recovery", {"commission"}, "IO // JUPITER SYSTEM", "Artifact Recovery",
-                    "Discover the thermal seal, cool and excavate its four segments, then tether the exposed artifact home.",
+                    "Discover the thermal seal, cool and excavate its four segments, then Collect Artifact.",
                     "REWARD // SATURN SYSTEM ROUTE", "Claim Io Mission", {},
                     ScenarioEventKind::ProtectedObjectiveExtracted, {}, content::miningSite::thermalLayeredRecovery, 1, 0, false, true, false,
                     ScenarioActionKind::BeginActivity, content::miningSite::thermalLayeredRecovery,
@@ -810,12 +816,12 @@ ContentCatalog createDefaultContent()
             content::destination::saturn,
             {
                 {"briefing", {}, "TITAN // SATURN SYSTEM", "Titan Artifact Mission",
-                    "Survey Titan, pulse the buried signal, and return its artifact to the ship.",
-                    "OBJECTIVE // RECOVER TITAN ARTIFACT", "Accept Mission", {},
+                    "Survey Titan, pulse the buried signal, and Collect Artifact.",
+                    "OBJECTIVE // COLLECT TITAN ARTIFACT", "Accept Mission", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"artifact", {"briefing"}, "TITAN // SATURN SYSTEM", "Titan Artifact",
-                    "Recover Titan's artifact and return it safely to the ship.",
+                    "Collect Titan's artifact and return to ship.",
                     "REWARD // URANUS SYSTEM ROUTE", "Claim Titan Mission", {},
                     ScenarioEventKind::ArtifactRecovered, "titan", content::protectedObjective::titanSignalArtifact, 1, 0,
                     false, true, false, ScenarioActionKind::ClaimReward, {},
@@ -829,12 +835,12 @@ ContentCatalog createDefaultContent()
             content::destination::uranus,
             {
                 {"briefing", {}, "TITANIA // URANUS SYSTEM", "Titania Artifact Mission",
-                    "Survey Titania, pulse the buried signal, and return its artifact to the ship.",
-                    "OBJECTIVE // RECOVER TITANIA ARTIFACT", "Accept Mission", {},
+                    "Survey Titania, pulse the buried signal, and Collect Artifact.",
+                    "OBJECTIVE // COLLECT TITANIA ARTIFACT", "Accept Mission", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"artifact", {"briefing"}, "TITANIA // URANUS SYSTEM", "Titania Artifact",
-                    "Recover Titania's artifact and return it safely to the ship.",
+                    "Collect Titania's artifact and return to ship.",
                     "REWARD // NEPTUNE SYSTEM ROUTE", "Claim Titania Mission", {},
                     ScenarioEventKind::ArtifactRecovered, "titania", content::protectedObjective::titaniaSignalArtifact,
                     1, 0, false, true, false, ScenarioActionKind::ClaimReward, {},
@@ -857,12 +863,12 @@ ContentCatalog createDefaultContent()
                      {ScenarioRewardKind::UnlockKey, "triton_attack_drone", 0, false},
                      {ScenarioRewardKind::SupportDrone, content::drone::attackDrone, 0, true}}},
                 {"briefing", {}, "TRITON // NEPTUNE SYSTEM", "Triton Artifact Mission",
-                    "Survey Triton, pulse the final buried signal, and return its artifact to the ship.",
-                    "OBJECTIVE // RECOVER TRITON ARTIFACT", "Accept Mission", {},
+                    "Survey Triton, pulse the final buried signal, and Collect Artifact.",
+                    "OBJECTIVE // COLLECT TRITON ARTIFACT", "Accept Mission", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
                 {"artifact", {"briefing"}, "TRITON // NEPTUNE SYSTEM", "Triton Artifact",
-                    "Recover Triton's artifact. Its signal resolves the impossible contact beyond Neptune.",
+                    "Collect Triton's artifact. Its signal resolves the impossible contact beyond Neptune.",
                     "REWARD // REVEAL STRAYLIGHT", "Claim Triton Mission", {},
                     ScenarioEventKind::ArtifactRecovered, "triton", content::protectedObjective::tritonSignalArtifact,
                     1, 0, false, true, false, ScenarioActionKind::ClaimReward, {},
@@ -870,12 +876,12 @@ ContentCatalog createDefaultContent()
             }
         },
         {content::scenario::mercuryArtifact, 1, content::unlock::routeMars, content::destination::moon, {
-            {"briefing", {}, "MERCURY", "Mercury Artifact Recovery", "Pulse and recover Mercury's optional artifact.", "OPTIONAL ARTIFACT", "Accept Mission", {}, ScenarioEventKind::None, {}, {}, 1, 0, true, false, false, ScenarioActionKind::AcknowledgeBriefing, {}, {}},
-            {"artifact", {"briefing"}, "MERCURY", "Mercury Artifact", "Return Mercury's artifact to the ship.", "REWARD // ARTIFACT XP", "Claim Mercury Recovery", {}, ScenarioEventKind::ArtifactRecovered, "mercury", content::protectedObjective::mercurySignalArtifact, 1, 0, false, true, false, ScenarioActionKind::ClaimReward, {}, {}}
+            {"briefing", {}, "MERCURY", "Mercury Artifact Recovery", "Pulse and collect Mercury's optional artifact.", "OPTIONAL ARTIFACT", "Accept Mission", {}, ScenarioEventKind::None, {}, {}, 1, 0, true, false, false, ScenarioActionKind::AcknowledgeBriefing, {}, {}},
+            {"artifact", {"briefing"}, "MERCURY", "Mercury Artifact", "Collect Mercury's artifact and return to ship.", "REWARD // ARTIFACT XP", "Claim Mercury Recovery", {}, ScenarioEventKind::ArtifactRecovered, "mercury", content::protectedObjective::mercurySignalArtifact, 1, 0, false, true, false, ScenarioActionKind::ClaimReward, {}, {}}
         }},
         {content::scenario::venusArtifact, 1, content::unlock::routeMars, content::destination::mars, {
-            {"briefing", {}, "VENUS", "Venus Artifact Recovery", "Pulse and recover Venus's optional artifact.", "OPTIONAL ARTIFACT", "Accept Mission", {}, ScenarioEventKind::None, {}, {}, 1, 0, true, false, false, ScenarioActionKind::AcknowledgeBriefing, {}, {}},
-            {"artifact", {"briefing"}, "VENUS", "Venus Artifact", "Return Venus's artifact to the ship.", "REWARD // ARTIFACT XP", "Claim Venus Recovery", {}, ScenarioEventKind::ArtifactRecovered, "venus", content::protectedObjective::venusSignalArtifact, 1, 0, false, true, false, ScenarioActionKind::ClaimReward, {}, {}}
+            {"briefing", {}, "VENUS", "Venus Artifact Recovery", "Pulse and collect Venus's optional artifact.", "OPTIONAL ARTIFACT", "Accept Mission", {}, ScenarioEventKind::None, {}, {}, 1, 0, true, false, false, ScenarioActionKind::AcknowledgeBriefing, {}, {}},
+            {"artifact", {"briefing"}, "VENUS", "Venus Artifact", "Collect Venus's artifact and return to ship.", "REWARD // ARTIFACT XP", "Claim Venus Recovery", {}, ScenarioEventKind::ArtifactRecovered, "venus", content::protectedObjective::venusSignalArtifact, 1, 0, false, true, false, ScenarioActionKind::ClaimReward, {}, {}}
         }},
         {
             content::scenario::generatedTemplate,
@@ -884,7 +890,7 @@ ContentCatalog createDefaultContent()
             {},
             {
                 {"delivery", {}, "GENERATED SITE", "Material Recovery",
-                    "Safely deliver the requested material.", "REWARD // CONFIGURED BY FACTORY", "Claim Reward", {},
+                    "Collect the requested material and return to ship.", "REWARD // CONFIGURED BY FACTORY", "Claim Reward", {},
                     ScenarioEventKind::SafeMaterialDelivered, {}, "common", 1, 0, false, true, false,
                     ScenarioActionKind::ClaimReward, {}, {}}
             },
@@ -959,6 +965,16 @@ ContentCatalog createDefaultContent()
     }
     std::string messageError;
     if (!validateIncomingMessages(catalog, &messageError)) throw std::runtime_error(messageError);
+    for (auto& scenario : catalog.scenarios) {
+        for (auto& step : scenario.steps) {
+            if (step.completionEvent != ScenarioEventKind::ArtifactRecovered &&
+                step.completionEvent != ScenarioEventKind::ProtectedObjectiveExtracted) continue;
+            step.detail += " Collect it, return to the servicing dock, and choose Complete Mission. An artifact aboard can be lost to a wreck.";
+            // Protected-objective activities retain their start action; presentation
+            // switches to Complete Mission only after banking.
+            if (step.action == ScenarioActionKind::ClaimReward) step.actionLabel = "Complete Mission";
+        }
+    }
     return catalog;
 }
 

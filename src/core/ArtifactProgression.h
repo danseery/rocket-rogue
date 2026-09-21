@@ -10,6 +10,15 @@
 namespace rocket {
 
 struct PreparedSurfaceLanding;
+bool artifactCompletionStep(const ScenarioStepDefinition&);
+bool artifactCompletionStep(ScenarioEventKind);
+const MissionArtifact* missionArtifact(const GameState&, std::string_view scenarioId, std::string_view stepId);
+void registerArtifactAboard(GameState&, const ContentCatalog&, const ArtifactRecord&,
+    std::string_view siteId = {}, std::string_view scenarioId = {}, std::string_view stepId = {});
+void reconcileArtifactCustody(GameState&, const ContentCatalog&);
+bool artifactHandInAvailable(const GameState&, const MissionArtifact&);
+bool completeBankedArtifact(GameState&, const ContentCatalog&, std::string_view key);
+void bankMissionArtifacts(GameState&, const ContentCatalog&);
 std::string artifactSectorForBody(const GameState& state, std::string_view systemId, std::string_view bodyId);
 int encounterArtifactDepth(const GameState& state, std::string_view systemId, std::string_view bodyId);
 

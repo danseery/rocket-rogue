@@ -10,6 +10,7 @@
 #include <vector>
 
 namespace rocket {
+void grantBankedArtifactRewards(GameState&, const ContentCatalog&, MissionArtifact&);
 
 // Migrate only nonphysical arrival records; existing physical poses are retained.
 bool resumePhysicalApproach(GameState& state, const ContentCatalog& catalog);

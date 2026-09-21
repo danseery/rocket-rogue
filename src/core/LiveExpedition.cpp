@@ -1,5 +1,6 @@
 #include "core/ExpeditionSystem.h"
 #include "core/MissionGuidance.h"
+#include "core/ArtifactProgression.h"
 #include "core/StraylightSequence.h"
 #include "core/FlightSystem.h"
 #include "core/ContentIds.h"
@@ -29,7 +30,9 @@ std::optional<SystemLocation> courseTargetLocation(const PersistentExpeditionSta
     return std::nullopt;
 }
 bool wreckCarriesArtifact(const PersistentExpeditionState& e, std::uint64_t wreckId) {
-    return std::any_of(e.batteries.begin(), e.batteries.end(), [&](const auto& battery) {
+    return std::any_of(e.artifacts.begin(),e.artifacts.end(),[&](const auto& a) {
+        return a.owner == ArtifactCustody::Wreck && a.wreckId == wreckId;
+    }) || std::any_of(e.batteries.begin(), e.batteries.end(), [&](const auto& battery) {
         return battery.owner == BatteryOwner::Wreck && battery.wreckId == wreckId;
     });
 }
@@ -47,12 +50,24 @@ CampaignObjective recommendedCampaignObjective(const GameState& state,const Cont
     return {CampaignObjectiveKind::Complete, {}, {}, "Explore the system", "Choose a destination on the map.", 0};
 }
 bool reconcileCampaignGuidance(GameState& state,const ContentCatalog& catalog,bool followNow) {
+    reconcileArtifactCustody(state,catalog);
+    bankMissionArtifacts(state,catalog);
     auto& e=state.run.expedition;
     if (!e.travelInitialized || e.location.systemId!="solar") return false;
     const auto& f=state.run.flight;
     bool changed=reconcileTrackedMission(state,catalog);
     const bool docked=operationalHomeDocked(e);
     if (e.coursePlayerSelected && followNow) { e.coursePlayerSelected=false; changed=true; }
+    if (e.coursePlayerSelected && !e.course.targetBodyId.starts_with("wreck:") &&
+        e.location.bodyId == e.course.targetBodyId) {
+        const auto* selectedBody = systemBody(solarSystemDefinition(), e.course.targetBodyId);
+        const bool reachedDock = selectedBody != nullptr && selectedBody->dock &&
+            e.location.siteId == selectedBody->siteId;
+        const bool capturedHere = state.run.flight.orbit.captured &&
+            state.run.flight.mode == FlightMode::Orbit;
+        const bool landedHere = state.run.flight.landing.siteCommitted;
+        if (reachedDock || capturedHere || landedHere) { e.coursePlayerSelected=false; changed=true; }
+    }
     if (e.course.targetBodyId.starts_with("wreck:") && !courseWreck(e,e.course.targetBodyId)) {
         e.course={}; e.cruise={}; e.coursePlayerSelected=false; changed=true;
     }
@@ -67,12 +82,15 @@ bool reconcileCampaignGuidance(GameState& state,const ContentCatalog& catalog,bo
             {"tutorial.wreck_salvage", "wreck_salvage_intro", "default"});
     }
     if (docked && objective.kind==CampaignObjectiveKind::RecoverArtifact) {
-        changed |= enqueueIncomingMessage(state.incomingMessages,catalog,
+        const bool queued = enqueueIncomingMessage(state.incomingMessages,catalog,
             {"recovery.wreck."+std::to_string(objective.wreckId),"artifact_wreck_recovery","default"});
+        changed |= queued;
+        if (queued) state.statusLine = "RECOVERY REQUIRED - Artifact in Wreck " +
+            std::to_string(objective.wreckId) + ". Rendezvous, salvage it, then return to the Earth dock to complete the mission.";
     }
     return changed;
 }
-FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool /*laserComplete*/) {
+FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool laserComplete) {
     const auto& e = state.run.expedition;
     const auto& f = state.run.flight;
     const auto& system = solarSystemDefinition();
@@ -97,17 +115,33 @@ FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool /*
     if (earthLaunchReady(e)) g.nextAction = "Launch from Earth / " + g.targetName + " ahead";
     else if (e.undockReady) g.nextAction = "Thrust to undock";
     else if (f.courseNoticeSeconds > 0) g.nextAction = e.cruise.active ? "Waypoint set / CRUISE ACTIVE" : "Waypoint set / manual flight";
+    else if (earthDockingActive(f)) g.nextAction = "Earth dock / " + earthDockingGuidance(f);
     else if (f.mode == FlightMode::Landing) g.nextAction = f.landing.departureActive ? "Climb clear of the surface" : "Control descent and touch down";
     else if (frame && frame->id == "earth" && f.positionX*f.velocityX+f.positionY*f.velocityY > 0)
         g.nextAction = "Climb away from Earth / follow your " + g.targetName + " marker";
     else if (f.predictedImpact) g.nextAction = "Brake or turn: predicted impact";
     else if (e.cruise.active && e.cruise.cooling) g.nextAction = "Cruise cooling / engines off until 40%";
     else if (courseWreck(e,e.course.targetBodyId)) g.nextAction = "Rendezvous within " + std::to_string(static_cast<int>(expeditionSalvageRadius)) + "U and match speed / Salvage wreck";
-    else if (frame && f.orbit.captured && g.orbitBodyId == frame->id) g.nextAction = surveyed ? "Land in the surveyed sector / drilling is optional" : "Scan a landing sector";
+    else if (frame && f.orbit.captured && g.orbitBodyId == frame->id) {
+        g.nextAction = surveyed ? "Land in the surveyed sector / drilling is optional" : "Scan a landing sector";
+        if (frame->id == "mars") {
+            const auto sector = artifactSectorForBody(state, e.location.systemId.empty() ? "solar" : e.location.systemId, "mars");
+            bool blocked = false;
+            for (const auto& site : e.sites)
+                if (site.bodyId == "mars" && site.siteId.ends_with(sector)) blocked |= site.orbital.laserBlocked;
+            g.nextAction = e.selectedOrbitZone != sector ? "Fly to " + missionSectorName(sector) + " / underground artifact"
+                : !surveyed ? "Scan the mission sector / underground artifact"
+                : blocked ? "Surface tools required / land to reach the underground artifact"
+                : laserComplete ? "Shaft ready / land and use the surface scanner"
+                : "Hold Drill to prepare a shaft / Mars's artifact is underground";
+        }
+    }
     else if (frame && g.orbitBodyId == frame->id) g.nextAction = f.orbit.confirmationSeconds > 0.0
         ? "Coast to confirm orbit / " + std::to_string(static_cast<int>(orbitConfirmationProgress(f) * 100.0)) + "%"
         : "Shape your trajectory into the orbit bands";
-    else if (target && target->dock) g.nextAction = "Approach within " + std::to_string(static_cast<int>(expeditionDockRadius)) + "U of the dock marker and slow to dock";
+    else if (target && target->dock) g.nextAction = target->id == "earth"
+        ? "Approach Earth service dock / docking maneuver begins automatically"
+        : "Approach within " + std::to_string(static_cast<int>(expeditionDockRadius)) + "U of the dock marker and slow to dock";
     else g.nextAction = target ? "Approach " + target->name + " / establish orbit" : "Plot a destination or fly manually";
     return g;
 }
@@ -223,6 +257,7 @@ ExpeditionResult launchEarthOpening(GameState& state, const ContentCatalog& cata
     e.departureCount = 1;
     e.location.siteId.clear();
     f.active = true;
+    f.docking.reentrySuppressed = true;
     // The opening launch supplies the authored departure impulse once. Later
     // dock departures continue to release only under ordinary player thrust.
     f.velocityX = earthLaunchSpeed;

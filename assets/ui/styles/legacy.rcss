@@ -6247,6 +6247,9 @@ body.panel-input-helper-visible #rr-panel.control-panel {
 .mining-vital-tile small b {
     margin-right: 6px;
 }
+.mining-vital-load small { display: block; line-height: 1.3; }
+.mining-vital-load small b, .mining-vital-load small i { display: block; }
+.mining-payload-ownership strong { white-space: normal; }
 
 .mining-vital-tile.load-light { border-color: rgba(102, 220, 177, 0.48); }
 .mining-vital-tile.load-standard { border-color: rgba(126, 207, 238, 0.58); }
@@ -6301,10 +6304,21 @@ body.panel-input-helper-visible #rr-panel.control-panel {
 }
 .mining-payload-ownership header strong {
     color: #d6edf5;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: bold;
-    letter-spacing: 1px;
+    letter-spacing: 0.6px;
     line-height: 1;
+    white-space: nowrap;
+}
+.mining-payload-ownership > small {
+    display: block;
+    margin-top: 6px;
+    color: #8faabd;
+    font-size: 10px;
+    font-weight: normal;
+    letter-spacing: 0.5px;
+    line-height: 1;
+    white-space: nowrap;
 }
 .mining-fullscreen.is-departing .mining-vitals,
 .mining-fullscreen.is-departing .mining-depth-route-overlay,
@@ -9872,7 +9886,8 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     font-size: 12px;
     font-weight: bold;
 }
-#rr-panel .expedition-home .expedition-dock-departure button {
+#rr-panel .expedition-home .expedition-dock-departure > button,
+#rr-panel .expedition-home .expedition-dock-departure .dock-depart {
     width: 100%;
     min-height: 56px;
     height: 56px;
@@ -10224,6 +10239,15 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 
 /* Shared Incoming Message card: content and speakers are supplied by the catalog. */
 .expedition-home { width: 704dp; max-width: 96%; margin: 12dp auto; padding: 16dp; background-color: #0b1118; border: 1dp #407382; overflow-y: auto; max-height: 94%; }
+.expedition-dock-layout { display: flex; flex-direction: row; align-items: flex-start; gap: 16dp; width: 1080dp; max-width: 96%; margin: 12dp auto; }
+.expedition-mission-sidebar { flex: 0 0 330dp; width: 330dp; min-width: 0dp; }
+.expedition-mission-sidebar .mission-tracker { width: auto; max-width: none; margin: 0; box-sizing: border-box; }
+.expedition-dock-main { flex: 1 1 704dp; min-width: 0dp; }
+.expedition-dock-main .expedition-home { width: auto; max-width: none; max-height: none; overflow-y: visible; margin: 0; box-sizing: border-box; }
+.expedition-dock-route-actions { display: flex; flex-direction: row; align-items: stretch; width: 100%; gap: 8dp; }
+#rr-panel .expedition-home .expedition-dock-route-actions button { box-sizing: border-box; width: 0dp; min-width: 0dp; min-height: 56px; height: 56px; margin: 0px; padding: 0px 8px; line-height: 56px; }
+#rr-panel .expedition-home .expedition-dock-route-actions .dock-depart { flex: 3 1 0dp; }
+#rr-panel .expedition-home .expedition-dock-route-actions .dock-waypoint { flex: 1 1 0dp; white-space: normal; }
 .expedition-home h2, .expedition-home h3 { color: #62dbe8; margin: 10dp 0; }
 .expedition-home p, .expedition-map p { color: #d5e5eb; margin: 8dp 0; font-size: 13dp; }
 .expedition-dock-status { display: flex; flex-wrap: wrap; margin: 12dp 0dp; border: 1dp #284856; background-color: #071019; }
@@ -10308,6 +10332,7 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 .solar-map-manifest { margin: 5dp 0dp 8dp; color: #8297a3; font-size: 10dp; text-align: center; }
 .expedition-warning { color: #ffbd67; }
 #rr-modal.modal-map { width: 760dp; max-width: 88%; min-width: 0dp; box-sizing: border-box; }
+@media (max-width: 900dp) { .expedition-dock-layout { flex-direction: column; width: auto; max-width: 94%; } .expedition-mission-sidebar { flex: 0 0 auto; width: 100%; } .expedition-dock-main { width: 100%; } }
 @media (max-width: 560dp) { .shipyard-track { width: 94%; } .expedition-home { max-width: 88%; } .dock-status-segment { min-width: 42%; border-bottom: 1dp #284856; } .dock-status-segment:nth-child(even) { border-right-width: 0dp; } }
 #rr-modal.modal-incoming_message, #rr-modal.modal-solar_mission_claim { width: 704dp; max-width: 94%; height: auto; max-height: 90%; }
 #rr-modal-scrim.incoming-message-scrim { background-color: #05070ab8; }
@@ -10416,9 +10441,10 @@ button,
     position: relative;
     overflow: visible;
 }
-/* An overlay badge avoids moving centered labels or expanding fixed-height
-   controls as focus moves. The space above each control remains unchanged. */
+/* A block formatting context prevents tall button label line-heights from
+   shifting the badge text. The overlay does not move the centered label. */
 .rr-controller-confirm-glyph {
+    display: block;
     position: absolute;
     top: -7px;
     right: 6px;
@@ -10439,6 +10465,10 @@ button,
 }
 body.controller-focus-visible .rr-controller-focus .rr-controller-confirm-glyph {
     visibility: visible;
+}
+.mining-command-dock .rr-controller-confirm-glyph {
+    /* Mining controls intentionally clip overflow; keep their badge inside. */
+    top: 3px;
 }
 
 /* Physical Io mission guidance remains available after its transmission is

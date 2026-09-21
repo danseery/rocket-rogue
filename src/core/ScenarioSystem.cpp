@@ -1,4 +1,5 @@
 #include "core/ScenarioSystem.h"
+#include "core/ArtifactProgression.h"
 
 #include "core/Content.h"
 #include "core/GameState.h"
@@ -63,6 +64,7 @@ bool parseScenarioEventKind(std::string_view text, ScenarioEventKind& value)
     else if (text == "mining_site_completed") value = ScenarioEventKind::MiningSiteCompleted;
     else if (text == "equipment_assigned") value = ScenarioEventKind::EquipmentAssigned;
     else if (text == "artifact_recovered") value = ScenarioEventKind::ArtifactRecovered;
+    else if (text == "artifact_banked") value = ScenarioEventKind::ArtifactBanked;
     else if (text == "flight_data_banked") value = ScenarioEventKind::FlightDataBanked;
     else if (text == "destination_reached") value = ScenarioEventKind::DestinationReached;
     else if (text == "surface_landed") value = ScenarioEventKind::SurfaceLanded;
@@ -85,6 +87,7 @@ bool awardsAuthoredObjectiveExperience(ScenarioEventKind kind)
     case ScenarioEventKind::ActivityAborted:
     case ScenarioEventKind::EquipmentAssigned:
     case ScenarioEventKind::FlightDataBanked:
+    case ScenarioEventKind::ArtifactBanked:
         return false;
     }
     return false;
@@ -421,7 +424,7 @@ bool stepSatisfied(
     if (step == nullptr || progress == nullptr || !progress->completed) {
         return false;
     }
-    return !step->claimRequired || progress->claimed;
+    return (!step->claimRequired && !artifactCompletionStep(*step)) || progress->claimed;
 }
 
 bool prerequisitesSatisfied(
@@ -521,7 +524,7 @@ void applyReward(
             state.meta.campaignMilestone = reward.milestone;
         if (reward.milestone == CampaignMilestone::ArkDiscovered) {
             state.run.expedition.straylightRevealed = true;
-            // Physical ship delivery owns the reveal; claiming never acknowledges its presentation.
+            // Banked mission hand-in enables the reveal, never pickup or automatic acknowledgement.
         }
         break;
     }
@@ -1071,13 +1074,14 @@ void ensureScenarioInstances(GameState& state, const ContentCatalog& catalog)
             // duplicates the artifact, XP, or a reward claim.
             progress.progress = std::max(1, step.requiredProgress);
             progress.completed = true;
-            if (!step.claimRequired) {
+            if (!step.claimRequired && !artifactCompletionStep(step)) {
                 progress.claimed = true;
             }
         }
         refreshScenarioCompletion(definition, *instance);
     }
 
+    reconcileArtifactCustody(state,catalog);
     // v16 is an exact-schema campaign boundary. Scenario instances and their
     // ledgers are authoritative; loading never infers rewards or advances
     // objectives from a different persistence projection.
@@ -1106,9 +1110,20 @@ ScenarioStepState scenarioStepState(
         return ScenarioStepState::Locked;
     }
     if (progress->claimed || (progress->completed && !step->claimRequired)) {
+        if (artifactCompletionStep(*step)) {
+            const auto* a = missionArtifact(state,scenarioId,stepId);
+            if (a && !a->completed) return artifactHandInAvailable(state,*a)
+                ? ScenarioStepState::ReadyToClaim : ScenarioStepState::Active;
+        }
         return ScenarioStepState::Complete;
     }
     if (progress->completed) {
+        if (artifactCompletionStep(*step)) {
+            const auto* a = missionArtifact(state,scenarioId,stepId);
+            if (!a) return state.run.expedition.travelInitialized
+                ? ScenarioStepState::Active : ScenarioStepState::ReadyToClaim;
+            if (!artifactHandInAvailable(state,*a)) return ScenarioStepState::Active;
+        }
         return ScenarioStepState::ReadyToClaim;
     }
     return ScenarioStepState::Active;
@@ -1183,11 +1198,24 @@ ScenarioActionOutcome performScenarioAction(
         return outcome;
     }
     if (action == ScenarioActionKind::ClaimReward) {
-        if (!progress->completed || !step->claimRequired || progress->claimed) {
+        const auto* artifact = artifactCompletionStep(*step) ? missionArtifact(state,scenarioId,stepId) : nullptr;
+        const bool legacyOfflineArtifact = artifactCompletionStep(*step) &&
+            artifact == nullptr && !state.run.expedition.travelInitialized;
+        if (artifactCompletionStep(*step) && !legacyOfflineArtifact &&
+            (!artifact || !artifactHandInAvailable(state,*artifact))) return outcome;
+        if (!progress->completed || (!step->claimRequired && !artifact) || (progress->claimed && !artifact)) {
             return outcome;
         }
+        const bool alreadyRewarded = progress->claimed;
         progress->claimed = true;
-        applyStepRewards(state, catalog, *instance, resolved, *step, allowSupportDroneAutoAssignment);
+        if (!alreadyRewarded) {
+            applyStepRewards(state, catalog, *instance, resolved, *step, allowSupportDroneAutoAssignment);
+            if (artifact && !artifact->objectiveExperienceAwarded) {
+                awardScenarioStepExperience(state,*step);
+                const_cast<MissionArtifact*>(artifact)->objectiveExperienceAwarded=true;
+            }
+        }
+        if (artifact) completeBankedArtifact(state,catalog,artifact->key);
         refreshScenarioCompletion(resolved, *instance);
         outcome.applied = true;
         outcome.transition = step->transition;
@@ -1243,6 +1271,42 @@ ScenarioActionOutcome performScenarioAction(
 bool recordScenarioEvent(GameState& state, const ContentCatalog& catalog, const ScenarioEvent& event)
 {
     ensureScenarioInstances(state, catalog);
+    if (state.run.expedition.travelInitialized &&
+        (event.kind == ScenarioEventKind::ArtifactRecovered ||
+         event.kind == ScenarioEventKind::ProtectedObjectiveExtracted)) {
+        // Some compatibility callers emit the authored completion event
+        // directly. Materialize the same Ship-custody record that the mining
+        // handoff creates so a live expedition can never claim before banking.
+        for (const auto& instance : state.meta.scenarios) {
+            if (!event.scenarioId.empty() && event.scenarioId != instance.id) continue;
+            const auto* definition = definitionForInstance(catalog, instance);
+            if (!definition) continue;
+            const auto resolved = resolveScenarioDefinition(*definition, instance);
+            for (const auto& step : resolved.steps) {
+                if (!artifactCompletionStep(step) ||
+                    (!event.stepId.empty() && event.stepId != step.id) ||
+                    !eventMatches(resolved, instance, step, event)) continue;
+                std::string artifactId = step.eventTargetId;
+                if (artifactId.empty() && !step.miningSiteDefinitionId.empty()) {
+                    if (const auto* site = findMiningSiteDefinition(catalog, step.miningSiteDefinitionId))
+                        artifactId = site->cocoon.protectedObjective.id;
+                }
+                if (artifactId.empty()) continue;
+                ArtifactRecord record;
+                record.id = artifactId;
+                record.originDestinationId = step.eventOriginId.empty() ? event.originId : step.eventOriginId;
+                if (record.originDestinationId.empty()) record.originDestinationId = instance.id;
+                registerArtifactAboard(state, catalog, record, state.run.expedition.location.siteId,
+                    instance.id, step.id);
+                if (!state.run.flight.active && state.run.expedition.location.siteId.ends_with(".dock")) {
+                    if (auto* custody = const_cast<MissionArtifact*>(missionArtifact(state, instance.id, step.id))) {
+                        custody->owner = ArtifactCustody::Banked;
+                        custody->bankedAt = state.run.expedition.location.bodyId;
+                    }
+                }
+            }
+        }
+    }
     bool changed = false;
     for (ScenarioInstance& instance : state.meta.scenarios) {
         const ScenarioDefinition* definition = definitionForInstance(catalog, instance);
@@ -1258,7 +1322,9 @@ bool recordScenarioEvent(GameState& state, const ContentCatalog& catalog, const 
             if (progress == nullptr || progress->completed ||
                 !prerequisitesSatisfied(resolved, instance, step) ||
                 (step.mandatoryBriefing && !progress->briefingAcknowledged) ||
-                !eventMatches(resolved, instance, step, event)) {
+                !(eventMatches(resolved, instance, step, event) ||
+                  (event.kind == ScenarioEventKind::ArtifactBanked && artifactCompletionStep(step) &&
+                   event.scenarioId == instance.id && event.stepId == step.id))) {
                 continue;
             }
 
@@ -1285,8 +1351,8 @@ bool recordScenarioEvent(GameState& state, const ContentCatalog& catalog, const 
             }
             if (progress->progress >= required) {
                 progress->completed = true;
-                awardScenarioStepExperience(state, step);
-                if (!step.claimRequired) {
+                if (!artifactCompletionStep(step)) awardScenarioStepExperience(state, step);
+                if (!step.claimRequired && !artifactCompletionStep(step)) {
                     progress->claimed = true;
                     applyStepRewards(state, catalog, instance, resolved, step);
                 }
@@ -1432,7 +1498,7 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
     presentation.eventTargetId = step->eventTargetId;
     presentation.returnPending = protectedObjectiveAwaitingReturn(state, catalog, *step);
     if (presentation.returnPending) {
-        presentation.detail = "ARTIFACT SECURED // RETURN TO EARTH TO FINALIZE.";
+        presentation.detail = "ARTIFACT SECURED // RETURN TO THE SERVICING DOCK TO COMPLETE THE MISSION.";
     }
     presentation.mandatoryBriefing = step->mandatoryBriefing;
     presentation.briefingAcknowledged = progress->briefingAcknowledged;
@@ -1460,6 +1526,7 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
         presentation.action = ScenarioActionKind::None;
     } else if (presentation.state == ScenarioStepState::ReadyToClaim) {
         presentation.action = ScenarioActionKind::ClaimReward;
+        if (artifactCompletionStep(*step)) presentation.actionLabel = "Complete Mission";
     } else if (presentation.firstFailurePending) {
         presentation.action = ScenarioActionKind::AcknowledgeFailure;
     } else if (step->mandatoryBriefing && !progress->briefingAcknowledged) {
@@ -1477,6 +1544,20 @@ ScenarioObjectivePresentation scenarioObjectivePresentation(
         // their eventual action in content, but must not present a premature
         // claim button while their counter is still active.
         presentation.action = ScenarioActionKind::None;
+    }
+    if (artifactCompletionStep(*step)) {
+        if (const auto* a=missionArtifact(state,instance->id,step->id); a && !a->completed) {
+            presentation.returnPending = !artifactHandInAvailable(state,*a);
+            if (presentation.returnPending) {
+                presentation.action = ScenarioActionKind::None;
+                const std::string dock = a->requiredDockId == "earth" ? "Earth dock" :
+                    a->requiredDockId == "straylight" ? "Straylight dock" : a->requiredDockId + " dock";
+                presentation.detail = a->owner == ArtifactCustody::Wreck
+                    ? "Collect the artifact from Wreck " + std::to_string(a->wreckId) + ", then return to ship."
+                    : a->owner == ArtifactCustody::Ship ? "Artifact aboard / unsecured. Return to the " + dock + " to complete the mission."
+                    : "Artifact secured at the " + dock + ". Complete Mission to claim rewards.";
+            }
+        }
     }
     if (presentation.activityStarted &&
         (presentation.action == ScenarioActionKind::BeginActivity ||
@@ -1591,7 +1672,10 @@ CampaignNextStep campaignNextStep(const GameState& state, const ContentCatalog& 
             result.goal = result.objective.goal;
             result.gate = result.objective.gate;
             result.nextStep = result.objective.state == ScenarioStepState::ReadyToClaim
-                ? "Claim the mission reward." : "Set a waypoint for " + result.location + ".";
+                ? (artifactCompletionStep(result.objective.completionEvent)
+                    ? "Complete Mission at the servicing dock."
+                    : "Claim the mission reward.")
+                : "Set a waypoint for " + result.location + ".";
             return result;
         }
         result.terminal = arkDiscovered(state);
@@ -1600,7 +1684,7 @@ CampaignNextStep campaignNextStep(const GameState& state, const ContentCatalog& 
         result.destinationId = "straylight";
         result.goal = result.terminal ? "Approach Straylight." : "No mission is available.";
         result.gate = result.terminal ? "Solar missions complete." : "Progression data is incomplete.";
-        result.nextStep = result.terminal ? "Set waypoint: Straylight." : "Return to Earth.";
+        result.nextStep = result.terminal ? "Set waypoint: Straylight." : "Return to the Earth dock.";
         return result;
     }
     if (!state.run.expedition.travelInitialized && state.run.routeTransit.active()) {

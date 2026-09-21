@@ -1106,7 +1106,7 @@ void testFlightPointerMatchesRenderedShip()
 
 void testMiningSkyAndTunnelBackdrop()
 {
-    for (int width : {800, 1600}) for (int depth : {0, 2}) {
+    for (int width : {800, 1600}) for (int depth : {0, 2}) for (int shipFall : {0, 4}) {
         SceneComposer composer;
         composer.setViewport({width, 800, width, 800, 1.0F});
         composer.setTextureReady(TextureId::LocalSolarBackground, true);
@@ -1117,6 +1117,8 @@ void testMiningSkyAndTunnelBackdrop()
         snapshot.miningHeight = 40;
         snapshot.miningReturnZoneX = snapshot.miningDroneX = 32;
         snapshot.miningReturnZoneY = snapshot.miningDroneY = 16;
+        snapshot.miningSurfaceRow = 16;
+        snapshot.miningReturnZoneY += shipFall;
         snapshot.miningActiveDepth = depth;
         snapshot.miningShipPresent = true;
         std::vector<rocket::MiningCell> cells(64 * 40);
@@ -1151,6 +1153,12 @@ void testMiningSkyAndTunnelBackdrop()
         const auto& t = packet.transform;
         const float topPixel = 800 - t.pixelCenterY - highest*t.worldUnitY;
         const float bottomPixel = 800 - t.pixelCenterY - lowest*t.worldUnitY;
+        if (depth == 0) {
+            const auto& camera = packet.surfaceCamera;
+            const float terrainHorizon = camera.top -
+                static_cast<float>(snapshot.miningSurfaceRow) * camera.cellHeight;
+            assert(std::abs(highest - terrainHorizon) < .001F);
+        }
         if (depth == 0) assert(topPixel > packet.logicalSceneClip.y + 20);
         else assert(std::abs(topPixel - packet.logicalSceneClip.y) < 1);
         assert(std::abs(bottomPixel - packet.logicalSceneClip.y - packet.logicalSceneClip.height) < 1);

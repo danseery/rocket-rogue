@@ -78,7 +78,10 @@ bool revealStraylightOnDelivery(GameState& s, const ContentCatalog&) {
     if (s.meta.straylightStage != Stage::Hidden || !s.run.expedition.travelInitialized) return false;
     const auto& batteries = s.run.expedition.batteries;
     if (std::none_of(batteries.begin(), batteries.end(), [](const auto& b) {
-        return b.id == "triton" && b.owner == BatteryOwner::Ship;
+        return b.id == "triton" && (b.owner == BatteryOwner::EarthStorage || b.owner == BatteryOwner::ArkSlot);
+    })) return false;
+    if (std::none_of(s.run.expedition.artifacts.begin(),s.run.expedition.artifacts.end(),[](const auto& a) {
+        return a.artifact.originDestinationId == "triton" && a.completed;
     })) return false;
     s.meta.straylightStage = Stage::RevealPending;
     s.meta.campaignMilestone = CampaignMilestone::ArkDiscovered;

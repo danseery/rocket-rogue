@@ -1941,6 +1941,8 @@ MaterialInventory unloadMiniDroneCargoAtShip(
         shipHoldCapacity(state, catalog));
     MaterialInventory moved = transfer.toContract;
     addMiningMaterials(moved, transfer.toShipHold);
+    if (mining.deliveredOreUnits >= 0) mining.deliveredOreUnits += moved.common + moved.rare + moved.exotic;
+    if (mining.missionOreUnits >= 0) mining.missionOreUnits += transfer.toContract.common + transfer.toContract.rare + transfer.toContract.exotic;
     applyPayloadTransferPlan(state, catalog, mining.destinationId, transfer);
     agent.haulMaterials = transfer.remainingAtSource;
     if (transfer.capacityBlocked)
@@ -7896,12 +7898,16 @@ bool bankMiningPayloadAtShip(GameState& state, const ContentCatalog& catalog)
         shipHoldCapacity(state, catalog));
     MaterialInventory moved = transfer.toContract;
     addMiningMaterials(moved, transfer.toShipHold);
+    if (mining.deliveredOreUnits >= 0) mining.deliveredOreUnits += moved.common + moved.rare + moved.exotic;
+    if (mining.missionOreUnits >= 0) mining.missionOreUnits += transfer.toContract.common + transfer.toContract.rare + transfer.toContract.exotic;
     const int movedCargo = materialCargoMass(moved);
     applyPayloadTransferPlan(state, catalog, mining.destinationId, transfer);
     addMiningMaterials(mining.stowedMaterials, moved);
     mining.temporaryMaterials = transfer.remainingAtSource;
     const bool movedArtifacts = !mining.temporaryArtifacts.empty();
     mining.stowedArtifacts.insert(mining.stowedArtifacts.end(), mining.temporaryArtifacts.begin(), mining.temporaryArtifacts.end());
+    for (const auto& artifact : mining.temporaryArtifacts)
+        registerArtifactAboard(state,catalog,artifact,state.run.expedition.location.siteId,mining.scenarioId,mining.scenarioStepId);
     mining.temporaryArtifacts.clear();
     mining.stowedCargo += movedCargo;
     mining.cargo = std::max(0, mining.cargo - movedCargo);
@@ -8446,6 +8452,7 @@ SurfaceActionOutcome startMiningRun(
         : std::nullopt;
 
     MiningRunState mining;
+    mining.deliveredOreUnits = mining.missionOreUnits = 0;
     mining.active = true;
     mining.arenaMetadata = {
         arenaRules.request.act,
@@ -8859,6 +8866,19 @@ bool surfaceLandingStaging(const MiningRunState& mining, double shipX, double sh
                     if (drop>=0.0 && !canOccupyRigHull(mining.terrain,x,drop,0.0,1.0)) {clear=false;break;}
                 }
                 if (clear) {rigX=x;rigY=y;return true;}
+            }
+        }
+    }
+    // Revisited mines may have no staging shelf left. Deploy the flying rig
+    // into clear air beside the supported ship without regenerating terrain.
+    for (double side : {1.0, -1.0}) {
+        for (double offset : {5.25, 4.25, 6.25, 7.25}) {
+            const double x = shipX + side * offset;
+            const double y = shipY - rig_geometry::drillTip - 0.02;
+            if (x < 3.0 || x > mining.terrain.width - 3.0) continue;
+            if (canOccupyRigHull(mining.terrain, x, y, 0.0, 1.0)) {
+                rigX = x; rigY = y;
+                return true;
             }
         }
     }
@@ -10602,11 +10622,13 @@ void updateMiningArtifact(GameState& state, const ContentCatalog& catalog, doubl
         // the rig's temporary ledger until the rig also reaches the pad.
         const std::string& artifactOrigin = mining.bodyId.empty() ? mining.destinationId : mining.bodyId;
         mining.stowedArtifacts.push_back(artifactRecordForObject(artifact, artifactOrigin));
+        reconcileArtifactCustody(state,catalog);
+        registerArtifactAboard(state,catalog,mining.stowedArtifacts.back(),
+            state.run.expedition.location.siteId,mining.scenarioId,mining.scenarioStepId);
         if (state.run.expedition.travelInitialized) {
             if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, artifactOrigin);
                 mission != nullptr && !mission->batteryId.empty()) {
                 (void)recoverSiteBattery(state.run.expedition, mission->batteryId);
-                (void)revealStraylightOnDelivery(state, catalog);
             }
         }
         if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, artifactOrigin)) {
@@ -10636,10 +10658,10 @@ void updateMiningArtifact(GameState& state, const ContentCatalog& catalog, doubl
                     0
                 });
             state.statusLine = mining.gate.securedMessage.empty()
-                ? "ARTIFACT SECURED — protected objective ready to claim."
+                ? "ARTIFACT SECURED — return to the servicing dock to complete the mission."
                 : mining.gate.securedMessage;
         } else {
-            state.statusLine = "ARTIFACT SECURED — Ship manifest updated. Return to Earth to complete recovery.";
+            state.statusLine = "ARTIFACT SECURED — Ship manifest updated. Return to the servicing dock to complete the mission.";
         }
         return true;
     };

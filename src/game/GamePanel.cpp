@@ -1,4 +1,5 @@
 #include "core/SurfacePresentation.h"
+#include "core/ArtifactProgression.h"
 #include "game/GamePanel.h"
 #include "game/ExpeditionPresentation.h"
 #include "core/ExpeditionSystem.h"
@@ -1093,6 +1094,10 @@ std::string scenarioObjectiveStateClass(ScenarioStepState state)
 std::string scenarioObjectiveDisplayStateLabel(
     const ScenarioObjectivePresentation& objective)
 {
+    if (objective.state == ScenarioStepState::ReadyToClaim &&
+        artifactCompletionStep(objective.completionEvent)) {
+        return "READY TO COMPLETE";
+    }
     return objective.returnPending
         ? "PENDING RETURN"
         : scenarioObjectiveStateLabel(objective.state);
@@ -1211,15 +1216,16 @@ std::string scenarioObjectiveModal(const ScenarioObjectivePresentation& objectiv
     }
 
     const std::string modalId = "scenario_" + objective.scenarioId + "_" + objective.stepId;
+    const bool artifactReady = readyToClaim && artifactCompletionStep(objective.completionEvent);
     const std::string title = firstFailure
         ? "OBJECTIVE RETRY REQUIRED"
-        : (readyToClaim ? objective.title + " READY" : objective.title);
+        : (artifactReady ? objective.title + " READY TO COMPLETE" : (readyToClaim ? objective.title + " READY" : objective.title));
     const std::string setup = firstFailure
         ? objective.failureExplanation
         : objective.detail;
     const std::string kicker = firstFailure
         ? "OBJECTIVE // LOCKED"
-        : (readyToClaim ? "READY TO CLAIM" : "MANDATORY DIRECTIVE");
+        : (artifactReady ? "COMPLETE MISSION" : (readyToClaim ? "READY TO CLAIM" : "MANDATORY DIRECTIVE"));
     const std::string actionClass = readyToClaim ? "ok" : (firstFailure ? "warn" : "ok");
     ScenarioObjectivePresentation actionObjective = objective;
     if (firstFailure) {
@@ -1352,7 +1358,7 @@ std::string compactMiningScenarioObjective(const GameState& state, const Content
         if (mission.available && mission.state == ScenarioStepState::Complete)
             return mission.location + " // MISSION COMPLETE";
         if (mission.available && mission.state == ScenarioStepState::ReadyToClaim)
-            return mission.location + " // READY TO CLAIM";
+            return mission.location + (artifactCompletionStep(mission.completionEvent) ? " // READY TO COMPLETE" : " // READY TO CLAIM");
     }
     const MiningGateRuntime& gate = state.run.mining.gate;
     if (!gate.cocoonLayers.empty()) {
@@ -1386,7 +1392,7 @@ std::string compactMiningScenarioObjective(const GameState& state, const Content
     const std::string targetLabel = scenarioProgressTargetLabel(presentation);
     const std::string locationAndTarget = presentation.location +
         (targetLabel.empty() ? std::string {} : " " + targetLabel);
-    return locationAndTarget + " // DELIVERED " +
+    return locationAndTarget + " // COLLECTED COMMON ORE " +
         std::to_string(presentation.current) + "/" + std::to_string(presentation.required);
 }
 
@@ -1566,7 +1572,7 @@ std::string surfaceActionCard(
     std::ostringstream out;
     const bool isMining = isSurfaceMiningAction(action);
     const bool featured = isSurfaceExtractionAction(action)
-            && (action.title == "Extract Mars Payload" || action.title.rfind("Deliver ", 0) == 0);
+            && (action.title == "Extract Mars Payload" || action.title.rfind("Collect ", 0) == 0);
     out << "<article class=\"resource-bank rr-fixed-lane-card surface-choice-row"
         << (featured ? " featured-action" : "")
         << (isMining && action.action.enabled ? " risk-action" : "") << "\">";
@@ -2816,7 +2822,7 @@ std::string buildGamePanelMarkup(
             metric("rr-landing-fuel", "SHIP FUEL", display::fixed(flight.fuelRemaining, 1));
             metric("rr-landing-hull", "HULL", display::fixed(flight.hullRemaining, 0) + " HP");
             metric("rr-landing-altitude", flight.landing.altitude < 0.0 ? "DEPTH" : "ALTITUDE", display::fixed(std::abs(flight.landing.altitude), 1) + " m");
-            metric("rr-landing-vertical", "VERTICAL", display::fixed(flight.landing.verticalVelocity, 1) + " m/s");
+            metric("rr-landing-vertical", "VERTICAL", landingVerticalSpeedText(flight.landing.verticalVelocity));
             metric("rr-landing-lateral", "LATERAL", display::fixed(flight.landing.lateralVelocity, 1) + " m/s");
             metric("rr-landing-tilt", "TILT", display::fixed(flight.landing.surfaceAngle * 57.29577951308232, 0) + " deg");
             out << "</section></header><footer class=\"mining-bottom-rail surface-flight-actions\">";
@@ -2843,7 +2849,7 @@ std::string buildGamePanelMarkup(
                 << flightStatusRow("rr-landing-fuel", "Fuel", display::fixed(flight.fuelRemaining, 1))
                 << flightStatusRow("rr-landing-hull", "Hull", display::fixed(flight.hullRemaining, 0) + " HP")
                 << flightStatusRow("rr-landing-altitude", "Altitude", display::fixed(std::abs(flight.landing.altitude), 1) + " m")
-                << flightStatusRow("rr-landing-vertical", "Vertical", display::fixed(flight.landing.verticalVelocity, 1) + " m/s")
+                << flightStatusRow("rr-landing-vertical", "Vertical", landingVerticalSpeedText(flight.landing.verticalVelocity))
                 << flightStatusRow("rr-landing-lateral", "Lateral", display::fixed(flight.landing.lateralVelocity, 1) + " m/s")
                 << flightStatusRow("rr-landing-tilt", "Tilt", display::fixed(flight.landing.surfaceAngle * 57.29577951308232, 0) + " deg")
                 << "</div><p>" << htmlEscape(landingControlHint(context)) << "</p>";
@@ -2907,11 +2913,19 @@ std::string buildGamePanelMarkup(
             const bool missionScan = w.surveyComplete && mission.available && !mission.complete &&
                 mission.id == state.run.expedition.location.bodyId && mission.targetId == mission.id && mission.stepId != "claim";
             const bool missionSlice = missionScan && state.run.expedition.selectedOrbitZone == mission.sectorId;
+            const bool marsTutorial = missionScan && mission.id == "mars";
             if (missionScan) {
                 out << "<section class=\"mission-scan-result\"><strong>YOUR MISSION / " << htmlEscape(mission.location) << "</strong>";
                 if (mission.id == "moon" && state.run.expedition.missionScanIntro == MissionScanIntro::Showing)
                     out << "<p>" << htmlEscape(firstMoonMissionInstructions(state, catalog)) << "</p><small>" << htmlEscape(mission.reward) << "</small>";
-                else out << "<p>Mission site is " << htmlEscape(missionSectorName(mission.sectorId)) << ". Recover the artifact and complete the mission requirements.</p>";
+                else if (marsTutorial) out << "<p>Mission site is " << htmlEscape(missionSectorName(mission.sectorId))
+                    << ". Mars's artifact is underground. "
+                    << (!missionSlice ? "Fly to the mission sector, then scan and prepare a shaft."
+                        : context.orbitalLaserBlocked ? "Protected terrain blocks the shaft. Land and use surface tools to reach the artifact."
+                        : context.orbitalLaserComplete ? "Shaft ready. Land and use the surface scanner to locate the artifact."
+                        : "Hold Drill to prepare a shaft, then land and use the surface scanner to locate it.") << "</p>";
+                else out << "<p>Mission site is " << htmlEscape(missionSectorName(mission.sectorId))
+                    << (mission.arrivalStage ? ". Scan this sector and land. Recovery briefing follows touchdown.</p>" : ". Collect Artifact and complete the mission requirements.</p>");
                 out << "</section>";
             }
             if (w.phase == OrbitalWorkPhase::LandingAlignment) {
@@ -2925,11 +2939,12 @@ std::string buildGamePanelMarkup(
                 const bool canDrill = ready && w.surveyComplete && !outside &&
                     !context.orbitalLaserBlocked && !context.orbitalLaserComplete;
                 const bool canLand = context.orbitalLandingEligible;
-                const bool workDefault = canScan || (canDrill && !missionScan);
+                const bool teachDrill = marsTutorial && missionSlice && canDrill;
+                const bool workDefault = canScan || (canDrill && (!missionScan || teachDrill));
                 if (missionScan) {
-                    if (missionSlice && canLand)
-                        out << button("Land at mission site", ui::actions::landFromOrbit, "ok", true);
-                    else if (w.active())
+                    if (missionSlice && canLand && !marsTutorial)
+                        out << button("Land at mission site", ui::actions::landFromOrbit, teachDrill ? "ghost" : "ok", !teachDrill);
+                    else if (!missionSlice && w.active())
                         out << button("Resume flight to mission sector", ui::actions::resumeOrbitalFlight, "ok", true);
                 }
                 out << "<div data-orbital-work=\"1\" class=\"orbit-primary-action\">";
@@ -2938,7 +2953,7 @@ std::string buildGamePanelMarkup(
                 } else if (canDrill) {
                     // Distinct identities prevent a held Scan confirm from turning
                     // into a Drill hold when the survey refreshes the panel.
-                    out << button(missionScan ? "Optional: prepare a shaft" : "DRILL", ui::actions::orbitalWork, missionScan ? "ghost" : "ok", !missionScan,
+                    out << button(marsTutorial ? "Hold to Drill" : missionScan ? "Optional: prepare a shaft" : "DRILL", ui::actions::orbitalWork, workDefault ? "ok" : "ghost", workDefault,
                         "action:orbital_drill", "continuous");
                 } else {
                     const std::string_view status = scanning ? "SCANNING..."
@@ -2952,6 +2967,8 @@ std::string buildGamePanelMarkup(
                     << (w.surveyComplete ? orbitalLaserHint(context)
                         : "Scan depth " + std::to_string(surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray)))
                     << "</p>";
+                if (marsTutorial && missionSlice && canLand)
+                    out << button("Land at mission site", ui::actions::landFromOrbit, teachDrill ? "ghost" : "ok", !teachDrill);
                 if (canLand && !(missionScan && missionSlice)) out << button(missionScan ? "Land here instead" : "LAND", ui::actions::landFromOrbit, missionScan ? "ghost" : "ok", !missionScan && !workDefault);
                 if (w.active() && (!missionScan || missionSlice))
                     out << button("RESUME FLIGHT", ui::actions::resumeOrbitalFlight, "ghost", !missionScan && !workDefault && !canLand);
@@ -3195,7 +3212,7 @@ std::string buildGamePanelMarkup(
                 << (index == 0 ? " id=\"rr-hud-mining-oxygen-label\"" : "") << ">"
                 << htmlEscape(tile.label) << "</span><strong id=\"" << id << "-value\">" << htmlEscape(tile.value) << "</strong>";
             if (!tile.microLabel.empty()) {
-                out << "<small><b>" << htmlEscape(tile.microLabel) << "</b> <i id=\"" << id << "-micro\">"
+                out << "<small><b id=\"" << id << "-micro-label\">" << htmlEscape(tile.microLabel) << "</b> <i id=\"" << id << "-micro\">"
                     << htmlEscape(tile.microValue) << "</i></small>";
             }
             out << "</article>";
@@ -3240,23 +3257,12 @@ std::string buildGamePanelMarkup(
             << "</span><span id=\"rr-hud-mining-route-down\" class=\"mining-route-down\">"
             << htmlEscape(std::string("DESCEND \xE2\x80\xA2 DEPTH +") + std::to_string(currentDepth + 1))
             << "</span></div>";
-        const int rigOre = std::max(0, mining.temporaryMaterials.common)
-            + std::max(0, mining.temporaryMaterials.rare)
-            + std::max(0, mining.temporaryMaterials.exotic);
-        int droneOre = 0;
-        for (const MiningMiniDroneAgent& drone : mining.miniDrones) {
-            droneOre += std::max(0, drone.haulMaterials.common)
-                + std::max(0, drone.haulMaterials.rare)
-                + std::max(0, drone.haulMaterials.exotic);
-        }
-        const int shipOre = std::max(0, mining.stowedMaterials.common)
-            + std::max(0, mining.stowedMaterials.rare)
-            + std::max(0, mining.stowedMaterials.exotic);
         out << "<footer class=\"mining-bottom-rail\"><section class=\"mining-payload-strip ui-kpi-strip rr-metric-strip\">"
             << "<article class=\"mining-ore-manifest mining-payload-ownership\"><header><span>PAYLOAD</span>"
-            << "<strong id=\"rr-hud-mining-payload-ownership\">RIG " << rigOre
-            << " / DRONES " << droneOre << " / SHIP " << shipOre
-            << "</strong></header></article>";
+            << "<strong id=\"rr-hud-mining-payload-ownership\">" << htmlEscape(miningPayloadOwnershipText(state,catalog))
+            << "</strong></header><small id=\"rr-hud-mining-payload-contract\">"
+            << htmlEscape(miningPayloadContractText(state,catalog))
+            << "</small></article>";
         out << "</section><section class=\"mining-command-dock" << (miningHud.atShip ? " at-ship" : " away")
             << "\"><div class=\"actions action-row system-actions\">";
         bool miningDefaultAssigned = false;
@@ -3408,9 +3414,9 @@ std::string buildGamePanelMarkup(
                 droneMissionInstruction = missionQualifier + std::to_string(commonAboard)
                     + " COMMON ABOARD // RETURN TO SURFACE OPS, THEN EXTRACT SAFELY.";
             } else {
-                droneMissionInstruction = missionQualifier + "SAFE DELIVERY REQUIRED // Mine "
+                droneMissionInstruction = missionQualifier + "SAFE COLLECTION REQUIRED // Mine "
                     + std::to_string(droneScenario.required)
-                    + " Common Ore, then extract it safely.";
+                    + " Common Ore, then return to ship.";
             }
         }
         if (!hazardMission.empty()) {
@@ -3507,7 +3513,7 @@ std::string buildGamePanelMarkup(
         ScenarioObjectivePresentation displayedSurfaceScenario = surfaceScenario;
         if (scenarioMiningDeploymentSpent) {
             displayedSurfaceScenario.detail =
-                "This surface loop's Mining Rig deployment is spent. Return to Earth, then land again to retry this recovery.";
+                "This surface loop's Mining Rig deployment is spent. Return to the Earth dock, then land again to retry this recovery.";
             displayedSurfaceScenario.action = ScenarioActionKind::None;
         }
         const bool showMiniDroneIntroduction = context.firstTimeIntroductionsEnabled
@@ -3548,7 +3554,7 @@ std::string buildGamePanelMarkup(
                     << "<strong>ON SHIP // RETURN GUARANTEED</strong><span>"
                     << htmlEscape(
                            std::to_string(surfaceDelivery.safelyAboard) + " " + material +
-                           " on Ship. Return will deliver +" +
+                           " on Ship. Return will collect +" +
                            std::to_string(std::min(remaining, surfaceDelivery.safelyAboard)) + ".")
                     << "</span></section>";
             }
@@ -3589,7 +3595,7 @@ std::string buildGamePanelMarkup(
                 out << activityIntroductionModal(
                     ui::modals::miningIntroduction,
                     "MINE THE DEPOSIT",
-                    "Mine is where all the action is. Take direct control of the Mining Rig to drill ore and recover artifacts from the tunnel you prepared. Bring back " +
+                    "Mine is where all the action is. Take direct control of the Mining Rig to drill ore and Collect Artifact from the tunnel you prepared. Bring back " +
                         std::to_string(tuning::research::prospectorCommonOreGoal) +
                         " Common Ore to build Prospector Mk I.",
                     "Mining starts at your selected start depth. Watch oxygen and drill heat, stow cargo at the ship, and leave before the rig can no longer make it home.",
@@ -3600,7 +3606,7 @@ std::string buildGamePanelMarkup(
                 out << activityIntroductionModal(
                     ui::modals::miningIntroduction,
                     "MINE THE DEPOSIT",
-                    "Mine is where all the action is. Take direct control of the Mining Rig to drill ore and recover artifacts from the tunnel you prepared.",
+                    "Mine is where all the action is. Take direct control of the Mining Rig to drill ore and Collect Artifact from the tunnel you prepared.",
                     "Mining starts at your selected start depth. Watch oxygen and drill heat, stow cargo at the ship, and leave before the rig can no longer make it home.",
                     "Deploy Mining Rig",
                     ui::actions::mineSurface,
@@ -4446,7 +4452,7 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
             appendHudText(result, "rr-landing-fuel", display::fixed(flight.fuelRemaining, 1));
             appendHudText(result, "rr-landing-hull", display::fixed(flight.hullRemaining, 0) + " HP");
             appendHudText(result, "rr-landing-altitude", display::fixed(std::abs(flight.landing.altitude), 1) + " m");
-            appendHudText(result, "rr-landing-vertical", display::fixed(flight.landing.verticalVelocity, 1) + " m/s");
+            appendHudText(result, "rr-landing-vertical", landingVerticalSpeedText(flight.landing.verticalVelocity));
             appendHudText(result, "rr-landing-lateral", display::fixed(flight.landing.lateralVelocity, 1) + " m/s");
             appendHudText(result, "rr-landing-tilt", display::fixed(flight.landing.surfaceAngle * 57.29577951308232, 0) + " deg");
             return;
@@ -4591,29 +4597,22 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
         appendHudText(result, vitalValueIds[index], miningHud.vitals[index].value);
     }
     appendHudText(result, "rr-hud-mining-oxygen-label", miningHud.vitals[0].label);
+    appendHudText(result, "rr-hud-mining-load-micro-label", miningHud.vitals[3].microLabel);
+    appendHudText(result, "rr-hud-mining-load-micro", miningHud.vitals[3].microValue);
     if (!miningHud.vitals[1].microLabel.empty()) {
         appendHudText(result, "rr-hud-mining-fuel-micro", miningHud.vitals[1].microValue);
     }
     if (!miningHud.vitals[2].microLabel.empty()) {
         appendHudText(result, "rr-hud-mining-drill-bit-micro", miningHud.vitals[2].microValue);
     }
-    const int rigOre = std::max(0, mining.temporaryMaterials.common)
-        + std::max(0, mining.temporaryMaterials.rare)
-        + std::max(0, mining.temporaryMaterials.exotic);
-    int droneOre = 0;
-    for (const MiningMiniDroneAgent& drone : mining.miniDrones) {
-        droneOre += std::max(0, drone.haulMaterials.common)
-            + std::max(0, drone.haulMaterials.rare)
-            + std::max(0, drone.haulMaterials.exotic);
-    }
-    const int shipOre = std::max(0, mining.stowedMaterials.common)
-        + std::max(0, mining.stowedMaterials.rare)
-        + std::max(0, mining.stowedMaterials.exotic);
     appendHudText(
         result,
         "rr-hud-mining-payload-ownership",
-        "RIG " + std::to_string(rigOre) + " / DRONES " + std::to_string(droneOre)
-            + " / SHIP " + std::to_string(shipOre));
+        miningPayloadOwnershipText(state,catalog));
+    appendHudText(
+        result,
+        "rr-hud-mining-payload-contract",
+        miningPayloadContractText(state,catalog));
     if (!mining.gate.cocoonLayers.empty()) {
         for (std::size_t layerIndex = 0; layerIndex < mining.gate.cocoonLayers.size(); ++layerIndex) {
             const MiningCocoonLayerProgress& layer = mining.gate.cocoonLayers[layerIndex];

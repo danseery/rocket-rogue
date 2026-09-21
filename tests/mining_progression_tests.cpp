@@ -1179,14 +1179,32 @@ void solarCampaignClaimsAdvanceToStraylight()
             if (step.completionEvent == ScenarioEventKind::ManualAction)
                 require(performScenarioAction(state, catalog, scenario->id, step.id,
                     ScenarioActionKind::BeginActivity).applied, "mission setup action should be available");
-            else if (step.completionEvent != ScenarioEventKind::None)
+            else if (step.completionEvent != ScenarioEventKind::None) {
+                if (artifactCompletionStep(step)) {
+                    // These cases model a live expedition, so the physical
+                    // handoff creates Ship custody before the dock hand-in.
+                    state.run.expedition.travelInitialized = true;
+                }
                 require(recordScenarioEvent(state, catalog,
                     {step.completionEvent, scenario->id, step.id, step.eventOriginId,
                      step.eventTargetId, step.requiredProgress, step.requiredGrade}),
                     "mission event should advance its own objective");
-            if (step.claimRequired)
+            }
+            if (step.claimRequired) {
+                if (artifactCompletionStep(step)) {
+                    // Mission artifacts are aboard and at risk until the ship
+                    // reaches its servicing dock. Complete the hand-in from
+                    // that authoritative custody state rather than claiming
+                    // directly from the surface event.
+                    state.run.expedition.travelInitialized = true;
+                    state.run.expedition.location = {"solar", "earth", CoordinateFrame::Body, {}, {}, 0.0, "earth.dock"};
+                    state.run.flight.active = false;
+                    reconcileArtifactCustody(state, catalog);
+                    bankMissionArtifacts(state, catalog);
+                }
                 require(performScenarioAction(state, catalog, scenario->id, step.id,
                     ScenarioActionKind::ClaimReward).applied, "mission should accept one explicit claim");
+            }
         }
         require(solarMissionClaimed(state, catalog, *mission), "claimed mission should persist");
         state.screen = Screen::Flight;

@@ -7,6 +7,20 @@ namespace rocket
 {
 inline constexpr double expeditionDockRadius = 2.0;
 inline constexpr double expeditionDockSpeed = 1.0;
+namespace service_dock {
+inline constexpr double approachRadius = expeditionDockRadius;
+inline constexpr double exitRadius = expeditionDockRadius * 1.25;
+inline constexpr double mouthY = 0.58;
+inline constexpr double rearY = -0.58;
+inline constexpr double channelHalfWidth = 0.34;
+inline constexpr double outerHalfWidth = 0.86;
+inline constexpr double hullRadius = 0.13;
+inline constexpr double rotationRateRadians = 0.5235987755982988;
+inline constexpr double captureHeadingRadians = 0.2617993877991494;
+inline constexpr double captureForwardSpeed = 2.0;
+inline constexpr double captureLateralSpeed = 1.0;
+inline constexpr double captureSeconds = 0.5;
+}
 inline constexpr double expeditionSalvageRadius = 2.0;
 inline constexpr double expeditionSalvageSpeed = 1.0;
 enum class CampaignObjectiveKind { Mission, SecureArtifact, RecoverArtifact, RecoveryUnavailable, Complete };
@@ -83,6 +97,8 @@ bool operationalHomeDocked(const PersistentExpeditionState &);
 bool expeditionMapBodyRevealed(const GameState &, const SystemBodyDefinition &);
 void recordExpeditionArrival(GameState &, const ContentCatalog &, const LaunchOutcome &);
 bool expeditionDockInRange(const PersistentExpeditionState &, const FlightRunState &, const SystemDefinition &, std::string_view dockBodyId = {});
+bool earthDockingActive(const FlightRunState&);
+std::string earthDockingGuidance(const FlightRunState&);
 bool canDockExpedition(const PersistentExpeditionState &, const FlightRunState &, const SystemDefinition &);
 bool canSalvageWreck(const PersistentExpeditionState &, const FlightRunState &, const SystemDefinition &, std::uint64_t id, bool requireMatchedSpeed = true);
 const Destination &expeditionEnvironment(const GameState &, const ContentCatalog &);

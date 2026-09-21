@@ -10,6 +10,8 @@ struct MissionRequirementView {
 };
 // Read-only projection. Scenarios and physical payload ownership remain authoritative.
 struct MissionView {
+    bool arrivalStage = false;
+    std::vector<MissionRequirementView> arrivalGoals, recoveryGoals;
     bool available = false, complete = false, optional = false, sectorKnown = false, artifactLocated = false;
     std::string id, stepId, location, title, instruction, purpose, reward;
     std::string targetId, sectorId, artifactId, action;
@@ -27,4 +29,9 @@ std::vector<MissionView> missionLog(const GameState&, const ContentCatalog&);
 bool reconcileTrackedMission(GameState&, const ContentCatalog&);
 std::string missionSectorName(std::string_view sectorId);
 std::string firstMoonMissionInstructions(const GameState&, const ContentCatalog&);
+int arrivalTutorialIndex(std::string_view body);
+bool arrivalBriefingRequired(const GameState&, std::string_view body);
+bool updateArrivalTutorial(GameState&, const ContentCatalog&, const FlightRunState&, bool surveyed, const OrbitalSiteProgress*);
+void recordTutorialTouchdown(GameState&, const ContentCatalog&);
+void migrateArrivalTutorials(GameState&, const ContentCatalog&);
 }

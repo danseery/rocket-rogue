@@ -169,6 +169,20 @@ std::string serializeExpedition(const PersistentExpeditionState &e)
     }
     out << " cruise1 " << e.cruise.cooling;
     out << " missions1 " << std::quoted(e.trackedMissionId) << ' ' << static_cast<int>(e.missionScanIntro);
+    out << " artifacts1 " << e.artifactCustodyLoaded << ' ' << e.artifacts.size();
+    for (const auto& a : e.artifacts) {
+        out << ' ' << std::quoted(a.key) << ' ' << std::quoted(a.sourceSiteId) << ' '
+            << std::quoted(a.scenarioId) << ' ' << std::quoted(a.stepId) << ' '
+            << std::quoted(a.requiredDockId) << ' ' << std::quoted(a.bankedAt) << ' '
+            << static_cast<int>(a.owner) << ' ' << a.wreckId << ' ' << a.completed << ' '
+            << a.experienceAwarded << ' ' << a.objectiveExperienceAwarded << ' ' << std::quoted(a.artifact.id) << ' '
+            << std::quoted(a.artifact.originDestinationId) << ' ' << a.artifact.identified << ' '
+            << static_cast<int>(a.artifact.kind) << ' ' << static_cast<int>(a.artifact.rewardType) << ' '
+            << a.artifact.condition << ' ' << a.artifact.rewardApplied;
+    }
+    out << " arrivals1";
+    for (const auto& t : e.arrivalTutorials)
+        out << ' ' << t.orbit << ' ' << t.scanned << ' ' << t.drilled << ' ' << t.drillBypassed << ' ' << t.landed << ' ' << t.acknowledged;
     return out.str();
 }
 std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view input)
@@ -176,6 +190,7 @@ std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view 
     std::istringstream in{std::string(input)};
     in.imbue(std::locale::classic());
     PersistentExpeditionState e;
+    e.arrivalTutorialsLoaded = false;
     if (!(in >> e.active >> e.arkActivated >> std::quoted(e.homeBodyId)) || !readLocation(in, e.location) ||
         !readCargo(in, e.cargo))
         return std::nullopt;
@@ -303,11 +318,42 @@ std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view 
         std::string extension;
         int intro;
         if (!(in >> extension >> std::quoted(e.trackedMissionId) >> intro) || extension != "missions1" ||
-            intro < 0 || intro > 2 || e.trackedMissionId.size() > 128) return std::nullopt;
+            intro < 0 || intro > 2 || e.trackedMissionId.size() > 4096) return std::nullopt;
         e.missionScanIntro = static_cast<MissionScanIntro>(intro);
         e.missionGuidanceLoaded = true;
         in >> std::ws;
     } else if (!e.sites.empty()) e.missionScanIntro = MissionScanIntro::Complete;
+    if (!in.eof()) {
+        std::string extension;
+        if (!(in >> extension >> e.artifactCustodyLoaded >> count) || extension != "artifacts1" || count > 4096) return std::nullopt;
+        for (std::size_t i=0; i<count; ++i) {
+            MissionArtifact a; int owner, kind, reward;
+            if (!(in >> std::quoted(a.key) >> std::quoted(a.sourceSiteId) >> std::quoted(a.scenarioId)
+                >> std::quoted(a.stepId) >> std::quoted(a.requiredDockId) >> std::quoted(a.bankedAt)
+                >> owner >> a.wreckId >> a.completed >> a.experienceAwarded >> a.objectiveExperienceAwarded >> std::quoted(a.artifact.id)
+                >> std::quoted(a.artifact.originDestinationId) >> a.artifact.identified >> kind >> reward
+                >> a.artifact.condition >> a.artifact.rewardApplied) ||
+                owner < 0 || owner > 2 || a.key.empty() || a.key.size() > 2048) return std::nullopt;
+            if (kind < 0 || kind > static_cast<int>(ArtifactKind::Story) || reward < 0 ||
+                reward > static_cast<int>(ArtifactRewardType::BlueprintInsight) || !std::isfinite(a.artifact.condition) ||
+                a.artifact.condition < 0 || a.artifact.condition > 1 || a.artifact.id.empty() ||
+                std::any_of(e.artifacts.begin(),e.artifacts.end(),[&](const auto& old){return old.key==a.key;})) return std::nullopt;
+            a.artifact.kind = static_cast<ArtifactKind>(kind); a.artifact.rewardType = static_cast<ArtifactRewardType>(reward);
+            a.owner = static_cast<ArtifactCustody>(owner);
+            if (a.completed && a.owner != ArtifactCustody::Banked) return std::nullopt;
+            e.artifacts.push_back(std::move(a));
+        }
+        in >> std::ws;
+    }
+    if (!in.eof()) {
+        std::string extension;
+        if (!(in >> extension) || extension != "arrivals1") return std::nullopt;
+        for (auto& t : e.arrivalTutorials)
+            if (!(in >> t.orbit >> t.scanned >> t.drilled >> t.drillBypassed >> t.landed >> t.acknowledged) ||
+                (t.acknowledged && !t.landed) || (t.drilled && t.drillBypassed)) return std::nullopt;
+        e.arrivalTutorialsLoaded = true;
+        in >> std::ws;
+    }
     if (e.undockReady && (e.active || !e.location.siteId.ends_with(".dock"))) return std::nullopt;
     if (!in.eof() || !validBatteryOwnership(e))
         return std::nullopt;

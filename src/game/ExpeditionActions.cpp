@@ -1,5 +1,6 @@
 #include "game/RocketGameApp.h"
 #include "core/ExpeditionSystem.h"
+#include "core/ArtifactProgression.h"
 #include "core/MissionGuidance.h"
 #include "core/StraylightSequence.h"
 #include "core/PayloadTransfer.h"
@@ -10,7 +11,7 @@
 namespace rocket {
 void RocketGameApp::toggleCruiseControl() {
     if (!state_.run.expedition.travelInitialized || state_.screen != Screen::Flight || services_.ui.modalOpen() ||
-        session_.flight.mode == FlightMode::Landing || !session_.flight.active) return;
+        (session_.flight.mode == FlightMode::Landing || session_.flight.mode == FlightMode::Docking) || !session_.flight.active) return;
     const auto result = toggleCruise(state_.run.expedition);
     queueAudioCue(result == ExpeditionResult::InvalidTarget ? GameAudioCue::UiError : GameAudioCue::EngineToggle);
     state_.statusLine = result == ExpeditionResult::InvalidTarget ? "Set a waypoint on the map first." :
@@ -48,6 +49,14 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
             save(); refreshPanel();
         }
         return true;
+    }
+    if (action.starts_with("expedition:artifact_handin:")) {
+        if (completeBankedArtifact(state_,catalog_,action.substr(27))) {
+            state_.statusLine = "Artifact secured. Mission complete.";
+            queueAudioCue(GameAudioCue::Deposit);
+            reconcileCampaignGuidance(state_,catalog_);
+        }
+        save(); panelDirty_=true; refreshPanel(); return true;
     }
     if (straylightCommitted(state_) || (straylightOwnsPresentation(state_) &&
         !(state_.meta.straylightStage == StraylightStage::RetrieveBeacons && action == "expedition:depart"))) return true;
@@ -170,11 +179,22 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
                 ". The waypoint marks direction; flight remains manual.";
         } else state_.statusLine = "Departure is available only from an operational dock.";
     } else if (action == "expedition:dock") {
+        const bool earthSettlementReady = session_.flight.docking.settlementReady &&
+            e.location.bodyId == "earth" && e.location.siteId == "earth.dock";
+        if (session_.flight.active && e.location.bodyId == "earth" && !earthSettlementReady) {
+            state_.statusLine = "Earth docking approach engages automatically. Enter the berth nose first.";
+            panelDirty_ = true;
+            return true;
+        }
+        reconcileArtifactCustody(state_,catalog_);
         state_.run.flight = session_.flight;
         const auto cargo = e.cargo.materials;
         const auto payout = static_cast<int>(e.cargo.credits);
         const auto batteriesBeforeDock = e.batteries;
         if (dockExpedition(state_, solarSystemDefinition()) == ExpeditionResult::Applied) {
+            session_.flight = state_.run.flight;
+            session_.flight.docking = {};
+            bankMissionArtifacts(state_,catalog_);
             queueAudioCue(GameAudioCue::Deposit);
             close();
             session_.flight.landing = {};
@@ -194,7 +214,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
                 session_.flightArmed = false;
                 reconcileCampaignGuidance(state_,catalog_);
                 const std::string nextWaypoint=courseTargetName(e,solarSystemDefinition(),e.course.targetBodyId);
-                state_.statusLine = "DOCKED - Banked " + std::to_string(cargo.common) + " common / " + std::to_string(cargo.rare) +
+                state_.statusLine = "DOCKED - Secured " + std::to_string(cargo.common) + " common / " + std::to_string(cargo.rare) +
                     " rare / " + std::to_string(cargo.exotic) + " exotic and " + std::to_string(payout) +
                     " credits. Ship serviced." + (nextWaypoint.empty() ? std::string{} : " Next waypoint: " + nextWaypoint + ".");
                 std::string bankedNames;
@@ -207,7 +227,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
                     bankedNames += origin ? origin->name : b.id;
                 }
                 if (!bankedNames.empty())
-                    state_.statusLine = "ARTIFACT BANKED - " + bankedNames + ". " + state_.statusLine;
+                    state_.statusLine = "ARTIFACT SECURED AT DOCK - " + bankedNames + ". " + state_.statusLine;
             } else {
                 state_.screen = Screen::Flight;
                 e.undockReady = true;
@@ -235,15 +255,14 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         const auto parsed = std::from_chars(text.data(), text.data() + text.size(), id);
         captureSystemLocation(e.location, session_.flight);
         if (parsed.ec == std::errc() && parsed.ptr == text.data() + text.size()) {
-            const bool artifactOnWreck=std::any_of(e.batteries.begin(),e.batteries.end(),
-                [id](const auto& battery){return battery.owner==BatteryOwner::Wreck && battery.wreckId==id;});
+            const bool artifactOnWreck=wreckCarriesArtifact(e,id);
             const bool following=!e.coursePlayerSelected || e.course.targetBodyId=="wreck:"+std::to_string(id);
             const auto result = salvageWreck(e, id, solarSystemDefinition(), shipHoldCapacity(state_, catalog_));
             const bool beaconMission = state_.meta.straylightStage == StraylightStage::RetrieveBeacons;
             if (result==ExpeditionResult::Applied && (following || (artifactOnWreck && beaconMission)))
                 reconcileCampaignGuidance(state_,catalog_,true);
             state_.statusLine = result == ExpeditionResult::Applied
-                ? (artifactOnWreck ? (beaconMission ? "Beacon recovered. Recovery waypoint updated. Remaining ore stays salvageable." : "Artifact recovered — return to Earth to secure it. Remaining ore stays salvageable.") : "Wreck recovered. Upgrades restored; remaining cargo stays salvageable.")
+                ? (artifactOnWreck ? (beaconMission ? "Beacon recovered. Recovery waypoint updated. Remaining ore stays salvageable." : "Artifact recovered — return to the Earth dock to complete the mission. Remaining ore stays salvageable.") : "Wreck recovered. Upgrades restored; remaining cargo stays salvageable.")
                 : "Rendezvous with the wreck and match its speed to recover cargo and upgrades.";
         }
     } else if (action == "expedition:graft_conflict:keep" || action == "expedition:graft_conflict:recovered") {

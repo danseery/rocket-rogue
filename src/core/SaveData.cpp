@@ -1484,7 +1484,14 @@ std::string serializeFlightState(const FlightRunState& flight)
         << flight.landing.siteCommitted << save_schema::crewFieldDelimiter
         << flight.landing.departureActive << save_schema::crewFieldDelimiter
         << flight.landing.launchSupportActive << save_schema::crewFieldDelimiter
-        << static_cast<int>(flight.failureCause);
+        << static_cast<int>(flight.failureCause) << save_schema::crewFieldDelimiter
+        << flight.docking.active << save_schema::crewFieldDelimiter << encodeSaveBlob(flight.docking.dockId) << save_schema::crewFieldDelimiter
+        << flight.docking.positionX << save_schema::crewFieldDelimiter << flight.docking.positionY << save_schema::crewFieldDelimiter
+        << flight.docking.velocityX << save_schema::crewFieldDelimiter << flight.docking.velocityY << save_schema::crewFieldDelimiter
+        << flight.docking.dockHeading << save_schema::crewFieldDelimiter << flight.docking.captureSeconds << save_schema::crewFieldDelimiter
+        << flight.docking.handoffSeconds << save_schema::crewFieldDelimiter << flight.docking.rotationLocked << save_schema::crewFieldDelimiter
+        << flight.docking.enteredMouth << save_schema::crewFieldDelimiter << flight.docking.settlementReady << save_schema::crewFieldDelimiter
+        << flight.docking.reentrySuppressed;
     return out.str();
 }
 
@@ -1492,7 +1499,7 @@ FlightRunState parseFlightState(std::string_view text)
 {
     FlightRunState flight;
     const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
-    if (fields.size() != 56 && fields.size() != 57) {
+    if (fields.size() != 56 && fields.size() != 57 && fields.size() != 70) {
         return flight;
     }
     std::size_t index = 0;
@@ -1523,7 +1530,7 @@ FlightRunState parseFlightState(std::string_view text)
     flight.orbit.perfectEligible = parseInt(fields[index++], 1) != 0;
     flight.orbit.rewardAwarded = parseInt(fields[index++], 0) != 0;
     flight.orbit.grade = static_cast<OrbitGrade>(std::clamp(parseInt(fields[index++], 0), 0, static_cast<int>(OrbitGrade::Perfect)));
-    flight.mode = static_cast<FlightMode>(std::clamp(parseInt(fields[index++], 0),0,2));
+    flight.mode = static_cast<FlightMode>(std::clamp(parseInt(fields[index++], 0),0,3));
     flight.landing.altitude = parseDouble(fields[index++], 0.0);
     flight.landing.verticalVelocity = parseDouble(fields[index++], 0.0);
     flight.landing.lateralVelocity = parseDouble(fields[index++], 0.0);
@@ -1540,8 +1547,8 @@ FlightRunState parseFlightState(std::string_view text)
     flight.landing.siteKey = parseU64(fields[index++], 0);
     flight.landing.siteBound = parseInt(fields[index++], 0) != 0;
     flight.landing.gateArmed = parseInt(fields[index++], 1) != 0;
-    flight.handoff.from = static_cast<FlightMode>(std::clamp(parseInt(fields[index++],0),0,2));
-    flight.handoff.to = static_cast<FlightMode>(std::clamp(parseInt(fields[index++],0),0,2));
+    flight.handoff.from = static_cast<FlightMode>(std::clamp(parseInt(fields[index++],0),0,3));
+    flight.handoff.to = static_cast<FlightMode>(std::clamp(parseInt(fields[index++],0),0,3));
     flight.handoff.elapsed = std::clamp(parseDouble(fields[index++],1.25),0.0,1.25);
     flight.handoff.sourceX = parseDouble(fields[index++],0.0);
     flight.handoff.sourceY = parseDouble(fields[index++],0.0);
@@ -1554,8 +1561,30 @@ FlightRunState parseFlightState(std::string_view text)
     flight.landing.launchSupportActive = parseInt(fields[index++],0) != 0;
     if (index < fields.size()) {
         flight.failureCause = static_cast<LaunchFailureCause>(std::clamp(
-            parseInt(fields[index], 0), 0, static_cast<int>(LaunchFailureCause::LunarImpact)));
+            parseInt(fields[index++], 0), 0, static_cast<int>(LaunchFailureCause::LunarImpact)));
     }
+    if (fields.size() - index >= 13) {
+        flight.docking.active = parseInt(fields[index++], 0) != 0;
+        flight.docking.dockId = decodeSaveBlob(fields[index++]);
+        flight.docking.positionX = parseDouble(fields[index++], 0.0);
+        flight.docking.positionY = parseDouble(fields[index++], 0.0);
+        flight.docking.velocityX = parseDouble(fields[index++], 0.0);
+        flight.docking.velocityY = parseDouble(fields[index++], 0.0);
+        flight.docking.dockHeading = parseDouble(fields[index++], 1.5707963267948966);
+        flight.docking.captureSeconds = std::max(0.0, parseDouble(fields[index++], 0.0));
+        flight.docking.handoffSeconds = std::clamp(parseDouble(fields[index++], 1.25), 0.0, 1.25);
+        flight.docking.rotationLocked = parseInt(fields[index++], 0) != 0;
+        flight.docking.enteredMouth = parseInt(fields[index++], 0) != 0;
+        flight.docking.settlementReady = parseInt(fields[index++], 0) != 0;
+        flight.docking.reentrySuppressed = parseInt(fields[index++], 0) != 0;
+    }
+    if (flight.mode == FlightMode::Docking && !flight.docking.active) {
+        // A partial/old save cannot leave the player in a non-interactive
+        // local frame. Recover it to ordinary Earth-relative flight.
+        flight.mode = FlightMode::Orbit;
+    }
+    if (flight.docking.active && flight.docking.dockId.empty())
+        flight.docking.dockId = "earth";
     flight.fuelRemaining = std::min(flight.fuelRemaining, flight.fuelCapacity);
     flight.hullRemaining = std::min(flight.hullRemaining, flight.hullMaximum);
     return flight;
@@ -3477,6 +3506,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     // Resolve legacy or removed mission IDs before the first gameplay tick.
     // Presentation migration must not cause a save on an immediately fatal frame.
     reconcileTrackedMission(state, catalog);
+    migrateArrivalTutorials(state, catalog);
 }
 
 std::string serializeSaveData(const SaveData& save)
@@ -3640,6 +3670,8 @@ std::string serializeSaveData(const SaveData& save)
     writeField(out, save_schema::field::miningArtifacts, serializeArtifacts(save.mining.temporaryArtifacts));
     writeField(out, save_schema::field::miningStowedCargo, save.mining.stowedCargo);
     writeField(out, save_schema::field::miningStowedMaterials, serializeMaterials(save.mining.stowedMaterials));
+    writeField(out, "miningDeliveredOreUnits", save.mining.deliveredOreUnits);
+    writeField(out, "miningMissionOreUnits", save.mining.missionOreUnits);
     writeField(out, save_schema::field::miningStowedArtifacts, serializeArtifacts(save.mining.stowedArtifacts));
     writeField(out, save_schema::field::miningHazard, save.mining.hazardDelta);
     writeField(out, save_schema::field::miningPassiveDroneYield, save.mining.passiveDroneYield);
@@ -4079,6 +4111,10 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.mining.temporaryArtifacts = parseArtifacts(value);
         } else if (key == save_schema::field::miningStowedCargo) {
             save.mining.stowedCargo = parseInt(value, save.mining.stowedCargo);
+        } else if (key == "miningDeliveredOreUnits") {
+            save.mining.deliveredOreUnits = std::max(-1,parseInt(value,-1));
+        } else if (key == "miningMissionOreUnits") {
+            save.mining.missionOreUnits = std::max(-1,parseInt(value,-1));
         } else if (key == save_schema::field::miningStowedMaterials) {
             save.mining.stowedMaterials = parseMaterials(value);
         } else if (key == save_schema::field::miningStowedArtifacts) {

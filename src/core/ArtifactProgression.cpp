@@ -5,6 +5,8 @@
 #include "core/Tuning.h"
 #include "core/FlightSystem.h"
 #include "core/MiningSystem.h"
+#include "core/ExpeditionSystem.h"
+#include "core/ResearchSystem.h"
 
 #include <algorithm>
 #include <cmath>
@@ -12,6 +14,157 @@
 #include <set>
 
 namespace rocket {
+
+bool artifactCompletionStep(ScenarioEventKind event) {
+    return event == ScenarioEventKind::ArtifactRecovered ||
+        event == ScenarioEventKind::ProtectedObjectiveExtracted ||
+        event == ScenarioEventKind::ArtifactBanked;
+}
+
+bool artifactCompletionStep(const ScenarioStepDefinition& step) {
+    return artifactCompletionStep(step.completionEvent);
+}
+
+const MissionArtifact* missionArtifact(const GameState& s, std::string_view scenario, std::string_view step) {
+    for (const auto& a : s.run.expedition.artifacts)
+        if (a.scenarioId == scenario && a.stepId == step) return &a;
+    return nullptr;
+}
+
+void registerArtifactAboard(GameState& s, const ContentCatalog& c, const ArtifactRecord& record,
+    std::string_view site, std::string_view scenario, std::string_view step) {
+    MissionArtifact a;
+    a.artifact = record; a.sourceSiteId = site;
+    // Mining handoffs can arrive before a scenario instance has been rebuilt
+    // (for example while restoring a partially initialized expedition). Keep
+    // the authored identity supplied by the caller as the authoritative
+    // fallback instead of degrading the artifact into a generic entry.
+    a.scenarioId = scenario;
+    a.stepId = step;
+    for (const auto& instance : s.meta.scenarios) {
+        const auto* definition = c.findScenario(instance.definitionId.empty() ? instance.id : instance.definitionId);
+        if (!definition) continue;
+        const auto resolved = resolveScenarioDefinition(*definition,instance);
+        for (const auto& candidate : resolved.steps) {
+            if (!artifactCompletionStep(candidate)) continue;
+            const auto* miningSite = findMiningSiteDefinition(c,candidate.miningSiteDefinitionId);
+            const bool matches = (candidate.eventTargetId == record.id &&
+                (candidate.eventOriginId.empty() || candidate.eventOriginId == record.originDestinationId)) ||
+                (miningSite && miningSite->cocoon.protectedObjective.id == record.id &&
+                 (site == candidate.miningSiteDefinitionId || scenario == instance.id));
+            if (matches) { a.scenarioId=instance.id; a.stepId=candidate.id; }
+        }
+    }
+    const auto* solar = solarMissionForBody(c, record.originDestinationId);
+    if (solar && solar->artifactId == record.id) {
+        a.key = "solar:" + solar->bodyId;
+        a.scenarioId = solar->scenarioId; a.stepId = solar->claimStepId; a.requiredDockId = "earth";
+    } else {
+        a.key = s.run.expedition.location.systemId + ":" +
+            (site.empty() ? s.run.expedition.location.siteId : std::string(site)) +
+            ":" + a.scenarioId + ":" + record.id;
+        a.requiredDockId = s.run.expedition.homeBodyId;
+    }
+    // Re-registering a scenario's same physical objective after departure must
+    // not manufacture a second entry under the surface template's site ID.
+    if (!a.scenarioId.empty() && !a.stepId.empty() && missionArtifact(s,a.scenarioId,a.stepId)) return;
+    if (std::none_of(s.run.expedition.artifacts.begin(), s.run.expedition.artifacts.end(),
+        [&](const auto& existing) { return existing.key == a.key; }))
+        s.run.expedition.artifacts.push_back(std::move(a));
+}
+
+bool artifactHandInAvailable(const GameState& s, const MissionArtifact& a) {
+    const auto& e = s.run.expedition;
+    return a.owner == ArtifactCustody::Banked && !a.completed && !s.run.flight.active &&
+        e.location.bodyId == a.requiredDockId && e.location.siteId.ends_with(".dock") &&
+        (a.requiredDockId == "earth" || (a.requiredDockId == "straylight" && e.arkActivated));
+}
+
+void reconcileArtifactCustody(GameState& s, const ContentCatalog& c) {
+    auto& e = s.run.expedition;
+    // Battery ownership is stronger evidence than legacy permanent-inventory entries.
+    for (const auto& b : e.batteries) {
+        const auto* m = solarMissionForBody(c, b.id);
+        if (!m || b.owner == BatteryOwner::Site) continue;
+        ArtifactRecord record; record.id = m->artifactId; record.originDestinationId = m->bodyId;
+        const auto old = std::find_if(s.meta.artifacts.begin(), s.meta.artifacts.end(), [&](const auto& item) {
+            return item.id == record.id && item.originDestinationId == record.originDestinationId;
+        });
+        if (old != s.meta.artifacts.end()) record = *old;
+        registerArtifactAboard(s,c,record,b.sourceSiteId);
+        auto* a = const_cast<MissionArtifact*>(missionArtifact(s,m->scenarioId,m->claimStepId));
+        if (!a) continue;
+        a->owner = b.owner == BatteryOwner::Ship ? ArtifactCustody::Ship :
+            b.owner == BatteryOwner::Wreck ? ArtifactCustody::Wreck : ArtifactCustody::Banked;
+        a->wreckId = b.wreckId;
+        if (a->owner == ArtifactCustody::Banked)
+            a->bankedAt = b.owner == BatteryOwner::ArkSlot ? "straylight" : "earth";
+        const auto* instance = findScenarioInstance(s.meta,m->scenarioId);
+        const auto* progress = instance ? findScenarioStepProgress(*instance,m->claimStepId) : nullptr;
+        a->completed = a->owner == ArtifactCustody::Banked && progress && progress->claimed;
+        a->experienceAwarded = old != s.meta.artifacts.end();
+        a->objectiveExperienceAwarded = progress && progress->completed;
+    }
+    for (const auto& record : s.meta.artifacts) {
+        if (std::any_of(e.artifacts.begin(),e.artifacts.end(),[&](const auto& a) {
+            return a.artifact.id == record.id && a.artifact.originDestinationId == record.originDestinationId;
+        })) continue;
+        registerArtifactAboard(s,c,record,"legacy");
+        auto found = std::find_if(e.artifacts.begin(),e.artifacts.end(),[&](const auto& item) {
+            return item.artifact.id == record.id && item.artifact.originDestinationId == record.originDestinationId;
+        });
+        if (found == e.artifacts.end()) continue;
+        auto& a = *found;
+        a.owner = ArtifactCustody::Banked; a.bankedAt = a.requiredDockId;
+        const auto* instance = findScenarioInstance(s.meta,a.scenarioId);
+        const auto* p = instance ? findScenarioStepProgress(*instance,a.stepId) : nullptr;
+        a.completed = a.scenarioId.empty() || (p && p->claimed);
+        a.experienceAwarded = true; a.objectiveExperienceAwarded = p && p->completed;
+    }
+    const auto pending = [&](const auto& records, std::string_view site, std::string_view scenario, std::string_view step) {
+        for (const auto& record : records) registerArtifactAboard(s,c,record,site,scenario,step);
+    };
+    pending(s.run.mining.stowedArtifacts,e.location.siteId,s.run.mining.scenarioId,s.run.mining.scenarioStepId);
+    pending(s.run.planetaryExpedition.temporaryArtifacts,e.location.siteId,{},{});
+    e.artifactCustodyLoaded = true;
+}
+
+void bankMissionArtifacts(GameState& s, const ContentCatalog& c) {
+    reconcileArtifactCustody(s,c);
+    auto& e = s.run.expedition;
+    if (s.run.flight.active || !e.location.siteId.ends_with(".dock")) return;
+    if (e.location.bodyId != "earth" && !(e.location.bodyId == "straylight" && e.arkActivated)) return;
+    for (auto& a : e.artifacts) {
+        if (a.owner == ArtifactCustody::Wreck || a.completed || a.requiredDockId != e.location.bodyId) continue;
+        a.owner = ArtifactCustody::Banked; a.bankedAt = e.location.bodyId; a.wreckId = 0;
+        // Keep the legacy battery projection synchronized before dispatching
+        // the event; reconciliation treats that projection as authoritative
+        // when loading older saves.
+        for (auto& battery : e.batteries) {
+            if (battery.id != a.artifact.originDestinationId || battery.owner != BatteryOwner::Ship) continue;
+            battery.owner = e.location.bodyId == "straylight" ? BatteryOwner::ArkSlot : BatteryOwner::EarthStorage;
+        }
+        if (!a.scenarioId.empty()) recordScenarioEvent(s,c,{ScenarioEventKind::ArtifactBanked,
+            a.scenarioId,a.stepId,a.artifact.originDestinationId,a.artifact.id,1,0});
+    }
+}
+
+bool completeBankedArtifact(GameState& s, const ContentCatalog& c, std::string_view key) {
+    for (auto& a : s.run.expedition.artifacts) {
+        if (a.key != key || !artifactHandInAvailable(s,a)) continue;
+        if (!a.scenarioId.empty()) {
+            const auto* instance = findScenarioInstance(s.meta,a.scenarioId);
+            const auto* p = instance ? findScenarioStepProgress(*instance,a.stepId) : nullptr;
+            if (!p || !p->claimed) return false;
+        }
+        grantBankedArtifactRewards(s,c,a);
+        a.completed = true;
+        for (auto& battery : s.run.expedition.batteries)
+            if (battery.id == a.artifact.originDestinationId) battery.researchEarned = true;
+        return true;
+    }
+    return false;
+}
 
 namespace {
 
@@ -66,6 +219,10 @@ bool hasPermanentArtifactFrom(
     const GameState& state,
     std::string_view destinationId)
 {
+    // Once recovered, custody (including wrecks) owns the unique objective.
+    // Do not regenerate a second artifact while its mission awaits banking.
+    if (std::any_of(state.run.expedition.artifacts.begin(),state.run.expedition.artifacts.end(),
+        [&](const auto& a) {return a.artifact.originDestinationId == destinationId;})) return true;
     return std::any_of(
         state.meta.artifacts.begin(),
         state.meta.artifacts.end(),

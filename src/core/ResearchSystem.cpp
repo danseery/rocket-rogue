@@ -63,6 +63,7 @@ bool resumePhysicalApproach(GameState& state, const ContentCatalog& catalog)
 void ensureDroneBayState(GameState& state, const ContentCatalog& catalog);
 
 namespace {
+bool bankAuthoredRouteFlightData(GameState&, const ContentCatalog&, std::string_view);
 
 const Destination* currentResearchDestination(const GameState& state, const ContentCatalog& catalog)
 {
@@ -227,8 +228,10 @@ bool scenarioStepMatchesEvent(
 
 ArtifactRecord* firstUnidentifiedArtifact(GameState& state)
 {
-    auto artifact = std::find_if(state.meta.artifacts.begin(), state.meta.artifacts.end(), [](const ArtifactRecord& record) {
-        return !record.identified;
+    auto artifact = std::find_if(state.meta.artifacts.begin(), state.meta.artifacts.end(), [&](const ArtifactRecord& record) {
+        return !record.identified && std::none_of(state.run.expedition.artifacts.begin(),state.run.expedition.artifacts.end(),[&](const auto& a) {
+            return a.artifact.id==record.id && a.artifact.originDestinationId==record.originDestinationId && !a.completed;
+        });
     });
     if (artifact == state.meta.artifacts.end()) {
         return nullptr;
@@ -430,6 +433,23 @@ double orbitBaseReward(const Destination& destination)
 }
 
 } // namespace
+
+void grantBankedArtifactRewards(GameState& state, const ContentCatalog& catalog, MissionArtifact& entry)
+{
+    if (entry.owner != ArtifactCustody::Banked) return;
+    std::vector<ArtifactRecord> records{entry.artifact};
+    applyRecoveredArtifactRewards(state,catalog,records,entry.sourceSiteId);
+    entry.artifact = records.front();
+    if (!entry.experienceAwarded) {
+        awardExpeditionExperience(state,75.0,state.screen);
+        if (destinationHasAuthoredProgressionArtifact(catalog,entry.artifact.originDestinationId))
+            (void)bankAuthoredRouteFlightData(state,catalog,entry.artifact.originDestinationId);
+        entry.experienceAwarded = true;
+    }
+    if (std::none_of(state.meta.artifacts.begin(),state.meta.artifacts.end(),[&](const auto& old) {
+        return old.id == entry.artifact.id && old.originDestinationId == entry.artifact.originDestinationId;
+    })) state.meta.artifacts.push_back(entry.artifact);
+}
 
 const Destination* scenarioRouteRewardDestination(
     const ContentCatalog& catalog,
@@ -2490,28 +2510,13 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
     writeLegacyCampaignSaveProjection(state, catalog);
     if (state.run.expedition.travelInitialized) addMaterials(state.run.expedition.cargo.materials, outcome.materialDelta);
     else addMaterials(state.meta.materials, outcome.materialDelta);
-    const bool recoveredNewAuthoredArtifact = std::any_of(
-        expedition.temporaryArtifacts.begin(),
-        expedition.temporaryArtifacts.end(),
-        [&](const ArtifactRecord& recovered) {
-            if (!destinationHasAuthoredProgressionArtifact(
-                    catalog,
-                    recovered.originDestinationId)) {
-                return false;
-            }
-            return std::none_of(
-                state.meta.artifacts.begin(),
-                state.meta.artifacts.end(),
-                [&](const ArtifactRecord& permanent) {
-                    return permanent.originDestinationId ==
-                        recovered.originDestinationId;
-                });
-        });
-    applyRecoveredArtifactRewards(
-        state,
-        catalog,
-        expedition.temporaryArtifacts,
-        expedition.pendingMiningSiteDefinitionId);
+    // Live Solar expeditions keep artifact custody in the expedition ledger
+    // until banking. Legacy/non-travel surface saves retain their historical
+    // permanent-inventory behavior for compatibility.
+    if (state.run.expedition.travelInitialized) {
+        for (const auto& artifact : expedition.temporaryArtifacts)
+            registerArtifactAboard(state,catalog,artifact,expedition.pendingMiningSiteDefinitionId);
+    }
     for (const ArtifactRecord& artifact : expedition.temporaryArtifacts) {
         (void)recordScenarioEvent(
             state,
@@ -2524,25 +2529,20 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
              1,
              0});
     }
-    if (recoveredNewAuthoredArtifact) {
-        (void)bankAuthoredRouteFlightData(
-            state,
-            catalog,
-            expedition.destinationId);
+    // Keep imported compatibility-site completion in sync. This is a site
+    // ledger only; authored rewards and mission progression remain deferred
+    // until the artifact is banked and explicitly handed in.
+    creditExtractedCompatibilityMiningSiteArtifacts(state.meta, expedition.temporaryArtifacts);
+    if (!state.run.expedition.travelInitialized && !expedition.temporaryArtifacts.empty()) {
+        std::vector<ArtifactRecord> legacyArtifacts = expedition.temporaryArtifacts;
+        applyRecoveredArtifactRewards(state,catalog,legacyArtifacts,expedition.pendingMiningSiteDefinitionId);
+        for (const auto& artifact : legacyArtifacts) {
+            if (std::none_of(state.meta.artifacts.begin(),state.meta.artifacts.end(),[&](const auto& old) {
+                return old.id == artifact.id && old.originDestinationId == artifact.originDestinationId;
+            })) state.meta.artifacts.push_back(artifact);
+        }
+        awardExpeditionExperience(state,75.0 * static_cast<double>(legacyArtifacts.size()),state.screen);
     }
-    creditExtractedCompatibilityMiningSiteArtifacts(
-        state.meta,
-        expedition.temporaryArtifacts);
-    if (!expedition.temporaryArtifacts.empty()) {
-        awardExpeditionExperience(
-            state,
-            75.0 * static_cast<double>(expedition.temporaryArtifacts.size()),
-            state.screen);
-    }
-    state.meta.artifacts.insert(
-        state.meta.artifacts.end(),
-        expedition.temporaryArtifacts.begin(),
-        expedition.temporaryArtifacts.end());
     outcome.artifactFound = !expedition.temporaryArtifacts.empty();
 
     if (expedition.bankedMiningArenaValid && expedition.bankedMiningProgressionEligible) {
@@ -2565,7 +2565,7 @@ SurfaceActionOutcome extractSurfacePayload(GameState& state, const ContentCatalo
     }
     if (outcome.materialDelta.common > 0) {
         outcome.message += " " + std::to_string(outcome.materialDelta.common) +
-            (state.run.expedition.travelInitialized ? " carried aboard. Dock home to bank." : " added to Materials.");
+            (state.run.expedition.travelInitialized ? " carried aboard. Return to the home dock to secure it." : " added to Materials.");
     }
 
     if (!expedition.pendingMiningSiteDefinitionId.empty()) {

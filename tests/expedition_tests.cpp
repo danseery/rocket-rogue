@@ -14,6 +14,7 @@
 #include "core/StraylightSequence.h"
 #include "core/PostSolarSystem.h"
 #include "core/MissionGuidance.h"
+#include "core/MiningPresentation.h"
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
@@ -46,7 +47,18 @@ void straylightSequenceTests()
     const auto* ark=systemBody(solarSystemDefinition(),"straylight");
     check(std::abs(std::hypot(ark->position.x-neptune->position.x,ark->position.y-neptune->position.y)-18)<.00001,
         "Straylight must be eighteen units beyond Neptune");
-    for (auto& b:e.batteries) b.owner=b.id=="triton" ? BatteryOwner::Ship : BatteryOwner::EarthStorage;
+    for (auto& b:e.batteries) b.owner=BatteryOwner::EarthStorage;
+    MissionArtifact tritonArtifact;
+    tritonArtifact.key = "solar:triton";
+    tritonArtifact.scenarioId = content::scenario::neptuneDiscovery;
+    tritonArtifact.stepId = "artifact";
+    tritonArtifact.requiredDockId = "earth";
+    tritonArtifact.artifact.id = content::protectedObjective::tritonSignalArtifact;
+    tritonArtifact.artifact.originDestinationId = "triton";
+    tritonArtifact.owner = ArtifactCustody::Banked;
+    tritonArtifact.completed = true;
+    e.artifacts.push_back(tritonArtifact);
+    e.artifactCustodyLoaded = true;
     e.coursePlayerSelected=true;
     check(revealStraylightOnDelivery(s,catalog) && e.course.targetBodyId=="straylight" && !e.coursePlayerSelected,
         "Ship delivery immediately replaces manual course with Straylight");
@@ -423,7 +435,7 @@ void orbitalObjectiveSafetyTests()
         }
     }
     std::cout << "Real Io legacy bore repairs: " << generatedRepairs << "/16\n";
-    check(generatedRepairs>0,"Safe relocation must work on actual generated Io terrain, not only synthetic regolith");
+    check(generatedRepairs>0,"Real Io repair audit must exercise at least one successful relocation");
     auto& objective=objectiveLayer(prepared.miningTemplate);
     check(objective.depthZone==2 && objective.gate.cocoonLayers.size()==1,"Io fixture must use its depth-two thermal seal");
     for(const auto& offset : catalog.findMiningSite(content::miningSite::thermalLayeredRecovery)->cocoon.layers.front().offsets) {
@@ -677,7 +689,7 @@ void campaignGuidanceTests()
         check(!wreckCarriesArtifact(e, 7) && wreckDisplayName(e, 7) == "Wreck 7",
             "partially salvaged ore wreck must immediately lose its artifact marker");
         e.batteries[1].owner=BatteryOwner::EarthStorage;
-        check(recommendedCampaignObjective(*state,catalog).kind==CampaignObjectiveKind::Mission,"banked artifact stops recovery guidance");
+        check(recommendedCampaignObjective(*state,catalog).kind==CampaignObjectiveKind::SecureArtifact,"banked artifact waits for explicit mission hand-in");
         e.batteries[1].owner=BatteryOwner::Wreck; e.batteries[1].wreckId=999;
         e.course.targetBodyId="wreck:999";
         reconcileCampaignGuidance(*state,catalog,true);
@@ -718,6 +730,50 @@ void missionGuidanceTests()
 {
     using namespace rocket;
     const auto catalog = createDefaultContent();
+    for (const auto body : {"moon", "mars"}) {
+        auto state = std::make_unique<GameState>(createNewGame(catalog, 915));
+        auto& s = *state;
+        initializeLiveExpedition(s, catalog);
+        s.meta.unlockKeys.push_back(content::unlock::routeMars);
+        auto& e = s.run.expedition;
+        e.location.bodyId = body;
+        e.trackedMissionId = body;
+        s.screen = Screen::Flight;
+        auto& f = s.run.flight;
+        f.mode = FlightMode::Orbit; f.orbit.captured = true;
+        const auto sector = artifactSectorForBody(s, "solar", body);
+        auto& t = e.arrivalTutorials[arrivalTutorialIndex(body)];
+        e.selectedOrbitZone = "wrong";
+        OrbitalSiteProgress orbital; orbital.laserComplete = true;
+        updateArrivalTutorial(s, catalog, f, true, &orbital);
+        check(t.orbit && !t.scanned && !t.drilled, "Wrong sector cannot complete scan or drill tutorial");
+        e.location.siteId = "site:wrong";
+        recordTutorialTouchdown(s, catalog);
+        check(!t.landed, "Wrong sector cannot complete tutorial arrival");
+        e.selectedOrbitZone = sector;
+        orbital.laserComplete = false;
+        updateArrivalTutorial(s, catalog, f, true, &orbital);
+        check(t.scanned && !t.landed, "Scan does not imply touchdown");
+        e.location.siteId = "site:" + sector;
+        recordTutorialTouchdown(s, catalog);
+        check(arrivalBriefingRequired(s, body), "Touchdown requires acknowledgement");
+        check(t.drillBypassed == (std::string_view(body) == "mars"), "Early Mars landing records bypass without completing drill");
+        auto restored = deserializeExpedition(serializeExpedition(e));
+        check(restored && restored->arrivalTutorials[arrivalTutorialIndex(body)].landed &&
+            !restored->arrivalTutorials[arrivalTutorialIndex(body)].acknowledged, "Pending arrival survives save/load");
+        t.acknowledged = true;
+        check(!missionView(s, catalog, body).arrivalStage && !arrivalBriefingRequired(s, body), "Continue switches to recovery");
+        recordTutorialTouchdown(s, catalog);
+        check(!arrivalBriefingRequired(s, body), "Return visit does not replay briefing");
+        auto encoded = serializeExpedition(e);
+        encoded.resize(encoded.find(" arrivals1"));
+        restored = deserializeExpedition(encoded);
+        check(restored && !restored->arrivalTutorialsLoaded, "Older saves remain readable");
+        e = *restored;
+        s.run.mining.active = true; s.run.mining.bodyId = body;
+        migrateArrivalTutorials(s, catalog);
+        check(e.arrivalTutorials[arrivalTutorialIndex(body)].acknowledged, "Legacy mining resumes Recovery without a briefing");
+    }
     for (const auto seed : {7, 32, 918}) {
         auto state = std::make_unique<GameState>(createNewGame(catalog, seed));
         auto& s = *state;
@@ -725,57 +781,85 @@ void missionGuidanceTests()
         auto& e = s.run.expedition;
         auto view = trackedMissionView(s, catalog);
         check(view.id == "moon" && view.stepId == "travel", "Fresh campaign tracks the Moon journey");
-        check(view.trackerGoals.size() == 3 && !view.trackerGoals[0].complete &&
-            !view.trackerGoals[1].complete && !view.trackerGoals[2].complete, "Tracker exposes three independent incomplete goals");
+        check(view.arrivalStage && view.trackerGoals.size() == 3 && !view.trackerGoals[0].complete &&
+            !view.trackerGoals[1].complete && !view.trackerGoals[2].complete, "Arrival only exposes orbit, scan and landing");
         check(missionLog(s, catalog).size() == 1, "Unrevealed missions stay out of the log");
         e.location.bodyId = "moon"; e.location.siteId.clear();
         s.screen = Screen::Flight; s.run.flight.orbit.captured = true;
-        check(trackedMissionView(s, catalog).stepId == "survey", "Captured orbit asks for a scan");
         const auto sector = artifactSectorForBody(s, "solar", "moon");
+        e.selectedOrbitZone = sector;
+        check(trackedMissionView(s, catalog).stepId == "survey", "Captured orbit asks for a scan");
         view = trackedMissionView(s, catalog, nullptr, true);
         check(view.sectorKnown && view.sectorId == sector && view.stepId == "land", "First survey identifies the actual artifact sector");
         check(firstMoonMissionInstructions(s, catalog).find(missionSectorName(sector)) != std::string::npos &&
-            firstMoonMissionInstructions(s, catalog).find("20 Common Ore to your ship, then") != std::string::npos,
-            "First scan spells out the sector and ore-before-artifact order");
+            firstMoonMissionInstructions(s, catalog).find("brief you on recovery after touchdown") != std::string::npos,
+            "First scan teaches arrival before recovery");
         s.screen = Screen::Mining; s.run.mining.active = true; s.run.mining.bodyId = "moon";
         e.location.siteId = "moon.surface:" + sector;
         performScenarioAction(s, catalog, content::scenario::lunarProspector, "briefing", ScenarioActionKind::AcknowledgeBriefing);
         s.run.mining.cargo = 20;
         view = trackedMissionView(s, catalog);
-        check(view.stepId == "ore" && view.progress.front() == "Ore delivered 0/20", "Carried ore does not count as ship delivery");
+        check(view.stepId == "ore" && view.progress.front() == "Common Ore collected 0/20", "Carried ore does not count as ship collection");
         e.location.bodyId = "earth"; // Stale travel frame must not override active surface ownership.
         view = trackedMissionView(s, catalog);
-        check(view.stepId == "ore" && view.trackerGoals[0].complete && !view.trackerGoals[1].complete,
-            "Active mining marks orbit complete even with a stale travel location");
+        check(view.stepId == "ore" && !view.arrivalStage && !view.trackerGoals[0].complete,
+            "Active mining shows recovery even with a stale travel location");
         e.location.bodyId = "moon";
         recordScenarioEvent(s, catalog, {ScenarioEventKind::SafeMaterialDelivered, content::scenario::lunarProspector,"delivery","moon","common",8,0});
-        check(trackedMissionView(s, catalog).progress.front() == "Ore delivered 8/20", "Tracker follows actual scenario delivery counts");
+        check(trackedMissionView(s, catalog).progress.front() == "Common Ore collected 8/20", "Tracker follows actual scenario collection counts");
         recordScenarioEvent(s, catalog, {ScenarioEventKind::SafeMaterialDelivered, content::scenario::lunarProspector,"delivery","moon","common",12,0});
         view = trackedMissionView(s, catalog);
         check(view.stepId == "scan_artifact", "Ore delivery unlocks the scanner instruction");
-        check(view.trackerGoals[1].complete && !view.trackerGoals[2].complete,
+        check(view.trackerGoals[0].complete && !view.trackerGoals[1].complete,
             "Ore and artifact remain independent checklist goals");
         auto& artifact = s.run.mining.artifact;
         artifact.present = artifact.revealed = true;
         artifact.state = MiningArtifactState::Loose;
-        check(trackedMissionView(s, catalog).progress.back() == "Artifact: exposed", "Exposed is not recovered");
+        check(trackedMissionView(s, catalog).progress.back() == "Artifact: collect artifact", "Exposed is not recovered");
         artifact.tethered = true;
         view = trackedMissionView(s, catalog);
         check(view.stepId == "carry" && !view.requirements[view.requirements.size()-2].complete, "Tethered artifact remains incomplete");
         e.batteries[0].owner = BatteryOwner::Ship;
         check(trackedMissionView(s, catalog).progress.back() == "Artifact: aboard ship", "Physical capture is shown as aboard ship");
-        check(trackedMissionView(s, catalog).trackerGoals[2].complete, "Artifact checkbox requires physical delivery");
+        check(trackedMissionView(s, catalog).trackerGoals[1].complete, "Artifact checkbox requires physical delivery");
         e.batteries[0].owner = BatteryOwner::EarthStorage;
-        check(trackedMissionView(s, catalog).progress.back() == "Artifact: banked", "Banked ownership takes precedence over stale site snapshots");
+        e.location = {"solar", "earth", CoordinateFrame::Body, {}, {}, 0.0, "earth.dock"};
+        s.run.flight.active = false;
+        reconcileArtifactCustody(s, catalog);
+        bankMissionArtifacts(s, catalog);
+        check(trackedMissionView(s, catalog).progress.back() == "Artifact: secured at dock", "Banked ownership takes precedence over stale site snapshots");
         recordScenarioEvent(s,catalog,{ScenarioEventKind::ProtectedObjectiveExtracted, content::scenario::lunarProspector,"anomaly","moon",content::miningSite::lunarAnomalyCrevice,1,0});
         check(trackedMissionView(s, catalog).stepId == "claim", "Completed recovery waits for the explicit claim");
         performScenarioAction(s,catalog,content::scenario::lunarProspector,"anomaly",ScenarioActionKind::ClaimReward);
         check(trackedMissionView(s, catalog).id == "mars", "Claim advances the campaign tracker");
         s.run.mining.bodyId = "mars";
         const auto mars = trackedMissionView(s, catalog);
-        check(mars.stepId == "ore" && mars.trackerGoals[0].complete &&
-            mars.trackerGoals[1].text == "Deliver Common Ore 0/8" && !mars.trackerGoals[2].complete,
-            "Mars surface checklist shows completed orbit and separate ore and artifact goals");
+        check(mars.purpose.find("artifact is underground") != std::string::npos, "Mars teaches underground recovery");
+        {
+            auto orbitState = std::make_unique<GameState>(s);
+            auto& test = *orbitState;
+            test.screen = Screen::Flight;
+            test.run.mining.active = false;
+            test.run.flight.mode = FlightMode::Orbit;
+            test.run.flight.orbit.captured = true;
+            auto& expedition = test.run.expedition;
+            expedition.location.bodyId = "mars";
+            expedition.selectedOrbitZone = mars.sectorId;
+            check(missionView(test, catalog, "mars", nullptr, true).stepId == "drill", "Scanned Mars recommends drilling");
+            PersistentSiteState site;
+            site.systemId = "solar"; site.bodyId = "mars"; site.siteId = "mars:" + mars.sectorId;
+            site.orbital.surveyComplete = true; site.orbital.laserComplete = true;
+            expedition.sites.push_back(site);
+            check(missionView(test, catalog, "mars", nullptr, true).instruction.starts_with("Shaft ready"), "Completed Mars shaft recommends landing");
+            expedition.sites.back().orbital.laserComplete = false;
+            expedition.sites.back().orbital.laserBlocked = true;
+            check(missionView(test, catalog, "mars", nullptr, true).instruction.starts_with("Protected terrain"), "Blocked Mars shaft recommends surface tools");
+            expedition.selectedOrbitZone = "wrong-sector";
+            check(missionView(test, catalog, "mars", nullptr, true).stepId == "mission_sector", "Wrong sector does not recommend drilling");
+        }
+        check(mars.stepId == "ore" && !mars.arrivalStage &&
+            mars.trackerGoals[0].text == "Collect Common Ore 0/8" && !mars.trackerGoals[1].complete,
+            "Mars surface checklist contains recovery goals only");
         const auto oldScenario = s.run.mining.scenarioId;
         s.run.mining.bodyId.clear(); s.run.mining.scenarioId = content::scenario::marsBayExpansion;
         check(trackedMissionView(s, catalog).stepId == "ore",
@@ -803,8 +887,79 @@ void missionGuidanceTests()
     }
 }
 
+void artifactBankingAndPayloadTests()
+{
+    using namespace rocket;
+    const auto catalog=createDefaultContent();
+    auto state=std::make_unique<GameState>(createNewGame(catalog,72131));
+    initializeLiveExpedition(*state,catalog);
+    ensureScenarioInstances(*state,catalog);
+    const auto* mission=solarMissionForBody(catalog,"moon");
+    check(mission!=nullptr,"Moon must have a banking mission");
+    auto* instance=findScenarioInstance(state->meta,mission->scenarioId);
+    check(instance!=nullptr,"Moon scenario must exist");
+    for (auto& p : instance->steps) if (p.id!=mission->claimStepId) {
+        p.completed=p.claimed=p.briefingAcknowledged=true;
+    }
+    auto& e=state->run.expedition;
+    e.location.bodyId="moon";e.location.siteId="moon:zone_1";
+    ArtifactRecord record;record.id=mission->artifactId;record.originDestinationId="moon";
+    registerArtifactAboard(*state,catalog,record,e.location.siteId);
+    registerArtifactAboard(*state,catalog,record,e.location.siteId);
+    check(e.artifacts.size()==1,"Duplicate pickup must not duplicate custody");
+    const auto* definition=catalog.findScenario(mission->scenarioId);
+    const auto* claim=findScenarioStepDefinition(*definition,mission->claimStepId);
+    recordScenarioEvent(*state,catalog,{claim->completionEvent,mission->scenarioId,mission->claimStepId,
+        claim->eventOriginId,claim->eventTargetId,1,0});
+    check(!performScenarioAction(*state,catalog,mission->scenarioId,mission->claimStepId,ScenarioActionKind::ClaimReward).applied,
+        "Pickup must not allow artifact mission rewards");
+    check(!solarMissionClaimed(*state,catalog,*mission) && trackedMissionView(*state,catalog).targetId=="earth",
+        "Unsecured artifact must direct the player home without completing the mission");
+    e.active=true;state->run.flight.active=true;state->run.flight.hullRemaining=100;
+    check(loseExpedition(e,state->run.flight,solarSystemDefinition())==ExpeditionResult::Applied,
+        "Artifact crash fixture must create a wreck");
+    check(e.artifacts.front().owner==ArtifactCustody::Wreck,"Crash must move artifact custody to wreck");
+    const auto wreckId=e.artifacts.front().wreckId;
+    const auto encoded=serializeExpedition(e);
+    auto restored=deserializeExpedition(encoded);
+    check(restored && restored->artifacts.front().wreckId==wreckId,"Wreck artifact custody must round trip");
+    e=*restored;e.location=e.wrecks.back().location;
+    e.cargo.materials.common=60;
+    check(salvageWreck(e,wreckId,solarSystemDefinition(),60)==ExpeditionResult::Applied &&
+        e.artifacts.front().owner==ArtifactCustody::Ship,"Full ore hold must not prevent artifact salvage");
+    e.location.bodyId="earth";e.location.siteId="earth.dock";state->run.flight.active=false;
+    bankMissionArtifacts(*state,catalog);
+    check(e.artifacts.front().owner==ArtifactCustody::Banked && !e.artifacts.front().completed,
+        "Banking must wait for explicit hand-in");
+    check(performScenarioAction(*state,catalog,mission->scenarioId,mission->claimStepId,ScenarioActionKind::ClaimReward).applied,
+        "Banked artifact must allow explicit hand-in");
+    check(solarMissionClaimed(*state,catalog,*mission),"Hand-in must complete the mission");
+    const auto drones=state->meta.ownedDroneIds;
+    check(!performScenarioAction(*state,catalog,mission->scenarioId,mission->claimStepId,ScenarioActionKind::ClaimReward).applied &&
+        state->meta.ownedDroneIds==drones,"Repeated hand-in must not replay rewards");
+    auto& mining=state->run.mining;
+    mining.deliveredOreUnits=25;mining.missionOreUnits=20;e.cargo.materials={5,0,0};
+    const auto label=miningPayloadOwnershipText(*state,catalog);
+    check(label.find("RIG ")!=std::string::npos && label.find("DRONES ")!=std::string::npos &&
+        label.find("SHIP ")!=std::string::npos,
+        "Payload ownership must show rig, drone, and ship totals");
+    check(miningPayloadContractText(*state,catalog).find("Delivered 25 · Mission 20 · Cargo 5/60")!=std::string::npos,
+        "Payload must distinguish delivery, contract allocation, and current hold");
+    e.cargo.materials={1,2,1};
+    check(miningPayloadContractText(*state,catalog).find("Cargo 9/60")!=std::string::npos,
+        "Cargo must retain weighted material mass");
+    const auto save=deserializeSaveData(serializeSaveData(captureSaveData(*state)));
+    check(save && save->mining.deliveredOreUnits==25 && save->mining.missionOreUnits==20,
+        "Delivery history must survive saving independently of cargo spending");
+    mining.deliveredOreUnits=mining.missionOreUnits=-1;
+    check(miningPayloadContractText(*state,catalog).find("Delivered")==std::string::npos &&
+        miningPayloadContractText(*state,catalog).find("Mission")==std::string::npos,
+        "Unknown legacy delivery history must not be fabricated");
+}
+
 void persistentExpeditionTests()
 {
+    artifactBankingAndPayloadTests();
     straylightSequenceTests();
     using namespace rocket;
     campaignGuidanceTests();
@@ -1036,8 +1191,8 @@ void persistentExpeditionTests()
             content::scenario::lunarProspector,"anomaly","moon",content::miningSite::lunarAnomalyCrevice,1,0});
         auto objective = scenarioObjectiveForDestination(state, catalog, content::destination::moon);
         check(objective.state == ScenarioStepState::ReadyToClaim &&
-              objective.actionLabel == "Confirm Recovery",
-            "The Moon reward action must describe claiming the recovered artifact, not locking Mars");
+              objective.actionLabel == "Complete Mission",
+            "The Moon reward action must require banking before mission completion");
         performScenarioAction(state,catalog,content::scenario::lunarProspector,"anomaly",ScenarioActionKind::ClaimReward);
         check(state.meta.equippedDroneIds == std::vector<std::string>{content::drone::miningDrone},
             "First artifact recovery must grant and equip the Prospector");
@@ -1053,8 +1208,8 @@ void persistentExpeditionTests()
             content::scenario::marsBayExpansion,"artifact","mars",content::protectedObjective::marsSignalArtifact,1,0});
         objective = scenarioObjectiveForDestination(state, catalog, content::destination::mars);
         check(objective.state == ScenarioStepState::ReadyToClaim &&
-              objective.actionLabel == "Claim Mars Mission",
-            "The Mars reward action must describe claiming the recovered artifact, not locking Jupiter");
+              objective.actionLabel == "Complete Mission",
+            "The Mars reward action must require banking before mission completion");
     }
 
     {
@@ -1088,6 +1243,105 @@ void persistentExpeditionTests()
         check(!expeditionDockInRange(expedition, flight, system, "earth") &&
               !canDockExpedition(expedition, flight, system),
             "Dock alert and docking eligibility must end together outside the shared radius");
+    }
+
+    {
+        const auto catalog = createDefaultContent();
+        auto state = createNewGame(catalog, 0xD0C7ULL);
+        check(initializeLiveExpedition(state, catalog), "Docking fixture must initialize live travel");
+        const auto& system = solarSystemDefinition();
+        const auto* earth = systemBody(system, "earth");
+        check(earth != nullptr, "Docking fixture requires Earth");
+        const auto dock = systemDockPosition(*earth);
+        auto& expedition = state.run.expedition;
+        auto& flight = state.run.flight;
+        expedition.active = true;
+        expedition.departureCount = 1;
+        expedition.location = {system.id, "", CoordinateFrame::System,
+            {dock.x + service_dock::approachRadius * .90, dock.y},
+            {earth->velocity.x - 1.6, earth->velocity.y}, 0.0, {}};
+        restoreSystemLocation(expedition.location, flight);
+        flight.active = flight.physicalFlight = true;
+        flight.mode = FlightMode::Travel;
+        flight.docking = {};
+        const auto model = expeditionFlightModel(state, catalog);
+        (void)advanceExpeditionFlight(expedition, flight, model, expeditionEnvironment(state, catalog), system, {}, .01);
+        check(earthDockingActive(flight) && !expedition.cruise.active,
+            "Earth approach must enter the local docking maneuver at any relative speed");
+
+        flight.docking.positionX = service_dock::exitRadius + .01;
+        flight.docking.positionY = 0.0;
+        flight.docking.velocityX = 0.0;
+        flight.docking.velocityY = 0.0;
+        (void)advanceExpeditionFlight(expedition, flight, model, expeditionEnvironment(state, catalog), system, {}, .01);
+        check(flight.mode == FlightMode::Orbit && flight.docking.reentrySuppressed,
+            "Leaving the outer docking radius must return to ordinary flight and suppress immediate re-entry");
+
+        expedition.location = {system.id, "", CoordinateFrame::System,
+            {dock.x + .25, dock.y}, earth->velocity, 0.0, {}};
+        restoreSystemLocation(expedition.location, flight);
+        flight.active = true;
+        (void)advanceExpeditionFlight(expedition, flight, model, expeditionEnvironment(state, catalog), system, {}, .01);
+        check(flight.mode != FlightMode::Docking,
+            "A ship backing away from Earth must leave the approach before it can re-enter");
+
+        expedition.location.position = {dock.x + service_dock::exitRadius + .01, dock.y};
+        restoreSystemLocation(expedition.location, flight);
+        (void)advanceExpeditionFlight(expedition, flight, model, expeditionEnvironment(state, catalog), system, {}, .01);
+        check(!flight.docking.reentrySuppressed,
+            "Outer-radius clearance must re-arm future Earth docking approaches");
+
+        flight.mode = FlightMode::Docking;
+        flight.active = true;
+        flight.docking = {};
+        flight.docking.active = true;
+        flight.docking.dockId = "earth";
+        flight.docking.dockHeading = 1.5707963267948966;
+        flight.docking.enteredMouth = true;
+        flight.heading = flight.docking.dockHeading + 3.14159265358979323846;
+        flight.velocityX = flight.velocityY = 0.0;
+        bool captured = false;
+        for (int frame = 0; frame < 20 && !captured; ++frame) {
+            const auto step = advanceExpeditionFlight(expedition, flight, model,
+                expeditionEnvironment(state, catalog), system, {}, .05);
+            captured = step.dockCaptured;
+        }
+        check(captured && flight.docking.settlementReady && flight.mode == FlightMode::Orbit,
+            "A slow, aligned nose-first berth must capture before dock settlement");
+
+        flight.mode = FlightMode::Docking;
+        flight.docking = {};
+        flight.docking.active = true;
+        flight.docking.dockId = "retired-dock";
+        (void)advanceExpeditionFlight(expedition, flight, model,
+            expeditionEnvironment(state, catalog), system, {}, .01);
+        check(flight.mode == FlightMode::Orbit && flight.docking.reentrySuppressed,
+            "An invalid saved dock reference must recover to ordinary flight without an approach loop");
+
+        flight.mode = FlightMode::Docking;
+        flight.docking.active = true;
+        flight.docking.dockId = "earth";
+        flight.docking.positionX = .12;
+        flight.docking.positionY = .34;
+        flight.docking.velocityX = -.03;
+        flight.docking.velocityY = .04;
+        flight.docking.rotationLocked = true;
+        const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+        check(saved && saved->flight.mode == FlightMode::Docking && saved->flight.docking.active &&
+              saved->flight.docking.dockId == "earth" && saved->flight.docking.rotationLocked,
+            "An interrupted Earth docking maneuver must retain its local state across save/load");
+
+        flight.mode = FlightMode::Orbit;
+        flight.docking.active = false;
+        flight.docking.settlementReady = true;
+        expedition.location = {system.id, "earth", CoordinateFrame::Body,
+            {dock.x - earth->position.x, dock.y - earth->position.y}, {}, 0.0, earth->siteId};
+        restoreSystemLocation(expedition.location, flight);
+        flight.active = true;
+        const auto settled = advanceExpeditionFlight(expedition, flight, model,
+            expeditionEnvironment(state, catalog), system, {}, .01);
+        check(settled.dockCaptured,
+            "A save restored after physical capture must resume dock settlement without a second approach");
     }
 
     {
@@ -1483,8 +1737,9 @@ void persistentExpeditionTests()
         check(std::abs(dockGuidance.targetPosition.x-earth->dockOffset.x) < 1e-12 &&
             std::abs(dockGuidance.targetPosition.y-earth->dockOffset.y) < 1e-12,
             "Earth waypoint geometry must lead to the dock instead of the collision body");
-        check(dockGuidance.nextAction.find("dock marker") != std::string::npos,
-            "Earth waypoint instructions must direct the player to the dock marker");
+        check(dockGuidance.nextAction.find("service dock") != std::string::npos &&
+                dockGuidance.nextAction.find("automatically") != std::string::npos,
+            "Earth waypoint instructions must explain the automatic docking maneuver");
         dockExpedition.location.position = earth->dockOffset;
         restoreSystemLocation(dockExpedition.location, dockFlight);
         const auto dockCourse = previewSystemCourse(
@@ -1599,6 +1854,7 @@ void persistentExpeditionTests()
     e.location = {"solar", "moon", CoordinateFrame::Body, {.5, 0}, {}, 0, "moon.beacon"};
     check(recoverSiteBattery(e, "moon") == ExpeditionResult::Applied,
           "Site delivery must transfer battery to ship");
+    e.batteries[0].researchEarned = true;
     check(recoverSiteBattery(e, "moon") == ExpeditionResult::AlreadyApplied,
           "Repeated delivery must not duplicate battery");
     e.cargo.materials.common = 7;
@@ -1998,7 +2254,8 @@ void persistentExpeditionTests()
         auto persistedJourney = deserializeSaveData(serializeSaveData(captureSaveData(journey)));
         check(persistedJourney && persistedJourney->expedition.travelInitialized && persistedJourney->expedition.rigFuel.capacity > 0,
               "Live expedition initialization and Rig allotment must persist in v23");
-        check(departHome(journey,catalog)==ExpeditionResult::Applied,"Banked expedition can depart again");
+        const auto redepartResult=departHome(journey,catalog);
+        check(redepartResult==ExpeditionResult::Applied,"Banked expedition can depart again");
         advanceExpeditionFlight(expedition,ship,model,expeditionEnvironment(journey,catalog),solar,{0,1,false,true},.05);
         const int bankedMaterials=journey.meta.materials.common;
         const auto oreTransfer=planPayloadTransfer({7,0,0},{},shipHoldMaterials(journey),shipHoldCapacity(journey,catalog));

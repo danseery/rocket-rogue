@@ -236,6 +236,12 @@ void enterLocalLanding(FlightRunState& flight)
     flight.orbit.confirmationSeconds = 0.0;
     flight.orbit.loopQualifies = false;
     auto& land = flight.landing;
+    // A new descent must not inherit the previous takeoff's support latch.
+    // That latch suppresses touchdown while the ship leaves its old pad.
+    land.launchSupportActive = false;
+    land.departureActive = false;
+    flight.contactEpisode = false;
+    flight.contactClearSeconds = 0.0;
     land.basisAngle = std::atan2(flight.positionY, flight.positionX);
     const double nx = std::cos(land.basisAngle), ny = std::sin(land.basisAngle);
     // Local right is clockwise around the surface normal; right/up is a
@@ -354,9 +360,11 @@ std::vector<FlightSurfaceContact> localLandingContacts(const LandingState& land,
             contact.pointX=(px-land.padGridX-0.5)*unit;
             contact.pointY=(land.padGridY-py)*unit;
             contact.gridX=gridX;contact.gridY=y;
+            // Support under the ship's center is sufficient. Requiring rock
+            // under both hull edges turned ordinary ledges into invisible
+            // no-landing zones and effectively required a pristine wide pad.
             contact.suitable=margin==0.0 && ny>=std::cos(flight_landing::stickTiltRadians)-1e-9 && std::abs(centerY+extentY-y)<0.45 &&
-                solid(static_cast<int>(std::floor(centerX-halfW*0.85)),y) &&
-                solid(static_cast<int>(std::floor(centerX+halfW*0.85)),y);
+                solid(static_cast<int>(std::floor(centerX)),y);
             if (contact.suitable) {
                 double rigX=0.0,rigY=0.0;
                 contact.suitable=surfaceLandingStaging(mining,gridX,y,rigX,rigY);

@@ -1,4 +1,5 @@
 #include "core/SolarProgression.h"
+#include "core/ArtifactProgression.h"
 
 #include "core/ContentIds.h"
 #include "core/ResearchSystem.h"
@@ -39,6 +40,9 @@ const SolarMissionDefinition* solarMissionForBody(const ContentCatalog& catalog,
 
 bool solarMissionClaimed(const GameState& state, const ContentCatalog&, const SolarMissionDefinition& mission)
 {
+    if (const auto* a = missionArtifact(state,mission.scenarioId,mission.claimStepId)) return a->completed;
+    for (const auto& b : state.run.expedition.batteries)
+        if (b.id == mission.bodyId && (b.owner == BatteryOwner::Ship || b.owner == BatteryOwner::Wreck)) return false;
     const ScenarioInstance* instance = findScenarioInstance(state.meta, mission.scenarioId);
     const ScenarioStepProgress* step = instance == nullptr
         ? nullptr
@@ -230,8 +234,8 @@ bool reconcileSolarMissionMessages(GameState& state, const ContentCatalog& catal
         }
         return std::any_of(catalog.solarMissions.begin(), catalog.solarMissions.end(),
             [&](const SolarMissionDefinition& mission) {
-                return occurrence.messageId == mission.briefingMessageId &&
-                    solarMissionClaimed(state, catalog, mission);
+                return (occurrence.messageId == mission.briefingMessageId && solarMissionClaimed(state, catalog, mission)) ||
+                    (occurrence.messageId == mission.completionMessageId && !solarMissionClaimed(state,catalog,mission));
             });
     });
     bool changed = messages.pending.size() != pendingCount;

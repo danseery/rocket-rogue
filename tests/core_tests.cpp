@@ -1069,6 +1069,13 @@ void expeditionExperienceQueuesDistinctSelectableOffers()
 
 void sharedFlightInstrumentPresentationMatchesEachMode()
 {
+    for (double velocity : {-0.199, -0.1, -0.049, -0.0, 0.0, 0.049, 0.1, 0.199})
+        require(landingVerticalSpeedText(velocity) == "0.0 m/s",
+            "vertical telemetry must suppress near-zero flutter and negative zero");
+    require(landingVerticalSpeedText(-0.2) == "-0.2 m/s" &&
+            landingVerticalSpeedText(0.2) == "0.2 m/s" &&
+            landingVerticalSpeedText(-12.4) == "-12.4 m/s",
+        "vertical telemetry must retain meaningful speed outside the display dead zone");
     PreparedLaunch launch;
     launch.config.burnGoalMultiplier = 2.0;
     launch.manualControlsEnabled = true;
@@ -1613,8 +1620,8 @@ void saturnArtifactQueuesPhysicalUranusRoute()
             objective.state == ScenarioStepState::ReadyToClaim &&
             objective.location == "SATURN DEPARTURE" &&
             objective.title == "Artifact Secured" &&
-            objective.actionLabel == "Lock Uranus Course",
-        "the returned Saturn artifact should expose the explicit Uranus course claim");
+            objective.actionLabel == "Complete Mission",
+        "the returned Saturn artifact should expose the explicit mission hand-in");
 
     Random claimPanelRng(0x51A8);
     const PreparedLaunch claimPanelLaunch = prepareLaunch(state, catalog, claimPanelRng);
@@ -1625,7 +1632,7 @@ void saturnArtifactQueuesPhysicalUranusRoute()
         claimPanelLaunch});
     require(claimPanel.find("SATURN DEPARTURE") != std::string::npos &&
             claimPanel.find("1/1") != std::string::npos &&
-            claimPanel.find("Lock Uranus Course") != std::string::npos &&
+            claimPanel.find("Complete Mission") != std::string::npos &&
             claimPanel.find("Launch: Saturn") == std::string::npos,
         "the Saturn Hangar should prioritize the concise Uranus claim over another Saturn sortie");
 

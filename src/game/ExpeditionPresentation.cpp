@@ -1,4 +1,5 @@
 #include "game/ExpeditionPresentation.h"
+#include "core/ArtifactProgression.h"
 #include "core/ExpeditionSystem.h"
 #include "core/MissionGuidance.h"
 #include "core/StraylightSequence.h"
@@ -35,10 +36,19 @@ std::string bankedArtifactMarkup(const PersistentExpeditionState& e) {
         if (count++) names += ", ";
         names += origin ? origin->name : b.id;
     }
+    for (const auto& artifact : e.artifacts) {
+        if (artifact.owner != ArtifactCustody::Banked ||
+            artifact.requiredDockId != e.location.bodyId) continue;
+        const auto* origin = systemBody(solarSystemDefinition(), artifact.artifact.originDestinationId);
+        const std::string label = origin ? origin->name : artifact.artifact.originDestinationId;
+        if (names.find(label) != std::string::npos) continue;
+        if (count++) names += ", ";
+        names += label;
+    }
     if (!count) return {};
     return "<section class=\"artifact-bank-status\"><strong>" +
-        std::string(count == 1 ? "ARTIFACT BANKED" : "ARTIFACTS BANKED") +
-        "</strong><p>" + esc(names) + " / " + (ark ? "Installed aboard Straylight" : "Secured in Earth Storage") +
+        std::string(count == 1 ? "MISSION ARTIFACT READY" : "MISSION ARTIFACTS READY") +
+        "</strong><p>" + esc(names) + " / " + (ark ? "At Straylight dock" : "At Earth dock") +
         "</p></section>";
 }
 // Both Rml render hosts support positioned geometry; avoid depending on CSS
@@ -427,7 +437,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     }
     map << "<p class=\"solar-map-manifest\">FUEL " << num(flight.fuelRemaining) << " / " << num(flight.fuelCapacity)
         << " / CARGO " << e.cargo.materials.common << "C " << e.cargo.materials.rare << "R " << e.cargo.materials.exotic
-        << "X / " << num(e.cargo.credits) << " UNBANKED</p>";
+        << "X / " << num(e.cargo.credits) << " UNSECURED</p>";
     map << "<section class=\"expedition-dock-departure\"><h3>RECOMMENDED OBJECTIVE *</h3><p>" << esc(recommendation.title)
         << "</p><p>" << esc(recommendation.detail) << "</p><p>SELECTED WAYPOINT: " << esc(selectedName)
         << (e.coursePlayerSelected ? " / MANUAL OVERRIDE" : " / FOLLOWING MISSION")
@@ -435,7 +445,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     for (const auto& w : e.wrecks) map << "<p class=\"" << (wreckCarriesArtifact(e, w.id) ? "wreck-artifact-copy" : "") << "\">"
         << esc(wreckDisplayName(e, w.id)) << " - "
         << action("Set waypoint: " + wreckDisplayName(e, w.id),"plot:wreck:"+std::to_string(w.id))
-        << action(wreckCarriesArtifact(e, w.id) ? "Recover artifact and salvage" : w.buildRecoverable ? "Recover upgrades and cargo" : "Recover cargo",
+        << action(wreckCarriesArtifact(e, w.id) ? "Collect artifact and salvage" : w.buildRecoverable ? "Recover upgrades and cargo" : "Recover cargo",
             "recover:" + std::to_string(w.id), canSalvageWreck(e, flight, system, w.id)) << "</p>";
     map << action(atOperationalDock ? "Back to dock" : "Resume flight", "close");
     if (e.active) map << action("Abandon ship", "abandon");
@@ -474,9 +484,26 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
             const auto* completedBody = systemBody(system, lastCompleted->bodyId);
             home << "<p>MISSION COMPLETE: " << esc(completedBody ? completedBody->name : lastCompleted->bodyId) << "</p>";
         }
+        bool handInDefault = false;
+        const auto handIn = [&](const MissionArtifact& a) {
+            if (!artifactHandInAvailable(state,a)) return;
+            const auto* scenario = a.scenarioId.empty() ? nullptr : findScenarioInstance(state.meta,a.scenarioId);
+            const auto* progress = scenario ? findScenarioStepProgress(*scenario,a.stepId) : nullptr;
+            const std::string id = !a.scenarioId.empty() && progress
+                ? ui::actions::scenarioAction(a.scenarioId,a.stepId,static_cast<int>(ScenarioActionKind::ClaimReward))
+                : "expedition:artifact_handin:" + a.key;
+            const auto* body = systemBody(system,a.artifact.originDestinationId);
+            home << button("Complete Mission: " + (body ? body->name : a.artifact.originDestinationId),id,true,"ok",!handInDefault);
+            handInDefault = true;
+        };
+        for (const auto& mission : c.catalog.solarMissions)
+            if (const auto* a = missionArtifact(state,mission.scenarioId,mission.claimStepId)) handIn(*a);
+        for (const auto& a : e.artifacts) if (!a.key.starts_with("solar:")) handIn(a);
         home << "<p>SELECTED WAYPOINT: " << esc(waypointName) << (e.coursePlayerSelected ? " / MANUAL OVERRIDE" : " / FOLLOWING MISSION")
-            << "</p>" << action(departLabel, "depart", true, true) << "</section><div class=\"action-row\">"
-            << action("Change waypoint", "map");
+            << "</p><div class=\"expedition-dock-route-actions\">"
+            << button(departLabel, "expedition:depart", true, "dock-depart", !handInDefault)
+            << button("Change waypoint", "expedition:map", true, "dock-waypoint")
+            << "</div></section><div class=\"action-row\">";
         if (operationalHomeDocked(e) && droneBayUnlocked(state))
             home << button("Drone Ops", ui::actions::droneOps);
         home << "</div>";
@@ -501,7 +528,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         panel.runtime.responsiveViewport = true;
     }
     if (stage == Stage::RevealPending) {
-        panel.contentMarkup += "<section class=\"straylight-contact\"><strong>CONTACT RESOLVED - STRAYLIGHT</strong><p>WAYPOINT SET / Leave Triton when ready.</p></section>";
+        panel.contentMarkup += "<section class=\"straylight-contact\"><strong>CONTACT RESOLVED - STRAYLIGHT</strong><p>WAYPOINT SET / Depart when ready.</p></section>";
     }
     if (stage == Stage::RetrieveBeacons && atOperationalDock && e.location.bodyId == "earth") {
         const bool stored = std::any_of(e.batteries.begin(), e.batteries.end(), [](const auto& b) { return b.owner == BatteryOwner::EarthStorage; });
@@ -516,16 +543,21 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
             if (mission.bodyId == "triton" && stage != Stage::Hidden) continue;
             const auto claim = solarMissionObjectiveForBody(state, c.catalog, mission.bodyId);
             if (claim.state != ScenarioStepState::ReadyToClaim || claim.action != ScenarioActionKind::ClaimReward) continue;
+            // A recovered artifact is only claimable after it has reached the
+            // servicing dock. Keep the mission prompt out of mining/flight
+            // screens while the artifact is still aboard and at risk.
+            const auto* artifact = missionArtifact(state, mission.scenarioId, mission.claimStepId);
+            if (!artifact || !artifactHandInAvailable(state, *artifact)) continue;
             const auto* body = systemBody(system, mission.bodyId);
             const std::string title = (body ? body->name : mission.bodyId) + " mission ready";
             const std::string claimAction = ui::actions::scenarioAction(claim.scenarioId, claim.stepId, static_cast<int>(claim.action));
             const bool autoOpen = std::none_of(panel.modals.begin(), panel.modals.end(), [](const auto& item) { return item.autoOpen; });
-            std::string copy = "Objectives complete. " + claim.rewardPreview;
+            std::string copy = "Artifact secured at the servicing dock. Complete the mission to claim: " + claim.rewardPreview;
             if (mission.bodyId == "moon") {
                 copy += " The Prospector mines revealed ore pockets while you explore. Manage it in Drone Ops.";
             }
             if (auto card = buildIncomingMessageCard(c, mission.briefingMessageId, "default", claimAction,
-                    title, copy, "Claim mission reward")) {
+                    title, copy, "Complete Mission")) {
                 card->id = "solar_mission_claim";
                 card->autoOpen = autoOpen;
                 replaceModal(panel, std::move(*card));
@@ -535,6 +567,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     }
     if (state.screen == Screen::Flight && !c.surfaceArrivalActive &&
         !(c.orbitalWork && c.orbitalWork->active())) {
+        const bool earthDocking = earthDockingActive(flight);
         const bool dockInRange = expeditionDockInRange(e, flight, system);
         const bool dockReady = canDockExpedition(e, flight, system);
         const bool flightDefaultAvailable = panel.contentMarkup.find("data-ui-default-focus=") == std::string::npos;
@@ -544,10 +577,13 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         " / Target: " + esc(selectedName) + " / " + (e.cruise.active ?
             (e.cruise.cooling ? "CRUISE COOLING" : "CRUISE ACTIVE") : "MANUAL") + "</p>" +
         hazardMission +
-        action(e.cruise.active ? "Cruise off [C / L3]" : "Cruise [C / L3]", "cruise", flight.active && flight.mode != FlightMode::Landing && !e.undockReady,
+        action(e.cruise.active ? "Cruise off [C / L3]" : "Cruise [C / L3]", "cruise", flight.active && flight.mode != FlightMode::Landing && flight.mode != FlightMode::Docking && !e.undockReady,
             flightDefaultAvailable && !dockReady) +
-        (dockInRange ? "<div class=\"expedition-dock-action\">" + button(e.course.targetBodyId == "straylight" ? "Dock with Straylight" : "DOCK", "expedition:dock", dockReady, "ok", flightDefaultAvailable && dockReady) + "</div>"
-                     : action("Dock", "dock", false));
+        (earthDocking ? "<div class=\"expedition-dock-action\"><strong>EARTH DOCK / " + esc(earthDockingGuidance(flight)) + "</strong></div>"
+            : dockInRange && e.location.bodyId == "earth"
+                ? "<div class=\"expedition-dock-action\"><strong>EARTH DOCK / MANEUVER ENGAGED</strong></div>"
+            : dockInRange ? "<div class=\"expedition-dock-action\">" + button(e.course.targetBodyId == "straylight" ? "Dock with Straylight" : "DOCK", "expedition:dock", dockReady, "ok", flightDefaultAvailable && dockReady) + "</div>"
+                          : action("Dock", "dock", false));
         for (const auto& wreck : e.wrecks) {
             if (!canSalvageWreck(e, flight, system, wreck.id, false)) continue;
             const bool ready = canSalvageWreck(e, flight, system, wreck.id);
@@ -562,7 +598,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     const auto& d = e.decision;
     if (!d.pendingId.empty() && !d.awaitingAscent && state.screen == Screen::Flight && flight.mode != FlightMode::Landing && c.incomingMessageDeliveryAllowed && e.progression.pendingRunUpgradeChoices == 0 &&
         std::none_of(panel.modals.begin(), panel.modals.end(), [](const auto& item) { return item.autoOpen; }))
-        replaceModal(panel, {"expedition_decision", "NEXT COURSE", "<p>Objective secured. Return to bank salvage, or continue with your current fuel and build.</p><div class=\"action-row\">" +
+        replaceModal(panel, {"expedition_decision", "NEXT COURSE", "<p>Objective secured. Return to the dock to secure salvage, or continue with your current fuel and build.</p><div class=\"action-row\">" +
             action("Set Earth waypoint", "decision:home:" + d.pendingId, true, true) + action("Set " + recommendedExpeditionLead(state, c.catalog) + " waypoint", "decision:lead:" + d.pendingId) + action("Inspect map", "decision:map:" + d.pendingId) + "</div>", "expedition:decision:map:" + d.pendingId, true, false, false, ModalTone::Neutral});
 }
 
@@ -579,9 +615,18 @@ void appendMissionPresentation(const PanelRenderContext& c, PanelDocumentPresent
     for (const auto& item : missionLog(s, c.catalog)) {
         std::string entry = "<section class=\"mission-log-entry\"><h3>" + esc(item.location + " / " + item.title) +
             (item.optional ? " (optional)" : "") + "</h3><p>" + esc(item.purpose) + "</p><ol>";
-        for (const auto& row : item.requirements)
-            entry += "<li class=\"" + std::string(row.complete ? "mission-done" : "mission-pending") + "\">" +
-                (row.complete ? "[x] " : "[ ] ") + esc(row.text) + "</li>";
+        const auto appendGoals = [&](const auto& goals) {
+            for (const auto& row : goals)
+                entry += "<li class=\"" + std::string(row.complete ? "mission-done" : "mission-pending") + "\">" +
+                    (row.complete ? "[x] " : "[ ] ") + esc(row.text) +
+                    (row.detail.empty() ? "" : " - " + esc(row.detail)) + "</li>";
+        };
+        if (!item.arrivalGoals.empty()) {
+            entry += "</ol><h4>Arrival</h4><ol>";
+            appendGoals(item.arrivalGoals);
+            entry += "</ol><h4>Recovery</h4><ol>";
+        }
+        appendGoals(item.recoveryGoals.empty() ? item.requirements : item.recoveryGoals);
         entry += "</ol><p>" + esc(item.instruction) + "</p>";
         for (const auto& progress : item.progress) entry += "<p>" + esc(progress) + "</p>";
         if (!item.reward.empty()) entry += "<p class=\"mission-reward\">" + esc(item.reward) + "</p>";
@@ -622,7 +667,18 @@ void appendMissionPresentation(const PanelRenderContext& c, PanelDocumentPresent
     if (e.coursePlayerSelected && e.course.targetBodyId != v.targetId && !v.targetId.empty())
         tracker += button("Return to mission", "expedition:follow_mission");
     tracker += "</div></section>";
-    if (s.screen == Screen::Flight || s.screen == Screen::Mining) panel.missionTrackerMarkup = tracker;
-    else panel.contentMarkup = tracker + panel.contentMarkup;
+    if (s.screen == Screen::Flight || s.screen == Screen::Mining) {
+        panel.missionTrackerMarkup = tracker;
+    } else if (s.screen == Screen::Hangar && panel.templateKind == PanelTemplateKind::LegacyRaw) {
+        // The dock has a full-width shipyard/menu surface. Keep the mission
+        // status in a sibling column so it cannot push the departure controls
+        // or shipyard cards down the page.
+        panel.contentMarkup =
+            "<div class=\"expedition-dock-layout\"><aside class=\"expedition-mission-sidebar\">" +
+            tracker + "</aside><div class=\"expedition-dock-main\">" +
+            panel.contentMarkup + "</div></div>";
+    } else {
+        panel.contentMarkup = tracker + panel.contentMarkup;
+    }
 }
 } // namespace rocket

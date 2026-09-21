@@ -1,4 +1,5 @@
 #include "core/ExpeditionSystem.h"
+#include "core/ArtifactProgression.h"
 #include "core/ContentIds.h"
 #include "core/ResearchSystem.h"
 #include "core/PayloadTransfer.h"
@@ -21,6 +22,243 @@ SystemLocation absolute(const SystemLocation &p, const SystemDefinition &s)
 bool atDock(const PersistentExpeditionState &e, std::string_view body)
 {
     return e.location.bodyId == body && e.location.siteId == std::string(body) + ".dock";
+}
+
+struct DockLocalPose { double x = 0.0, y = 0.0, vx = 0.0, vy = 0.0; };
+
+DockLocalPose dockLocalPose(const DockingState& docking)
+{
+    const double nx = std::cos(docking.dockHeading), ny = std::sin(docking.dockHeading);
+    const double rx = ny, ry = -nx;
+    return {
+        docking.positionX * rx + docking.positionY * ry,
+        docking.positionX * nx + docking.positionY * ny,
+        docking.velocityX * rx + docking.velocityY * ry,
+        docking.velocityX * nx + docking.velocityY * ny,
+    };
+}
+
+void writeDockLocalPose(DockingState& docking, const DockLocalPose& pose)
+{
+    const double nx = std::cos(docking.dockHeading), ny = std::sin(docking.dockHeading);
+    const double rx = ny, ry = -nx;
+    docking.positionX = pose.x * rx + pose.y * nx;
+    docking.positionY = pose.x * ry + pose.y * ny;
+    docking.velocityX = pose.vx * rx + pose.vy * nx;
+    docking.velocityY = pose.vx * ry + pose.vy * ny;
+}
+
+bool dockRectContact(DockLocalPose& pose, double left, double right, double bottom, double top,
+    double& normalX, double& normalY)
+{
+    const double radius = service_dock::hullRadius;
+    const double expandedLeft = left - radius, expandedRight = right + radius;
+    const double expandedBottom = bottom - radius, expandedTop = top + radius;
+    if (pose.x < expandedLeft || pose.x > expandedRight || pose.y < expandedBottom || pose.y > expandedTop)
+        return false;
+    const std::array<std::pair<double, std::pair<double, double>>, 4> faces {{
+        {pose.x - expandedLeft, {-1.0, 0.0}}, {expandedRight - pose.x, {1.0, 0.0}},
+        {pose.y - expandedBottom, {0.0, -1.0}}, {expandedTop - pose.y, {0.0, 1.0}},
+    }};
+    const auto face = std::min_element(faces.begin(), faces.end(), [](const auto& a, const auto& b) {
+        return a.first < b.first;
+    });
+    normalX = face->second.first;
+    normalY = face->second.second;
+    const double separation = face->first + 0.001;
+    pose.x += normalX * separation;
+    pose.y += normalY * separation;
+    return true;
+}
+
+void updateDockExpeditionLocation(PersistentExpeditionState& e, const DockingState& docking,
+    const SystemBodyDefinition& earth, const SystemDefinition& system)
+{
+    SystemLocation pose {system.id, {}, CoordinateFrame::System,
+        {systemDockPosition(earth).x + docking.positionX, systemDockPosition(earth).y + docking.positionY},
+        {earth.velocity.x + docking.velocityX, earth.velocity.y + docking.velocityY}, 0, {}};
+    e.location = convertSystemFrame(pose, CoordinateFrame::Body, earth.id, system);
+    e.location.heading = 0;
+}
+
+void beginEarthDocking(PersistentExpeditionState& e, FlightRunState& flight, const SystemDefinition& system,
+    const SystemBodyDefinition& earth)
+{
+    auto pose = e.location;
+    captureSystemLocation(pose, flight);
+    pose = absolute(pose, system);
+    const auto marker = systemDockPosition(earth);
+    DockingState docking;
+    docking.active = true;
+    docking.dockId = earth.id;
+    docking.positionX = pose.position.x - marker.x;
+    docking.positionY = pose.position.y - marker.y;
+    docking.velocityX = pose.velocity.x - earth.velocity.x;
+    docking.velocityY = pose.velocity.y - earth.velocity.y;
+    docking.dockHeading = std::atan2(docking.positionY, docking.positionX);
+    docking.handoffSeconds = 0.0;
+    flight.handoff = {flight.mode, FlightMode::Docking, 0.0, flight.positionX, flight.positionY, flight.heading};
+    flight.docking = docking;
+    flight.positionX = docking.positionX;
+    flight.positionY = docking.positionY;
+    flight.velocityX = docking.velocityX;
+    flight.velocityY = docking.velocityY;
+    flight.mode = FlightMode::Docking;
+    flight.phase = FlightPhase::TargetApproach;
+    flight.predictedTrajectory.clear();
+    flight.predictedImpact = false;
+    flight.orbit = {};
+    e.cruise = {};
+    updateDockExpeditionLocation(e, docking, earth, system);
+}
+
+LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunState& flight,
+    const SystemDefinition& system, const FlightInput& input, double deltaSeconds)
+{
+    LaunchFlightStep result;
+    auto& docking = flight.docking;
+    const auto* earth = systemBody(system, docking.dockId.empty() ? "earth" : docking.dockId);
+    if (!docking.active || earth == nullptr || earth->id != "earth" || !earth->dock) {
+        // Do not fall straight back into automatic approach if a legacy or
+        // invalid save names a dock which no longer exists. The player keeps
+        // the recovered system pose and must clear the approach volume before
+        // Earth can offer a new maneuver.
+        docking = {};
+        docking.reentrySuppressed = true;
+        restoreSystemLocation(e.location, flight);
+        flight.mode = FlightMode::Orbit;
+        return result;
+    }
+    const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+    docking.handoffSeconds = std::min(flight_landing::handoffSeconds, docking.handoffSeconds + dt);
+    flight.handoff.elapsed = docking.handoffSeconds;
+    DockLocalPose pose = dockLocalPose(docking);
+    const double range = std::hypot(pose.x, pose.y);
+    if (range >= service_dock::exitRadius) {
+        docking.active = false;
+        docking.reentrySuppressed = true;
+        updateDockExpeditionLocation(e, docking, *earth, system);
+        restoreSystemLocation(e.location, flight);
+        flight.mode = FlightMode::Orbit;
+        flight.handoff = {FlightMode::Docking, FlightMode::Orbit, 0.0, flight.positionX, flight.positionY, flight.heading};
+        return result;
+    }
+
+    const bool inChannel = std::abs(pose.x) <= service_dock::channelHalfWidth + service_dock::hullRadius &&
+        pose.y >= service_dock::rearY - service_dock::hullRadius && pose.y <= service_dock::mouthY + service_dock::hullRadius;
+    if (inChannel) docking.rotationLocked = true;
+    else if (docking.rotationLocked &&
+        (std::abs(pose.x) > service_dock::channelHalfWidth + 2.0 * service_dock::hullRadius ||
+         pose.y > service_dock::mouthY + 2.0 * service_dock::hullRadius ||
+         pose.y < service_dock::rearY - 2.0 * service_dock::hullRadius)) {
+        // Do not turn against a hull which has only just cleared the mouth.
+        docking.rotationLocked = false;
+    }
+    double dockAngularVelocity = 0.0;
+    if (!docking.rotationLocked && range > 0.001) {
+        const double desired = std::atan2(docking.positionY, docking.positionX);
+        const double turn = std::clamp(flightWrappedAngleDelta(docking.dockHeading, desired),
+            -service_dock::rotationRateRadians * dt, service_dock::rotationRateRadians * dt);
+        docking.dockHeading += turn;
+        dockAngularVelocity = dt > 0.0 ? turn / dt : 0.0;
+        pose = dockLocalPose(docking);
+    }
+
+    advanceFlightHeading(flight, input.steer, dt);
+    const double forwardX = std::cos(flight.heading), forwardY = std::sin(flight.heading);
+    const double rightX = forwardY, rightY = -forwardX;
+    const double thrust = std::clamp(input.throttle, -1.0, 1.0);
+    const double acceleration = (thrust >= 0.0 ? flight_landing::forwardAcceleration : flight_landing::reverseAcceleration) /
+        flight_geometry::velocityToMetersPerSecond;
+    docking.velocityX += forwardX * thrust * acceleration * dt + rightX * std::clamp(input.strafe, -1.0, 1.0) * acceleration * dt;
+    docking.velocityY += forwardY * thrust * acceleration * dt + rightY * std::clamp(input.strafe, -1.0, 1.0) * acceleration * dt;
+    flight.selectedThrottle = thrust;
+    flight.fuelRemaining = std::max(0.0, flight.fuelRemaining - std::abs(thrust) * 0.012 * dt);
+
+    const double speed = std::hypot(docking.velocityX, docking.velocityY);
+    const int steps = std::clamp(static_cast<int>(std::ceil(speed * dt / (service_dock::hullRadius * .5))), 1, 64);
+    const double substep = dt / steps;
+    bool contacted = false;
+    for (int index = 0; index < steps; ++index) {
+        pose = dockLocalPose(docking);
+        const double previousY = pose.y;
+        pose.x += pose.vx * substep;
+        pose.y += pose.vy * substep;
+        if (previousY > service_dock::mouthY && pose.y <= service_dock::mouthY &&
+            std::abs(pose.x) <= service_dock::channelHalfWidth) docking.enteredMouth = true;
+        double normalX = 0.0, normalY = 0.0;
+        const bool hit =
+            dockRectContact(pose, -service_dock::outerHalfWidth, -service_dock::channelHalfWidth,
+                service_dock::rearY, service_dock::mouthY, normalX, normalY) ||
+            dockRectContact(pose, service_dock::channelHalfWidth, service_dock::outerHalfWidth,
+                service_dock::rearY, service_dock::mouthY, normalX, normalY) ||
+            dockRectContact(pose, -service_dock::outerHalfWidth, service_dock::outerHalfWidth,
+                service_dock::rearY - 0.28, service_dock::rearY, normalX, normalY);
+        if (hit) {
+            // The tongs are fixed in position but may be rotating. Measure
+            // impact against their moving surface instead of a static wall.
+            const double contactX = pose.x - normalX * service_dock::hullRadius;
+            const double contactY = pose.y - normalY * service_dock::hullRadius;
+            const double dockRotationVelocityX = -dockAngularVelocity * contactY;
+            const double dockRotationVelocityY = dockAngularVelocity * contactX;
+            const double impactSpeed = std::hypot(pose.vx - dockRotationVelocityX, pose.vy - dockRotationVelocityY) *
+                flight_geometry::velocityToMetersPerSecond;
+            const double damage = flightImpactDamage(impactSpeed);
+            if (!contacted && damage > 0.0) {
+                const double before = flight.hullRemaining;
+                flight.hullRemaining = std::max(0.0, before - damage);
+                flight.impact = {true, impactSpeed, damage, before, flight.hullRemaining, docking.positionX, docking.positionY, "earth"};
+                flight.impactDisplaySeconds = 3.0;
+            }
+            double relativeX = pose.vx - dockRotationVelocityX;
+            double relativeY = pose.vy - dockRotationVelocityY;
+            const double inward = relativeX * normalX + relativeY * normalY;
+            if (inward < 0.0) {
+                relativeX -= inward * normalX * 1.15;
+                relativeY -= inward * normalY * 1.15;
+            }
+            pose.vx = relativeX * .85 + dockRotationVelocityX;
+            pose.vy = relativeY * .85 + dockRotationVelocityY;
+            flight.angularVelocity *= 0.5;
+            contacted = true;
+        }
+        writeDockLocalPose(docking, pose);
+        if (flight.hullRemaining <= 0.0) {
+            flight.active = false;
+            flight.phase = FlightPhase::Impact;
+            flight.failureCause = LaunchFailureCause::LunarImpact;
+            result.failed = true;
+            result.failureCause = flight.failureCause;
+            return result;
+        }
+    }
+    pose = dockLocalPose(docking);
+    const double headingError = std::abs(flightWrappedAngleDelta(flight.heading, docking.dockHeading + 3.14159265358979323846));
+    const bool insideBerth = docking.enteredMouth && std::abs(pose.x) <= service_dock::channelHalfWidth - service_dock::hullRadius &&
+        pose.y >= service_dock::rearY + service_dock::hullRadius && pose.y <= service_dock::mouthY - service_dock::hullRadius;
+    const bool slowEnough = std::abs(pose.vy) * flight_geometry::velocityToMetersPerSecond <= service_dock::captureForwardSpeed &&
+        std::abs(pose.vx) * flight_geometry::velocityToMetersPerSecond <= service_dock::captureLateralSpeed;
+    docking.captureSeconds = insideBerth && slowEnough && headingError <= service_dock::captureHeadingRadians
+        ? docking.captureSeconds + dt : 0.0;
+    if (docking.captureSeconds >= service_dock::captureSeconds) {
+        SystemLocation captured {system.id, {}, CoordinateFrame::System, systemDockPosition(*earth), earth->velocity, 0.0, earth->siteId};
+        e.location = convertSystemFrame(captured, CoordinateFrame::Body, earth->id, system);
+        e.location.siteId = earth->siteId;
+        restoreSystemLocation(e.location, flight);
+        docking.active = false;
+        docking.settlementReady = true;
+        docking.velocityX = docking.velocityY = 0.0;
+        flight.mode = FlightMode::Orbit;
+        flight.handoff = {FlightMode::Docking, FlightMode::Orbit, 0.0, flight.positionX, flight.positionY, flight.heading};
+        result.dockCaptured = true;
+        return result;
+    }
+    flight.positionX = docking.positionX;
+    flight.positionY = docking.positionY;
+    flight.velocityX = docking.velocityX;
+    flight.velocityY = docking.velocityY;
+    updateDockExpeditionLocation(e, docking, *earth, system);
+    return result;
 }
 
 void mergeRecoveredBuild(ExpeditionProgressionState& active, ExpeditionProgressionState recovered)
@@ -409,6 +647,32 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
         restoreSystemLocation(e.location, flight);
         flight.mode = body ? FlightMode::Orbit : FlightMode::Travel;
     }
+    if (flight.docking.settlementReady && flight.active && atDock(e, "earth")) {
+        // A save can be written after physical capture but before the app has
+        // opened the dock. Resume the same one-shot settlement rather than
+        // sending the already captured ship through another approach.
+        LaunchFlightStep captured;
+        captured.dockCaptured = true;
+        return captured;
+    }
+    if (flight.mode == FlightMode::Docking) {
+        return advanceEarthDocking(e, flight, system, input, dt);
+    }
+    if (flight.active && flight.mode != FlightMode::Landing) {
+        auto current = e.location;
+        captureSystemLocation(current, flight);
+        const auto* earth = systemBody(system, "earth");
+        if (earth && earth->dock) {
+            const double dockDistance = distance(absolute(current, system).position, systemDockPosition(*earth));
+            if (flight.docking.reentrySuppressed && dockDistance > service_dock::exitRadius)
+                flight.docking.reentrySuppressed = false;
+            if (!flight.docking.reentrySuppressed && dockDistance <= service_dock::approachRadius) {
+                e.location = current;
+                beginEarthDocking(e, flight, system, *earth);
+                return {};
+            }
+        }
+    }
     input = cruiseInput(e, flight, system, input, launch.heatEnabled);
     auto result = updateLaunchFlight(flight, launch, destination, input, dt, site, &system, &e.location);
     if (flight.mode == FlightMode::Landing)
@@ -416,6 +680,18 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
     captureSystemLocation(e.location, flight);
     if (result.failed)
         return result;
+    const auto* earth = systemBody(system, "earth");
+    if (earth && earth->dock) {
+        const auto absolutePose = absolute(e.location, system);
+        const double dockDistance = distance(absolutePose.position, systemDockPosition(*earth));
+        if (flight.docking.reentrySuppressed && dockDistance > service_dock::exitRadius)
+            flight.docking.reentrySuppressed = false;
+        if (!flight.docking.reentrySuppressed && flight.active && flight.mode != FlightMode::Landing &&
+            dockDistance <= service_dock::approachRadius) {
+            beginEarthDocking(e, flight, system, *earth);
+            return result;
+        }
+    }
     const auto *encounter = encounteredBody(e.location, system);
     if (encounter && encounter->id == "straylight" && !e.straylightRevealed) encounter = nullptr;
     const auto frame = encounter ? CoordinateFrame::Body : CoordinateFrame::System;
@@ -546,12 +822,15 @@ ExpeditionResult dockExpedition(PersistentExpeditionState &e, FlightRunState &f,
     e.cruise.active = false;
     e.undockReady = false;
     f.active = false;
+    if (dock->id == "earth" || (dock->id == "straylight" && e.arkActivated))
+        for (auto& a : e.artifacts) if (a.owner == ArtifactCustody::Ship && a.requiredDockId == dock->id) {
+            a.owner = ArtifactCustody::Banked; a.bankedAt = dock->id; a.wreckId = 0;
+        }
     if (dock->id == "earth")
         for (auto &b : e.batteries)
             if (b.owner == BatteryOwner::Ship)
             {
                 b.owner = BatteryOwner::EarthStorage;
-                b.researchEarned = true;
             }
     if (dock->id == "straylight" && !e.arkActivated)
         return ExpeditionResult::Applied;
@@ -567,6 +846,8 @@ ExpeditionResult dockExpedition(PersistentExpeditionState &e, FlightRunState &f,
 ExpeditionResult dockExpedition(GameState &state, const SystemDefinition &system)
 {
     auto &e = state.run.expedition;
+    // Preserve pre-docking Ship/Wreck evidence during legacy migration.
+    // Banking events are dispatched by the application with its content catalog.
     const auto result = dockExpedition(e, state.run.flight, system);
     if (result != ExpeditionResult::Applied || e.active || (atDock(e, "straylight") && !e.arkActivated))
         return result;
@@ -601,6 +882,23 @@ bool expeditionDockInRange(const PersistentExpeditionState& e, const FlightRunSt
             distance(p.position, systemDockPosition(b)) <= expeditionDockRadius) return true;
     return false;
 }
+
+bool earthDockingActive(const FlightRunState& flight)
+{
+    return flight.mode == FlightMode::Docking && flight.docking.active && flight.docking.dockId == "earth";
+}
+
+std::string earthDockingGuidance(const FlightRunState& flight)
+{
+    if (!earthDockingActive(flight)) return {};
+    const auto pose = dockLocalPose(flight.docking);
+    if (!flight.docking.enteredMouth) return "NOSE FIRST";
+    if (std::abs(flightWrappedAngleDelta(flight.heading, flight.docking.dockHeading + 3.14159265358979323846)) >
+        service_dock::captureHeadingRadians) return "ALIGN WITH BERTH";
+    if (std::abs(pose.vx) * flight_geometry::velocityToMetersPerSecond > service_dock::captureLateralSpeed ||
+        std::abs(pose.vy) * flight_geometry::velocityToMetersPerSecond > service_dock::captureForwardSpeed) return "SLOW DOWN";
+    return flight.docking.captureSeconds > 0.0 ? "DOCKING..." : "HOLD ALIGNMENT";
+}
 bool canSalvageWreck(const PersistentExpeditionState& e, const FlightRunState& f, const SystemDefinition& s, std::uint64_t id, bool requireMatchedSpeed) {
     if (!f.active || f.mode == FlightMode::Landing) return false;
     auto p = e.location;
@@ -629,6 +927,9 @@ ExpeditionResult departDock(PersistentExpeditionState &e, FlightRunState &f)
     e.undockReady = false;
     e.location.siteId.clear();
     f.active = true;
+    // Leaving a captured Earth berth must not immediately pull the ship back
+    // into the maneuver while it is still inside the approach envelope.
+    if (e.location.bodyId == "earth") f.docking.reentrySuppressed = true;
     return ExpeditionResult::Applied;
 }
 ExpeditionResult loadEarthBattery(PersistentExpeditionState &e, std::string_view id)
@@ -688,6 +989,9 @@ ExpeditionResult salvageWreck(PersistentExpeditionState &e, std::uint64_t id, co
             b.wreckId = 0;
         }
     const auto transfer = planPayloadTransfer(it->cargo.materials, {}, e.cargo.materials, holdCapacity);
+    for (auto& a : e.artifacts) if (a.owner == ArtifactCustody::Wreck && a.wreckId == id) {
+        a.owner = ArtifactCustody::Ship; a.wreckId = 0;
+    }
     ExpeditionCargo recovered = it->cargo;
     recovered.materials = transfer.toShipHold;
     addCargo(e.cargo, recovered);
@@ -763,6 +1067,9 @@ ExpeditionResult loseExpedition(PersistentExpeditionState &e, FlightRunState &f,
     wreck.build.pendingGraftConflicts.clear();
     wreck.buildRecoverable = true;
     e.wrecks.push_back(std::move(wreck));
+    for (auto& a : e.artifacts) if (a.owner == ArtifactCustody::Ship) {
+        a.owner = ArtifactCustody::Wreck; a.wreckId = id;
+    }
     e.cargo = {};
     for (auto &b : e.batteries)
         if (b.owner == BatteryOwner::Ship)

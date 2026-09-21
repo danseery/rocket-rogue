@@ -90,13 +90,22 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
 {
     InventoryPresentation presentation;
     const MaterialInventory& owned = state.meta.materials;
-    const int artifactCount = static_cast<int>(state.meta.artifacts.size());
-    const int identifiedArtifacts = static_cast<int>(std::count_if(
+    int artifactCount = static_cast<int>(state.meta.artifacts.size());
+    int identifiedArtifacts = static_cast<int>(std::count_if(
         state.meta.artifacts.begin(),
         state.meta.artifacts.end(),
         [](const ArtifactRecord& artifact) {
             return artifact.identified;
         }));
+    for (const auto& entry : state.run.expedition.artifacts) {
+        const bool alreadyListed = std::any_of(state.meta.artifacts.begin(),state.meta.artifacts.end(),[&](const auto& artifact) {
+            return artifact.id == entry.artifact.id &&
+                artifact.originDestinationId == entry.artifact.originDestinationId;
+        });
+        if (alreadyListed) continue;
+        ++artifactCount;
+        if (entry.artifact.identified) ++identifiedArtifacts;
+    }
 
     presentation.summary = {
         panelMetric(text::labels::missionCredits, display::credits(state.run.credits)),
@@ -145,13 +154,16 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
 
     InventorySectionPresentation artifacts {
         "Artifacts",
-        "Recovered anomaly objects for later decoding and Ark progression.",
+        "Artifacts aboard are unsecured until you reach the servicing dock. Complete the mission there to claim rewards.",
         {}
     };
-    if (state.meta.artifacts.empty()) {
+    if (state.meta.artifacts.empty() && state.run.expedition.artifacts.empty()) {
         addInventoryItem(artifacts, "AR", "No artifacts", "None recovered yet", "0", "artifact rarity-prototype");
     } else {
         for (const ArtifactRecord& artifact : state.meta.artifacts) {
+            if (std::any_of(state.run.expedition.artifacts.begin(),state.run.expedition.artifacts.end(),[&](const auto& a) {
+                return a.artifact.id==artifact.id && a.artifact.originDestinationId==artifact.originDestinationId;
+            })) continue;
             const Destination* origin = catalog.findDestination(artifact.originDestinationId);
             addInventoryItem(
                 artifacts,
@@ -161,6 +173,13 @@ inline InventoryPresentation inventoryPresentation(const GameState& state, const
                 artifact.identified ? "Decoded" : "Sealed",
                 "artifact rarity-prototype");
         }
+    }
+    for (const auto& a : state.run.expedition.artifacts) {
+        const auto status=a.owner==ArtifactCustody::Ship ? std::string("Aboard / unsecured") :
+            a.owner==ArtifactCustody::Wreck ? "In Wreck "+std::to_string(a.wreckId) :
+            a.completed ? std::string("Mission complete") : std::string("At servicing dock / complete mission");
+        addInventoryItem(artifacts,"AR",a.artifact.identified ? artifactDisplayName(a.artifact) : "Unidentified artifact",
+            a.artifact.originDestinationId,status,"artifact rarity-prototype");
     }
     artifacts.detail += " " + std::to_string(identifiedArtifacts) + "/" + std::to_string(artifactCount) + " decoded.";
     presentation.sections.push_back(std::move(artifacts));

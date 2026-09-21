@@ -566,6 +566,17 @@ FlightCameraView physicalFlightCamera(
     float approachBlendOverride)
 {
     FlightCameraView result;
+    if (snapshot.launchDockingActive) {
+        const float handoff = smootherstep(static_cast<float>(snapshot.launchDockHandoffProgress));
+        const Camera2D wide {{static_cast<float>(snapshot.launchPositionX), static_cast<float>(snapshot.launchPositionY)},
+            {0.0F, 0.0F}, 0.48F, 0.0F};
+        const Camera2D close {{static_cast<float>(snapshot.launchPositionX * 0.42), static_cast<float>(snapshot.launchPositionY * 0.42)},
+            {0.0F, 0.0F}, 1.18F, 0.0F};
+        result.transfer = wide;
+        result.camera = blendCamera(wide, close, handoff);
+        result.approachBlend = 1.0F;
+        return result;
+    }
     constexpr Vec2 orbitalAnchor {0.0F, 0.0F};
     const Vec2 landingAnchor = snapshot.surfaceArrivalPrepared
         ? Vec2 {0.0F, 0.05F}
@@ -2825,7 +2836,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
     const float backdropRight = (backdropClip.x + backdropClip.width - scenePixelCenterX_) / sceneWorldUnitX_;
     const float backdropBottom = (sceneCssHeight_ - backdropClip.y - backdropClip.height - scenePixelCenterY_) / sceneWorldUnitY_;
     const float viewportTop = (sceneCssHeight_ - backdropClip.y - scenePixelCenterY_) / sceneWorldUnitY_;
-    const float horizon = gridPoint(0, snapshot.miningReturnZoneY).y;
+    const float horizon = gridPoint(0, snapshot.miningSurfaceRow).y;
     const float backdropTop = snapshot.miningActiveDepth > 0 ? viewportTop : std::min(viewportTop, horizon);
     if (backdropTop > backdropBottom) {
         const float tileW = cellW * 24.0F, tileH = cellH * 24.0F;
@@ -6254,6 +6265,26 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
     if (snapshot.screen == Screen::Flight && snapshot.launchPhysicalFlight) {
         const float approachBlend = flightCameraPresentation_.approachBlend;
         const FlightCameraView view = physicalFlightCamera(snapshot, approachBlend);
+        if (snapshot.launchDockingActive) {
+            const Vec2 center = view.camera.point(0.0, 0.0);
+            const Vec2 outward = view.camera.vector(std::cos(snapshot.launchDockHeading), std::sin(snapshot.launchDockHeading));
+            const Vec2 right {outward.y, -outward.x};
+            const float mouth = static_cast<float>(service_dock::mouthY) * view.camera.scale;
+            const float rear = static_cast<float>(service_dock::rearY) * view.camera.scale;
+            const float half = static_cast<float>(service_dock::channelHalfWidth) * view.camera.scale;
+            const Vec2 mouthLeft {center.x + outward.x * mouth - right.x * half, center.y + outward.y * mouth - right.y * half};
+            const Vec2 mouthRight {center.x + outward.x * mouth + right.x * half, center.y + outward.y * mouth + right.y * half};
+            const Vec2 rearLeft {center.x + outward.x * rear - right.x * half, center.y + outward.y * rear - right.y * half};
+            const Vec2 rearRight {center.x + outward.x * rear + right.x * half, center.y + outward.y * rear + right.y * half};
+            const Color guide {0.30F, 0.92F, 0.82F, 0.80F};
+            drawLine(mouthLeft.x, mouthLeft.y, rearLeft.x, rearLeft.y, guide, 2.0F);
+            drawLine(mouthRight.x, mouthRight.y, rearRight.x, rearRight.y, guide, 2.0F);
+            drawLine(rearLeft.x, rearLeft.y, rearRight.x, rearRight.y, guide, 2.0F);
+            if (!snapshot.launchDockGuidance.empty())
+                drawPoiLabel(center.x + outward.x * (mouth + .12F), center.y + outward.y * (mouth + .12F),
+                    .0042F, snapshot.launchDockGuidance, PoiGuidanceKind::Ship);
+            return;
+        }
         const auto orbitPosition = snapshot.systemTravel ? snapshot.flightGuidance.orbitPosition : SystemVector{};
         const Vec2 center = physicalFlightPoint(snapshot, orbitPosition.x, orbitPosition.y, approachBlend);
         const float localScale = view.camera.scale;
@@ -7204,6 +7235,20 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
 {
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
     drawSolarBackground(snapshot, 0.70F, snapshot.screen != Screen::Flight);
+    if (snapshot.launchDockingActive) {
+        const FlightCameraView view = physicalFlightCamera(snapshot, flightCameraPresentation_.approachBlend);
+        const Vec2 center = view.camera.point(0.0, 0.0);
+        const Vec2 outward = view.camera.vector(std::cos(snapshot.launchDockHeading), std::sin(snapshot.launchDockHeading));
+        const float pulse = snapshot.launchDockRotationLocked ? 0.82F : 0.96F;
+        drawRadialGlow(center.x, center.y, 0.45F, {0.20F, 0.82F, 1.0F, 0.12F * pulse}, 48);
+        drawSpriteRotated(center.x, center.y, 1.75F * view.camera.scale, 1.75F * view.camera.scale,
+            outward.x, outward.y, {1.0F, 1.0F, 1.0F, 1.0F}, static_cast<int>(TextureId::ServiceDock) - 1);
+        // The regular physical-flight backdrop submits route overlays before
+        // it returns. The local dock frame is a self-contained scene, so
+        // explicitly submit its berth rails and spatial prompt here too.
+        drawRoute(snapshot);
+        return;
+    }
     if (snapshot.systemTravel && snapshot.screen == Screen::Flight && !snapshot.launchLandingLocalFrame && snapshot.launchLandingBlend <= .001 && snapshot.orbitalOverlay <= .001) {
         const auto* frame = snapshot.systemLocation.frame == CoordinateFrame::Body ? systemBody(snapshot.system, snapshot.systemLocation.bodyId) : nullptr;
         const SystemVector offset = frame ? frame->position : SystemVector{};

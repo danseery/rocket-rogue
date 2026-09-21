@@ -1795,7 +1795,7 @@ inline std::vector<DetailPresentationRow> surfaceDetailsPresentation(
         return delivery.objective.title + ": " +
             std::to_string(std::clamp(delivery.objective.current, 0, delivery.objective.required)) + "/" +
             std::to_string(delivery.objective.required) + " " +
-            scenarioTargetMaterialLabel(delivery.objective.eventTargetId) + " delivered from the Mining Rig.";
+            scenarioTargetMaterialLabel(delivery.objective.eventTargetId) + " collected from the Mining Rig.";
     };
     std::vector<DetailPresentationRow> rows {
         detailPresentationRow(text::labels::site, std::string(surfaceSiteProfileName(expedition.siteProfile))),

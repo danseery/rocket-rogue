@@ -82,6 +82,7 @@ struct LaunchFlightStep {
     bool hardTouchdown = false;
     bool flyby = false;
     bool surfaceImpact = false;
+    bool dockCaptured = false;
 };
 
 // Both opening calibration flights teach the same readable fuel-return

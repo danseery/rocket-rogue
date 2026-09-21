@@ -1,5 +1,6 @@
 #include "core/Content.h"
 #include "core/ContentIds.h"
+#include "core/ArtifactProgression.h"
 #include "core/GameState.h"
 #include "core/MiningProgression.h"
 #include "core/MiningSystem.h"
@@ -423,6 +424,11 @@ void lunarContractActivatesScannerLedEvaArtifactInSameRun()
     mining.artifact.tethered = true;
     mining.artifact.x = mining.returnZoneX;
     mining.artifact.y = mining.returnZoneY;
+    // The later hand-in assertions exercise the live-expedition custody path.
+    // Mark the run live before capture so the artifact is registered aboard
+    // rather than treated as an offline legacy completion.
+    state.run.expedition.travelInitialized = true;
+    state.run.expedition.location = {"solar", "moon", CoordinateFrame::Body, {}, {}, 0.0, "moon.surface"};
     updateMiningRun(state, catalog, 0.01);
     require(mining.artifact.state == MiningArtifactState::Delivered &&
             mining.stowedArtifacts.size() == 1,
@@ -431,10 +437,27 @@ void lunarContractActivatesScannerLedEvaArtifactInSameRun()
                 state,
                 catalog,
                 content::scenario::lunarProspector,
-                "anomaly") == ScenarioStepState::ReadyToClaim,
-        "physical artifact recovery should advance the anomaly to an explicit claim");
+                "anomaly") != ScenarioStepState::ReadyToClaim,
+        "physical artifact recovery remains aboard and at risk until dock servicing");
     require(!hasUnlock(state.meta, content::unlock::routeMars),
         "recovering the artifact should not silently advance the story before its claim");
+    // A live expedition must secure the artifact at the servicing dock before
+    // the explicit mission hand-in is accepted. This mirrors the player path
+    // after carrying the anomaly aboard and prevents a surface pickup from
+    // granting progression on its own.
+    state.run.expedition.travelInitialized = true;
+    state.run.expedition.location = {"solar", "earth", CoordinateFrame::Body, {}, {}, 0.0, "earth.dock"};
+    state.run.flight.active = false;
+    require(!performScenarioAction(
+                state,
+                catalog,
+                content::scenario::lunarProspector,
+                "anomaly",
+                ScenarioActionKind::ClaimReward)
+                .applied,
+        "an aboard artifact must wait for dock servicing before hand-in");
+    reconcileArtifactCustody(state, catalog);
+    bankMissionArtifacts(state, catalog);
     require(performScenarioAction(
                 state,
                 catalog,
@@ -1128,9 +1151,8 @@ void ioTerrainAndArtifactSealAreDeterministic()
         content::scenario::volcanicDescent,
         "recovery");
     require(recoveredPayload.artifactFound &&
-            (recoveryState == ScenarioStepState::ReadyToClaim ||
-             recoveryState == ScenarioStepState::Complete),
-        "returning the ship-secured Io artifact must advance the recovery mission");
+            recoveryState != ScenarioStepState::ReadyToClaim,
+        "returning the ship-secured Io artifact remains pending until dock servicing");
 }
 
 void proceduralArtifactGatesStayCenteredTenCellsBelowEntry()

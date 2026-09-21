@@ -240,6 +240,11 @@ struct RenderSnapshot {
     double launchLandingLateralVelocity = 0.0;
     bool launchLandingAuthorized = false;
     bool launchLandingLocalFrame = false;
+    bool launchDockingActive = false;
+    double launchDockHeading = 1.5707963267948966;
+    double launchDockHandoffProgress = 1.0;
+    bool launchDockRotationLocked = false;
+    std::string launchDockGuidance;
     double launchLandingBasisAngle = 1.5707963267948966;
     double launchLandingHorizontalPosition = 0.0;
     int launchFlightMode = 0;
@@ -347,6 +352,8 @@ struct RenderSnapshot {
     double miningDroneHealth = 1.0;
     double miningReturnZoneX = 0.0;
     double miningReturnZoneY = 0.0;
+    // Original terrain surface in the displayed grid, independent of ship falls.
+    double miningSurfaceRow = 0.0;
     bool miningShipPresent = false;
     bool miningAtReturnZone = false;
     double miningLoad = 0.0;

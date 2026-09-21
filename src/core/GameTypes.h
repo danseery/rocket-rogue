@@ -1072,6 +1072,17 @@ struct ArtifactRecord {
     bool rewardApplied = false;
 };
 
+enum class ArtifactCustody { Ship, Wreck, Banked };
+struct MissionArtifact {
+    std::string key, sourceSiteId, scenarioId, stepId, requiredDockId, bankedAt;
+    ArtifactRecord artifact;
+    ArtifactCustody owner = ArtifactCustody::Ship;
+    std::uint64_t wreckId = 0;
+    bool completed = false;
+    bool experienceAwarded = false;
+    bool objectiveExperienceAwarded = false;
+};
+
 enum class ScenarioSource {
     Authored,
     Procedural
@@ -1098,7 +1109,8 @@ enum class ScenarioEventKind {
     // authored destination beat. It deliberately carries the destination in
     // ScenarioEvent::targetId rather than teaching launch code story IDs.
     DestinationReached,
-    SurfaceLanded
+    SurfaceLanded,
+    ArtifactBanked
 };
 
 enum class ScenarioActionKind {
@@ -1972,6 +1984,9 @@ struct MiningDepthLayerState {
 };
 
 struct MiningRunState {
+    // -1 means an older save has no reliable delivery history.
+    int deliveredOreUnits = -1;
+    int missionOreUnits = -1;
     int rigContactX = -1, rigContactY = -1;
     double rigContactNormalX = 0, rigContactNormalY = 0;
     bool rigContactPassage = false;
@@ -2207,7 +2222,7 @@ struct OrbitalWorkState {
     bool active() const { return phase != OrbitalWorkPhase::Inactive; }
 };
 
-enum class FlightMode { Travel, Orbit, Landing };
+enum class FlightMode { Travel, Orbit, Landing, Docking };
 
 struct FlightHandoffState {
     FlightMode from = FlightMode::Travel;
@@ -2240,6 +2255,22 @@ struct LandingState {
     bool siteCommitted = false;
     bool departureActive = false;
     bool launchSupportActive = false;
+};
+
+// Earth service docking is a local, zero-gravity maneuver. Coordinates are
+// relative to the fixed dock centre; +Y faces out through the tongs.
+struct DockingState {
+    std::string dockId;
+    double positionX = 0.0, positionY = 0.0;
+    double velocityX = 0.0, velocityY = 0.0;
+    double dockHeading = 1.5707963267948966;
+    double captureSeconds = 0.0;
+    double handoffSeconds = 1.25;
+    bool active = false;
+    bool rotationLocked = false;
+    bool enteredMouth = false;
+    bool settlementReady = false;
+    bool reentrySuppressed = false;
 };
 
 struct FlightRunState {
@@ -2298,6 +2329,7 @@ struct FlightRunState {
     double angularVelocity = 0.0;
     OrbitCaptureState orbit;
     LandingState landing;
+    DockingState docking;
     bool flybyRecorded = false;
     bool orbitCelebrationPending = false;
     bool touchdownCelebrationPending = false;
@@ -2377,7 +2409,15 @@ struct ExpeditionDecisionState {
     bool awaitingAscent = false;
 };
 enum class MissionScanIntro { Unseen, Showing, Complete };
+struct ArrivalTutorialProgress {
+    bool orbit = false, scanned = false, drilled = false, drillBypassed = false;
+    bool landed = false, acknowledged = false;
+};
 struct PersistentExpeditionState {
+    bool arrivalTutorialsLoaded = true;
+    std::array<ArrivalTutorialProgress, 2> arrivalTutorials{}; // Moon, Mars.
+    std::vector<MissionArtifact> artifacts;
+    bool artifactCustodyLoaded = false;
     bool travelInitialized = false;
     bool openingInitialized = false;
     bool departureHistoryKnown = false;

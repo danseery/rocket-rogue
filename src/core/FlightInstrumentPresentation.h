@@ -12,6 +12,13 @@
 
 namespace rocket {
 
+inline std::string landingVerticalSpeedText(double velocity)
+{
+    // Presentation only: suppress tiny idle corrections and negative zero.
+    constexpr double deadZoneMetersPerSecond = 0.2;
+    return display::fixed(std::abs(velocity) < deadZoneMetersPerSecond ? 0.0 : velocity, 1) + " m/s";
+}
+
 struct FlightInstrumentPresentation {
     bool visible = false;
     double speed = 0.0;
@@ -42,6 +49,8 @@ inline FlightInstrumentPresentation launchFlightInstruments(
     if (flight.physicalFlight) {
         const double speed = flight.mode == FlightMode::Landing
             ? std::hypot(flight.landing.lateralVelocity,flight.landing.verticalVelocity)
+            : flight.mode == FlightMode::Docking
+            ? std::hypot(flight.docking.velocityX, flight.docking.velocityY) * flight_geometry::velocityToMetersPerSecond
             : std::hypot(flight.velocityX, flight.velocityY) * flight_geometry::velocityToMetersPerSecond;
         const double throttle = std::clamp(std::abs(flight.selectedThrottle), 0.0, 1.0);
         return {

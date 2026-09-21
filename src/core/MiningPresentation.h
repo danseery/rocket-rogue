@@ -20,6 +20,35 @@
 
 namespace rocket {
 
+inline std::string miningPayloadOwnershipText(const GameState& state, const ContentCatalog& catalog) {
+    (void)catalog;
+    const auto units = [](const MaterialInventory& m) {
+        return std::max(0,m.common) + std::max(0,m.rare) + std::max(0,m.exotic);
+    };
+    const auto& mining = state.run.mining;
+    int drones = 0;
+    for (const auto& drone : mining.miniDrones) drones += units(drone.haulMaterials);
+    return "RIG " + std::to_string(units(mining.temporaryMaterials)) +
+        " · DRONES " + std::to_string(drones) +
+        " · SHIP " + std::to_string(units(mining.stowedMaterials));
+}
+
+inline std::string miningPayloadContractText(const GameState& state, const ContentCatalog& catalog) {
+    const auto& mining = state.run.mining;
+    std::string text;
+    if (mining.deliveredOreUnits >= 0) {
+        text = "Delivered " + std::to_string(mining.deliveredOreUnits);
+    }
+    if (mining.missionOreUnits >= 0) {
+        if (!text.empty()) text += " · ";
+        text += "Mission " + std::to_string(mining.missionOreUnits);
+    }
+    if (!text.empty()) text += " · ";
+    return text + "Cargo " +
+        std::to_string(shipHoldUsed(state)) + "/" +
+        std::to_string(shipHoldCapacity(state,catalog));
+}
+
 struct MiningRunPresentation {
     std::vector<PanelMetricPresentation> metrics;
     std::vector<PanelMetricPresentation> payloadMetrics;
@@ -731,13 +760,12 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
             std::move(drillCssClass),
             (arenaRules.mechanics.drillHeat && (mining.drilling || mining.drillHeat > 0.01)) ? "HEAT" : "",
             (arenaRules.mechanics.drillHeat && (mining.drilling || mining.drillHeat > 0.01)) ? metricValue(text::labels::drillHeat, "0%") : ""},
-        {"RIG LOAD",
+        {evaActive ? "EVA LOAD" : "RIG LOAD",
             std::to_string(static_cast<int>(std::round(load.currentLoad))) + "/" +
                 std::to_string(static_cast<int>(std::round(load.capacity))),
             loadBandCss(load.band),
-            std::string(rigLoadBandName(load.band)),
-            "SHIP " + std::to_string(shipHoldUsed(state)) + "/" +
-                std::to_string(shipHoldCapacity(state, catalog))}
+            {},
+            {}}
     }};
     const auto droneOre = [&](auto member) {
         int total = 0;

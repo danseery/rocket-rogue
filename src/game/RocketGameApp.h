@@ -349,6 +349,7 @@ private:
         RecoveryMethod method,
         LaunchFailureCause failureCause = LaunchFailureCause::None);
     void prepareSurfaceArrivalIfNeeded(const Destination& destination, std::string_view zoneId = {});
+    void restoreSurfaceFlightContext();
     void storeOrbitalSite();
     bool shipInsideOrbitalWorkZone() const;
     bool orbitalLandingEligible() const;
@@ -418,6 +419,9 @@ private:
     void previewSyntheticControllerInput(const ControllerFrame& frame, double realTimeSeconds);
     void openControllerSystemMenu(PauseReason reason);
     void clearControllerPause();
+    enum class GameplayActionOutcome { Rejected, Applied, TransitionStarted, OpenedUi };
+    void finishGameplayAction(GameplayActionOutcome outcome);
+    std::uint64_t gameplayActionHandoffRevision_ = 0;
     bool realtimeControllerContext(InputContext context) const;
     InputContext gameplayInputContext() const;
     void updateControllerHapticState();

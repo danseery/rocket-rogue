@@ -210,6 +210,20 @@ void focusPass(int width, int height)
     assert(focused->GetBox().GetSize(Rml::BoxArea::Border) == originalSize);
     ui.setControllerPresentation(true, rocket::ControllerFamily::PlayStation);
     assert(soleFocus(ui)->QuerySelector(".rr-controller-confirm-glyph")->GetInnerRML() == "Circle");
+    // Mining buttons clip overflow and use a tall line-height. The confirm
+    // badge must stay entirely inside the control, including its text.
+    ui.setPanelPresentation(panel("<div class=\"mining-command-dock\"><div class=\"system-actions\">"
+        + button("repair", "data-ui-default-focus=\"1\"") + "</div></div>"));
+    ui.render();
+    auto* miningButton = soleFocus(ui);
+    auto* badge = miningButton->QuerySelector(".rr-controller-confirm-glyph");
+    const auto buttonTop = miningButton->GetAbsoluteOffset(Rml::BoxArea::Border).y;
+    const auto badgeTop = badge->GetAbsoluteOffset(Rml::BoxArea::Border).y;
+    assert(badgeTop >= buttonTop);
+    assert(badgeTop + badge->GetBox().GetSize(Rml::BoxArea::Border).y <=
+        buttonTop + miningButton->GetBox().GetSize(Rml::BoxArea::Border).y);
+    assert(badge->GetInnerRML() == "Circle");
+    ui.setPanelPresentation(presentation);
     ui.requestFocus("land");
     presentation.contentMarkup += "<p>Telemetry update</p>";
     ui.setPanelPresentation(presentation);

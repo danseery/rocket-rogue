@@ -110,7 +110,7 @@ const SystemDefinition &solarSystemDefinition()
              1.42,
              1,
              "earth.dock",
-             "Bank cargo and service ship",
+             "Service ship and secure cargo",
              "Surface impact",
              true},
             {"moon",
