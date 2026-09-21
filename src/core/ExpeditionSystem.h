@@ -11,9 +11,11 @@ namespace service_dock {
 // Enter the close-up only when the dock is visually relevant. The wider
 // exit boundary prevents an abort/re-entry loop while the player backs away.
 inline constexpr double approachRadius = 1.0;
-inline constexpr double exitRadius = 1.5;
-// Expand both distance and velocity at the handoff, preserving time to the
-// dock center while leaving room ahead of the enlarged local collision hull.
+inline constexpr double exitRadius = 1.25;
+inline constexpr double entrySpeedScale = 0.35;
+inline constexpr double entryMaxSpeed = 0.45; // Local units/s, including lateral motion.
+// Convert system distances to the expanded close-up frame. Entry velocity is
+// converted on the same scale, then reduced once for precision maneuvering.
 inline constexpr double localUnitsPerSystemUnit = 4.0;
 // The service-dock art is a U-shaped cradle which opens along +Y. Keep all
 // physical and presentation measurements in this shared dock-local frame so

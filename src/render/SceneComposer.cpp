@@ -1,5 +1,6 @@
 #include "core/RigGeometry.h"
 #include "render/SceneComposer.h"
+#include <optional>
 #include "core/ExpeditionSystem.h"
 
 #include "core/FlightInstrumentLayout.h"
@@ -566,6 +567,13 @@ FlightCameraView physicalFlightCamera(
     float approachBlendOverride)
 {
     FlightCameraView result;
+    if (snapshot.flightCameraOverride) {
+        const auto& c = snapshot.flightCameraTransform;
+        result.camera = {{c[0], c[1]}, {c[2], c[3]}, c[4], c[5]};
+        result.transfer = result.camera;
+        result.approachBlend = approachBlendOverride;
+        return result;
+    }
     if (snapshot.launchDockingActive) {
         const float handoff = smootherstep(static_cast<float>(snapshot.launchDockHandoffProgress));
         double startX = snapshot.launchDockHandoffX;
@@ -1484,13 +1492,22 @@ void SceneComposer::setTextureReady(TextureId texture, bool ready) noexcept
     textureReady_[index] = ready;
 }
 
-const ScenePacket& SceneComposer::compose(const RenderSnapshot& snapshot)
+const ScenePacket& SceneComposer::compose(const RenderSnapshot& inputSnapshot)
 {
+    // Only copy during the short retarget blend. All draw paths then consume
+    // one camera while gameplay guidance and marker coordinates remain real.
+    std::optional<RenderSnapshot> blendedSnapshot;
+    if (inputSnapshot.screen == Screen::Flight && inputSnapshot.launchPhysicalFlight)
+        updateFlightCameraPresentation(inputSnapshot);
+    if (flightCameraPresentation_.transitionStart >= 0.0) {
+        blendedSnapshot = inputSnapshot;
+        blendedSnapshot->flightCameraOverride = true;
+        blendedSnapshot->flightCameraTransform = flightCameraPresentation_.current;
+    }
+    const auto& snapshot = blendedSnapshot ? *blendedSnapshot : inputSnapshot;
     if (snapshot.screen != Screen::Flight || !snapshot.launchPhysicalFlight) {
         resetFlightTrajectoryPresentation();
         resetFlightCameraPresentation();
-    } else {
-        updateFlightCameraPresentation(snapshot);
     }
     if (snapshot.screen != Screen::Mining && !snapshot.surfaceArrivalPrepared) {
         previousMiningActive_ = false;
@@ -6838,6 +6855,31 @@ void SceneComposer::updateFlightCameraPresentation(const RenderSnapshot& snapsho
         approachBlend,
         0.0,
         1.0));
+    auto& state = flightCameraPresentation_;
+    const bool eligible = snapshot.systemTravel && !snapshot.launchDockingActive &&
+        !snapshot.launchLandingLocalFrame && snapshot.launchLandingBlend <= 0.0 &&
+        !snapshot.surfaceArrivalPrepared;
+    if (!eligible) { state.initialized = false; state.transitionStart = -1.0; return; }
+    const auto target = physicalFlightCamera(snapshot, state.approachBlend).camera;
+    const double now = presentationTimeSeconds_ >= 0.0 ? presentationTimeSeconds_ : snapshot.animationTime;
+    const std::string frame = std::to_string(static_cast<int>(snapshot.systemLocation.frame)) + snapshot.systemLocation.bodyId;
+    if (state.initialized && frame == state.frameId && state.targetId != snapshot.flightGuidance.targetId) {
+        state.from = state.current;
+        state.transitionStart = now;
+    } else if (!state.initialized || frame != state.frameId) {
+        state.transitionStart = -1.0;
+    }
+    auto camera = target;
+    if (state.transitionStart >= 0.0) {
+        const float progress = static_cast<float>(std::clamp((now - state.transitionStart) / 1.25, 0.0, 1.0));
+        const auto& c = state.from;
+        camera = blendCamera({{c[0],c[1]}, {c[2],c[3]}, c[4],c[5]}, target, smootherstep(progress));
+        if (progress >= 1.0F) state.transitionStart = -1.0;
+    }
+    state.current = {camera.focus.x,camera.focus.y,camera.anchor.x,camera.anchor.y,camera.scale,camera.rotation};
+    state.targetId = snapshot.flightGuidance.targetId;
+    state.frameId = frame;
+    state.initialized = true;
 }
 
 void SceneComposer::resetFlightCameraPresentation() noexcept
@@ -7450,10 +7492,17 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                 const auto dock = systemDockPosition(body);
                 const auto d = view.camera.point(dock.x-offset.x,dock.y-offset.y);
                 drawEllipseLine(d.x,d.y,.035F,.035F,{.3F,1,.8F,1},24,0,2*kPi);
-                if (snapshot.launchUndockReady && body.id == "earth") {
-                    const Vec2 departure = view.camera.vector(
-                        std::cos(snapshot.launchHeading), std::sin(snapshot.launchHeading));
-                    drawSpriteRotated(d.x,d.y,.058F,.058F,departure.x,departure.y,
+                if (body.id == "earth") {
+                    // Match the berth's entry bearing before the close-up.
+                    // Once docking starts its saved heading is locked. At
+                    // departure the ship still shares the dock center, so use
+                    // its waypoint-facing heading until it has moved clear.
+                    const double dx = ship.position.x - dock.x;
+                    const double dy = ship.position.y - dock.y;
+                    const double bearing = snapshot.launchUndockReady || std::hypot(dx, dy) < 1e-6
+                        ? snapshot.launchHeading : std::atan2(dy, dx);
+                    const Vec2 outward = view.camera.vector(std::cos(bearing), std::sin(bearing));
+                    drawSpriteRotated(d.x,d.y,.058F,.058F,outward.x,outward.y,
                         {1,1,1,1},static_cast<int>(TextureId::ServiceDock)-1);
                 } else {
                     drawSprite(d.x,d.y,.058F,.058F,{1,1,1,1},static_cast<int>(TextureId::ServiceDock)-1);

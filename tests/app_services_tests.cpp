@@ -1,4 +1,5 @@
 #include "game/GameRunner.h"
+#include "render/SceneComposer.h"
 #include "game/GamePanel.h"
 #include "game/GameRmlUi.h"
 #include "game/IRmlRenderHost.h"
@@ -2889,6 +2890,41 @@ void mouseRigInput()
 
 int main(int argc, char** argv)
 {
+    {
+        rocket::SceneComposer composer;
+        composer.setViewport({1280,800,1280,800,1.0F});
+        rocket::RenderSnapshot view;
+        view.screen = rocket::Screen::Flight;
+        view.launchPhysicalFlight = view.systemTravel = true;
+        view.system = rocket::solarSystemDefinition();
+        view.systemLocation.frame = rocket::CoordinateFrame::System;
+        view.launchApproachBlend = view.launchLandingBlend = 0.0;
+        view.launchPositionX = view.launchPositionY = 50.0;
+        view.flightGuidance.targetId = "wreck:1";
+        view.flightGuidance.targetPosition = {52,50};
+        composer.setPresentationTime(10.0);
+        const auto before = composer.compose(view).flightPointer;
+        view.flightGuidance.targetId = "earth";
+        view.flightGuidance.targetPosition = {50,54};
+        const auto changed = composer.compose(view).flightPointer;
+        assert(before.active && changed.active);
+        assert(std::hypot(changed.shipX-before.shipX,changed.shipY-before.shipY) < .01);
+        composer.setPresentationTime(10.625);
+        const auto middle = composer.compose(view).flightPointer;
+        assert(std::hypot(middle.shipX-before.shipX,middle.shipY-before.shipY) > 1.0);
+        // A second retarget during the blend must start at the displayed pose.
+        view.flightGuidance.targetId = "wreck:2";
+        view.flightGuidance.targetPosition = {48,51};
+        const auto interrupted = composer.compose(view).flightPointer;
+        assert(std::hypot(interrupted.shipX-middle.shipX,interrupted.shipY-middle.shipY) < .01);
+        composer.setPresentationTime(11.875);
+        const auto finished = composer.compose(view).flightPointer;
+        rocket::SceneComposer fresh;
+        fresh.setViewport({1280,800,1280,800,1.0F});
+        const auto expected = fresh.compose(view).flightPointer;
+        assert(std::hypot(finished.shipX-expected.shipX,finished.shipY-expected.shipY) < .01);
+        assert(view.launchPositionX == 50 && view.launchPositionY == 50);
+    }
 #if defined(_MSC_VER)
     _set_error_mode(_OUT_TO_STDERR);
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);

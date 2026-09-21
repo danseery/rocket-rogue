@@ -141,6 +141,13 @@ void beginEarthDocking(PersistentExpeditionState& e, FlightRunState& flight, con
     docking.positionY = (pose.position.y - marker.y) * service_dock::localUnitsPerSystemUnit;
     docking.velocityX = (pose.velocity.x - earth.velocity.x) * service_dock::localUnitsPerSystemUnit;
     docking.velocityY = (pose.velocity.y - earth.velocity.y) * service_dock::localUnitsPerSystemUnit;
+    // Ease into precision maneuvering once, without cancelling direction or
+    // providing ongoing braking. Cap fast arrivals before the camera zoom.
+    const double entrySpeed = std::hypot(docking.velocityX, docking.velocityY);
+    const double entryScale = entrySpeed > 1e-9
+        ? std::min(service_dock::entrySpeedScale, service_dock::entryMaxSpeed / entrySpeed) : 1.0;
+    docking.velocityX *= entryScale;
+    docking.velocityY *= entryScale;
     docking.dockHeading = std::atan2(docking.positionY, docking.positionX);
     docking.rotationLocked = true;
     docking.handoffStartX = docking.positionX;

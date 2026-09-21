@@ -4293,6 +4293,38 @@ void testCommittedDepartureRendering()
     assert(std::abs(outgoing.axisXx-orbital.axisXx)<.02F);
 }
 
+void testServiceDockTracksShipBeforeApproach()
+{
+    using namespace rocket;
+    RenderSnapshot snapshot;
+    snapshot.screen = Screen::Flight;
+    snapshot.launchPhysicalFlight = snapshot.systemTravel = true;
+    snapshot.system = solarSystemDefinition();
+    snapshot.systemLocation.frame = CoordinateFrame::System;
+    const auto dockPosition = systemDockPosition(*systemBody(snapshot.system, "earth"));
+    snapshot.flightGuidance.targetPosition = dockPosition;
+    snapshot.flightGuidance.targetId = "earth";
+    SceneComposer composer;
+    composer.setViewport({1600, 900, 1600, 900, 1.0F});
+    composer.setTextureReady(TextureId::RocketClosed, true);
+    composer.setTextureReady(TextureId::ServiceDock, true);
+    for (const double angle : {0.0, 1.1, 2.8, -1.4}) {
+        snapshot.launchPositionX = dockPosition.x + 2.0 * std::cos(angle);
+        snapshot.launchPositionY = dockPosition.y + 2.0 * std::sin(angle);
+        snapshot.launchHeading = angle;
+        for (const bool stagedDeparture : {false, true}) {
+            snapshot.launchUndockReady = stagedDeparture;
+            const auto& packet = composer.compose(snapshot);
+            const auto dock = spriteInstance(packet, TextureId::ServiceDock, 0, 0, 1, 1);
+            const auto ship = spriteInstance(packet, TextureId::RocketClosed, 0, 0, 1, 1);
+            const float dx = ship.centerX - dock.centerX, dy = ship.centerY - dock.centerY;
+            const float norm = std::hypot(dx, dy) * std::hypot(dock.axisYx, dock.axisYy);
+            assert(norm > 0.0F);
+            assert((dx * dock.axisYx + dy * dock.axisYy) / norm > .999F);
+        }
+    }
+}
+
 void testServiceDockUsesBalancedScaleAndDeterministicHandoff()
 {
     using namespace rocket;
@@ -4371,6 +4403,7 @@ int main() try
     testEnemyThemesAndAnimationPriorityUseTheSharedSpriteContract();
     testFlightInstrumentClusterUsesAtlasNeedlesAndBlinkingWarning();
     testLaunchUsesAttachedAnimatedSideFlames();
+    testServiceDockTracksShipBeforeApproach();
     testServiceDockUsesBalancedScaleAndDeterministicHandoff();
     testMiningSkyAndTunnelBackdrop();
     testDistantEarthMarkerUsesViewportEdgeAndPixelSize();

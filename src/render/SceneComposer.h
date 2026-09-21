@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <string_view>
+#include <string>
 #include <vector>
 
 namespace rocket {
@@ -216,6 +217,10 @@ private:
 
     struct FlightCameraPresentationState {
         float approachBlend = 0.0F;
+        bool initialized = false;
+        std::string targetId, frameId;
+        double transitionStart = -1.0;
+        std::array<float, 6> from {}, current {};
     };
 
     SceneViewport viewport_;
