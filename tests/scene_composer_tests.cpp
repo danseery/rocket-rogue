@@ -2,6 +2,7 @@
 #include "core/Tuning.h"
 #include "core/FlightInstrumentLayout.h"
 #include "core/FlightSystem.h"
+#include "core/ExpeditionSystem.h"
 #include "render/SceneAtlas.h"
 #include "render/SceneClip.h"
 #include "render/SceneComposer.h"
@@ -4292,6 +4293,59 @@ void testCommittedDepartureRendering()
     assert(std::abs(outgoing.axisXx-orbital.axisXx)<.02F);
 }
 
+void testServiceDockUsesBalancedScaleAndDeterministicHandoff()
+{
+    using namespace rocket;
+    RenderSnapshot snapshot;
+    snapshot.screen = Screen::Flight;
+    snapshot.launchPhysicalFlight = true;
+    snapshot.systemTravel = true;
+    snapshot.system = solarSystemDefinition();
+    snapshot.launchDockingActive = true;
+    snapshot.launchDockHeading = 1.10;
+    snapshot.launchHeading = snapshot.launchDockHeading + 3.14159265358979323846;
+    snapshot.launchPositionX = .16;
+    snapshot.launchPositionY = 1.05;
+    snapshot.launchDockHandoffX = .40;
+    snapshot.launchDockHandoffY = 1.86;
+    snapshot.launchDockHandoffProgress = 1.0;
+
+    SceneComposer composer;
+    composer.setViewport({1600, 900, 1600, 900, 1.0F});
+    composer.setTextureReady(TextureId::RocketClosed, true);
+    composer.setTextureReady(TextureId::ServiceDock, true);
+    composer.setTextureReady(TextureId::Earth, true);
+    const auto& packet = composer.compose(snapshot);
+    const auto ship = spriteInstance(packet, TextureId::RocketClosed, 0, 0, 1, 1);
+    const auto dock = spriteInstance(packet, TextureId::ServiceDock, 0, 0, 1, 1);
+    const float shipLength = 2.0F * std::hypot(ship.axisYx, ship.axisYy);
+    const float dockLength = 2.0F * std::hypot(dock.axisYx, dock.axisYy);
+    assert(shipLength / dockLength > .35F && shipLength / dockLength < .42F);
+    snapshot.launchPositionX = 0.0;
+    snapshot.launchPositionY = service_dock::approachRadius * service_dock::localUnitsPerSystemUnit;
+    const auto& widePacket = composer.compose(snapshot);
+    const auto distantShip = spriteInstance(widePacket, TextureId::RocketClosed, 0, 0, 1, 1);
+    const auto distantDock = spriteInstance(widePacket, TextureId::ServiceDock, 0, 0, 1, 1);
+    const float distantRatio = std::hypot(distantShip.axisYx, distantShip.axisYy) /
+        std::hypot(distantDock.axisYx, distantDock.axisYy);
+    assert(std::abs(distantRatio - shipLength / dockLength) < .002F);
+    assert(std::abs(distantShip.centerY) < .9F && std::abs(distantDock.centerY) < .9F);
+    snapshot.launchPositionX = .16;
+    snapshot.launchPositionY = 1.05;
+    assert(service_dock::captureCenterY - service_dock::guideHalfDepth > service_dock::backstopY);
+    assert(service_dock::captureCenterY + service_dock::guideHalfDepth < service_dock::mouthY);
+
+    snapshot.launchDockHandoffProgress = .52;
+    const auto running = spriteInstance(composer.compose(snapshot), TextureId::RocketClosed, 0, 0, 1, 1);
+    SceneComposer restored;
+    restored.setViewport({1600, 900, 1600, 900, 1.0F});
+    restored.setTextureReady(TextureId::RocketClosed, true);
+    restored.setTextureReady(TextureId::ServiceDock, true);
+    restored.setTextureReady(TextureId::Earth, true);
+    const auto reloaded = spriteInstance(restored.compose(snapshot), TextureId::RocketClosed, 0, 0, 1, 1);
+    assert(std::hypot(running.centerX - reloaded.centerX, running.centerY - reloaded.centerY) < .002F);
+}
+
 } // namespace
 
 int main() try
@@ -4317,6 +4371,7 @@ int main() try
     testEnemyThemesAndAnimationPriorityUseTheSharedSpriteContract();
     testFlightInstrumentClusterUsesAtlasNeedlesAndBlinkingWarning();
     testLaunchUsesAttachedAnimatedSideFlames();
+    testServiceDockUsesBalancedScaleAndDeterministicHandoff();
     testMiningSkyAndTunnelBackdrop();
     testDistantEarthMarkerUsesViewportEdgeAndPixelSize();
     testPhysicalMoonFlightStartsOnScreenAtEarthDeparture();

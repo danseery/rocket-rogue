@@ -2264,13 +2264,24 @@ struct DockingState {
     double positionX = 0.0, positionY = 0.0;
     double velocityX = 0.0, velocityY = 0.0;
     double dockHeading = 1.5707963267948966;
+    double dockAngularVelocity = 0.0;
     double captureSeconds = 0.0;
     double handoffSeconds = 1.25;
+    double handoffStartX = 0.0, handoffStartY = 0.0;
+    double securingSeconds = 0.0;
+    double securingStartX = 0.0, securingStartY = 0.0;
+    double securingStartHeading = 0.0;
     bool active = false;
     bool rotationLocked = false;
     bool enteredMouth = false;
+    bool securing = false;
     bool settlementReady = false;
     bool reentrySuppressed = false;
+    bool contactEpisode = false;
+    double contactClearSeconds = 0.0;
+    // Transient effects are never replayed after loading a save.
+    double bumpAge = 1.0, bumpStrength = 0.0;
+    double bumpX = 0.0, bumpY = 0.0, bumpNormalX = 0.0, bumpNormalY = 0.0;
 };
 
 struct FlightRunState {

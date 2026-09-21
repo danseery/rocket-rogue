@@ -1268,8 +1268,112 @@ void persistentExpeditionTests()
         (void)advanceExpeditionFlight(expedition, flight, model, expeditionEnvironment(state, catalog), system, {}, .01);
         check(earthDockingActive(flight) && !expedition.cruise.active,
             "Earth approach must enter the local docking maneuver at any relative speed");
+        check(std::abs(flight.docking.positionX - .90 * service_dock::localUnitsPerSystemUnit) < 1e-6 &&
+              std::abs(flight.docking.velocityX + 1.6 * service_dock::localUnitsPerSystemUnit) < 1e-6,
+            "Dock handoff must convert distance and velocity together without shortening time to center");
+        const auto entrySystemPose = convertSystemFrame(expedition.location, CoordinateFrame::System, "", system);
+        check(std::abs(entrySystemPose.position.x - dock.x - .90) < 1e-6 &&
+              std::abs(entrySystemPose.velocity.x - earth->velocity.x + 1.6) < 1e-6,
+            "Expanded dock coordinates must round-trip to the unchanged system pose");
+        // A typical .1-system-unit/s approach must still have several seconds
+        // before the nose reaches the rails after the full camera handoff.
+        auto reactionFlight = flight;
+        auto reactionExpedition = expedition;
+        reactionFlight.docking.velocityX = -.1 * service_dock::localUnitsPerSystemUnit;
+        reactionFlight.heading = 3.14159265358979323846;
+        for (int frame = 0; frame < 25; ++frame)
+            (void)advanceExpeditionFlight(reactionExpedition, reactionFlight, model,
+                expeditionEnvironment(state, catalog), system, {}, .05);
+        const double clearance = reactionFlight.docking.positionX - service_dock::mouthY - service_dock::shipLength * .5;
+        check(clearance / std::abs(reactionFlight.docking.velocityX) > 5.0 &&
+              !reactionFlight.docking.enteredMouth && !reactionFlight.docking.contactEpisode,
+            "Completed zoom must leave approach room rather than placing the nose inside the catch rails");
+        check(flight.docking.rotationLocked && flight.docking.dockAngularVelocity == 0.0 &&
+              std::abs(flightWrappedAngleDelta(flight.docking.dockHeading,
+                  std::atan2(flight.docking.positionY, flight.docking.positionX))) < 1e-6,
+            "Dock must aim at the ship center once on entry and lock immediately");
+        const double entryDockHeading = flight.docking.dockHeading;
+        flight.docking.positionX = 1.2 * std::cos(entryDockHeading);
+        flight.docking.positionY = 1.2 * std::sin(entryDockHeading);
+        flight.docking.velocityX = flight.docking.velocityY = 0.0;
+        flight.docking.rotationLocked = false;
+        flight.docking.dockAngularVelocity = .3;
+        for (int frame = 0; frame < 20; ++frame)
+            (void)advanceExpeditionFlight(expedition, flight, model,
+                expeditionEnvironment(state, catalog), system, {}, .05);
+        check(flight.docking.dockHeading == entryDockHeading && flight.docking.rotationLocked &&
+              flight.docking.dockAngularVelocity == 0.0,
+            "Dock must not track a circling ship or resume legacy angular motion");
 
-        flight.docking.positionX = service_dock::exitRadius + .01;
+        constexpr double pi = 3.14159265358979323846;
+        for (const double approachHeading : {0.0, pi, pi / 2.0, -pi / 2.0, pi / 4.0, -pi / 4.0,
+                                             3.0 * pi / 4.0, -3.0 * pi / 4.0}) {
+            for (const double steer : {-1.0, 1.0}) {
+                flight.docking.dockHeading = approachHeading;
+                flight.docking.positionX = 1.2 * std::cos(approachHeading);
+                flight.docking.positionY = 1.2 * std::sin(approachHeading);
+                flight.heading = approachHeading + pi;
+                flight.angularVelocity = 0.0;
+                const double beforeHeading = flight.heading;
+                FlightInput input;
+                input.steer = steer;
+                (void)advanceExpeditionFlight(expedition, flight, model,
+                    expeditionEnvironment(state, catalog), system, input, .05);
+                check((flight.heading - beforeHeading) * steer < 0.0 && flight.angularVelocity * steer < 0.0,
+                    "Docking A/Left must rotate counterclockwise and D/Right clockwise from every approach side");
+                check(flight.docking.dockHeading == approachHeading,
+                    "Steering must never rotate the dock");
+            }
+        }
+        for (const double shipHeading : {-.01, .01}) {
+            flight.docking.dockHeading = pi / 2.0;
+            flight.docking.positionX = 0.0;
+            flight.docking.positionY = 1.2;
+            flight.heading = shipHeading;
+            flight.angularVelocity = 0.0;
+            FlightInput input;
+            input.steer = 1.0;
+            (void)advanceExpeditionFlight(expedition, flight, model,
+                expeditionEnvironment(state, catalog), system, input, .05);
+            check(flight.angularVelocity < 0.0,
+                "Docking clockwise steering must stay consistent through horizontal");
+        }
+
+        for (const double shipHeading : {0.0, pi / 2.0, pi, -pi / 2.0, pi / 4.0}) {
+            for (const double strafe : {-1.0, 1.0}) {
+                flight.docking.dockHeading = pi / 2.0;
+                flight.docking.positionX = 0.0;
+                flight.docking.positionY = 1.2;
+                flight.docking.velocityX = flight.docking.velocityY = 0.0;
+                flight.heading = shipHeading;
+                flight.angularVelocity = 0.0;
+                FlightInput input;
+                input.strafe = strafe;
+                (void)advanceExpeditionFlight(expedition, flight, model,
+                    expeditionEnvironment(state, catalog), system, input, .01);
+                const double forwardX = std::cos(shipHeading), forwardY = std::sin(shipHeading);
+                const double rightX = forwardY, rightY = -forwardX;
+                const double lateral = flight.docking.velocityX * rightX + flight.docking.velocityY * rightY;
+                const double axial = flight.docking.velocityX * forwardX + flight.docking.velocityY * forwardY;
+                check(lateral * strafe > 0.0 && std::abs(axial) < 1e-9 &&
+                      flight.selectedThrottle == 0.0 && flight.heading == shipHeading,
+                    "Docking strafe must apply only sideways ship-relative thrust without reverse thrust or rotation");
+            }
+        }
+        const double forwardX = std::cos(flight.heading), forwardY = std::sin(flight.heading);
+        const double rightX = forwardY, rightY = -forwardX;
+        flight.docking.velocityX = rightX * .7 + forwardX * .2;
+        flight.docking.velocityY = rightY * .7 + forwardY * .2;
+        FlightInput counterThrust;
+        counterThrust.strafe = -1.0;
+        (void)advanceExpeditionFlight(expedition, flight, model,
+            expeditionEnvironment(state, catalog), system, counterThrust, .01);
+        const double remainingLateral = flight.docking.velocityX * rightX + flight.docking.velocityY * rightY;
+        const double remainingAxial = flight.docking.velocityX * forwardX + flight.docking.velocityY * forwardY;
+        check(remainingLateral > 0.0 && remainingLateral < .7 && std::abs(remainingAxial - .2) < 1e-9,
+            "Ship-relative strafe must counter lateral drift without instantly cancelling momentum or reversing thrust");
+
+        flight.docking.positionX = service_dock::exitRadius * service_dock::localUnitsPerSystemUnit + .01;
         flight.docking.positionY = 0.0;
         flight.docking.velocityX = 0.0;
         flight.docking.velocityY = 0.0;
@@ -1291,17 +1395,35 @@ void persistentExpeditionTests()
         check(!flight.docking.reentrySuppressed,
             "Outer-radius clearance must re-arm future Earth docking approaches");
 
+        expedition.location = {system.id, "", CoordinateFrame::System,
+            {dock.x + service_dock::approachRadius - .01, dock.y},
+            earth->velocity, 0.0, {}};
+        restoreSystemLocation(expedition.location, flight);
+        flight.active = flight.physicalFlight = true;
+        flight.mode = FlightMode::Travel;
+        flight.docking = {};
+        refreshExpeditionTrajectory(expedition, flight, model,
+            expeditionEnvironment(state, catalog), system);
+        check(!flight.predictedTrajectory.empty(),
+            "Earth approach must retain a global trajectory up to the local handoff");
+        const auto forecastEnd = flight.predictedTrajectory.back();
+        check(std::hypot(forecastEnd.x - dock.x, forecastEnd.y - dock.y) >=
+                service_dock::approachRadius - .08 &&
+              flight.predictedTrajectory.size() < 100,
+            "Global trajectory must stop at the dock approach boundary instead of forecasting through the local berth");
+
         flight.mode = FlightMode::Docking;
         flight.active = true;
         flight.docking = {};
         flight.docking.active = true;
         flight.docking.dockId = "earth";
         flight.docking.dockHeading = 1.5707963267948966;
+        flight.docking.positionY = service_dock::captureCenterY;
         flight.docking.enteredMouth = true;
         flight.heading = flight.docking.dockHeading + 3.14159265358979323846;
-        flight.velocityX = flight.velocityY = 0.0;
+        flight.docking.velocityX = flight.docking.velocityY = 0.0;
         bool captured = false;
-        for (int frame = 0; frame < 20 && !captured; ++frame) {
+        for (int frame = 0; frame < 65 && !captured; ++frame) {
             const auto step = advanceExpeditionFlight(expedition, flight, model,
                 expeditionEnvironment(state, catalog), system, {}, .05);
             captured = step.dockCaptured;
@@ -1325,10 +1447,17 @@ void persistentExpeditionTests()
         flight.docking.positionY = .34;
         flight.docking.velocityX = -.03;
         flight.docking.velocityY = .04;
-        flight.docking.rotationLocked = true;
+        flight.docking.dockAngularVelocity = .12;
+        flight.docking.handoffStartX = .40;
+        flight.docking.handoffStartY = 1.70;
+        flight.docking.rotationLocked = false;
+        const double savedDockHeading = flight.docking.dockHeading;
         const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(state)));
         check(saved && saved->flight.mode == FlightMode::Docking && saved->flight.docking.active &&
-              saved->flight.docking.dockId == "earth" && saved->flight.docking.rotationLocked,
+              saved->flight.docking.dockId == "earth" && saved->flight.docking.rotationLocked &&
+              saved->flight.docking.dockAngularVelocity == 0.0 &&
+              std::abs(saved->flight.docking.dockHeading - savedDockHeading) < 1e-6 &&
+              std::abs(saved->flight.docking.handoffStartY - 1.70) < 1e-6,
             "An interrupted Earth docking maneuver must retain its local state across save/load");
 
         flight.mode = FlightMode::Orbit;
@@ -1344,6 +1473,84 @@ void persistentExpeditionTests()
             "A save restored after physical capture must resume dock settlement without a second approach");
     }
 
+    {
+        const auto catalog = createDefaultContent();
+        auto state = createNewGame(catalog, 0xD0C202ULL);
+        check(initializeLiveExpedition(state, catalog), "Dock feedback fixture initializes");
+        auto& flight = state.run.flight;
+        auto& expedition = state.run.expedition;
+        const auto model = expeditionFlightModel(state, catalog);
+        const auto& system = solarSystemDefinition();
+        const auto& destination = expeditionEnvironment(state, catalog);
+        expedition.undockReady = false;
+        const auto resetDock = [&] {
+            flight.active = flight.physicalFlight = true;
+            flight.hullRemaining = 100;
+            flight.mode = FlightMode::Docking;
+            flight.docking = {};
+            flight.docking.active = true;
+            flight.docking.dockId = "earth";
+            flight.docking.positionY = service_dock::captureCenterY;
+            flight.docking.rotationLocked = true;
+            flight.heading = flight.docking.dockHeading + 3.14159265358979323846;
+        };
+        const auto step = [&](double dt) {
+            return advanceExpeditionFlight(expedition, flight, model, destination, system, {}, dt);
+        };
+        resetDock();
+        flight.docking.positionX = .25;
+        flight.docking.velocityX = .01;
+        check(step(.01).dockBump && flight.hullRemaining == 100,
+            "Harmless docking contact still emits feedback");
+        for (int i = 0; i < 8; ++i) {
+            flight.docking.positionX = .25;
+            check(!step(.02).dockBump, "Sustained contact cannot repeat bump feedback");
+        }
+        flight.docking.positionX = 0;
+        flight.docking.velocityX = 0;
+        step(.08); step(.08);
+        flight.docking.positionX = .25;
+        check(step(.01).dockBump, "A clear interval rearms bump feedback");
+        const auto contactSave = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+        check(contactSave && contactSave->flight.docking.contactEpisode &&
+            contactSave->flight.docking.bumpAge >= service_dock::bumpFeedbackSeconds,
+            "Contact episode persists without replaying its transient effect");
+        resetDock();
+        flight.docking.positionX = .25;
+        flight.docking.velocityX = 2;
+        const auto hard = step(.01);
+        check(hard.dockBump && hard.dockImpactDamaging && flight.hullRemaining < 100,
+            "Hard contact produces stronger feedback and existing damage");
+        resetDock();
+        flight.hullRemaining = .1;
+        flight.docking.positionX = .25;
+        flight.docking.velocityX = 20;
+        check(step(.01).failed, "Fatal docking contact retains destruction handling");
+
+        resetDock();
+        flight.docking.enteredMouth = true;
+        flight.docking.captureSeconds = .49;
+        check(step(.02).dockSecuringStarted, "Stable capture starts the securing sequence");
+        int lockEvents = 0;
+        for (int i = 0; i < 39; ++i) {
+            const auto result = advanceExpeditionFlight(expedition, flight, model, destination, system,
+                {1, 1, false, true, 1}, .05);
+            lockEvents += result.dockClampLocked;
+            check(!result.dockCaptured && !flight.docking.settlementReady,
+                "Dock services cannot open before two seconds");
+            check(flight.selectedThrottle == 0 && flight.velocityX == 0 && flight.velocityY == 0,
+                "Securing suppresses thrust and motion");
+            if (i == 3 || i == 11 || i == 22 || i == 36) {
+                const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+                check(saved && std::abs(saved->flight.docking.securingSeconds - flight.docking.securingSeconds) < 1e-6,
+                    "Every arrival phase preserves its elapsed time across save/load");
+                flight = saved->flight;
+            }
+        }
+        check(lockEvents == 1, "Clamp lock is emitted once across repeated saves");
+        check(step(.05).dockCaptured && flight.docking.settlementReady,
+            "Two-second arrival completes with exactly one settlement handoff");
+    }
     {
         const auto catalog = createDefaultContent();
         auto fixture = [&]() {
@@ -2170,8 +2377,17 @@ void persistentExpeditionTests()
         journey.run.credits = 100;
         check(canInstallLaunchUpgrade(journey, catalog, LaunchUpgradeKind::FlightControls), "Rank I controls need no lesson gate");
         check(canInstallSurfaceDepthUpgrade(journey, catalog, SurfaceDepthUpgradeKind::BoreSystem), "Rank I bore needs no blueprint gate");
+        const auto& departureSystem = solarSystemDefinition();
+        const auto departureOrigin = convertSystemFrame(expedition.location, CoordinateFrame::System, "", departureSystem);
+        const auto departureTarget = courseTargetLocation(expedition, departureSystem, expedition.course.targetBodyId);
+        const double expectedDepartureHeading = std::atan2(
+            departureTarget->position.y - departureOrigin.position.y,
+            departureTarget->position.x - departureOrigin.position.x);
         check(departHome(journey, catalog) == ExpeditionResult::Applied, "Earth departure must enter live flight");
         check(expedition.undockReady && !ship.active && !expedition.active,"Departure waits attached to the dock");
+        check(std::abs(flightWrappedAngleDelta(ship.heading, expectedDepartureHeading)) < 1e-9 &&
+                  std::abs(flightWrappedAngleDelta(expedition.location.heading, expectedDepartureHeading)) < 1e-9,
+              "Attached ship and Earth dock departure pose must face the selected waypoint");
         const auto dockFuel=ship.fuelRemaining;
         const auto dockModel=expeditionFlightModel(journey,catalog);
         advanceExpeditionFlight(expedition,ship,dockModel,expeditionEnvironment(journey,catalog),solarSystemDefinition(),{},.05);
@@ -2242,7 +2458,9 @@ void persistentExpeditionTests()
         check(expedition.progression.expeditionLevel == 4 && expedition.cargo.materials.common == 9,
               "Cross-body travel must preserve XP and cargo");
         check(pilotTo({earth->position.x+2.1,earth->position.y-2.0}), "Return pilot must brake outside Earth's approach");
-        check(pilotTo(systemDockPosition(*earth)), "Starter pilot fixture must be able to return to Earth dock");
+        const auto dockApproach = systemDockPosition(*earth);
+        check(pilotTo({dockApproach.x + service_dock::exitRadius + .01, dockApproach.y}),
+            "Starter pilot fixture must be able to return to the outer Earth docking boundary");
         check(canDockExpedition(expedition,ship,solar), "Dock eligibility must match physical rendezvous");
         const int bankBefore = journey.meta.materials.common;
         check(dockExpedition(journey,solar) == ExpeditionResult::Applied && journey.meta.materials.common == bankBefore+9,

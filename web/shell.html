@@ -491,6 +491,8 @@
           <button type="button" data-debug-action="hangar">Hangar board</button>
           <button type="button" data-debug-action="incoming-message">Incoming Message</button>
           <button type="button" data-debug-action="expedition">Persistent Expedition</button>
+          <button type="button" data-debug-action="dock-arrival">Dock arrival sequence</button>
+          <button type="button" data-debug-action="dock-bump">Dock bump feedback</button>
           <button type="button" data-debug-action="straylight-reveal">Straylight reveal</button>
           <button type="button" data-debug-action="straylight-dock">Straylight docking</button>
           <button type="button" data-debug-action="straylight-beacons">Straylight beacon installation</button>
@@ -1100,6 +1102,8 @@
       hangar: () => rr.debugHangar(),
       "incoming-message": () => rr.debugIncomingMessage(),
       "expedition": () => rrCall("rr_debug_expedition"),
+      "dock-arrival": () => rrCall("rr_debug_dock_arrival", [0]),
+      "dock-bump": () => rrCall("rr_debug_dock_arrival", [1]),
       "straylight-reveal": () => rrCall("rr_debug_straylight", [0]),
       "straylight-dock": () => rrCall("rr_debug_straylight", [1]),
       "straylight-beacons": () => rrCall("rr_debug_straylight", [2]),

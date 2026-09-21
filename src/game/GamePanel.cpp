@@ -76,6 +76,13 @@ bool surfaceHudForContext(const PanelRenderContext& context)
 
 std::string physicalFlightControlHint(const PanelRenderContext& context)
 {
+    if (context.launchFlight && context.launchFlight->mode == FlightMode::Docking) {
+        if (!context.controllerFlightControls)
+            return "A/Left: counterclockwise · D/Right: clockwise · Shift+A/D: strafe relative to ship · W/S: forward/reverse.";
+        return context.invertFlightY
+            ? "R-stick: left counterclockwise / right clockwise · L-stick: ship-relative strafe · down forward / up reverse"
+            : "R-stick: left counterclockwise / right clockwise · L-stick: ship-relative strafe · up forward / down reverse";
+    }
     if (!context.controllerFlightControls) {
         return "A/D rotate · W/S thrust/reverse · Hold Shift: A/D strafe.";
     }
@@ -470,17 +477,79 @@ std::string autoModalTemplate(
 
 void collectSharedUtilityModals()
 {
-    const std::string controlsBody =
-        "<div class=\"detail-stack rr-detail-stack modal-body controller-controls\">"
-        "<div><strong>Menus</strong><span>Left stick or D-pad navigates. Confirm selects the highlighted action; Back returns. Right stick scrolls. Confirm and Back follow your controller settings.</span></div>"
-        "<div><strong>Shortcuts</strong><span>Menu opens this pause menu. View opens Map. North opens Inventory outside real-time play.</span></div>"
-        "<div><strong>Flight keyboard</strong><span>A/D or Left/Right rotate. Hold either Shift to use A/D or Left/Right to strafe without turning toward the mouse. Release Shift to resume keyboard rotation. W/S or Up/Down apply forward/reverse thrust.</span></div>"
-        "<div><strong>Flight controller</strong><span>Right stick left/right rotates. Left stick left/right strafes; up/down applies forward/reverse thrust (subject to flight-Y inversion). Release thrust and strafe to coast.</span></div>"
-        "<div><strong>Orbital work</strong><span>After Scan, left stick or D-pad selects Scan, Drill, Land, or Resume Flight. Hold Confirm on Drill. Resume Flight or Back returns to piloting.</span></div>"
-        "<div><strong>Action selection</strong><span>Press D-pad during flight or mining to pause and select UI actions. Back returns to gameplay after sticks and action buttons are released.</span></div>"
-        "<div><strong>Mining rig</strong><span>WASD or arrows move in screen directions regardless of drill heading. The rig turns toward the mouse; no Shift required. On controller, left stick moves in screen directions; point the right stick to aim the drill in any direction. Center it to hold the current heading. Space or left click drills; right trigger drills on controller. West scans. North tethers. Tap South to stow cargo or leave; hold South for 0.6 seconds to exit.</span></div>"
-        "<div><strong>Jetpack EVA</strong><span>Left stick thrusts. Right stick aims. Right trigger fires. Left trigger drills. West scans. North tethers. Hold South for 0.6 seconds to enter.</span></div>"
-        "</div>";
+    const auto binding = [](std::string_view key, std::string_view action, std::string_view tone = "") {
+        return "<div class=\"controls-binding\"><span class=\"controls-key " + std::string(tone) +
+            "\">" + htmlEscape(key) + "</span><span class=\"controls-action\">" + htmlEscape(action) + "</span></div>";
+    };
+    const auto card = [](std::string_view title, const std::string& body) {
+        return "<div class=\"controls-card\"><h3>" + htmlEscape(title) + "</h3>" + body + "</div>";
+    };
+    const std::string controlsBody = std::string(R"(<div class="controller-controls">
+        <div class="controls-callout"><strong>D-PAD = MENU PANELS</strong>
+        <p>In mining, orbit, or flight, press the D-pad to select panel actions. Piloting pauses while you choose.</p>
+        <div class="controls-flow"><span>SELECT</span><span> / </span><span>CONFIRM</span><span> / </span><span>RESUME PLAY</span></div>
+        <p>Actions resume play automatically; interfaces stay open. Back cancels. Release buttons and center sticks to pilot again.</p></div>
+        <div class="controls-pad-card"><div class="controls-pad" aria-label="Xbox-style controller reference: left stick upper left, D-pad lower left, right stick lower right, face buttons upper right">
+        <div class="pad-shell"></div>
+        <span class="pad-part pad-lt">LT</span><span class="pad-part pad-rt">RT</span>
+        <span class="pad-part pad-lb">LB</span><span class="pad-part pad-rb">RB</span>
+        <span class="pad-part pad-ls">LS</span><span class="pad-part pad-rs">RS</span>
+        <span class="pad-part pad-dpad">+</span>
+        <span class="pad-part pad-view">View</span><span class="pad-part pad-menu">Menu</span>
+        <span class="pad-part pad-north">Y</span><span class="pad-part pad-west">X</span>
+        <span class="pad-part pad-east">B</span><span class="pad-part pad-south">A</span>
+        </div><p class="controls-caption">POSITION GUIDE / Xbox-style layout</p>
+        <p class="controls-caption">South = A · East = B · West = X · North = Y<br/>LS / RS = sticks · LB / RB = bumpers · LT / RT = triggers</p></div>
+        <div class="controls-cards">)") +
+        card("01 / Menus & panels",
+            binding("D-pad / LS", "Move selection", "controls-cyan") +
+            binding("Confirm", "Activate highlighted action", "controls-green") +
+            binding("Back", "Close / resume play", "controls-red") +
+            binding("RS up / down", "Scroll panel") +
+            "<p>Default: South confirms, East goes back. Confirm/Back swapping follows Settings; gameplay shortcuts keep their physical positions.</p>") +
+        card("02 / Flight & docking",
+            binding("RS left / right", "Rotate counterclockwise / clockwise", "controls-cyan") +
+            binding("LS left / right", "Strafe relative to the ship") +
+            binding("LS up / down", "Forward / reverse thrust") +
+            binding("Click LS", "Toggle cruise in ordinary flight") +
+            "<p>Flight-Y inversion follows Settings. Release thrust to coast; use opposite thrust to slow down.</p>") +
+        card("03 / Orbital work",
+            binding("D-pad / LS", "Select Scan, Drill, or Land", "controls-cyan") +
+            binding("Confirm", "Start highlighted action", "controls-green") +
+            binding("Hold Confirm", "Fire the orbital laser", "controls-amber") +
+            binding("Back", "Return to piloting", "controls-red") +
+            "<p>Establish orbit and reach the mission sector. Scan the site, prepare a shaft when needed, then land.</p>") +
+        card("04 / Mining rig",
+            binding("LS", "Move in screen directions", "controls-cyan") +
+            binding("RS", "Aim drill; center to hold heading") +
+            binding("RT", "Drill", "controls-amber") +
+            binding("LB / RB", "Repair drill / repair rig") +
+            binding("Hold South", "Exit rig · 0.6 seconds", "controls-green")) +
+        card("05 / Jetpack EVA",
+            binding("LS / RS", "Thrust / aim", "controls-cyan") +
+            binding("RT", "Fire weapon", "controls-red") +
+            binding("LT", "Drill", "controls-amber") +
+            binding("Hold South", "Enter rig when nearby · 0.6 seconds", "controls-green")) +
+        card("06 / Surface shortcuts",
+            binding("West / X", "Pulse scanner", "controls-cyan") +
+            binding("North / Y", "Tether / release", "controls-amber") +
+            binding("Tap South / A", "Unload payload at the ship", "controls-green") +
+            binding("Hold East / B", "Abort · 0.45 seconds", "controls-red") +
+            "<p>Actions require the appropriate range, supplies, and equipment. Use the D-pad to select ship service buttons.</p>") +
+        card("Keyboard / Ship",
+            binding("A / D", "Rotate · Left / Right arrows also work") +
+            binding("Shift + A / D", "Ship-relative strafe") +
+            binding("W / S", "Forward / reverse · Up / Down also work") +
+            binding("C", "Toggle cruise in ordinary flight")) +
+        card("Keyboard / Surface",
+            binding("WASD / arrows", "Move in screen directions") +
+            binding("Mouse", "Aim rig / EVA") +
+            binding("Space", "Drill · rig also uses left click") +
+            binding("Left click", "Fire EVA weapon") +
+            binding("E / T", "Scan / tether") +
+            binding("R / F", "Stow payload / enter or exit rig")) +
+        "</div><div class=\"controls-footer\"><p>Menu opens Pause. View opens Map in menus, orbit, and flight. North opens Inventory in menus.</p>" +
+        modalButton("Controller settings", ui::modals::settings, "ghost") + "</div></div>";
     const std::string systemMenuBody =
         "<div class=\"modal-actions action-row system-menu-actions\">"
         "<button type=\"button\" class=\"ok rr-text-button\" data-ui-close-modal=\"1\" data-controller-resume=\"1\" "
@@ -498,7 +567,7 @@ void collectSharedUtilityModals()
         "data-controller-hold-seconds=\"0.75\" data-ui-activation=\"hold\" data-ui-hold-seconds=\"0.75\"><span class=\"rr-button-label\">Hold to reset save</span></button></div>";
 
     collectModal({"system_menu", "Paused", systemMenuBody, {}, false, false, false});
-    collectModal({"controls", "Controller controls", controlsBody});
+    collectModal({"controls", "Controls / Pilot handbook", controlsBody});
     collectModal({"reset_save_confirm", "Reset save?", resetBody, {}, false, true, false});
 }
 

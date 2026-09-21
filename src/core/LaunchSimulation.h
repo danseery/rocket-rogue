@@ -83,6 +83,13 @@ struct LaunchFlightStep {
     bool flyby = false;
     bool surfaceImpact = false;
     bool dockCaptured = false;
+    bool dockSecuringStarted = false;
+    bool dockClampLocked = false;
+    bool dockBump = false;
+    double dockContactX = 0.0, dockContactY = 0.0;
+    double dockNormalX = 0.0, dockNormalY = 0.0;
+    double dockImpactStrength = 0.0;
+    bool dockImpactDamaging = false;
 };
 
 // Both opening calibration flights teach the same readable fuel-return

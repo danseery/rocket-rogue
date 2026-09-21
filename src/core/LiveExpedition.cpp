@@ -351,6 +351,21 @@ ExpeditionResult departHome(GameState& state, const ContentCatalog&) {
     f.landing = {};
     f.orbit = {};
     f.selectedThrottle = f.angularVelocity = f.burnRatePerSecond = 0;
+    // Aim the attached ship and service dock at the selected destination so
+    // the departure staging pose previews the player's real route. Wreck
+    // courses use the same shared target resolver as map and flight guidance.
+    if (e.location.bodyId == "earth") {
+        const auto& system = solarSystemDefinition();
+        const auto origin = convertSystemFrame(e.location, CoordinateFrame::System, "", system);
+        if (const auto target = courseTargetLocation(e, system, e.course.targetBodyId)) {
+            const double dx = target->position.x - origin.position.x;
+            const double dy = target->position.y - origin.position.y;
+            if (std::hypot(dx, dy) > 1e-8) {
+                f.heading = std::atan2(dy, dx);
+                e.location.heading = f.heading;
+            }
+        }
+    }
     state.screen = Screen::Flight;
     return ExpeditionResult::Applied;
 }

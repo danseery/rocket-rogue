@@ -38,6 +38,67 @@
 
 namespace rocket {
 struct OrbitalLandingTestAccess {
+    static void dockingArrival(RocketGameApp& app) {
+        app.debugStartExpedition();
+        app.state_.incomingMessages = {};
+        app.state_.incomingMessages.acknowledgedMessages.push_back("earth_dock_intro");
+        app.state_.meta.campaignIntroductionAcknowledged = true;
+        app.services_.ui.closeModal();
+        app.state_.screen = Screen::Flight;
+        app.session_.flightArmed = true;
+        app.surfaceArrival_ = {};
+        app.surfaceBaySequence_ = {};
+        app.state_.run.expedition.undockReady = false;
+        app.state_.run.expedition.departureCount = 1;
+        auto& flight = app.session_.flight;
+        flight.active = flight.physicalFlight = true;
+        flight.mode = FlightMode::Docking;
+        flight.docking = {};
+        flight.docking.active = true;
+        flight.docking.dockId = "earth";
+        flight.docking.positionY = service_dock::captureCenterY;
+        flight.docking.securingStartY = service_dock::captureCenterY;
+        flight.heading = flight.docking.securingStartHeading = flight.docking.dockHeading + 3.141592653589793;
+        flight.docking.enteredMouth = flight.docking.rotationLocked = flight.docking.securing = true;
+        app.activeInputSource_ = InputSource::Controller;
+        app.pauseReason_ = PauseReason::ControllerUiFocus;
+        app.tick(.05);
+        assert(app.pauseReason_ == PauseReason::None);
+        assert(flight.docking.securingSeconds > 0);
+        assert(app.thrustAudioLevel() == 0);
+        app.runUiAction("expedition:dock");
+        app.runUiAction("expedition:depart");
+        assert(app.state_.screen == Screen::Flight);
+        const double elapsed = flight.docking.securingSeconds;
+        for (auto pause : {PauseReason::ControllerDisconnected, PauseReason::PageHidden, PauseReason::SystemMenu}) {
+            app.pauseReason_ = pause;
+            app.tick(.05);
+            assert(flight.docking.securingSeconds == elapsed);
+        }
+        app.pauseReason_ = PauseReason::None;
+        (void)app.consumePendingAudioEvents();
+        int locks = 0, arrivals = 0;
+        for (int frame = 0; frame < 39; ++frame) {
+            app.tick(.05);
+            for (const auto event : app.consumePendingAudioEvents()) {
+                locks += event.cue == GameAudioCue::DockClamp;
+                arrivals += event.cue == GameAudioCue::DockArrival;
+            }
+            if (frame < 38) assert(app.state_.screen == Screen::Flight);
+        }
+        assert(locks == 1 && arrivals == 1);
+        assert(app.state_.screen == Screen::Hangar);
+        assert(app.dockingControllerNeutralRequired_);
+        ControllerFrame held;
+        held.connected = held.meaningfulInput = true;
+        held.down.set(static_cast<std::size_t>(ControllerButton::South));
+        app.inputFrame(held, 10.0);
+        assert(app.dockingControllerNeutralRequired_);
+        assert(app.state_.screen == Screen::Hangar);
+        held.down.reset();
+        app.inputFrame(held, 10.1);
+        assert(!app.dockingControllerNeutralRequired_);
+    }
     static void miningActionHandoffs(RocketGameApp& app) {
         app.debugStartMining();
         app.services_.ui.closeModal();
@@ -1180,6 +1241,37 @@ void liveMissionClaimPresentationAndDockRecovery()
     assertNoLegacyRecoveryActions(panel);
 }
 
+void dockingControlHintsStayScoped()
+{
+    const auto catalog = rocket::createDefaultContent();
+    auto state = std::make_unique<rocket::GameState>(readyLiveMarsMissionState(catalog));
+    state->screen = rocket::Screen::Flight;
+    auto& flight = state->run.flight;
+    flight.active = flight.physicalFlight = true;
+    flight.mode = rocket::FlightMode::Docking;
+    flight.docking.active = true;
+    const auto model = rocket::expeditionFlightModel(*state, catalog);
+    rocket::PanelRenderContext context{*state, catalog, model, model};
+    context.firstTimeIntroductionsEnabled = false;
+    context.launchFlight = &flight;
+    auto markup = rocket::buildGamePanelPresentation(context).contentMarkup;
+    assert(markup.find("A/Left: counterclockwise") != std::string::npos);
+    assert(markup.find("Shift+A/D: strafe relative to ship") != std::string::npos);
+    context.controllerFlightControls = true;
+    markup = rocket::buildGamePanelPresentation(context).contentMarkup;
+    assert(markup.find("R-stick: left counterclockwise / right clockwise") != std::string::npos);
+    assert(markup.find("L-stick: ship-relative strafe") != std::string::npos);
+    context.invertFlightY = true;
+    markup = rocket::buildGamePanelPresentation(context).contentMarkup;
+    assert(markup.find("down forward / up reverse") != std::string::npos);
+    context.controllerFlightControls = false;
+    flight.mode = rocket::FlightMode::Travel;
+    flight.docking.active = false;
+    markup = rocket::buildGamePanelPresentation(context).contentMarkup;
+    assert(markup.find("Hold Shift: A/D strafe.") != std::string::npos);
+    assert(markup.find("strafe relative to ship") == std::string::npos);
+}
+
 void liveWaypointModalActionOwnership()
 {
     const auto catalog = rocket::createDefaultContent();
@@ -2146,6 +2238,12 @@ void controllerOwnershipFencesUiHolds()
     {
         auto fixture = std::make_unique<AppFixture>();
         assert(fixture->runner.initialize());
+        OrbitalLandingTestAccess::dockingArrival(fixture->runner.app());
+        fixture->runner.shutdown();
+    }
+    {
+        auto fixture = std::make_unique<AppFixture>();
+        assert(fixture->runner.initialize());
         OrbitalLandingTestAccess::miningActionHandoffs(fixture->runner.app());
         fixture->runner.shutdown();
     }
@@ -2904,6 +3002,7 @@ int main(int argc, char** argv)
         fixture.runner.shutdown();
     }
     liveMissionClaimPresentationAndDockRecovery();
+    dockingControlHintsStayScoped();
     liveWaypointModalActionOwnership();
     liveShipRecoveryAppFlows();
 

@@ -31,7 +31,9 @@ inline constexpr std::array<AudioCueDefinition, static_cast<std::size_t>(GameAud
     {"gameplay/drill.wav", .42}, {"gameplay/deposit.wav", .4}, {"gameplay/repair.wav", .4},
     {"gameplay/drone_task.wav", .7}, {"gameplay/drone_return.wav", .4},
     {"gameplay/engine_toggle.wav", .25}, {"gameplay/orbit.wav", .5}, {"gameplay/weapon.wav", .12},
-    {"gameplay/thrust.wav", 0.0}, {"gameplay/ship_explosion.wav", 1.0}
+    {"gameplay/thrust.wav", 0.0}, {"gameplay/ship_explosion.wav", 1.0},
+    {"surface/rig_ejection.wav", .15}, {"surface/hard_touchdown.wav", .15},
+    {"surface/bay_close.wav", .3}, {"surface/surface_ready.wav", .3}
 }};
 inline double audioClockSeconds() {
     return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();

@@ -1965,6 +1965,7 @@ std::vector<GameAudioEvent> RocketGameApp::consumePendingAudioEvents()
 
 double RocketGameApp::thrustAudioLevel() const
 {
+    if (earthDockingActive(session_.flight) && session_.flight.docking.securing) return 0.0;
     if (straylightOwnsPresentation(state_)) return 0.0;
     if (titleScreenActive_ || state_.screen != Screen::Flight || !session_.flightArmed ||
         pauseReason_ != PauseReason::None || services_.ui.modalOpen() ||
@@ -2067,6 +2068,10 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
 
 void RocketGameApp::applyRealtimeInputs()
 {
+    if (earthDockingActive(session_.flight) && session_.flight.docking.securing) {
+        releaseRealtimeInputs(true);
+        return;
+    }
     const bool rigPiloting = state_.screen == Screen::Mining &&
         state_.run.mining.operatorMode != MiningOperatorMode::Jetpack &&
         (inputContext() == InputContext::MiningActive || inputContext() == InputContext::MiningService);
@@ -2581,6 +2586,23 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
     }
 
     const InputContext context = inputContext();
+    if (earthDockingActive(session_.flight) && session_.flight.docking.securing && !modalOpen &&
+        pauseReason_ == PauseReason::None) {
+        inputRouter_.observeInactiveFrame(context, frame, controllerPreferences_, services_.ui.focusedControllerAction());
+        releaseRealtimeInputs(true);
+        dockingControllerNeutralRequired_ = true;
+        if (frame.wasPressed(ControllerButton::Menu)) openControllerSystemMenu(PauseReason::SystemMenu);
+        return;
+    }
+    if (dockingControllerNeutralRequired_ && pauseReason_ == PauseReason::None && !modalOpen) {
+        inputRouter_.observeInactiveFrame(context, frame, controllerPreferences_, services_.ui.focusedControllerAction());
+        const bool neutral = frame.down.none() && !frame.navigation &&
+            std::abs(frame.leftX) <= .01 && std::abs(frame.leftY) <= .01 &&
+            std::abs(frame.rightX) <= .01 && std::abs(frame.rightY) <= .01;
+        releaseRealtimeInputs(true);
+        if (neutral) dockingControllerNeutralRequired_ = false;
+        return;
+    }
     if (controllerGameplayNeutralRequired_ && pauseReason_ == PauseReason::None && !modalOpen && realtime) {
         const bool neutral = frame.down.none() && !frame.navigation
             && std::abs(frame.leftX) <= .01 && std::abs(frame.leftY) <= .01
@@ -2792,6 +2814,11 @@ void RocketGameApp::tick(double deltaSeconds)
         }
     }
 
+    if (earthDockingActive(session_.flight) && session_.flight.docking.securing &&
+        pauseReason_ == PauseReason::ControllerUiFocus && !services_.ui.modalOpen()) {
+        clearControllerPause();
+        services_.ui.setControllerFocusVisible(false);
+    }
     if (controllerPauseStopsSimulation(pauseReason_, gameplayInputContext(), services_.ui.modalOpen())) {
         return;
     }
@@ -2930,7 +2957,26 @@ void RocketGameApp::tick(double deltaSeconds)
             // The local maneuver has already placed the authoritative ship at
             // Earth dock. Reuse the normal settlement path exactly once.
             runExpeditionAction("expedition:dock");
+            releaseRealtimeInputs(true);
+            dockingControllerNeutralRequired_ = true;
             return;
+        }
+        if (step.dockSecuringStarted) {
+            releaseRealtimeInputs(true);
+            departureThrustHeld_ = false;
+            dockingControllerNeutralRequired_ = true;
+            services_.ui.setControllerFocusVisible(false);
+            save();
+        }
+        if (step.dockBump) {
+            queueAudioCue(step.dockImpactDamaging ? GameAudioCue::DockImpact : GameAudioCue::DockBump);
+            queueControllerHapticCue(step.dockImpactDamaging
+                ? ControllerHapticCue::Touchdown : ControllerHapticCue::MiningHardContact);
+        }
+        if (step.dockClampLocked) {
+            queueAudioCue(GameAudioCue::DockClamp);
+            queueAudioCue(GameAudioCue::DockArrival);
+            queueControllerHapticCue(ControllerHapticCue::Arrival);
         }
         if (!step.failed && previousBody == state_.run.expedition.location.bodyId && updateArrivalTutorial(state_, catalog_, session_.flight,
                 session_.orbitalWork.surveyComplete, surfaceArrival_.prepared ? &*surfaceArrival_.prepared : nullptr)) {
@@ -6016,7 +6062,10 @@ void RocketGameApp::save()
     storeOrbitalSite();
     if (state_.run.expedition.travelInitialized && session_.flight.landing.siteCommitted && !state_.run.expedition.location.siteId.empty())
         storeVisitedSite(state_, state_.run.expedition.location.siteId);
-    if (state_.run.expedition.travelInitialized) captureSystemLocation(state_.run.expedition.location, session_.flight);
+    // Docking physics maintains the body-relative fallback pose. Its live
+    // flight position is dock-relative and must not overwrite that frame.
+    if (state_.run.expedition.travelInitialized && !earthDockingActive(session_.flight))
+        captureSystemLocation(state_.run.expedition.location, session_.flight);
     if (state_.run.expedition.travelInitialized && state_.run.mining.active)
         state_.run.expedition.rigFuel = state_.run.mining.rigFuel;
     if (debugSessionActive_ || surfaceArrival_.active() || surfaceBaySequence_.active() || session_.destruction.active) {
@@ -6284,6 +6333,8 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
 
 void RocketGameApp::runUiAction(const std::string& action)
 {
+    if (earthDockingActive(session_.flight) && session_.flight.docking.securing &&
+        !services_.ui.modalOpen()) return;
     if (action.starts_with("sfx:")) {
         if (surfaceBaySequence_.active() || surfaceArrival_.active() || titleLaunchActive_) return;
         const auto name = action.substr(4);
@@ -6965,10 +7016,25 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.launchLandingVerticalVelocity = session_.flight.landing.verticalVelocity;
         result.launchLandingLateralVelocity = session_.flight.landing.lateralVelocity;
         result.launchLandingLocalFrame = session_.flight.mode == FlightMode::Landing;
+        result.launchUndockReady = state_.run.expedition.undockReady;
         result.launchDockingActive = earthDockingActive(session_.flight);
         result.launchDockHeading = session_.flight.docking.dockHeading;
+        result.launchDockAngularVelocity = session_.flight.docking.dockAngularVelocity;
         result.launchDockHandoffProgress = std::clamp(session_.flight.docking.handoffSeconds / flight_landing::handoffSeconds, 0.0, 1.0);
+        result.launchDockHandoffX = session_.flight.docking.handoffStartX;
+        result.launchDockHandoffY = session_.flight.docking.handoffStartY;
         result.launchDockRotationLocked = session_.flight.docking.rotationLocked;
+        result.launchDockEnteredMouth = session_.flight.docking.enteredMouth;
+        result.launchDockSecuring = session_.flight.docking.securing;
+        result.launchDockSecuringSeconds = session_.flight.docking.securingSeconds;
+        result.launchDockSecuringStartX = session_.flight.docking.securingStartX;
+        result.launchDockSecuringStartY = session_.flight.docking.securingStartY;
+        result.launchDockBumpAge = session_.flight.docking.bumpAge;
+        result.launchDockBumpStrength = session_.flight.docking.bumpStrength;
+        result.launchDockBumpX = session_.flight.docking.bumpX;
+        result.launchDockBumpY = session_.flight.docking.bumpY;
+        result.launchDockBumpNormalX = session_.flight.docking.bumpNormalX;
+        result.launchDockBumpNormalY = session_.flight.docking.bumpNormalY;
         result.launchDockGuidance = earthDockingGuidance(session_.flight);
         result.launchFlightMode = static_cast<int>(session_.flight.mode);
         result.launchHandoffFrom = static_cast<int>(session_.flight.handoff.from);

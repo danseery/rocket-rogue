@@ -394,6 +394,10 @@ void rr_debug_expedition() { if (g_app) g_app->debugStartExpedition(); }
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_debug_dock_arrival(int bump) { if (g_app) g_app->debugStartDockArrival(bump != 0); }
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_debug_straylight(int stage) { if (g_app) g_app->debugStartStraylight(stage); }
 
 #ifdef __EMSCRIPTEN__

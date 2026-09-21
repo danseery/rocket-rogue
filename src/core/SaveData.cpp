@@ -2,6 +2,7 @@
 #include "core/StraylightSequence.h"
 #include "core/MissionGuidance.h"
 #include "core/ExpeditionPersistence.h"
+#include "core/ExpeditionSystem.h"
 #include "core/SystemContent.h"
 #include "core/ContentIds.h"
 #include "core/GameText.h"
@@ -1491,7 +1492,13 @@ std::string serializeFlightState(const FlightRunState& flight)
         << flight.docking.dockHeading << save_schema::crewFieldDelimiter << flight.docking.captureSeconds << save_schema::crewFieldDelimiter
         << flight.docking.handoffSeconds << save_schema::crewFieldDelimiter << flight.docking.rotationLocked << save_schema::crewFieldDelimiter
         << flight.docking.enteredMouth << save_schema::crewFieldDelimiter << flight.docking.settlementReady << save_schema::crewFieldDelimiter
-        << flight.docking.reentrySuppressed;
+        << flight.docking.reentrySuppressed << save_schema::crewFieldDelimiter
+        << flight.docking.dockAngularVelocity << save_schema::crewFieldDelimiter
+        << flight.docking.handoffStartX << save_schema::crewFieldDelimiter << flight.docking.handoffStartY << save_schema::crewFieldDelimiter
+        << flight.docking.securingSeconds << save_schema::crewFieldDelimiter
+        << flight.docking.securingStartX << save_schema::crewFieldDelimiter << flight.docking.securingStartY << save_schema::crewFieldDelimiter
+        << flight.docking.securingStartHeading << save_schema::crewFieldDelimiter << flight.docking.securing << save_schema::crewFieldDelimiter
+        << flight.docking.contactEpisode << save_schema::crewFieldDelimiter << flight.docking.contactClearSeconds;
     return out.str();
 }
 
@@ -1499,7 +1506,7 @@ FlightRunState parseFlightState(std::string_view text)
 {
     FlightRunState flight;
     const std::vector<std::string> fields = split(text, save_schema::crewFieldDelimiter);
-    if (fields.size() != 56 && fields.size() != 57 && fields.size() != 70) {
+    if (fields.size() != 56 && fields.size() != 57 && fields.size() != 70 && fields.size() != 78 && fields.size() != 80) {
         return flight;
     }
     std::size_t index = 0;
@@ -1578,6 +1585,29 @@ FlightRunState parseFlightState(std::string_view text)
         flight.docking.settlementReady = parseInt(fields[index++], 0) != 0;
         flight.docking.reentrySuppressed = parseInt(fields[index++], 0) != 0;
     }
+    if (fields.size() - index >= 8) {
+        // Consume the legacy tracking velocity, but never resume a moving dock.
+        ++index;
+        flight.docking.dockAngularVelocity = 0.0;
+        flight.docking.handoffStartX = parseDouble(fields[index++], flight.docking.positionX);
+        flight.docking.handoffStartY = parseDouble(fields[index++], flight.docking.positionY);
+        flight.docking.securingSeconds = std::clamp(parseDouble(fields[index++], 0.0),
+            0.0, service_dock::securingSeconds);
+        flight.docking.securingStartX = parseDouble(fields[index++], flight.docking.positionX);
+        flight.docking.securingStartY = parseDouble(fields[index++], flight.docking.positionY);
+        flight.docking.securingStartHeading = parseDouble(fields[index++], flight.heading);
+        flight.docking.securing = parseInt(fields[index++], 0) != 0;
+    } else if (flight.docking.active) {
+        // Old docking saves resume from their current physical pose with a
+        // deterministic camera handoff and no inherited rotation impulse.
+        flight.docking.handoffStartX = flight.docking.positionX;
+        flight.docking.handoffStartY = flight.docking.positionY;
+    }
+    if (fields.size() - index >= 2) {
+        flight.docking.contactEpisode = parseInt(fields[index++], 0) != 0;
+        flight.docking.contactClearSeconds = std::clamp(parseDouble(fields[index++], 0.0),
+            0.0, service_dock::contactRearmSeconds);
+    }
     if (flight.mode == FlightMode::Docking && !flight.docking.active) {
         // A partial/old save cannot leave the player in a non-interactive
         // local frame. Recover it to ordinary Earth-relative flight.
@@ -1585,6 +1615,7 @@ FlightRunState parseFlightState(std::string_view text)
     }
     if (flight.docking.active && flight.docking.dockId.empty())
         flight.docking.dockId = "earth";
+    if (flight.docking.active) flight.docking.rotationLocked = true;
     flight.fuelRemaining = std::min(flight.fuelRemaining, flight.fuelCapacity);
     flight.hullRemaining = std::min(flight.hullRemaining, flight.hullMaximum);
     return flight;

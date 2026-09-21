@@ -48,17 +48,35 @@ void writeDockLocalPose(DockingState& docking, const DockLocalPose& pose)
     docking.velocityY = pose.vx * ry + pose.vy * ny;
 }
 
-bool dockRectContact(DockLocalPose& pose, double left, double right, double bottom, double top,
-    double& normalX, double& normalY)
+struct DockHullBasis {
+    double forwardX = 0.0;
+    double forwardY = -1.0;
+};
+
+DockHullBasis dockHullBasis(double shipHeading, double dockHeading)
+{
+    const double nx = std::cos(dockHeading), ny = std::sin(dockHeading);
+    const double rx = ny, ry = -nx;
+    return {
+        std::cos(shipHeading) * rx + std::sin(shipHeading) * ry,
+        std::cos(shipHeading) * nx + std::sin(shipHeading) * ny,
+    };
+}
+
+bool dockRectContact(DockLocalPose& pose, double circleOffsetX, double circleOffsetY,
+    double left, double right, double bottom, double top,
+    double& normalX, double& normalY, double& contactX, double& contactY)
 {
     const double radius = service_dock::hullRadius;
     const double expandedLeft = left - radius, expandedRight = right + radius;
     const double expandedBottom = bottom - radius, expandedTop = top + radius;
-    if (pose.x < expandedLeft || pose.x > expandedRight || pose.y < expandedBottom || pose.y > expandedTop)
+    const double circleX = pose.x + circleOffsetX;
+    const double circleY = pose.y + circleOffsetY;
+    if (circleX < expandedLeft || circleX > expandedRight || circleY < expandedBottom || circleY > expandedTop)
         return false;
     const std::array<std::pair<double, std::pair<double, double>>, 4> faces {{
-        {pose.x - expandedLeft, {-1.0, 0.0}}, {expandedRight - pose.x, {1.0, 0.0}},
-        {pose.y - expandedBottom, {0.0, -1.0}}, {expandedTop - pose.y, {0.0, 1.0}},
+        {circleX - expandedLeft, {-1.0, 0.0}}, {expandedRight - circleX, {1.0, 0.0}},
+        {circleY - expandedBottom, {0.0, -1.0}}, {expandedTop - circleY, {0.0, 1.0}},
     }};
     const auto face = std::min_element(faces.begin(), faces.end(), [](const auto& a, const auto& b) {
         return a.first < b.first;
@@ -68,15 +86,43 @@ bool dockRectContact(DockLocalPose& pose, double left, double right, double bott
     const double separation = face->first + 0.001;
     pose.x += normalX * separation;
     pose.y += normalY * separation;
+    contactX = circleX - normalX * radius;
+    contactY = circleY - normalY * radius;
     return true;
+}
+
+bool dockHullContact(DockLocalPose& pose, const DockHullBasis& hull,
+    double& normalX, double& normalY, double& contactX, double& contactY)
+{
+    constexpr std::array<double, 3> samples {-service_dock::hullHalfLength, 0.0,
+        service_dock::hullHalfLength};
+    for (const double offset : samples) {
+        const double offsetX = hull.forwardX * offset;
+        const double offsetY = hull.forwardY * offset;
+        if (dockRectContact(pose, offsetX, offsetY,
+                -service_dock::outerHalfWidth, -service_dock::channelHalfWidth,
+                service_dock::backstopY, service_dock::mouthY,
+                normalX, normalY, contactX, contactY) ||
+            dockRectContact(pose, offsetX, offsetY,
+                service_dock::channelHalfWidth, service_dock::outerHalfWidth,
+                service_dock::backstopY, service_dock::mouthY,
+                normalX, normalY, contactX, contactY) ||
+            dockRectContact(pose, offsetX, offsetY,
+                -service_dock::outerHalfWidth, service_dock::outerHalfWidth,
+                -service_dock::outerHalfWidth, service_dock::backstopY,
+                normalX, normalY, contactX, contactY)) return true;
+    }
+    return false;
 }
 
 void updateDockExpeditionLocation(PersistentExpeditionState& e, const DockingState& docking,
     const SystemBodyDefinition& earth, const SystemDefinition& system)
 {
     SystemLocation pose {system.id, {}, CoordinateFrame::System,
-        {systemDockPosition(earth).x + docking.positionX, systemDockPosition(earth).y + docking.positionY},
-        {earth.velocity.x + docking.velocityX, earth.velocity.y + docking.velocityY}, 0, {}};
+        {systemDockPosition(earth).x + docking.positionX / service_dock::localUnitsPerSystemUnit,
+         systemDockPosition(earth).y + docking.positionY / service_dock::localUnitsPerSystemUnit},
+        {earth.velocity.x + docking.velocityX / service_dock::localUnitsPerSystemUnit,
+         earth.velocity.y + docking.velocityY / service_dock::localUnitsPerSystemUnit}, 0, {}};
     e.location = convertSystemFrame(pose, CoordinateFrame::Body, earth.id, system);
     e.location.heading = 0;
 }
@@ -91,11 +137,14 @@ void beginEarthDocking(PersistentExpeditionState& e, FlightRunState& flight, con
     DockingState docking;
     docking.active = true;
     docking.dockId = earth.id;
-    docking.positionX = pose.position.x - marker.x;
-    docking.positionY = pose.position.y - marker.y;
-    docking.velocityX = pose.velocity.x - earth.velocity.x;
-    docking.velocityY = pose.velocity.y - earth.velocity.y;
+    docking.positionX = (pose.position.x - marker.x) * service_dock::localUnitsPerSystemUnit;
+    docking.positionY = (pose.position.y - marker.y) * service_dock::localUnitsPerSystemUnit;
+    docking.velocityX = (pose.velocity.x - earth.velocity.x) * service_dock::localUnitsPerSystemUnit;
+    docking.velocityY = (pose.velocity.y - earth.velocity.y) * service_dock::localUnitsPerSystemUnit;
     docking.dockHeading = std::atan2(docking.positionY, docking.positionX);
+    docking.rotationLocked = true;
+    docking.handoffStartX = docking.positionX;
+    docking.handoffStartY = docking.positionY;
     docking.handoffSeconds = 0.0;
     flight.handoff = {flight.mode, FlightMode::Docking, 0.0, flight.positionX, flight.positionY, flight.heading};
     flight.docking = docking;
@@ -130,11 +179,12 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
         return result;
     }
     const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
+    docking.bumpAge = std::min(1.0, docking.bumpAge + dt);
     docking.handoffSeconds = std::min(flight_landing::handoffSeconds, docking.handoffSeconds + dt);
     flight.handoff.elapsed = docking.handoffSeconds;
     DockLocalPose pose = dockLocalPose(docking);
     const double range = std::hypot(pose.x, pose.y);
-    if (range >= service_dock::exitRadius) {
+    if (range >= service_dock::exitRadius * service_dock::localUnitsPerSystemUnit) {
         docking.active = false;
         docking.reentrySuppressed = true;
         updateDockExpeditionLocation(e, docking, *earth, system);
@@ -144,24 +194,45 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
         return result;
     }
 
-    const bool inChannel = std::abs(pose.x) <= service_dock::channelHalfWidth + service_dock::hullRadius &&
-        pose.y >= service_dock::rearY - service_dock::hullRadius && pose.y <= service_dock::mouthY + service_dock::hullRadius;
-    if (inChannel) docking.rotationLocked = true;
-    else if (docking.rotationLocked &&
-        (std::abs(pose.x) > service_dock::channelHalfWidth + 2.0 * service_dock::hullRadius ||
-         pose.y > service_dock::mouthY + 2.0 * service_dock::hullRadius ||
-         pose.y < service_dock::rearY - 2.0 * service_dock::hullRadius)) {
-        // Do not turn against a hull which has only just cleared the mouth.
-        docking.rotationLocked = false;
-    }
-    double dockAngularVelocity = 0.0;
-    if (!docking.rotationLocked && range > 0.001) {
-        const double desired = std::atan2(docking.positionY, docking.positionX);
-        const double turn = std::clamp(flightWrappedAngleDelta(docking.dockHeading, desired),
-            -service_dock::rotationRateRadians * dt, service_dock::rotationRateRadians * dt);
-        docking.dockHeading += turn;
-        dockAngularVelocity = dt > 0.0 ? turn / dt : 0.0;
-        pose = dockLocalPose(docking);
+    // Aim once at approach entry, then keep the berth stationary. Also stop
+    // legacy saved tracking in place without changing its heading or ship pose.
+    docking.rotationLocked = true;
+    docking.dockAngularVelocity = 0.0;
+
+    if (docking.securing) {
+        const double previousTime = docking.securingSeconds;
+        docking.securingSeconds = std::min(service_dock::securingSeconds,
+            docking.securingSeconds + dt);
+        result.dockClampLocked = previousTime < service_dock::clampLockSeconds &&
+            docking.securingSeconds >= service_dock::clampLockSeconds;
+        const double linear = std::clamp(docking.securingSeconds / service_dock::settleSeconds, 0.0, 1.0);
+        const double settle = linear * linear * (3.0 - 2.0 * linear);
+        pose.x = std::lerp(docking.securingStartX, 0.0, settle);
+        pose.y = std::lerp(docking.securingStartY, service_dock::captureCenterY, settle);
+        pose.vx = pose.vy = 0.0;
+        writeDockLocalPose(docking, pose);
+        docking.velocityX = docking.velocityY = 0.0;
+        flight.heading = docking.securingStartHeading + flightWrappedAngleDelta(
+            docking.securingStartHeading, docking.dockHeading + 3.14159265358979323846) * settle;
+        flight.positionX = docking.positionX;
+        flight.positionY = docking.positionY;
+        flight.velocityX = flight.velocityY = 0.0;
+        flight.selectedThrottle = flight.angularVelocity = 0.0;
+        updateDockExpeditionLocation(e, docking, *earth, system);
+        if (docking.securingSeconds < service_dock::securingSeconds) return result;
+
+        SystemLocation captured {system.id, {}, CoordinateFrame::System,
+            systemDockPosition(*earth), earth->velocity, 0.0, earth->siteId};
+        e.location = convertSystemFrame(captured, CoordinateFrame::Body, earth->id, system);
+        e.location.siteId = earth->siteId;
+        restoreSystemLocation(e.location, flight);
+        docking.active = false;
+        docking.settlementReady = true;
+        flight.mode = FlightMode::Orbit;
+        flight.handoff = {FlightMode::Docking, FlightMode::Orbit, 0.0,
+            flight.positionX, flight.positionY, flight.heading};
+        result.dockCaptured = true;
+        return result;
     }
 
     advanceFlightHeading(flight, input.steer, dt);
@@ -181,29 +252,37 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
     bool contacted = false;
     for (int index = 0; index < steps; ++index) {
         pose = dockLocalPose(docking);
-        const double previousY = pose.y;
+        const DockHullBasis hull = dockHullBasis(flight.heading, docking.dockHeading);
+        const double previousNoseY = pose.y + hull.forwardY * service_dock::hullHalfLength;
         pose.x += pose.vx * substep;
         pose.y += pose.vy * substep;
-        if (previousY > service_dock::mouthY && pose.y <= service_dock::mouthY &&
-            std::abs(pose.x) <= service_dock::channelHalfWidth) docking.enteredMouth = true;
-        double normalX = 0.0, normalY = 0.0;
-        const bool hit =
-            dockRectContact(pose, -service_dock::outerHalfWidth, -service_dock::channelHalfWidth,
-                service_dock::rearY, service_dock::mouthY, normalX, normalY) ||
-            dockRectContact(pose, service_dock::channelHalfWidth, service_dock::outerHalfWidth,
-                service_dock::rearY, service_dock::mouthY, normalX, normalY) ||
-            dockRectContact(pose, -service_dock::outerHalfWidth, service_dock::outerHalfWidth,
-                service_dock::rearY - 0.28, service_dock::rearY, normalX, normalY);
+        const double noseX = pose.x + hull.forwardX * service_dock::hullHalfLength;
+        const double noseY = pose.y + hull.forwardY * service_dock::hullHalfLength;
+        if (previousNoseY > service_dock::mouthY && noseY <= service_dock::mouthY &&
+            std::abs(noseX) <= service_dock::channelHalfWidth - service_dock::hullRadius)
+            docking.enteredMouth = true;
+        double normalX = 0.0, normalY = 0.0, contactX = 0.0, contactY = 0.0;
+        const bool hit = dockHullContact(pose, hull, normalX, normalY, contactX, contactY);
         if (hit) {
-            // The tongs are fixed in position but may be rotating. Measure
-            // impact against their moving surface instead of a static wall.
-            const double contactX = pose.x - normalX * service_dock::hullRadius;
-            const double contactY = pose.y - normalY * service_dock::hullRadius;
-            const double dockRotationVelocityX = -dockAngularVelocity * contactY;
-            const double dockRotationVelocityY = dockAngularVelocity * contactX;
+            // The berth stays fixed throughout this approach.
+            const double dockRotationVelocityX = -docking.dockAngularVelocity * contactY;
+            const double dockRotationVelocityY = docking.dockAngularVelocity * contactX;
             const double impactSpeed = std::hypot(pose.vx - dockRotationVelocityX, pose.vy - dockRotationVelocityY) *
                 flight_geometry::velocityToMetersPerSecond;
             const double damage = flightImpactDamage(impactSpeed);
+            if (!docking.contactEpisode) {
+                docking.contactEpisode = true;
+                docking.bumpAge = 0.0;
+                docking.bumpStrength = std::clamp(impactSpeed / 18.0, 0.15, 1.0);
+                docking.bumpX = contactX; docking.bumpY = contactY;
+                docking.bumpNormalX = normalX; docking.bumpNormalY = normalY;
+                result.dockBump = true;
+                result.dockContactX = contactX; result.dockContactY = contactY;
+                result.dockNormalX = normalX; result.dockNormalY = normalY;
+                result.dockImpactStrength = docking.bumpStrength;
+                result.dockImpactDamaging = damage > 0.0;
+            }
+            docking.contactClearSeconds = 0.0;
             if (!contacted && damage > 0.0) {
                 const double before = flight.hullRemaining;
                 flight.hullRemaining = std::max(0.0, before - damage);
@@ -224,6 +303,7 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
         }
         writeDockLocalPose(docking, pose);
         if (flight.hullRemaining <= 0.0) {
+            updateDockExpeditionLocation(e, docking, *earth, system);
             flight.active = false;
             flight.phase = FlightPhase::Impact;
             flight.failureCause = LaunchFailureCause::LunarImpact;
@@ -232,26 +312,38 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
             return result;
         }
     }
+    if (!contacted) {
+        docking.contactClearSeconds += dt;
+        if (docking.contactClearSeconds >= service_dock::contactRearmSeconds)
+            docking.contactEpisode = false;
+    }
     pose = dockLocalPose(docking);
+    const DockHullBasis hull = dockHullBasis(flight.heading, docking.dockHeading);
+    const double hullExtentX = std::abs(hull.forwardX) * service_dock::hullHalfLength + service_dock::hullRadius;
+    const double hullExtentY = std::abs(hull.forwardY) * service_dock::hullHalfLength + service_dock::hullRadius;
     const double headingError = std::abs(flightWrappedAngleDelta(flight.heading, docking.dockHeading + 3.14159265358979323846));
-    const bool insideBerth = docking.enteredMouth && std::abs(pose.x) <= service_dock::channelHalfWidth - service_dock::hullRadius &&
-        pose.y >= service_dock::rearY + service_dock::hullRadius && pose.y <= service_dock::mouthY - service_dock::hullRadius;
+    const bool fullyInside = std::abs(pose.x) + hullExtentX <= service_dock::channelHalfWidth &&
+        pose.y - hullExtentY >= service_dock::backstopY &&
+        pose.y + hullExtentY <= service_dock::mouthY;
+    const bool insideBerth = docking.enteredMouth && fullyInside &&
+        std::abs(pose.x) <= service_dock::captureHalfWidth &&
+        std::abs(pose.y - service_dock::captureCenterY) <= service_dock::captureHalfDepth;
     const bool slowEnough = std::abs(pose.vy) * flight_geometry::velocityToMetersPerSecond <= service_dock::captureForwardSpeed &&
         std::abs(pose.vx) * flight_geometry::velocityToMetersPerSecond <= service_dock::captureLateralSpeed;
     docking.captureSeconds = insideBerth && slowEnough && headingError <= service_dock::captureHeadingRadians
         ? docking.captureSeconds + dt : 0.0;
     if (docking.captureSeconds >= service_dock::captureSeconds) {
-        SystemLocation captured {system.id, {}, CoordinateFrame::System, systemDockPosition(*earth), earth->velocity, 0.0, earth->siteId};
-        e.location = convertSystemFrame(captured, CoordinateFrame::Body, earth->id, system);
-        e.location.siteId = earth->siteId;
-        restoreSystemLocation(e.location, flight);
-        docking.active = false;
-        docking.settlementReady = true;
+        docking.securing = true;
+        docking.rotationLocked = true;
+        docking.dockAngularVelocity = 0.0;
+        result.dockSecuringStarted = true;
+        docking.securingSeconds = 0.0;
+        docking.securingStartX = pose.x;
+        docking.securingStartY = pose.y;
+        docking.securingStartHeading = flight.heading;
         docking.velocityX = docking.velocityY = 0.0;
-        flight.mode = FlightMode::Orbit;
-        flight.handoff = {FlightMode::Docking, FlightMode::Orbit, 0.0, flight.positionX, flight.positionY, flight.heading};
-        result.dockCaptured = true;
-        return result;
+        flight.velocityX = flight.velocityY = 0.0;
+        flight.selectedThrottle = flight.angularVelocity = 0.0;
     }
     flight.positionX = docking.positionX;
     flight.positionY = docking.positionY;
@@ -419,6 +511,12 @@ SystemLocation convertSystemFrame(const SystemLocation &source, CoordinateFrame 
 }
 void captureSystemLocation(SystemLocation &p, const FlightRunState &f)
 {
+    // Dock-local coordinates are not body/system coordinates. The docking
+    // integrator maintains the converted expedition pose, including on impact.
+    if (f.mode == FlightMode::Docking && f.docking.active) {
+        p.heading = f.heading;
+        return;
+    }
     p.position = {f.positionX, f.positionY};
     p.velocity = {f.velocityX, f.velocityY};
     p.heading = f.heading;
@@ -733,12 +831,30 @@ void refreshExpeditionTrajectory(PersistentExpeditionState& e, FlightRunState& f
     const int steps = e.location.frame == CoordinateFrame::Body ? 1000 : 400;
     for (int i=0;i<steps;++i) {
         const auto result = advanceExpeditionFlight(forecast,predicted,model,destination,system,{},.05);
+        const bool enteredDockingApproach = predicted.mode == FlightMode::Docking;
         auto p = forecast.location;
-        captureSystemLocation(p,predicted);
+        if (enteredDockingApproach) {
+            const auto* earth = systemBody(system, predicted.docking.dockId);
+            if (earth) {
+                const auto dock = systemDockPosition(*earth);
+                p = {system.id, {}, CoordinateFrame::System,
+                    {dock.x + predicted.docking.handoffStartX / service_dock::localUnitsPerSystemUnit,
+                     dock.y + predicted.docking.handoffStartY / service_dock::localUnitsPerSystemUnit},
+                    {earth->velocity.x + predicted.docking.velocityX / service_dock::localUnitsPerSystemUnit,
+                     earth->velocity.y + predicted.docking.velocityY / service_dock::localUnitsPerSystemUnit},
+                    predicted.heading, {}};
+            }
+        } else {
+            captureSystemLocation(p,predicted);
+        }
         p = convertSystemFrame(p,e.location.frame,e.location.bodyId,system);
-        if (i%4==3 || result.failed || result.asteroidHit) flight.predictedTrajectory.push_back({p.position.x,p.position.y});
+        if (i%4==3 || result.failed || result.asteroidHit || enteredDockingApproach)
+            flight.predictedTrajectory.push_back({p.position.x,p.position.y});
         if (result.failed || result.asteroidHit) { flight.predictedImpact = true; break; }
-        if (predicted.mode == FlightMode::Landing) break;
+        // The global forecast ends where the dedicated local maneuver begins.
+        // Simulating the rotating dock from the system view produces a hooked
+        // path which the player can never actually fly in that coordinate frame.
+        if (predicted.mode == FlightMode::Landing || enteredDockingApproach) break;
     }
 }
 bool validBatteryOwnership(const PersistentExpeditionState &e)
@@ -891,6 +1007,8 @@ bool earthDockingActive(const FlightRunState& flight)
 std::string earthDockingGuidance(const FlightRunState& flight)
 {
     if (!earthDockingActive(flight)) return {};
+    if (flight.docking.securing) return flight.docking.securingSeconds < service_dock::clampLockSeconds
+        ? "SECURING SHIP" : "DOCKING COMPLETE";
     const auto pose = dockLocalPose(flight.docking);
     if (!flight.docking.enteredMouth) return "NOSE FIRST";
     if (std::abs(flightWrappedAngleDelta(flight.heading, flight.docking.dockHeading + 3.14159265358979323846)) >

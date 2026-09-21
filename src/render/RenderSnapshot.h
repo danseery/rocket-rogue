@@ -240,10 +240,23 @@ struct RenderSnapshot {
     double launchLandingLateralVelocity = 0.0;
     bool launchLandingAuthorized = false;
     bool launchLandingLocalFrame = false;
+    // While still physically attached after Depart, the Earth dock and ship
+    // share this staged departure pose toward the selected waypoint.
+    bool launchUndockReady = false;
     bool launchDockingActive = false;
     double launchDockHeading = 1.5707963267948966;
+    double launchDockAngularVelocity = 0.0;
     double launchDockHandoffProgress = 1.0;
+    double launchDockHandoffX = 0.0;
+    double launchDockHandoffY = 0.0;
     bool launchDockRotationLocked = false;
+    bool launchDockEnteredMouth = false;
+    bool launchDockSecuring = false;
+    double launchDockSecuringSeconds = 0.0;
+    double launchDockSecuringStartX = 0.0, launchDockSecuringStartY = 0.0;
+    double launchDockBumpAge = 1.0, launchDockBumpStrength = 0.0;
+    double launchDockBumpX = 0.0, launchDockBumpY = 0.0;
+    double launchDockBumpNormalX = 0.0, launchDockBumpNormalY = 0.0;
     std::string launchDockGuidance;
     double launchLandingBasisAngle = 1.5707963267948966;
     double launchLandingHorizontalPosition = 0.0;

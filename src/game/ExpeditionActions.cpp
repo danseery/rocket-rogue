@@ -21,6 +21,7 @@ void RocketGameApp::toggleCruiseControl() {
 }
 bool RocketGameApp::runExpeditionAction(const std::string& action) {
     if (!action.starts_with("expedition:")) return false;
+    if (earthDockingActive(session_.flight) && session_.flight.docking.securing) return true;
     auto& e = state_.run.expedition;
     if (!e.travelInitialized) return true;
     if (action == "expedition:missions" || action == "expedition:mission_history") {
@@ -299,6 +300,46 @@ void RocketGameApp::debugStartExpedition() {
     initializeLiveExpedition(state_, catalog_);
     state_.run.credits = 100;
     session_.preparedLaunch = expeditionFlightModel(state_, catalog_);
+    refreshPanel();
+}
+void RocketGameApp::debugStartDockArrival(bool bump) {
+    beginDebugSandbox("Dock feedback preview. No campaign save writes.");
+    initializeLiveExpedition(state_, catalog_);
+    state_.screen = Screen::Flight;
+    state_.meta.campaignIntroductionAcknowledged = true;
+    state_.incomingMessages = {};
+    state_.incomingMessages.acknowledgedMessages.push_back("earth_dock_intro");
+    earthDockIntroEligibleAfterReload_ = false;
+    auto& expedition = state_.run.expedition;
+    expedition.active = true;
+    expedition.undockReady = false;
+    expedition.departureCount = 1;
+    expedition.course.targetBodyId = "earth";
+    auto& flight = session_.flight;
+    flight.active = flight.physicalFlight = true;
+    flight.mode = FlightMode::Docking;
+    flight.hullRemaining = flight.hullMaximum = 100;
+    flight.fuelRemaining = flight.fuelCapacity = 10;
+    flight.docking = {};
+    flight.docking.active = flight.docking.rotationLocked = true;
+    flight.docking.dockId = "earth";
+    flight.docking.positionX = 0.0;
+    flight.docking.positionY = service_dock::captureCenterY;
+    flight.docking.velocityX = bump ? .4 : 0.0;
+    flight.docking.enteredMouth = !bump;
+    flight.heading = flight.docking.dockHeading + 3.141592653589793;
+    flight.positionX = flight.docking.positionX;
+    flight.positionY = flight.docking.positionY;
+    const auto& system = solarSystemDefinition();
+    const auto* earth = systemBody(system, "earth");
+    const auto dock = systemDockPosition(*earth);
+    expedition.location = convertSystemFrame({system.id, {}, CoordinateFrame::System,
+        {dock.x + flight.positionX, dock.y + flight.positionY}, earth->velocity, flight.heading, {}},
+        CoordinateFrame::Body, earth->id, system);
+    session_.preparedLaunch = expeditionFlightModel(state_, catalog_);
+    session_.flightArmed = true;
+    services_.ui.closeModal();
+    clearControllerPause();
     refreshPanel();
 }
 void RocketGameApp::debugStartStraylight(int requested) {

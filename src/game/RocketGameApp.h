@@ -72,6 +72,7 @@ public:
     void toggleCruiseControl();
     bool runExpeditionAction(const std::string& action);
     void debugStartExpedition();
+    void debugStartDockArrival(bool bump = false);
     void debugStartStraylight(int stage);
     void debugStartMoonApproach(bool acknowledge = false);
     void next();
@@ -478,6 +479,7 @@ private:
     bool controllerConnected_ = false;
     bool controllerResumeNeutralRequired_ = false;
     bool controllerGameplayNeutralRequired_ = false;
+    bool dockingControllerNeutralRequired_ = false;
     std::optional<InputContext> lastControllerGameplayContext_;
     std::string lastControllerAction_ = "none";
     ControllerHapticCue pendingHapticCue_ = ControllerHapticCue::None;

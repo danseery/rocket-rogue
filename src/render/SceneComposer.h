@@ -75,6 +75,7 @@ private:
     void drawLevelUpFanfare(const RenderSnapshot& snapshot);
     void drawSolarBackground(const RenderSnapshot& snapshot, float alpha, bool animateFrames = true);
     void drawRoute(const RenderSnapshot& snapshot);
+    void drawDockFeedback(const RenderSnapshot& snapshot);
     const std::vector<FlightTrajectoryPointSnapshot>& displayedFlightTrajectory(
         const RenderSnapshot& snapshot);
     void rebuildFlightTrajectoryCurve(const RenderSnapshot& snapshot);

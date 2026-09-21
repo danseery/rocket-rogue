@@ -378,6 +378,48 @@ body {
 	padding-bottom: 8px;
 }
 
+/* Controls handbook: shared by RmlUi and the web presentation. */
+#rr-modal.modal-controls { width: 1000px; max-width: 94%; left: 0px; right: 0px; margin-left: auto; margin-right: auto; }
+.controller-controls { color: #d6e6ed; font-size: 14px; }
+.controller-controls p { margin: 8px 0px; line-height: 1.5; color: #9fb7c5; }
+.controls-callout { padding: 14px; border: 1px #26768a; border-left: 4px #40d8ed; background-color: #0b252e; margin-bottom: 14px; }
+.controls-callout strong { color: #65e4f3; font-size: 16px; }
+.controls-flow { display: flex; color: #8ee8bd; font-size: 13px; margin-top: 10px; margin-bottom: 6px; }
+.controls-flow span { display: block; margin-right: 12px; color: #8ee8bd; }
+.controls-pad-card { padding: 12px; margin-bottom: 14px; background-color: #08131c; border: 1px #263e4b; border-radius: 8px; }
+.controller-controls .controls-caption { text-align: center; font-size: 12px; }
+.controls-pad { position: relative; width: 320px; height: 192px; margin: 0px auto; }
+.pad-shell { position: absolute; left: 12px; top: 42px; width: 296px; height: 142px; background-color: #1c303e; border: 2px #5b788b; border-radius: 58px; }
+.pad-part { position: absolute; box-sizing: border-box; display: block; text-align: center; background-color: #0a1721; border: 2px #678295; color: #e5f1f7; font-size: 12px; height: 28px; line-height: 24px; width: 54px; border-radius: 8px; }
+.pad-lt { left: 47px; top: 0px; }
+.pad-rt { right: 47px; top: 0px; }
+.pad-lb { left: 31px; top: 30px; width: 84px; height: 22px; line-height: 18px; }
+.pad-rb { right: 31px; top: 30px; width: 84px; height: 22px; line-height: 18px; }
+.pad-ls, .pad-rs { width: 48px; height: 48px; line-height: 44px; border-radius: 24px; border-color: #54cddf; }
+.pad-ls { left: 45px; top: 66px; }
+.pad-rs { left: 190px; top: 127px; }
+.pad-dpad { left: 86px; top: 125px; width: 42px; height: 42px; font-size: 34px; line-height: 35px; color: #65e4f3; border-color: #3ca8b8; }
+.pad-view, .pad-menu { width: 44px; height: 24px; line-height: 20px; font-size: 10px; top: 82px; }
+.pad-view { left: 112px; }
+.pad-menu { left: 162px; }
+.pad-north, .pad-west, .pad-east, .pad-south { width: 28px; height: 28px; border-radius: 14px; }
+.pad-north { left: 246px; top: 57px; color: #f6ce6b; border-color: #bd9038; }
+.pad-west { left: 219px; top: 84px; color: #7dbffc; border-color: #518cbd; }
+.pad-east { left: 273px; top: 84px; color: #ff9791; border-color: #c46863; }
+.pad-south { left: 246px; top: 111px; color: #8ee8bd; border-color: #50ab84; }
+.controls-cards { display: flex; flex-wrap: wrap; margin: 0px -5px; }
+.controls-card { box-sizing: border-box; flex: 1 1 380px; min-width: 0px; padding: 12px; margin: 5px; background-color: #0c1b25; border: 1px #2d4756; border-radius: 6px; }
+.controls-card h3 { color: #62d9eb; font-size: 15px; margin: 0px 0px 12px; }
+.controls-card p { font-size: 12px; }
+.controls-binding { display: flex; align-items: center; margin-bottom: 8px; }
+.controls-key { display: block; flex: 0 0 115px; box-sizing: border-box; padding: 5px; margin-right: 9px; background-color: #192e3c; border: 1px #506979; border-bottom: 3px #506979; border-radius: 5px; text-align: center; font-size: 12px; color: #edf5f8; }
+.controls-action { display: block; flex: 1 1 0px; font-size: 13px; }
+.controls-cyan { color: #79e4f2; border-color: #337e91; }
+.controls-green { color: #8ee8bd; border-color: #39846a; }
+.controls-red { color: #ffaba6; border-color: #a35d5b; }
+.controls-amber { color: #f6ce6b; border-color: #94743a; }
+.controls-footer { padding: 12px; margin-top: 10px; border-top: 1px #345365; }
+
 /* First-wave screens still bring their proven viewport-height geometry with
    them. Until their dynamic renderers are converted component by component,
    the template wrapper must not shift or clip that content vertically. */

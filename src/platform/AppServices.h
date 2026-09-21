@@ -266,6 +266,7 @@ enum class GameAudioCue {
     EngineToggle, Orbit, Weapon,
     Thrust,
     ShipExplosion,
+    DockBump, DockImpact, DockClamp, DockArrival,
     Count
 };
 
