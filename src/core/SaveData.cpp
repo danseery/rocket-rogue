@@ -4056,7 +4056,11 @@ std::optional<SaveData> deserializeSaveData(std::string_view text)
             save.planetaryExpedition.pendingMiningSiteDefinitionId = std::string(value);
         } else if (key == save_schema::field::surfaceLog) {
             save.planetaryExpedition.logEntries = split(value, save_schema::textListDelimiter);
-        } else if (key == save_schema::field::miningActive) {
+        }
+
+        // Keep the mining fields in a separate chain. MSVC treats a long
+        // else-if cascade as nested blocks and rejects the combined parser.
+        if (key == save_schema::field::miningActive) {
             save.mining.active = parseInt(value, 0) != 0;
         } else if (key == save_schema::field::miningDestination) {
             save.mining.destinationId = std::string(value);

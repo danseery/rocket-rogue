@@ -4715,8 +4715,6 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
         appendHudText(result, vitalValueIds[index], miningHud.vitals[index].value);
     }
     appendHudText(result, "rr-hud-mining-oxygen-label", miningHud.vitals[0].label);
-    appendHudText(result, "rr-hud-mining-load-micro-label", miningHud.vitals[3].microLabel);
-    appendHudText(result, "rr-hud-mining-load-micro", miningHud.vitals[3].microValue);
     if (!miningHud.vitals[1].microLabel.empty()) {
         appendHudText(result, "rr-hud-mining-fuel-micro", miningHud.vitals[1].microValue);
     }
