@@ -115,7 +115,7 @@ FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool la
     if (earthLaunchReady(e)) g.nextAction = "Launch from Earth / " + g.targetName + " ahead";
     else if (e.undockReady) g.nextAction = "Thrust to undock";
     else if (f.courseNoticeSeconds > 0) g.nextAction = e.cruise.active ? "Waypoint set / CRUISE ACTIVE" : "Waypoint set / manual flight";
-    else if (earthDockingActive(f)) g.nextAction = "Earth dock / " + earthDockingGuidance(f);
+    else if (serviceDockingActive(f)) g.nextAction = earthDockingGuidance(f);
     else if (f.mode == FlightMode::Landing) g.nextAction = f.landing.departureActive ? "Climb clear of the surface" : "Control descent and touch down";
     else if (frame && frame->id == "earth" && f.positionX*f.velocityX+f.positionY*f.velocityY > 0)
         g.nextAction = "Climb away from Earth / follow your " + g.targetName + " marker";

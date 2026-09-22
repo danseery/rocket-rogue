@@ -1981,7 +1981,7 @@ std::vector<GameAudioEvent> RocketGameApp::consumePendingAudioEvents()
 
 double RocketGameApp::thrustAudioLevel() const
 {
-    if (earthDockingActive(session_.flight) && session_.flight.docking.securing) return 0.0;
+    if (serviceDockingActive(session_.flight) && session_.flight.docking.securing) return 0.0;
     if (straylightOwnsPresentation(state_)) return 0.0;
     if (titleScreenActive_ || state_.screen != Screen::Flight || !session_.flightArmed ||
         pauseReason_ != PauseReason::None || services_.ui.modalOpen() ||
@@ -2084,7 +2084,7 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
 
 void RocketGameApp::applyRealtimeInputs()
 {
-    if (earthDockingActive(session_.flight) && session_.flight.docking.securing) {
+    if (serviceDockingActive(session_.flight) && session_.flight.docking.securing) {
         releaseRealtimeInputs(true);
         return;
     }
@@ -2602,7 +2602,7 @@ void RocketGameApp::inputFrame(const ControllerFrame& frame, double realTimeSeco
     }
 
     const InputContext context = inputContext();
-    if (earthDockingActive(session_.flight) && session_.flight.docking.securing && !modalOpen &&
+    if (serviceDockingActive(session_.flight) && session_.flight.docking.securing && !modalOpen &&
         pauseReason_ == PauseReason::None) {
         inputRouter_.observeInactiveFrame(context, frame, controllerPreferences_, services_.ui.focusedControllerAction());
         releaseRealtimeInputs(true);
@@ -2850,7 +2850,7 @@ void RocketGameApp::tick(double deltaSeconds)
         }
     }
 
-    if (earthDockingActive(session_.flight) && session_.flight.docking.securing &&
+    if (serviceDockingActive(session_.flight) && session_.flight.docking.securing &&
         pauseReason_ == PauseReason::ControllerUiFocus && !services_.ui.modalOpen()) {
         clearControllerPause();
         services_.ui.setControllerFocusVisible(false);
@@ -6099,7 +6099,7 @@ void RocketGameApp::save(bool milestone)
         storeVisitedSite(state_, state_.run.expedition.location.siteId);
     // Docking physics maintains the body-relative fallback pose. Its live
     // flight position is dock-relative and must not overwrite that frame.
-    if (state_.run.expedition.travelInitialized && !earthDockingActive(session_.flight))
+    if (state_.run.expedition.travelInitialized && !serviceDockingActive(session_.flight))
         captureSystemLocation(state_.run.expedition.location, session_.flight);
     if (state_.run.expedition.travelInitialized && state_.run.mining.active)
         state_.run.expedition.rigFuel = state_.run.mining.rigFuel;
@@ -6381,7 +6381,7 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
 
 void RocketGameApp::runUiAction(const std::string& action)
 {
-    if (earthDockingActive(session_.flight) && session_.flight.docking.securing &&
+    if (serviceDockingActive(session_.flight) && session_.flight.docking.securing &&
         !services_.ui.modalOpen()) return;
     if (action.starts_with("sfx:")) {
         if (surfaceBaySequence_.active() || surfaceArrival_.active() || titleLaunchActive_) return;
@@ -7074,7 +7074,10 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.launchLandingLateralVelocity = session_.flight.landing.lateralVelocity;
         result.launchLandingLocalFrame = session_.flight.mode == FlightMode::Landing;
         result.launchUndockReady = state_.run.expedition.undockReady;
-        result.launchDockingActive = earthDockingActive(session_.flight);
+        result.launchDockingActive = serviceDockingActive(session_.flight);
+        result.launchDockId = session_.flight.docking.dockId;
+        result.launchDockName = session_.flight.docking.dockId == "straylight"
+            ? (straylightIdentityKnown(state_.meta.straylightStage) ? "Straylight Dock" : "The Anomaly") : "Earth Orbital Dock";
         result.launchDockHeading = session_.flight.docking.dockHeading;
         result.launchDockAngularVelocity = session_.flight.docking.dockAngularVelocity;
         result.launchDockHandoffProgress = std::clamp(session_.flight.docking.handoffSeconds / flight_landing::handoffSeconds, 0.0, 1.0);

@@ -1990,6 +1990,11 @@ void straylightSequenceActionsAndArrival()
     assert(fixture->ui.html.find("Bring me the artifacts you recovered.")!=std::string::npos);
     fixture->ui.dispatchAction("expedition:straylight:skip");
     assert(fixture->ui.html.find("I can still think")!=std::string::npos);
+    app.debugStartStraylight(8);
+    for (int i=0;i<70;++i) { fixture->host.now+=.05; fixture->runner.frame(); }
+    assert(fixture->ui.html.find("That is the name on my hull.")!=std::string::npos);
+    assert(fixture->ui.html.find("Skip animation")==std::string::npos);
+    // Legacy cinematic saves still finish through their original stage.
     app.debugStartStraylight(1);
     fixture->ui.dispatchAction("expedition:straylight:skip");
     assert(fixture->ui.html.find("That is the name on my hull.")!=std::string::npos);

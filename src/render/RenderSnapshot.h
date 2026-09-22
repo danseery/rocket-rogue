@@ -244,6 +244,8 @@ struct RenderSnapshot {
     // share this staged departure pose toward the selected waypoint.
     bool launchUndockReady = false;
     bool launchDockingActive = false;
+    std::string launchDockId = "earth";
+    std::string launchDockName = "Earth Orbital Dock";
     double launchDockHeading = 1.5707963267948966;
     double launchDockAngularVelocity = 0.0;
     double launchDockHandoffProgress = 1.0;

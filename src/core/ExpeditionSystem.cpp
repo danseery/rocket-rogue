@@ -10,6 +10,12 @@
 
 namespace rocket
 {
+double service_dock::captureHeading(std::string_view id, double dockHeading, double shipHeading) {
+    if (!profile(id).parallel) return dockHeading + 3.14159265358979323846;
+    const double a = dockHeading - 1.5707963267948966;
+    const double b = a + 3.14159265358979323846;
+    return std::abs(flightWrappedAngleDelta(shipHeading, a)) <= std::abs(flightWrappedAngleDelta(shipHeading, b)) ? a : b;
+}
 namespace
 {
 constexpr double dockRange = .65;
@@ -91,7 +97,7 @@ bool dockRectContact(DockLocalPose& pose, double circleOffsetX, double circleOff
     return true;
 }
 
-bool dockHullContact(DockLocalPose& pose, const DockHullBasis& hull,
+bool dockHullContact(DockLocalPose& pose, const DockHullBasis& hull, const service_dock::Profile& profile,
     double& normalX, double& normalY, double& contactX, double& contactY)
 {
     constexpr std::array<double, 3> samples {-service_dock::hullHalfLength, 0.0,
@@ -100,16 +106,16 @@ bool dockHullContact(DockLocalPose& pose, const DockHullBasis& hull,
         const double offsetX = hull.forwardX * offset;
         const double offsetY = hull.forwardY * offset;
         if (dockRectContact(pose, offsetX, offsetY,
-                -service_dock::outerHalfWidth, -service_dock::channelHalfWidth,
-                service_dock::backstopY, service_dock::mouthY,
+                -profile.outerWidth, -profile.halfWidth,
+                profile.backstop, profile.mouth,
                 normalX, normalY, contactX, contactY) ||
             dockRectContact(pose, offsetX, offsetY,
-                service_dock::channelHalfWidth, service_dock::outerHalfWidth,
-                service_dock::backstopY, service_dock::mouthY,
+                profile.halfWidth, profile.outerWidth,
+                profile.backstop, profile.mouth,
                 normalX, normalY, contactX, contactY) ||
             dockRectContact(pose, offsetX, offsetY,
-                -service_dock::outerHalfWidth, service_dock::outerHalfWidth,
-                -service_dock::outerHalfWidth, service_dock::backstopY,
+                -profile.outerWidth, profile.outerWidth,
+                profile.bottom, profile.backstop,
                 normalX, normalY, contactX, contactY)) return true;
     }
     return false;
@@ -127,7 +133,7 @@ void updateDockExpeditionLocation(PersistentExpeditionState& e, const DockingSta
     e.location.heading = 0;
 }
 
-void beginEarthDocking(PersistentExpeditionState& e, FlightRunState& flight, const SystemDefinition& system,
+void beginServiceDocking(PersistentExpeditionState& e, FlightRunState& flight, const SystemDefinition& system,
     const SystemBodyDefinition& earth)
 {
     auto pose = e.location;
@@ -148,7 +154,8 @@ void beginEarthDocking(PersistentExpeditionState& e, FlightRunState& flight, con
         ? std::min(service_dock::entrySpeedScale, service_dock::entryMaxSpeed / entrySpeed) : 1.0;
     docking.velocityX *= entryScale;
     docking.velocityY *= entryScale;
-    docking.dockHeading = std::atan2(docking.positionY, docking.positionX);
+    docking.dockHeading = service_dock::profile(earth.id).parallel ? service_dock::arkHeading :
+        std::atan2(docking.positionY, docking.positionX);
     docking.rotationLocked = true;
     docking.handoffStartX = docking.positionX;
     docking.handoffStartY = docking.positionY;
@@ -168,13 +175,13 @@ void beginEarthDocking(PersistentExpeditionState& e, FlightRunState& flight, con
     updateDockExpeditionLocation(e, docking, earth, system);
 }
 
-LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunState& flight,
+LaunchFlightStep advanceServiceDocking(PersistentExpeditionState& e, FlightRunState& flight,
     const SystemDefinition& system, const FlightInput& input, double deltaSeconds, int flightControlRank)
 {
     LaunchFlightStep result;
     auto& docking = flight.docking;
     const auto* earth = systemBody(system, docking.dockId.empty() ? "earth" : docking.dockId);
-    if (!docking.active || earth == nullptr || earth->id != "earth" || !earth->dock) {
+    if (!docking.active || earth == nullptr || !service_dock::supported(earth->id) || !earth->dock) {
         // Do not fall straight back into automatic approach if a legacy or
         // invalid save names a dock which no longer exists. The player keeps
         // the recovered system pose and must clear the approach volume before
@@ -189,6 +196,7 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
     docking.bumpAge = std::min(1.0, docking.bumpAge + dt);
     docking.handoffSeconds = std::min(flight_landing::handoffSeconds, docking.handoffSeconds + dt);
     flight.handoff.elapsed = docking.handoffSeconds;
+    const auto profile = service_dock::profile(docking.dockId);
     DockLocalPose pose = dockLocalPose(docking);
     const double range = std::hypot(pose.x, pose.y);
     if (range >= service_dock::exitRadius * service_dock::localUnitsPerSystemUnit) {
@@ -214,12 +222,12 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
             docking.securingSeconds >= service_dock::clampLockSeconds;
         const double settle = service_dock::clampProgress(docking.securingSeconds);
         pose.x = std::lerp(docking.securingStartX, 0.0, settle);
-        pose.y = std::lerp(docking.securingStartY, service_dock::captureCenterY, settle);
+        pose.y = std::lerp(docking.securingStartY, profile.centerY, settle);
         pose.vx = pose.vy = 0.0;
         writeDockLocalPose(docking, pose);
         docking.velocityX = docking.velocityY = 0.0;
         flight.heading = docking.securingStartHeading + flightWrappedAngleDelta(
-            docking.securingStartHeading, docking.dockHeading + 3.14159265358979323846) * settle;
+            docking.securingStartHeading, service_dock::captureHeading(docking.dockId, docking.dockHeading, docking.securing ? docking.securingStartHeading : flight.heading)) * settle;
         flight.positionX = docking.positionX;
         flight.positionY = docking.positionY;
         flight.velocityX = flight.velocityY = 0.0;
@@ -264,11 +272,11 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
         pose.y += pose.vy * substep;
         const double noseX = pose.x + hull.forwardX * service_dock::hullHalfLength;
         const double noseY = pose.y + hull.forwardY * service_dock::hullHalfLength;
-        if (previousNoseY > service_dock::mouthY && noseY <= service_dock::mouthY &&
-            std::abs(noseX) <= service_dock::channelHalfWidth - service_dock::hullRadius)
+        if (previousNoseY > profile.mouth && noseY <= profile.mouth &&
+            std::abs(noseX) <= profile.halfWidth - service_dock::hullRadius)
             docking.enteredMouth = true;
         double normalX = 0.0, normalY = 0.0, contactX = 0.0, contactY = 0.0;
-        const bool hit = dockHullContact(pose, hull, normalX, normalY, contactX, contactY);
+        const bool hit = dockHullContact(pose, hull, profile, normalX, normalY, contactX, contactY);
         if (hit) {
             // The berth stays fixed throughout this approach.
             const double dockRotationVelocityX = -docking.dockAngularVelocity * contactY;
@@ -292,7 +300,7 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
             if (!contacted && damage > 0.0) {
                 const double before = flight.hullRemaining;
                 flight.hullRemaining = std::max(0.0, before - damage);
-                flight.impact = {true, impactSpeed, damage, before, flight.hullRemaining, docking.positionX, docking.positionY, "earth"};
+                flight.impact = {true, impactSpeed, damage, before, flight.hullRemaining, docking.positionX, docking.positionY, docking.dockId};
                 flight.impactDisplaySeconds = 3.0;
             }
             double relativeX = pose.vx - dockRotationVelocityX;
@@ -327,15 +335,16 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
     const DockHullBasis hull = dockHullBasis(flight.heading, docking.dockHeading);
     const double hullExtentX = std::abs(hull.forwardX) * service_dock::hullHalfLength + service_dock::hullRadius;
     const double hullExtentY = std::abs(hull.forwardY) * service_dock::hullHalfLength + service_dock::hullRadius;
-    const double headingError = std::abs(flightWrappedAngleDelta(flight.heading, docking.dockHeading + 3.14159265358979323846));
-    const bool fullyInside = std::abs(pose.x) + hullExtentX <= service_dock::channelHalfWidth &&
-        pose.y - hullExtentY >= service_dock::backstopY &&
-        pose.y + hullExtentY <= service_dock::mouthY;
-    const bool insideBerth = docking.enteredMouth && fullyInside &&
-        std::abs(pose.x) <= service_dock::captureHalfWidth * service_dock::captureGraceScale &&
-        std::abs(pose.y - service_dock::captureCenterY) <= service_dock::captureHalfDepth * service_dock::captureGraceScale;
-    const bool slowEnough = std::abs(pose.vy) * flight_geometry::velocityToMetersPerSecond <= service_dock::captureForwardSpeed &&
-        std::abs(pose.vx) * flight_geometry::velocityToMetersPerSecond <= service_dock::captureLateralSpeed;
+    const double headingError = std::abs(flightWrappedAngleDelta(flight.heading, service_dock::captureHeading(docking.dockId, docking.dockHeading, docking.securing ? docking.securingStartHeading : flight.heading)));
+    const bool fullyInside = std::abs(pose.x) + hullExtentX <= profile.halfWidth &&
+        pose.y - hullExtentY >= profile.backstop &&
+        pose.y + hullExtentY <= profile.mouth;
+    if (profile.parallel) docking.enteredMouth = fullyInside;
+    const bool insideBerth = (profile.parallel || docking.enteredMouth) && fullyInside &&
+        std::abs(pose.x) <= profile.targetHalfWidth * service_dock::captureGraceScale &&
+        std::abs(pose.y - profile.centerY) <= profile.targetHalfDepth * service_dock::captureGraceScale;
+    const bool slowEnough = std::abs(profile.parallel ? pose.vx : pose.vy) * flight_geometry::velocityToMetersPerSecond <= service_dock::captureForwardSpeed &&
+        std::abs(profile.parallel ? pose.vy : pose.vx) * flight_geometry::velocityToMetersPerSecond <= service_dock::captureLateralSpeed;
     docking.captureSeconds = insideBerth && slowEnough && headingError <= service_dock::captureHeadingRadians
         ? docking.captureSeconds + dt : 0.0;
     if (docking.captureSeconds >= service_dock::captureSeconds) {
@@ -754,7 +763,7 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
         restoreSystemLocation(e.location, flight);
         flight.mode = body ? FlightMode::Orbit : FlightMode::Travel;
     }
-    if (flight.docking.settlementReady && flight.active && atDock(e, "earth")) {
+    if (flight.docking.settlementReady && flight.active && atDock(e, flight.docking.dockId)) {
         // A save can be written after physical capture but before the app has
         // opened the dock. Resume the same one-shot settlement rather than
         // sending the already captured ship through another approach.
@@ -763,22 +772,24 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
         return captured;
     }
     if (flight.mode == FlightMode::Docking) {
-        return advanceEarthDocking(e, flight, system, input, dt, launch.flightControlRank);
+        return advanceServiceDocking(e, flight, system, input, dt, launch.flightControlRank);
     }
     if (flight.active && flight.mode != FlightMode::Landing) {
         auto current = e.location;
         captureSystemLocation(current, flight);
-        const auto* earth = systemBody(system, "earth");
-        if (earth && earth->dock) {
+        for (const auto& candidate : system.bodies) {
+        const auto* earth = &candidate;
+        if (earth->dock && service_dock::supported(earth->id) && (earth->id != "straylight" || e.straylightRevealed)) {
             const double dockDistance = distance(absolute(current, system).position, systemDockPosition(*earth));
-            if (flight.docking.reentrySuppressed && dockDistance > service_dock::exitRadius)
+            if (flight.docking.reentrySuppressed && (flight.docking.dockId.empty() || flight.docking.dockId == earth->id) && dockDistance > service_dock::exitRadius)
                 flight.docking.reentrySuppressed = false;
             if (!flight.docking.reentrySuppressed && dockDistance <= service_dock::approachRadius) {
                 e.location = current;
-                beginEarthDocking(e, flight, system, *earth);
+                beginServiceDocking(e, flight, system, *earth);
                 return {};
             }
         }
+    }
     }
     input = cruiseInput(e, flight, system, input, launch.heatEnabled);
     auto result = updateLaunchFlight(flight, launch, destination, input, dt, site, &system, &e.location);
@@ -797,17 +808,19 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
     captureSystemLocation(e.location, flight);
     if (result.failed)
         return result;
-    const auto* earth = systemBody(system, "earth");
-    if (earth && earth->dock) {
+    for (const auto& candidate : system.bodies) {
+    const auto* earth = &candidate;
+    if (earth->dock && service_dock::supported(earth->id) && (earth->id != "straylight" || e.straylightRevealed)) {
         const auto absolutePose = absolute(e.location, system);
         const double dockDistance = distance(absolutePose.position, systemDockPosition(*earth));
-        if (flight.docking.reentrySuppressed && dockDistance > service_dock::exitRadius)
+        if (flight.docking.reentrySuppressed && (flight.docking.dockId.empty() || flight.docking.dockId == earth->id) && dockDistance > service_dock::exitRadius)
             flight.docking.reentrySuppressed = false;
         if (!flight.docking.reentrySuppressed && flight.active && flight.mode != FlightMode::Landing &&
             dockDistance <= service_dock::approachRadius) {
-            beginEarthDocking(e, flight, system, *earth);
+            beginServiceDocking(e, flight, system, *earth);
             return result;
         }
+    }
     }
     const auto *encounter = encounteredBody(e.location, system);
     if (encounter && encounter->id == "straylight" && !e.straylightRevealed) encounter = nullptr;
@@ -1018,6 +1031,10 @@ bool expeditionDockInRange(const PersistentExpeditionState& e, const FlightRunSt
     return false;
 }
 
+bool serviceDockingActive(const FlightRunState& flight) {
+    return flight.mode == FlightMode::Docking && flight.docking.active && service_dock::supported(flight.docking.dockId);
+}
+
 bool earthDockingActive(const FlightRunState& flight)
 {
     return flight.mode == FlightMode::Docking && flight.docking.active && flight.docking.dockId == "earth";
@@ -1025,15 +1042,17 @@ bool earthDockingActive(const FlightRunState& flight)
 
 std::string earthDockingGuidance(const FlightRunState& flight)
 {
-    if (!earthDockingActive(flight)) return {};
+    if (!serviceDockingActive(flight)) return {};
     if (flight.docking.securing) return flight.docking.securingSeconds < service_dock::clampLockSeconds
         ? "SECURING SHIP" : "DOCKING COMPLETE";
     const auto pose = dockLocalPose(flight.docking);
-    if (!flight.docking.enteredMouth) return "NOSE FIRST";
-    if (std::abs(flightWrappedAngleDelta(flight.heading, flight.docking.dockHeading + 3.14159265358979323846)) >
-        service_dock::captureHeadingRadians) return "ALIGN WITH BERTH";
-    if (std::abs(pose.vx) * flight_geometry::velocityToMetersPerSecond > service_dock::captureLateralSpeed ||
-        std::abs(pose.vy) * flight_geometry::velocityToMetersPerSecond > service_dock::captureForwardSpeed) return "SLOW DOWN";
+    const auto profile = service_dock::profile(flight.docking.dockId);
+    if (!profile.parallel && !flight.docking.enteredMouth) return "NOSE FIRST";
+    if (std::abs(flightWrappedAngleDelta(flight.heading, service_dock::captureHeading(flight.docking.dockId, flight.docking.dockHeading, flight.heading))) >
+        service_dock::captureHeadingRadians) return profile.parallel ? "ALIGN PARALLEL" : "ALIGN WITH BERTH";
+    if (std::abs(profile.parallel ? pose.vy : pose.vx) * flight_geometry::velocityToMetersPerSecond > service_dock::captureLateralSpeed ||
+        std::abs(profile.parallel ? pose.vx : pose.vy) * flight_geometry::velocityToMetersPerSecond > service_dock::captureForwardSpeed) return "SLOW DOWN";
+    if (profile.parallel) return flight.docking.captureSeconds > 0.0 ? "HOLD POSITION" : "STRAFE INTO BERTH";
     return flight.docking.captureSeconds > 0.0 ? "DOCKING..." : "HOLD ALIGNMENT";
 }
 bool canSalvageWreck(const PersistentExpeditionState& e, const FlightRunState& f, const SystemDefinition& s, std::uint64_t id, bool requireMatchedSpeed) {
@@ -1063,10 +1082,19 @@ ExpeditionResult departDock(PersistentExpeditionState &e, FlightRunState &f)
     ++e.departureCount;
     e.undockReady = false;
     e.location.siteId.clear();
+    if (e.location.bodyId == "straylight") {
+        e.location.position.y += (service_dock::profile("straylight").mouth +
+            service_dock::hullRadius + .2) / service_dock::localUnitsPerSystemUnit;
+        restoreSystemLocation(e.location, f);
+    }
     f.active = true;
     // Leaving a captured Earth berth must not immediately pull the ship back
     // into the maneuver while it is still inside the approach envelope.
-    if (e.location.bodyId == "earth") f.docking.reentrySuppressed = true;
+    if (service_dock::supported(e.location.bodyId)) {
+        f.docking = {};
+        f.docking.dockId = e.location.bodyId;
+        f.docking.reentrySuppressed = true;
+    }
     return ExpeditionResult::Applied;
 }
 ExpeditionResult loadEarthBattery(PersistentExpeditionState &e, std::string_view id)

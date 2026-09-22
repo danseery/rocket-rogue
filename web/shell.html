@@ -495,7 +495,8 @@
           <button type="button" data-debug-action="dock-bump">Dock bump feedback</button>
           <button type="button" data-debug-action="travel-camera">Cinematic travel camera</button>
           <button type="button" data-debug-action="straylight-reveal">Straylight reveal</button>
-          <button type="button" data-debug-action="straylight-dock">Straylight docking</button>
+          <button type="button" data-debug-action="straylight-dock">Straylight parking</button>
+          <button type="button" data-debug-action="straylight-capture">Straylight capture</button>
           <button type="button" data-debug-action="straylight-beacons">Straylight beacon installation</button>
           <button type="button" data-debug-action="straylight-online">Straylight awakening</button>
           <button type="button" data-debug-action="straylight-boarding">Straylight boarding</button>
@@ -1301,7 +1302,8 @@
       "dock-bump": () => rrCall("rr_debug_dock_arrival", [1]),
       "travel-camera": () => rrCall("rr_debug_launch_lesson", [6]),
       "straylight-reveal": () => rrCall("rr_debug_straylight", [0]),
-      "straylight-dock": () => rrCall("rr_debug_straylight", [1]),
+      "straylight-dock": () => rrCall("rr_debug_straylight", [7]),
+      "straylight-capture": () => rrCall("rr_debug_straylight", [8]),
       "straylight-beacons": () => rrCall("rr_debug_straylight", [2]),
       "straylight-online": () => rrCall("rr_debug_straylight", [3]),
       "straylight-boarding": () => rrCall("rr_debug_straylight", [4]),

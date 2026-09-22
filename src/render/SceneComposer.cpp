@@ -666,7 +666,7 @@ FlightCameraView physicalFlightCamera(
     if (snapshot.systemTravel) {
         const auto& g = snapshot.flightGuidance;
         const auto* frameBody = snapshot.systemLocation.frame == CoordinateFrame::Body
-            ? systemBody(solarSystemDefinition(),snapshot.systemLocation.bodyId) : nullptr;
+            ? systemBody(snapshot.system,snapshot.systemLocation.bodyId) : nullptr;
         // Keep the travel view in the same physical frame on either side of
         // encounter entry/exit; local framing fades in by distance below.
         const SystemVector frameOffset = frameBody ? frameBody->position : SystemVector{};
@@ -6419,6 +6419,7 @@ void SceneComposer::drawSceneTransition(const RenderSnapshot& snapshot)
 
 void SceneComposer::drawDockFeedback(const RenderSnapshot& snapshot)
 {
+    const auto profile = service_dock::profile(snapshot.launchDockId);
     const auto view = physicalFlightCamera(snapshot, flightCameraPresentation_.approachBlend);
     const Vec2 center = view.camera.point(0, 0);
     const Vec2 outward = view.camera.vector(std::cos(snapshot.launchDockHeading), std::sin(snapshot.launchDockHeading));
@@ -6452,18 +6453,30 @@ void SceneComposer::drawDockFeedback(const RenderSnapshot& snapshot)
         ? static_cast<float>(service_dock::clampProgress(time)) : 0.0F;
     const bool locked = snapshot.launchDockSecuring && time >= service_dock::clampLockSeconds;
     const Color light = locked ? Color {.25F, 1.0F, .65F, 1.0F} : Color {1.0F, .65F, .18F, .85F};
-    for (const double side : {-1.0, 1.0}) {
-        const double base = side * service_dock::channelHalfWidth;
+    if (profile.parallel) {
+        // Two hull-mounted shoes rise from the inner wall to the ship's side.
+        for (double station : {-.12, .12}) {
+            const double tipY = std::lerp(profile.backstop - .025, profile.centerY - service_dock::hullRadius, close);
+            const Vec2 mount = point(station, profile.backstop - .05);
+            const Vec2 end = point(station, tipY);
+            drawLine(mount.x, mount.y, end.x, end.y, {.18F,.24F,.28F,1}, 12);
+            drawLine(mount.x, mount.y, end.x, end.y, {.60F,.67F,.70F,1}, 5);
+            const Vec2 a = point(station-.045,tipY), b = point(station+.045,tipY);
+            drawLine(a.x,a.y,b.x,b.y,{.40F,.48F,.52F,1},6);
+            if (snapshot.launchDockSecuring) drawCircle(end.x,end.y,.012F*scale,light,12);
+        }
+    } else for (const double side : {-1.0, 1.0}) {
+        const double base = side * profile.halfWidth;
         const double tip = std::lerp(base, side * service_dock::hullRadius, close);
-        const Vec2 mount = point(base + side * .035, service_dock::captureCenterY);
-        const Vec2 end = point(tip, service_dock::captureCenterY);
-        const Vec2 sleeve = point(base - side * .065 * close, service_dock::captureCenterY);
+        const Vec2 mount = point(base + side * .035, profile.centerY);
+        const Vec2 end = point(tip, profile.centerY);
+        const Vec2 sleeve = point(base - side * .065 * close, profile.centerY);
         drawLine(mount.x, mount.y, end.x, end.y, {.12F, .17F, .20F, 1}, 10.0F);
         drawLine(mount.x, mount.y, end.x, end.y, {.57F, .65F, .69F, 1}, 5.0F);
         drawLine(mount.x, mount.y, sleeve.x, sleeve.y, {.09F, .13F, .16F, 1}, 16.0F);
         drawLine(mount.x, mount.y, sleeve.x, sleeve.y, {.34F, .42F, .46F, 1}, 10.0F);
-        const Vec2 padA = point(tip, service_dock::captureCenterY - .055);
-        const Vec2 padB = point(tip, service_dock::captureCenterY + .055);
+        const Vec2 padA = point(tip, profile.centerY - .055);
+        const Vec2 padB = point(tip, profile.centerY + .055);
         drawLine(padA.x, padA.y, padB.x, padB.y, {.30F, .38F, .41F, 1}, 5.0F);
         if (snapshot.launchDockSecuring) {
             drawCircle(end.x, end.y, .012F * scale, light, 12);
@@ -6474,14 +6487,14 @@ void SceneComposer::drawDockFeedback(const RenderSnapshot& snapshot)
     if (locked) {
         const float pulse = static_cast<float>(std::sin(std::clamp((time - service_dock::clampLockSeconds) / .9, 0.0, 1.0) * kPi));
         for (const double side : {-1.0, 1.0}) {
-            const Vec2 marker = point(side * service_dock::channelHalfWidth, service_dock::mouthY);
+            const Vec2 marker = point(side * profile.halfWidth, profile.mouth);
             drawRadialGlow(marker.x, marker.y, (.06F + pulse * .10F) * scale,
                 {.2F, 1.0F, .65F, pulse * .5F}, 24);
         }
     }
     // Fixed scene labels remain clear of the ship and bottom-right instruments.
     drawPoiLabel(0.0F, .73F, .0053F, locked ? "DOCKING COMPLETE" : "SECURING SHIP", PoiGuidanceKind::Ship);
-    if (locked) drawPoiLabel(0.0F, .66F, .0033F, "Earth Orbital Dock", PoiGuidanceKind::Ship);
+    if (locked) drawPoiLabel(0.0F, .66F, .0033F, snapshot.launchDockName, PoiGuidanceKind::Ship);
 }
 
 void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
@@ -6494,14 +6507,15 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
         const float approachBlend = flightCameraPresentation_.approachBlend;
         const FlightCameraView view = physicalFlightCamera(snapshot, approachBlend);
         if (snapshot.launchDockingActive) {
+            const auto profile = service_dock::profile(snapshot.launchDockId);
             const Vec2 center = view.camera.point(0.0, 0.0);
             const Vec2 outward = view.camera.vector(std::cos(snapshot.launchDockHeading), std::sin(snapshot.launchDockHeading));
             const Vec2 right {outward.y, -outward.x};
-            const float mouth = static_cast<float>(service_dock::mouthY) * view.camera.scale;
-            const float channel = static_cast<float>(service_dock::channelHalfWidth) * view.camera.scale;
-            const float pocket = static_cast<float>(service_dock::captureCenterY) * view.camera.scale;
-            const float pocketHalfWidth = static_cast<float>(service_dock::captureHalfWidth) * view.camera.scale;
-            const float pocketHalfDepth = static_cast<float>(service_dock::captureHalfDepth) * view.camera.scale;
+            const float mouth = static_cast<float>(profile.mouth) * view.camera.scale;
+            const float channel = static_cast<float>(profile.halfWidth) * view.camera.scale;
+            const float pocket = static_cast<float>(profile.centerY) * view.camera.scale;
+            const float pocketHalfWidth = static_cast<float>(profile.targetHalfWidth) * view.camera.scale;
+            const float pocketHalfDepth = static_cast<float>(profile.targetHalfDepth) * view.camera.scale;
             const float tick = static_cast<float>(service_dock::hullRadius) * view.camera.scale;
             const float handoff = smootherstep(static_cast<float>(snapshot.launchDockHandoffProgress));
             const float guideAlpha = (snapshot.launchDockSecuring ? 0.16F :
@@ -6972,7 +6986,7 @@ void SceneComposer::updateFlightCameraPresentation(const RenderSnapshot& snapsho
     SystemVector origin = frameBody ? frameBody->position : SystemVector{};
     double units = 1;
     if (snapshot.launchDockingActive) {
-        const auto* earth = systemBody(solarSystemDefinition(),"earth");
+        const auto* earth = systemBody(snapshot.system,snapshot.launchDockId);
         if (earth) origin = systemDockPosition(*earth);
         units = service_dock::localUnitsPerSystemUnit;
     }
@@ -7606,6 +7620,7 @@ void SceneComposer::drawStraylightSequence(const RenderSnapshot& snapshot)
 
 void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
 {
+    const auto profile = service_dock::profile(snapshot.launchDockId);
     drawRect(0.0F, 0.0F, 2.0F, 2.0F, {0.015F, 0.022F, 0.032F, 1.0F}, false);
     drawSolarBackground(snapshot, 0.70F, snapshot.screen != Screen::Flight);
     if (snapshot.launchDockingActive) {
@@ -7613,20 +7628,33 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
         const Vec2 center = view.camera.point(0.0, 0.0);
         const Vec2 outward = view.camera.vector(std::cos(snapshot.launchDockHeading), std::sin(snapshot.launchDockHeading));
         const float handoff = smootherstep(static_cast<float>(snapshot.launchDockHandoffProgress));
-        if (const auto* earth = systemBody(snapshot.system, "earth")) {
+        if (const auto* earth = systemBody(snapshot.system, snapshot.launchDockId)) {
             const auto dock = systemDockPosition(*earth);
             const Vec2 earthPoint = view.camera.point((earth->position.x - dock.x) * service_dock::localUnitsPerSystemUnit,
                 (earth->position.y - dock.y) * service_dock::localUnitsPerSystemUnit);
             const float earthRadius = static_cast<float>(systemBodyDisplayRadius(*earth) * service_dock::localUnitsPerSystemUnit) * view.camera.scale;
-            drawSprite(earthPoint.x, earthPoint.y, earthRadius * 2.0F, earthRadius * 2.0F,
-                {1.0F, 1.0F, 1.0F, 1.0F - handoff}, EarthAsset);
+            if (earth->kind == SystemBodyKind::Station) {
+                const auto hullUp = view.camera.vector(0,1);
+                const float light = snapshot.straylightStage >= StraylightStage::Awakening ? 1.0F : .46F;
+                drawSpriteRotated(earthPoint.x,earthPoint.y,earthRadius*2.4F,earthRadius*2.4F,
+                    hullUp.x,hullUp.y,{light,light,light,1.0F-handoff},
+                    arkDamaged(snapshot.arkCondition) ? ArkDamagedAsset : ArkOperationalAsset);
+            } else drawSprite(earthPoint.x, earthPoint.y, earthRadius * 2.0F, earthRadius * 2.0F,
+                {1.0F, 1.0F, 1.0F, 1.0F - handoff}, systemBodyAsset(*earth));
         }
         const float pulse = snapshot.launchDockRotationLocked ? 0.82F : 0.96F;
         drawRadialGlow(center.x, center.y, 0.45F,
             {0.20F, 0.82F, 1.0F, (0.03F + 0.09F * handoff) * pulse}, 48);
         const float dockWorldSize = std::lerp(static_cast<float>(service_dock::handoffIconWorldSize * service_dock::localUnitsPerSystemUnit),
             static_cast<float>(service_dock::artWorldSize), handoff);
-        drawSpriteRotated(center.x, center.y, dockWorldSize * view.camera.scale, dockWorldSize * view.camera.scale,
+        if (profile.parallel) {
+            const float artScale = view.camera.scale;
+            drawSpriteRotated(center.x + outward.x * static_cast<float>(profile.artOffsetY) * artScale,
+                center.y + outward.y * static_cast<float>(profile.artOffsetY) * artScale,
+                static_cast<float>(profile.artWidth) * view.camera.scale,
+                static_cast<float>(profile.artHeight) * view.camera.scale,
+                outward.x, outward.y, {1,1,1,handoff}, static_cast<int>(TextureId::StraylightDock)-1);
+        } else drawSpriteRotated(center.x, center.y, dockWorldSize * view.camera.scale, dockWorldSize * view.camera.scale,
             outward.x, outward.y, {1.0F, 1.0F, 1.0F, 1.0F}, static_cast<int>(TextureId::ServiceDock) - 1);
         // The regular physical-flight backdrop submits route overlays before
         // it returns. The local dock frame is a self-contained scene, so
@@ -7720,7 +7748,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                 const auto dock = systemDockPosition(body);
                 const auto d = view.camera.point(dock.x-offset.x,dock.y-offset.y);
                 drawEllipseLine(d.x,d.y,.035F,.018F,{.2F,1,1,1},24,0,2*kPi);
-                drawPoiLabel(d.x,d.y+.06F,.003F,"DOCKING CORRIDOR",PoiGuidanceKind::Ship);
+                drawPoiLabel(d.x,d.y+.06F,.003F,"SIDE BERTH",PoiGuidanceKind::Ship);
                 slowDown(dock,body.velocity,d.x,d.y,expeditionDockRadius,expeditionDockSpeed);
             }
             else drawSprite(p.x,p.y,radius*2.0F,radius*2.0F,{1,1,1,1},asset);

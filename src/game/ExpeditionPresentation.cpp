@@ -567,7 +567,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     }
     if (state.screen == Screen::Flight && !c.surfaceArrivalActive &&
         !(c.orbitalWork && c.orbitalWork->active())) {
-        const bool earthDocking = earthDockingActive(flight);
+        const bool earthDocking = serviceDockingActive(flight);
         const bool dockInRange = expeditionDockInRange(e, flight, system);
         const bool dockReady = canDockExpedition(e, flight, system);
         const bool flightDefaultAvailable = panel.contentMarkup.find("data-ui-default-focus=") == std::string::npos;
@@ -579,15 +579,13 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         hazardMission +
         action(e.cruise.active ? "Cruise off [C / L3]" : "Cruise [C / L3]", "cruise", flight.active && flight.mode != FlightMode::Landing && flight.mode != FlightMode::Docking && !e.undockReady,
             flightDefaultAvailable && !dockReady) +
-        (earthDocking ? "<div class=\"expedition-dock-action\"><strong>EARTH DOCK / " + esc(earthDockingGuidance(flight)) + "</strong></div>"
-            : dockInRange && e.location.bodyId == "earth"
-                ? "<div class=\"expedition-dock-action\"><strong>EARTH DOCK / MANEUVER ENGAGED</strong></div>"
-            // Earth has no UI docking affordance: entering its approach radius
-            // starts the physical berth maneuver. Straylight keeps its distinct
-            // story-corridor interaction until its own docking design exists.
-            : dockInRange && e.course.targetBodyId == "straylight"
-                ? "<div class=\"expedition-dock-action\">" + button(straylightIdentityKnown(stage) ? "Enter Straylight corridor" : "Enter The Anomaly corridor", "expedition:dock", dockReady, "ok", flightDefaultAvailable && dockReady) + "</div>"
-                : std::string{});
+        (earthDocking ? "<div class=\"expedition-dock-action\"><strong>" +
+            std::string(flight.docking.dockId == "earth" ? "EARTH DOCK / " : "") + esc(earthDockingGuidance(flight)) +
+            "</strong><p>" + (flight.docking.dockId == "straylight"
+                ? "Align parallel in either direction. Hold Shift + A/D to strafe; controller: left stick left/right."
+                : "Enter the berth nose first.") + "</p></div>" :
+            dockInRange && e.location.bodyId == "earth" ?
+                "<div class=\"expedition-dock-action\">EARTH DOCK / MANEUVER ENGAGED</div>" : std::string{});
         for (const auto& wreck : e.wrecks) {
             if (!canSalvageWreck(e, flight, system, wreck.id, false)) continue;
             const bool ready = canSalvageWreck(e, flight, system, wreck.id);

@@ -55,6 +55,22 @@ inline constexpr double arrivalFadeSeconds = 1.75;
 inline constexpr double securingSeconds = 2.0;
 inline constexpr double contactRearmSeconds = 0.15;
 inline constexpr double bumpFeedbackSeconds = 0.32;
+struct Profile {
+    bool parallel = false;
+    double halfWidth = channelHalfWidth, mouth = mouthY, backstop = backstopY;
+    double centerY = captureCenterY, outerWidth = outerHalfWidth;
+    double targetHalfWidth = captureHalfWidth, targetHalfDepth = captureHalfDepth;
+    double artWidth = artWorldSize, artHeight = artWorldSize, artOffsetY = 0.0;
+    double bottom = -outerHalfWidth;
+};
+inline constexpr Profile profile(std::string_view id) {
+    return id == "straylight" ? Profile{true, shipLength * .75, .48, .12, .30,
+        .913, shipLength * .5, hullRadius, 1.862, 2.213, .139, -.875} : Profile{};
+}
+inline constexpr bool supported(std::string_view id) { return id == "earth" || id == "straylight"; }
+// Local +X follows the Ark's horizontal hull; +Y opens away from it.
+inline constexpr double arkHeading = 1.5707963267948966;
+double captureHeading(std::string_view id, double dockHeading, double shipHeading);
 }
 inline constexpr double expeditionSalvageRadius = 2.0;
 inline constexpr double expeditionSalvageSpeed = 1.0;
@@ -133,6 +149,7 @@ bool expeditionMapBodyRevealed(const GameState &, const SystemBodyDefinition &);
 void recordExpeditionArrival(GameState &, const ContentCatalog &, const LaunchOutcome &);
 bool expeditionDockInRange(const PersistentExpeditionState &, const FlightRunState &, const SystemDefinition &, std::string_view dockBodyId = {});
 bool earthDockingActive(const FlightRunState&);
+bool serviceDockingActive(const FlightRunState&);
 std::string earthDockingGuidance(const FlightRunState&);
 bool canDockExpedition(const PersistentExpeditionState &, const FlightRunState &, const SystemDefinition &);
 bool canSalvageWreck(const PersistentExpeditionState &, const FlightRunState &, const SystemDefinition &, std::uint64_t id, bool requireMatchedSpeed = true);

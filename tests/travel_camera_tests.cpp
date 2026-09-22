@@ -96,22 +96,24 @@ void brakingAndReversal() {
     const auto compact=travel_camera::targetOffset(1,0,100,80,30);
     check(compact.x==0,"Ship padding clamps an impossibly small viewport to center");
 }
-void frameAndDockContinuity() {
+void frameAndDockContinuity(std::string dockId = "earth", int width=1600, int height=900) {
     auto c=std::make_unique<SceneComposer>(); auto s=fixture(); screenVelocity(s,20,0);
+    c->setViewport({width,height,width,height,1});
     s.system=solarSystemDefinition(); s.system.bodies.clear(); // isolate camera frame conversion
-    const auto* earth=systemBody(solarSystemDefinition(),"earth");
+    const auto* earth=systemBody(solarSystemDefinition(),dockId);
     s.system.bodies.push_back(*earth);
     const auto dock=systemDockPosition(*earth);
     s.launchPositionX=dock.x+1; s.launchPositionY=dock.y;
     settle(*c,s,60,10);
     const auto systemPoint=shipPoint(*c,s);
-    s.systemLocation.frame=CoordinateFrame::Body; s.systemLocation.bodyId="earth";
+    s.systemLocation.frame=CoordinateFrame::Body; s.systemLocation.bodyId=dockId;
     s.launchPositionX-=earth->position.x; s.launchPositionY-=earth->position.y;
     s.launchVelocityX-=earth->velocity.x; s.launchVelocityY-=earth->velocity.y;
     s.flightGuidance.targetPosition.x-=earth->position.x;
     s.flightGuidance.targetPosition.y-=earth->position.y;
     const auto bodyPoint=shipPoint(*c,s);
     check(near(systemPoint.x,bodyPoint.x,.0001)&&near(systemPoint.y,bodyPoint.y,.0001),"Body-frame conversion preserves lead");
+    s.launchDockId=dockId;
     s.launchDockingActive=true; s.launchDockHandoffProgress=0;
     s.launchPositionX=(s.launchPositionX+earth->position.x-dock.x)*service_dock::localUnitsPerSystemUnit;
     s.launchPositionY=(s.launchPositionY+earth->position.y-dock.y)*service_dock::localUnitsPerSystemUnit;
@@ -223,6 +225,7 @@ void boardedShipKeepsCloseUpScale()
 
 int main() {
     boardedShipKeepsCloseUpScale();
-    placementAndTiming(); brakingAndReversal(); frameAndDockContinuity(); planetApproachAndBeltZoom();
+    placementAndTiming(); brakingAndReversal(); frameAndDockContinuity(); frameAndDockContinuity("straylight");
+    frameAndDockContinuity("straylight",800,600); planetApproachAndBeltZoom();
     std::puts("Travel camera: placement, timing, momentum, pause, frame and docking regressions passed");
 }

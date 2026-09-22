@@ -31,6 +31,122 @@ void check(bool condition, const char *message)
     }
 }
 
+void parallelDockTests()
+{
+    using namespace rocket;
+    const auto catalog=createDefaultContent();
+    auto state=createNewGame(catalog,77);
+    initializeLiveExpedition(state,catalog);
+    const auto& system=solarSystemDefinition();
+    const auto* ark=systemBody(system,"straylight");
+    auto& e=state.run.expedition;
+    auto& f=state.run.flight;
+    e.straylightRevealed=true;
+    const auto model=expeditionFlightModel(state,catalog);
+    const auto environment=expeditionEnvironment(state,catalog);
+    auto step=[&](double dt=.05) { return advanceExpeditionFlight(e,f,model,environment,system,{},dt); };
+    auto setup=[&](double heading,double x=0,double y=.30) {
+        e.active=true;
+        e.location={system.id,"straylight",CoordinateFrame::Body,ark->dockOffset,{},heading,{}};
+        f.active=f.physicalFlight=true;
+        f.hullRemaining=f.hullMaximum=100;
+        f.fuelRemaining=10;
+        f.mode=FlightMode::Docking;
+        f.docking={};
+        f.docking.active=f.docking.rotationLocked=true;
+        f.docking.dockId="straylight";
+        f.docking.dockHeading=service_dock::arkHeading;
+        f.docking.positionX=x;
+        f.docking.positionY=y;
+        f.heading=heading;
+        f.angularVelocity=0;
+    };
+    for (double heading : {0.0,3.141592653589793}) {
+        setup(heading,.04,.34);
+        for (int i=0;i<11;++i) step();
+        check(f.docking.securing,"Either parallel heading must capture without nose-first entry");
+        check(std::abs(f.docking.positionX-.04)<1e-8,"Capture must not snap position before clamps move");
+        const auto loaded=deserializeSaveData(serializeSaveData(captureSaveData(state)));
+        check(loaded && loaded->flight.docking.dockId=="straylight" && loaded->flight.docking.securing,
+            "Parallel capture must round-trip through existing save fields");
+        f=loaded->flight; e=loaded->expedition;
+        for(int i=0;i<10;++i) step();
+        const auto midClamp=deserializeSaveData(serializeSaveData(captureSaveData(state)));
+        check(midClamp && midClamp->flight.docking.securingSeconds>0,
+            "Clamps must remain resumable on the existing timer");
+        f=midClamp->flight; e=midClamp->expedition;
+        for (int i=0;i<45 && f.mode==FlightMode::Docking;++i) step();
+        check(f.docking.settlementReady && e.location.siteId==ark->siteId,
+            "Parallel clamps must finish with Straylight settlement ready");
+        check(std::abs(flightWrappedAngleDelta(f.docking.securingStartHeading,heading))<1e-8,
+            "Saved capture heading must preserve the accepted facing");
+        f.active=false; e.active=false;
+        check(departDock(e,f)==ExpeditionResult::Applied && f.docking.reentrySuppressed,
+            "Departure must suppress recapture");
+        check((e.location.position.y-ark->dockOffset.y)*service_dock::localUnitsPerSystemUnit>
+            service_dock::profile("straylight").mouth+service_dock::hullRadius,
+            "Departure must release the complete parallel ship outside the berth");
+        step();
+        check(f.mode!=FlightMode::Docking,"Departure must not instantly recapture");
+    }
+    setup(1.5707963267948966,0,.36);
+    for (int i=0;i<15;++i) step();
+    check(!f.docking.securing,"Nose-first alignment must not capture at Straylight");
+    for (bool along : {false,true}) {
+        setup(0);
+        (along ? f.docking.velocityX : f.docking.velocityY)=
+            (along ? 2.1 : 1.1)/flight_geometry::velocityToMetersPerSecond;
+        step();
+        check(f.docking.captureSeconds==0,"Excessive along/across drift must reset capture");
+    }
+    for (const auto position : {std::pair{.2,.3},std::pair{0.0,.15}}) {
+        setup(0,position.first,position.second);
+        check(step().dockBump && !f.docking.securing,"Bumpers and inner wall must remain solid");
+    }
+    setup(0,0,.4);
+    f.docking.velocityY=-.03;
+    for (int i=0;i<80 && !f.docking.securing;++i) step();
+    check(f.docking.securing,"A slow sideways entry must capture naturally");
+    setup(0,0,service_dock::exitRadius*service_dock::localUnitsPerSystemUnit+.01);
+    step();
+    check(!serviceDockingActive(f) && f.docking.reentrySuppressed,"Aborting must leave the local maneuver");
+    step();
+    check(!f.docking.reentrySuppressed,"Clearing the exit boundary rearms Straylight");
+    e.location={system.id,"straylight",CoordinateFrame::Body,
+        {ark->dockOffset.x,ark->dockOffset.y+.9},{},0,{}};
+    restoreSystemLocation(e.location,f); f.active=f.physicalFlight=true; f.mode=FlightMode::Travel;
+    step();
+    check(serviceDockingActive(f) && f.docking.dockId=="straylight" &&
+        f.docking.dockHeading==service_dock::arkHeading,"Proximity must acquire the fixed Ark berth on re-entry");
+    const auto approach=deserializeSaveData(serializeSaveData(captureSaveData(state)));
+    check(approach && approach->flight.docking.active && approach->flight.docking.dockId=="straylight",
+        "Approach saves must retain the selected dock profile");
+    setup(0);
+    e.arkActivated=true; e.homeBodyId="straylight";
+    e.cargo.materials.common=7;
+    const int before=state.meta.materials.common;
+    for(int i=0;i<55 && !f.docking.settlementReady;++i) step();
+    check(dockExpedition(state,system)==ExpeditionResult::Applied && state.meta.materials.common==before+7,
+        "Operational Straylight capture must settle cargo and service the ship");
+    check(dockExpedition(state,system)==ExpeditionResult::AlreadyApplied && state.meta.materials.common==before+7,
+        "Repeated settlement must not duplicate operational dock cargo");
+    const auto homeSystem=systemDefinitionForRoster(generatePostSolarSystemRoster("aaru_vale",77));
+    const auto* home=systemBody(homeSystem,"straylight");
+    check(home!=nullptr,"Generated home system must contain Straylight");
+    e.location={homeSystem.id,"straylight",CoordinateFrame::Body,
+        {home->dockOffset.x,home->dockOffset.y+.9},{},0,{}};
+    restoreSystemLocation(e.location,f);
+    e.active=f.active=f.physicalFlight=true; f.mode=FlightMode::Travel; f.docking={};
+    advanceExpeditionFlight(e,f,model,environment,homeSystem,{},.05);
+    check(serviceDockingActive(f) && f.docking.dockId=="straylight",
+        "Generated-system home visits must use the same parallel dock profile");
+    f.docking.positionX=0; f.docking.positionY=.3; f.heading=0;
+    for(int i=0;i<55 && !f.docking.settlementReady;++i)
+        advanceExpeditionFlight(e,f,model,environment,homeSystem,{},.05);
+    check(dockExpedition(state,homeSystem)==ExpeditionResult::Applied,
+        "Generated home-dock capture must settle against its own coordinate frame");
+}
+
 void straylightSequenceTests()
 {
     using namespace rocket;
@@ -1193,6 +1309,7 @@ void persistentExpeditionTests()
 {
     artifactBankingAndPayloadTests();
     straylightSequenceTests();
+    parallelDockTests();
     using namespace rocket;
     campaignGuidanceTests();
     missionGuidanceTests();

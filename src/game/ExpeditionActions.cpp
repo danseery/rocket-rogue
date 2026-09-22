@@ -21,7 +21,7 @@ void RocketGameApp::toggleCruiseControl() {
 }
 bool RocketGameApp::runExpeditionAction(const std::string& action) {
     if (!action.starts_with("expedition:")) return false;
-    if (earthDockingActive(session_.flight) && session_.flight.docking.securing) return true;
+    if (serviceDockingActive(session_.flight) && session_.flight.docking.securing) return true;
     auto& e = state_.run.expedition;
     if (!e.travelInitialized) return true;
     if (action == "expedition:missions" || action == "expedition:mission_history") {
@@ -181,9 +181,9 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         } else state_.statusLine = "Departure is available only from an operational dock.";
     } else if (action == "expedition:dock") {
         const bool earthSettlementReady = session_.flight.docking.settlementReady &&
-            e.location.bodyId == "earth" && e.location.siteId == "earth.dock";
-        if (session_.flight.active && e.location.bodyId == "earth" && !earthSettlementReady) {
-            state_.statusLine = "Earth docking approach engages automatically. Enter the berth nose first.";
+            e.location.bodyId == session_.flight.docking.dockId && e.location.siteId == e.location.bodyId + ".dock";
+        if (session_.flight.active && service_dock::supported(e.location.bodyId) && !earthSettlementReady) {
+            state_.statusLine = "Docking approach engages automatically. Align with the berth.";
             panelDirty_ = true;
             return true;
         }
@@ -200,7 +200,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
             close();
             session_.flight.landing = {};
             if (e.location.bodyId == "straylight" && state_.meta.straylightStage == StraylightStage::Approach) {
-                state_.meta.straylightStage = StraylightStage::Docking;
+                state_.meta.straylightStage = StraylightStage::FirstContact;
                 e.undockReady = false;
                 session_.flightArmed = false;
                 straylightElapsed_ = 0;
@@ -356,14 +356,14 @@ void RocketGameApp::debugStartStraylight(int requested) {
     state_.run.flight.hullRemaining=state_.run.flight.hullMaximum=100;
     const auto stage=requested==1 ? StraylightStage::Docking : requested==2 ? StraylightStage::RetrieveBeacons :
         requested==3 ? StraylightStage::Awakening : requested==4 ? StraylightStage::Boarding :
-        requested==5 ? StraylightStage::Departing : requested==6 ? StraylightStage::Approach : StraylightStage::Reveal;
+        requested==5 ? StraylightStage::Departing : requested>=6 ? StraylightStage::Approach : StraylightStage::Reveal;
     state_.meta.straylightStage=stage;
     for (auto& b:e.batteries) b.owner=requested>=3 && requested<=5 ? BatteryOwner::ArkSlot : BatteryOwner::Ship;
     if (requested>=3 && requested<=5) { e.arkActivated=true; e.homeBodyId="straylight"; }
     e.active=false;
     e.undockReady=false;
     state_.screen=Screen::Flight;
-    if (requested==6) {
+    if (requested>=6) {
         e.location.siteId.clear();
         e.location.position.x-=1;
         e.location.position.y-=.4;
@@ -373,6 +373,22 @@ void RocketGameApp::debugStartStraylight(int requested) {
         session_.flightArmed=true;
         session_.preparedLaunch=expeditionFlightModel(state_,catalog_);
         plotSystemCourse(e,state_.run.flight,solarSystemDefinition(),"straylight");
+        if (requested>=7) {
+            auto& flight=state_.run.flight;
+            flight.mode=FlightMode::Docking;
+            flight.docking={};
+            flight.docking.active=flight.docking.rotationLocked=true;
+            flight.docking.dockId="straylight";
+            flight.docking.dockHeading=service_dock::arkHeading;
+            flight.docking.positionY=requested==8 ? .34 : .85;
+            flight.docking.positionX=requested==8 ? .04 : -.10;
+            flight.heading=0;
+            flight.positionX=flight.docking.positionX;
+            flight.positionY=flight.docking.positionY;
+            flight.velocityX=flight.velocityY=0;
+            flight.handoff={};
+            state_.incomingMessages={};
+        }
     }
     straylightElapsed_=0;
     services_.ui.closeModal();
