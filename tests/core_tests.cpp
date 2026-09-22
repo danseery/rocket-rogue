@@ -5079,6 +5079,62 @@ void miningUsesRigFuelReserve()
         "physical fuel-cell contact should restart a zero-fuel rig");
 }
 
+void supportDronesPrioritizeArtifactWork()
+{
+    for (const auto role : {MiniDroneRole::Mining, MiniDroneRole::Hazard}) {
+        MiningRunState mining;
+        mining.active = true;
+        mining.terrain.width = 30;
+        mining.terrain.height = 20;
+        mining.terrain.cells.resize(600);
+        mining.droneX = mining.operatorX = 10.5;
+        mining.droneY = mining.operatorY = 10.5;
+        mining.artifact.present = mining.artifact.revealed = true;
+        mining.artifact.state = MiningArtifactState::Embedded;
+        mining.artifact.x = 16.5;
+        mining.artifact.y = 10.5;
+        mining.gate.active = true;
+        for (const int x : {9, 15, 16}) {
+            auto& cell = mining.terrain.cells[10 * 30 + x];
+            cell.revealed = true;
+            cell.material = role == MiniDroneRole::Hazard ? MiningCellMaterial::HazardPocket : MiningCellMaterial::CommonOre;
+            cell.hazard = role == MiniDroneRole::Hazard;
+            cell.hazardAffinity = MiningElementalAffinity::Thermal;
+            cell.gateAssociated = x == 16;
+            cell.maxToughness = cell.remainingToughness = 5;
+        }
+        MiningMiniDroneAgent agent;
+        agent.role = role;
+        agent.upgradeLevel = 3;
+        agent.x = 10.5;
+        agent.y = 10.5;
+        MiningDroneCoordinator prospector(mining);
+        HazardDroneCoordinator hazard(mining);
+        MiniDroneTaskCoordinator& coordinator = role == MiniDroneRole::Mining
+            ? static_cast<MiniDroneTaskCoordinator&>(prospector)
+            : static_cast<MiniDroneTaskCoordinator&>(hazard);
+        require(coordinator.acquireAssignment(agent) && agent.targetCellX == 16,
+            "support drone must choose the mission gate before closer ordinary work");
+        mining.terrain.cells[10 * 30 + 16] = {};
+        require(coordinator.acquireAssignment(agent) && agent.targetCellX == 15,
+            "support drone must clear non-gate artifact surroundings next");
+        mining.artifact.revealed = false;
+        require(coordinator.acquireAssignment(agent) &&
+                agent.targetCellX == (role == MiniDroneRole::Hazard ? 15 : 9),
+            "Hazard Drone clears the artifact approach before scanning; Prospector behavior stays unchanged");
+        require(!mining.artifact.revealed,
+            "Hazard priority must not reveal the unscanned artifact");
+        mining.artifact.revealed = true;
+        mining.artifact.state = MiningArtifactState::Delivered;
+        require(coordinator.acquireAssignment(agent) && agent.targetCellX == 9,
+            "delivered artifacts must not retain special work priority");
+        mining.artifact.state = MiningArtifactState::Embedded;
+        mining.terrain.cells[10 * 30 + 15] = {};
+        require(coordinator.acquireAssignment(agent) && agent.targetCellX == 9,
+            "ordinary work resumes when artifact surroundings are cleared");
+    }
+}
+
 void drillPowerUpgradesProduceMeasuredCuttingGains()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -9653,6 +9709,7 @@ int main(int argc, char** argv)
     hazardDronesCrossSolidTerrainButNeverTargetHiddenCells();
     hazardDroneFinishesCommittedTreatmentBeforeFollowingMovedPlayer();
     duplicateHazardDronesCoordinatePriorityAndExactAssistance();
+    supportDronesPrioritizeArtifactWork();
     hazardDroneAssignmentsNormalizeAcrossSaveRoundTrips();
     miningHazardAffinitiesApplyOnlyOnDrillContact();
     miningAndSurveyDroneAgentsPerformWorldActions();

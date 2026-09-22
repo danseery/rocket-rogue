@@ -726,7 +726,7 @@ LaunchFlightStep updateSpaceFlight(
     flight.orbitCelebrationPending = false;
     flight.touchdownCelebrationPending = false;
 
-    advanceFlightHeading(flight, input.steer, controlDt);
+    advanceFlightHeading(flight, input.steer, controlDt, launch.flightControlRank);
 
     // W is forward main thrust; S is reverse thrust, not a velocity brake.
     // With the nose upright, W arrests descent and S accelerates the fall.
@@ -799,8 +799,9 @@ LaunchFlightStep updateSpaceFlight(
         moved = convertSystemFrame(moved, location->frame, location->bodyId, *system);
         restoreSystemLocation(moved, flight);
         result.crossedAsteroidBelt = system->id == "solar" &&
-            crossesSolarAsteroidBelt(global.position, {next.x,next.y});
-        if (result.crossedAsteroidBelt && flight.asteroidInvulnerabilitySeconds <= 0.0) {
+            approachingSolarAsteroidBelt(global.position, global.velocity);
+        if (system->id == "solar" && crossesSolarAsteroidBelt(global.position, {next.x,next.y}) &&
+            flight.asteroidInvulnerabilitySeconds <= 0.0) {
             for (const auto& asteroid : solarAsteroidBelt()) {
                 if (pointToSegmentDistance(asteroid.position.x,asteroid.position.y,
                     global.position.x,global.position.y,next.x,next.y) > asteroid.radius+.075) continue;
@@ -1044,7 +1045,7 @@ LaunchFlightStep updateLocalLandingFlight(FlightRunState& flight, const Prepared
     flight.elapsedSeconds+=dt;
     flight.orbitCelebrationPending=false;
     flight.touchdownCelebrationPending=false;
-    const double target=-std::clamp(input.steer,-1.0,1.0)*flight_landing::turnRate;
+    const double target=-std::clamp(input.steer,-1.0,1.0)*flight_landing::turnRate * flightRotationMultiplier(launch.flightControlRank);
     flight.angularVelocity=std::lerp(flight.angularVelocity,target,
         1.0-std::exp(-dt/flight_landing::turnResponseSeconds));
     double thrust=flightThrottleForInput(flight.selectedThrottle,input.enginesCut?0.0:input.throttle,dt,input.analogThrottle);
@@ -1256,9 +1257,14 @@ LaunchFlightStep updatePhysicalFlight(FlightRunState& flight,const PreparedLaunc
 
 } // namespace
 
-void advanceFlightHeading(FlightRunState& flight, double steer, double deltaSeconds)
+double flightRotationMultiplier(int flightControlRank)
 {
-    constexpr double turnAcceleration = flight_controls::turnAcceleration;
+    return 1.0 + std::clamp(flightControlRank, 0, 3) * tuning::physicalFlight::flightControlsRotationAssistPerRank;
+}
+
+void advanceFlightHeading(FlightRunState& flight, double steer, double deltaSeconds, int flightControlRank)
+{
+    const double turnAcceleration = flight_controls::turnAcceleration * flightRotationMultiplier(flightControlRank);
     constexpr double turnDamping = 5.2;
     const double dt = std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds);
     const double turn = std::clamp(steer, -1.0, 1.0);

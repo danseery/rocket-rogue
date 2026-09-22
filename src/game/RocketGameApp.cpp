@@ -2738,6 +2738,13 @@ void RocketGameApp::tick(double deltaSeconds)
     if (state_.screen == Screen::Mining && state_.run.mining.active) {
         bool cargoMessageQueued = false;
         const MiningRunState& mining = state_.run.mining;
+        const auto& arena = mining.arenaMetadata;
+        const auto rules = resolveMiningArenaRules({arena.act, std::clamp(arena.difficulty, 1, 10),
+            arena.seed, arena.gateOverrideEnabled, arena.gateType});
+        if (rules.mechanics.oxygenAndFuel &&
+            mining.rigFuel.capacity > 0.0 && mining.rigFuel.current <= 0.0)
+            cargoMessageQueued |= enqueueIncomingMessage(state_.incomingMessages, catalog_,
+                {"campaign.rig_fuel_empty_tip", "rig_fuel_empty_tip", "default"});
         if (mining.cargo >= miningRigCargoCapacityMass(state_, catalog_))
             cargoMessageQueued |= enqueueIncomingMessage(state_.incomingMessages, catalog_,
                 {"campaign.rig_full_tip", "rig_full_tip", "default"});

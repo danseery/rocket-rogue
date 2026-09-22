@@ -2,6 +2,7 @@
 #include "core/GameTypes.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace rocket
 {
@@ -9,12 +10,27 @@ const std::vector<SystemAsteroid>& solarAsteroidBelt()
 {
     static const auto rocks = [] {
         std::vector<SystemAsteroid> result;
+        const auto* mars = systemBody(solarSystemDefinition(), "mars");
+        // At the widest normal travel scale (.25), a screen spans eight
+        // world units vertically. Keep that much real clearance beyond
+        // Mars's orbital region, including rock and ship collision radii.
+        const double marsClearance = mars ? mars->influenceRadius + 8.0 : 0.0;
         constexpr int perRing = 160;
+        // Fixed hash: irregular, but identical for rendering, collision and saves.
+        const auto jitter = [](std::uint32_t seed) {
+            seed ^= seed >> 16; seed *= 0x7feb352dU;
+            seed ^= seed >> 15; seed *= 0x846ca68bU; seed ^= seed >> 16;
+            return static_cast<double>(seed & 0xffffU) / 65535.0;
+        };
         for (int row = 0; row < 4; ++row) for (int index = 0; index < perRing; ++index) {
-            const double angle = (index + row*.37)*6.283185307179586/perRing;
-            const double radius = 24.35 + row*.85 + .12*std::sin(index*2.31+row);
-            const double scale = .75 + .5*(.5+.5*std::sin(index*4.17+row*1.9));
-            result.push_back({{radius*std::cos(angle),radius*std::sin(angle)}, .12*scale, scale});
+            const auto seed = static_cast<std::uint32_t>(row * perRing + index + 1);
+            const double angle = (index + row*.37 + .70*(jitter(seed*3)-.5))*6.283185307179586/perRing;
+            const double radius = 24.35 + row*.85 + .60*(jitter(seed*3+1)-.5);
+            const double scale = .65 + .70*jitter(seed*3+2);
+            const SystemVector position {radius*std::cos(angle),radius*std::sin(angle)};
+            if (mars && std::hypot(position.x-mars->position.x, position.y-mars->position.y) <=
+                    marsClearance + .12*scale + .075) continue;
+            result.push_back({position, .12*scale, scale});
         }
         return result;
     }();
@@ -30,6 +46,14 @@ bool crossesSolarAsteroidBelt(SystemVector from, SystemVector to)
     const double nearest = std::hypot(from.x+dx*t,from.y+dy*t);
     const double farthest = std::max(std::hypot(from.x,from.y),std::hypot(to.x,to.y));
     return nearest <= solarBeltOuterRadius && farthest >= solarBeltInnerRadius;
+}
+
+bool approachingSolarAsteroidBelt(SystemVector position, SystemVector velocity)
+{
+    // Six seconds of coasting lookahead, plus a spatial buffer at low speed.
+    const double radius = std::hypot(position.x, position.y);
+    return (radius >= solarBeltInnerRadius - 3.0 && radius <= solarBeltOuterRadius + 3.0) ||
+        crossesSolarAsteroidBelt(position, {position.x + velocity.x * 6.0, position.y + velocity.y * 6.0});
 }
 
 double systemBodyApproachBlend(const SystemBodyDefinition &body, double radius)

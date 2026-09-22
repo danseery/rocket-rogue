@@ -3,6 +3,7 @@
 #include "core/ContentIds.h"
 #include "core/GameState.h"
 #include "core/IncomingMessages.h"
+#include "core/MiningSystem.h"
 #include "core/SaveData.h"
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
@@ -22,6 +23,42 @@ void incomingMessageTests() {
         }
     };
     auto catalog = createDefaultContent();
+    {
+        auto state = createNewGame(catalog, 0xA2A2ULL);
+        auto& mining = state.run.mining;
+        mining.active = true;
+        mining.terrain.width = mining.terrain.height = 12;
+        mining.terrain.cells.resize(144);
+        mining.droneX = mining.operatorX = 6.0;
+        mining.droneY = mining.operatorY = 6.0;
+        const auto pending = [&] {
+            return std::count_if(state.incomingMessages.pending.begin(), state.incomingMessages.pending.end(),
+                [](const auto& item) { return item.messageId == "mining_hazard_scan_tip"; });
+        };
+        pulseMiningScanner(state, catalog);
+        check(pending() == 0, "Safe scans do not show hazard reminders");
+        auto& hazard = mining.terrain.cells[6 * 12 + 7];
+        hazard.material = MiningCellMaterial::HazardPocket;
+        hazard.hazard = true;
+        hazard.hazardAffinity = MiningElementalAffinity::Thermal;
+        pulseMiningScanner(state, catalog);
+        check(pending() == 0, "Cooldown presses do not show hazard reminders");
+        state.run.planetaryExpedition.scannerCooldownSeconds = 0;
+        pulseMiningScanner(state, catalog);
+        check(pending() == 1, "Successful hazard scan queues incoming reminder");
+        state.run.planetaryExpedition.scannerCooldownSeconds = 0;
+        pulseMiningScanner(state, catalog);
+        check(pending() == 1, "Repeated scans do not duplicate reminder");
+        check(acknowledgeIncomingMessage(state.incomingMessages, "campaign.mining_hazard_scan_tip").has_value(),
+            "Hazard reminder acknowledges normally");
+        IncomingMessageState restored;
+        check(deserializeIncomingMessages(serializeIncomingMessages(state.incomingMessages), restored),
+            "Hazard acknowledgement survives save/load");
+        state.incomingMessages = restored;
+        state.run.planetaryExpedition.scannerCooldownSeconds = 0;
+        pulseMiningScanner(state, catalog);
+        check(pending() == 0, "Acknowledged hazard reminder does not replay");
+    }
     for (const auto& drone : catalog.miniDrones) {
         const std::string id = "drone_arrival_" + drone.id;
         check(incomingMessage(catalog, id) != nullptr, "Every drone type has a shared first-arrival introduction");
@@ -59,6 +96,25 @@ void incomingMessageTests() {
                                         false,
                                         {{"default", "Repairs are complete.", {}}}});
     check(validateIncomingMessages(catalog), "Multiple speakers and repeatable messages must validate");
+    const auto fuelMessage = incomingMessage(catalog, "rig_fuel_empty_tip");
+    check(fuelMessage && fuelMessage->concerned && fuelMessage->campaignOnce &&
+              fuelMessage->context == MessageDeliveryContext::Mining &&
+              fuelMessage->variants.front().hints.size() == 2,
+          "Empty rig fuel tutorial uses the concerned portrait and EVA/tether hints");
+    IncomingMessageState fuelMessages;
+    check(enqueueIncomingMessage(fuelMessages, catalog,
+              {"campaign.rig_fuel_empty_tip", "rig_fuel_empty_tip", "default"}),
+          "First empty fuel tutorial queues");
+    IncomingMessageState restoredFuelMessages;
+    check(deserializeIncomingMessages(serializeIncomingMessages(fuelMessages), restoredFuelMessages) &&
+              !enqueueIncomingMessage(restoredFuelMessages, catalog,
+                  {"repeat", "rig_fuel_empty_tip", "default"}),
+          "Pending fuel tutorial survives reload without duplication");
+    check(acknowledgeIncomingMessage(restoredFuelMessages, "campaign.rig_fuel_empty_tip").has_value() &&
+              deserializeIncomingMessages(serializeIncomingMessages(restoredFuelMessages), fuelMessages) &&
+              !enqueueIncomingMessage(fuelMessages, catalog,
+                  {"later", "rig_fuel_empty_tip", "default"}),
+          "Acknowledged fuel tutorial never repeats after reload");
     const auto shipFullMessage = incomingMessage(catalog, "ship_full_tip");
     check(shipFullMessage != nullptr && shipFullMessage->concerned &&
               shipFullMessage->title == "Easy there, space squirrel" &&

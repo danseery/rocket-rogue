@@ -298,7 +298,7 @@ ContentCatalog createDefaultContent()
     catalog.incomingMessages.push_back({"artifact_wreck_recovery", "mission_control_fennec", "Artifact recovery required", "Understood", false,
         {{"default", "Your unsecured artifact remains in the wreck. Rendezvous and salvage it, then return to the Earth dock to complete the mission.", {}}}});
     catalog.incomingMessages.push_back({"asteroid_belt_intro", "mission_control_fennec", "Asteroid belt ahead", "Understood", true,
-        {{"default", "You're entering the asteroid belt between Mars and Jupiter. Watch your projected path and steer toward the gaps. Slow down early with thrust opposite your motion; coasting does not brake. At Earth's dock, Flight Controls upgrades give you stronger thrust at the same fuel burn rate for course corrections. Hull Plating increases hull integrity and reduces asteroid impact damage. Upgrades help, but avoiding the rocks is still your best defense.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
+        {{"default", "The asteroid belt between Mars and Jupiter is ahead. Start slowing down now with thrust opposite your motion; coasting does not brake. Watch your projected path and steer toward the gaps. At Earth's dock, Flight Controls upgrades give you stronger thrust at the same fuel burn rate for course corrections. Hull Plating increases hull integrity and reduces asteroid impact damage. Upgrades help, but avoiding the rocks is still your best defense.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
     const auto addMissionMessages = [&](std::string id, std::string world, std::string objective,
                                         std::string next) {
         catalog.incomingMessages.push_back({id + "_briefing", "mission_control_fennec",
@@ -355,6 +355,14 @@ ContentCatalog createDefaultContent()
         {{"default", "Your Rig is full. Return to the parked ship to unload your ore, then head back out if you have room and supplies to keep mining.", {}}}, MessageDeliveryContext::Mining});
     catalog.incomingMessages.push_back({"ship_full_tip", "mission_control_fennec", "Easy there, space squirrel", "Understood", true,
         {{"default", "Hoarding is frowned upon around here. The ship is full, so anything else you dig up stays behind. Head to the dock and empty the hold before you excavate the whole planet.", {}}}, MessageDeliveryContext::Mining});
+    catalog.incomingMessages.back().concerned = true;
+
+    catalog.incomingMessages.push_back({"rig_fuel_empty_tip", "mission_control_fennec", "Rig fuel empty", "I'll bring it home", true,
+        {{"default", "Your Rig is out of fuel, but you don't have to abandon it. Exit into EVA, move close to the Rig and tether it. Tow it back to the parked ship for repairs, or stow it and leave. Repairs restore integrity, not fuel; a fuel cell can get the Rig moving again.", {MessageHint::ExitRig, MessageHint::Tether}}}, MessageDeliveryContext::Mining});
+    catalog.incomingMessages.back().concerned = true;
+
+    catalog.incomingMessages.push_back({"mining_hazard_scan_tip", "mission_control_fennec", "Hazards detected", "Understood", true,
+        {{"default", "The scan has picked up hazardous pockets. Keep the Rig and your EVA suit clear. An assigned Hazard Drone can treat supported pockets once they are revealed; give it time to work before moving in. If it can't treat a pocket, find a safe route around it.", {}}}, MessageDeliveryContext::Mining});
     catalog.incomingMessages.back().concerned = true;
 
     catalog.modules = {

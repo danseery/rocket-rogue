@@ -4301,7 +4301,8 @@ void GameRmlUi::updateControllerConfirmGlyphs()
         const bool held = activation == "hold" || activation == "continuous"
             || button->GetAttribute<Rml::String>("data-rr-action", "") == "reset_save";
         const std::string text = (held ? "Hold " : "") + std::string(confirm);
-        if (glyph->GetInnerRML() != text) glyph->SetInnerRML(text);
+        const std::string markup = "<span class=\"rr-controller-confirm-label\">" + text + "</span>";
+        if (glyph->GetInnerRML() != markup) glyph->SetInnerRML(markup);
     }
 }
 

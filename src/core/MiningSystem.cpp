@@ -8882,6 +8882,24 @@ bool surfaceLandingStaging(const MiningRunState& mining, double shipX, double sh
             }
         }
     }
+    // A drilled shaft can support the ship below the surrounding surface.
+    // Same-depth side exits then lie inside its walls. Look up alongside the
+    // hull for free deployment air instead of rejecting an otherwise valid
+    // touchdown. Never carve terrain or relocate the supported ship.
+    const double riseLimit = 2.0 * flight_landing::hullHalfHeight / flight_landing::metersPerCell + 2.0;
+    for (double rise = 0.5; rise <= riseLimit; rise += 0.5) {
+        for (double side : {1.0, -1.0}) {
+            for (double offset : {4.25, 5.25, 6.25, 7.25}) {
+                const double x = shipX + side * offset;
+                const double y = shipY - rig_geometry::drillTip - 0.02 - rise;
+                if (x < 3.0 || x > mining.terrain.width - 3.0) continue;
+                if (canOccupyRigHull(mining.terrain, x, y, 0.0, 1.0)) {
+                    rigX = x; rigY = y;
+                    return true;
+                }
+            }
+        }
+    }
     return false;
 }
 
@@ -10571,6 +10589,23 @@ MiningScannerResult pulseMiningScanner(GameState& state, const ContentCatalog& c
     }
     mining.scannerPulseSeconds = tuning::mining::scannerPulseSeconds;
     state.run.planetaryExpedition.scannerCooldownSeconds = tuning::mining::scannerCooldownSeconds;
+    // Explain visible danger after a successful player scan, not on landing
+    // or on a rejected cooldown press. Include pockets already visible nearby.
+    bool scannedHazard = false;
+    for (int y = 0; y < mining.terrain.height && !scannedHazard; ++y) {
+        for (int x = 0; x < mining.terrain.width; ++x) {
+            const auto* cell = miningCellAt(mining.terrain, x, y);
+            if (cell && cell->revealed && cell->hazard &&
+                cell->material == MiningCellMaterial::HazardPocket &&
+                std::hypot(x + 0.5 - originX, y + 0.5 - originY) <= scannerRadius) {
+                scannedHazard = true;
+                break;
+            }
+        }
+    }
+    if (scannedHazard)
+        enqueueIncomingMessage(state.incomingMessages, catalog,
+            {"campaign.mining_hazard_scan_tip", "mining_hazard_scan_tip", "default"});
     return {true, signalsRevealed > 0 ? mining.gate.protectedObjective.id : std::string {}};
 }
 

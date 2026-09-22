@@ -169,7 +169,7 @@ void beginEarthDocking(PersistentExpeditionState& e, FlightRunState& flight, con
 }
 
 LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunState& flight,
-    const SystemDefinition& system, const FlightInput& input, double deltaSeconds)
+    const SystemDefinition& system, const FlightInput& input, double deltaSeconds, int flightControlRank)
 {
     LaunchFlightStep result;
     auto& docking = flight.docking;
@@ -212,8 +212,7 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
             docking.securingSeconds + dt);
         result.dockClampLocked = previousTime < service_dock::clampLockSeconds &&
             docking.securingSeconds >= service_dock::clampLockSeconds;
-        const double linear = std::clamp(docking.securingSeconds / service_dock::settleSeconds, 0.0, 1.0);
-        const double settle = linear * linear * (3.0 - 2.0 * linear);
+        const double settle = service_dock::clampProgress(docking.securingSeconds);
         pose.x = std::lerp(docking.securingStartX, 0.0, settle);
         pose.y = std::lerp(docking.securingStartY, service_dock::captureCenterY, settle);
         pose.vx = pose.vy = 0.0;
@@ -242,7 +241,7 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
         return result;
     }
 
-    advanceFlightHeading(flight, input.steer, dt);
+    advanceFlightHeading(flight, input.steer, dt, flightControlRank);
     const double forwardX = std::cos(flight.heading), forwardY = std::sin(flight.heading);
     const double rightX = forwardY, rightY = -forwardX;
     const double thrust = std::clamp(input.throttle, -1.0, 1.0);
@@ -333,8 +332,8 @@ LaunchFlightStep advanceEarthDocking(PersistentExpeditionState& e, FlightRunStat
         pose.y - hullExtentY >= service_dock::backstopY &&
         pose.y + hullExtentY <= service_dock::mouthY;
     const bool insideBerth = docking.enteredMouth && fullyInside &&
-        std::abs(pose.x) <= service_dock::captureHalfWidth &&
-        std::abs(pose.y - service_dock::captureCenterY) <= service_dock::captureHalfDepth;
+        std::abs(pose.x) <= service_dock::captureHalfWidth * service_dock::captureGraceScale &&
+        std::abs(pose.y - service_dock::captureCenterY) <= service_dock::captureHalfDepth * service_dock::captureGraceScale;
     const bool slowEnough = std::abs(pose.vy) * flight_geometry::velocityToMetersPerSecond <= service_dock::captureForwardSpeed &&
         std::abs(pose.vx) * flight_geometry::velocityToMetersPerSecond <= service_dock::captureLateralSpeed;
     docking.captureSeconds = insideBerth && slowEnough && headingError <= service_dock::captureHeadingRadians
@@ -739,7 +738,7 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
     if (e.undockReady) {
         e.cruise.active = false;
         if (input.throttle <= 0.001 && std::abs(input.strafe) <= 0.001) {
-            advanceFlightHeading(flight, input.steer, std::max(0.0, dt));
+            advanceFlightHeading(flight, input.steer, std::max(0.0, dt), launch.flightControlRank);
             e.location.heading = flight.heading;
             return {};
         }
@@ -761,7 +760,7 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
         return captured;
     }
     if (flight.mode == FlightMode::Docking) {
-        return advanceEarthDocking(e, flight, system, input, dt);
+        return advanceEarthDocking(e, flight, system, input, dt, launch.flightControlRank);
     }
     if (flight.active && flight.mode != FlightMode::Landing) {
         auto current = e.location;

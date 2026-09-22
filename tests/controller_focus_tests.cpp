@@ -10,6 +10,7 @@
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Core.h>
 #include <RmlUi/Core/ElementDocument.h>
+#include <RmlUi/Core/ElementText.h>
 #include <RmlUi/Core/ElementUtilities.h>
 #include <RmlUi/Core/Elements/ElementFormControlSelect.h>
 #include <RmlUi/Core/RenderInterface.h>
@@ -200,20 +201,20 @@ void focusPass(int width, int height)
     ui.setControllerFocusVisible(true);
     assert(ui.focusedId() == "scan");
     auto* focused = soleFocus(ui);
-    assert(focused->QuerySelector(".rr-controller-confirm-glyph")->GetInnerRML() == "A");
+    assert(focused->QuerySelector(".rr-controller-confirm-label")->GetInnerRML() == "A");
     assert(ui.activateFocused() && action == "scan");
     const auto originalSize = focused->GetBox().GetSize(Rml::BoxArea::Border);
     ui.setControllerConfirmCancelSwapped(true);
     ui.render();
     focused = soleFocus(ui);
-    assert(focused->QuerySelector(".rr-controller-confirm-glyph")->GetInnerRML() == "B");
+    assert(focused->QuerySelector(".rr-controller-confirm-label")->GetInnerRML() == "B");
     assert(focused->GetBox().GetSize(Rml::BoxArea::Border) == originalSize);
     ui.setControllerPresentation(true, rocket::ControllerFamily::PlayStation);
-    assert(soleFocus(ui)->QuerySelector(".rr-controller-confirm-glyph")->GetInnerRML() == "Circle");
+    assert(soleFocus(ui)->QuerySelector(".rr-controller-confirm-label")->GetInnerRML() == "Circle");
     // Mining buttons clip overflow and use a tall line-height. The confirm
     // badge must stay entirely inside the control, including its text.
     ui.setPanelPresentation(panel("<div class=\"mining-command-dock\"><div class=\"system-actions\">"
-        + button("repair", "data-ui-default-focus=\"1\"") + "</div></div>"));
+        + button("repair", "class=\"rr-text-button\" data-ui-default-focus=\"1\"") + "</div></div>"));
     ui.render();
     auto* miningButton = soleFocus(ui);
     auto* badge = miningButton->QuerySelector(".rr-controller-confirm-glyph");
@@ -222,7 +223,13 @@ void focusPass(int width, int height)
     assert(badgeTop >= buttonTop);
     assert(badgeTop + badge->GetBox().GetSize(Rml::BoxArea::Border).y <=
         buttonTop + miningButton->GetBox().GetSize(Rml::BoxArea::Border).y);
-    assert(badge->GetInnerRML() == "Circle");
+    assert(badge->QuerySelector(".rr-controller-confirm-label")->GetInnerRML() == "Circle");
+    auto* badgeText = badge->GetChild(0)->GetChild(0);
+    assert(badgeText);
+    const auto& lines = static_cast<Rml::ElementText*>(badgeText)->GetLines();
+    assert(lines.size() == 1);
+    assert(lines.front().width > 0);
+    assert(badge->GetBox().GetSize(Rml::BoxArea::Content).x >= lines.front().width);
     ui.setPanelPresentation(presentation);
     ui.requestFocus("land");
     presentation.contentMarkup += "<p>Telemetry update</p>";
@@ -248,7 +255,7 @@ void focusPass(int width, int height)
     ui.setPanelPresentation(presentation);
     assert(ui.focusedId() == "drill");
     assert(ui.focusedControllerAction().kind == rocket::ControllerActivationKind::ContinuousHold);
-    assert(soleFocus(ui)->QuerySelector(".rr-controller-confirm-glyph")->GetInnerRML() == "Hold Circle");
+    assert(soleFocus(ui)->QuerySelector(".rr-controller-confirm-label")->GetInnerRML() == "Hold Circle");
     assert(reachable(ui, "drill") == std::set<std::string>({"drill", "land", "resume"}));
     ui.requestFocus("resume");
     presentation.contentMarkup += "<p>Drill telemetry</p>";
@@ -387,6 +394,24 @@ void auditRenderedGraph(rocket::GameRmlUi& ui, const std::string& label)
         if (!visited.contains(id)) std::cerr << label << ": unreachable " << id << "\n";
     }
     assert(std::includes(visited.begin(), visited.end(), expected.begin(), expected.end()));
+    if (label.find("mining") != std::string::npos) {
+        for (const auto& id : expected) {
+            ui.requestFocus(id);
+            ui.render();
+            auto* glyph = soleFocus(ui)->QuerySelector(".rr-controller-confirm-glyph");
+            if (!glyph) continue;
+            auto* text = static_cast<Rml::ElementText*>(glyph->GetChild(0)->GetChild(0));
+            assert(text && !text->GetLines().empty());
+            const auto width = glyph->GetBox().GetSize(Rml::BoxArea::Content).x;
+            const float baseline = text->GetAbsoluteOffset().y + text->GetLines().front().position.y;
+            const float bottom = glyph->GetAbsoluteOffset(Rml::BoxArea::Border).y + glyph->GetBox().GetSize(Rml::BoxArea::Border).y;
+            const float textLeft = text->GetAbsoluteOffset().x + text->GetLines().front().position.x;
+            const float left = glyph->GetAbsoluteOffset(Rml::BoxArea::Content).x;
+            assert(width >= text->GetLines().front().width);
+            assert(baseline <= bottom);
+            assert(textLeft >= left && textLeft + text->GetLines().front().width <= left + width + 1);
+        }
+    }
 }
 
 void assertActionLabelFits(Rml::Element* root, const std::string& action, const std::string& text)

@@ -123,6 +123,23 @@ int hazardRequiredMarkForCell(const MiningRunState& mining, const MiningCell& ce
     return required;
 }
 
+// Shared objective-first ordering; eligibility, reach and reservations remain
+// the responsibility of each drone. Hazard support can clear the approach
+// before the artifact is scanned, without revealing or collecting the artifact.
+int missionWorkPriority(const MiningRunState& mining, const MiningCell& cell, int x, int y,
+    bool requireArtifactScan = true)
+{
+    if (isActiveRevealedCocoonCell(mining, cell) ||
+        (mining.gate.active && cell.gateAssociated && cell.cocoonLayer < 0)) return 0;
+    const auto& artifact = mining.artifact;
+    constexpr double artifactWorkRadius = 5.0;
+    if (artifact.present && (!requireArtifactScan || artifact.revealed) &&
+        artifact.state != MiningArtifactState::Delivered &&
+        artifact.state != MiningArtifactState::Destroyed &&
+        std::hypot(x + 0.5 - artifact.x, y + 0.5 - artifact.y) <= artifactWorkRadius) return 1;
+    return 2;
+}
+
 bool miniDroneCanOccupyCell(const MiningTerrain& terrain, int x, int y)
 {
     const MiningCell* cell = miningCellAt(terrain, x, y);
@@ -534,6 +551,7 @@ bool MiningDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
     const double acquireRadius = tuning::mining::miningDroneAcquireRadiusCells;
     const double acquireRangeSq = acquireRadius * acquireRadius;
     double bestScore = 1.0e9;
+    int bestPriority = 3;
     int bestX = -1;
     int bestY = -1;
     const int minX = std::max(0, static_cast<int>(std::floor(anchor.x - acquireRadius)));
@@ -562,7 +580,9 @@ bool MiningDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
             const double agentDx = centerX - agent.x;
             const double agentDy = centerY - agent.y;
             const double score = std::sqrt(agentDx * agentDx + agentDy * agentDy) + targetPriority(cell->material);
-            if (score < bestScore) {
+            const int priority = missionWorkPriority(mining_, *cell, x, y);
+            if (priority < bestPriority || (priority == bestPriority && score < bestScore)) {
+                bestPriority = priority;
                 bestScore = score;
                 bestX = x;
                 bestY = y;
@@ -664,6 +684,7 @@ bool HazardDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
     }
     bool foundCandidate = false;
     bool bestIsProtectedLayer = false;
+    int bestPriority = 3;
     double bestArtifactDistance = 1.0e12;
     double bestAnchorDistance = 1.0e12;
     double bestIntensity = -1.0;
@@ -688,15 +709,14 @@ bool HazardDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
             const MiningCell* cell = miningCellAt(mining_.terrain, x, y);
             const double anchorDistance = std::hypot(rigDx, rigDy);
             const double intensityPriority = static_cast<double>(hazardRequiredMarkForCell(mining_, *cell));
-            const bool isProtectedLayer = isActiveRevealedCocoonCell(mining_, *cell);
+            const int priority = missionWorkPriority(mining_, *cell, x, y, false);
+            const bool isProtectedLayer = priority < 2;
             const double artifactDistance = isProtectedLayer && mining_.artifact.present
                 ? std::hypot(centerX - mining_.artifact.x, centerY - mining_.artifact.y)
                 : 0.0;
-            // The rig is the operational anchor. Active protected-layer segments
-            // always win; within that group we work from the objective outward.
-            // Ordinary hazards then favor the closest threat to the player, not the
-            // closest leftover tile to a drone that has just returned from elsewhere.
-            const bool better = !foundCandidate
+            // Gates first, artifact surroundings next, ordinary hazards last.
+            // Within objective groups work outward from the artifact.
+            const bool better = priority < bestPriority || (priority == bestPriority && (!foundCandidate
                 || (isProtectedLayer != bestIsProtectedLayer && isProtectedLayer)
                 || (isProtectedLayer == bestIsProtectedLayer && isProtectedLayer && artifactDistance < bestArtifactDistance - 0.0001)
                 || (!isProtectedLayer && !bestIsProtectedLayer
@@ -711,8 +731,9 @@ bool HazardDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
                         ? std::abs(artifactDistance - bestArtifactDistance) <= 0.0001
                         : std::abs(anchorDistance - bestAnchorDistance) <= 0.0001)
                     && intensityPriority == bestIntensity
-                    && (bestY < 0 || y * mining_.terrain.width + x < bestY * mining_.terrain.width + bestX));
+                    && (bestY < 0 || y * mining_.terrain.width + x < bestY * mining_.terrain.width + bestX))));
             if (better) {
+                bestPriority = priority;
                 foundCandidate = true;
                 bestIsProtectedLayer = isProtectedLayer;
                 bestArtifactDistance = artifactDistance;
@@ -759,6 +780,7 @@ bool HazardDroneCoordinator::acquireAssistAssignment(MiningMiniDroneAgent& agent
     }
     bool foundCandidate = false;
     bool bestIsProtectedLayer = false;
+    int bestPriority = 3;
     double bestArtifactDistance = 1.0e12;
     double bestAnchorDistance = 1.0e12;
     double bestIntensity = -1.0;
@@ -776,14 +798,15 @@ bool HazardDroneCoordinator::acquireAssistAssignment(MiningMiniDroneAgent& agent
         const MiningCell* cell = miningCellAt(mining_.terrain, x, y);
         const double centerX = static_cast<double>(x) + 0.5;
         const double centerY = static_cast<double>(y) + 0.5;
-        const bool isProtectedLayer = isActiveRevealedCocoonCell(mining_, *cell);
+        const int priority = missionWorkPriority(mining_, *cell, x, y, false);
+        const bool isProtectedLayer = priority < 2;
         const double artifactDistance = isProtectedLayer && mining_.artifact.present
             ? std::hypot(centerX - mining_.artifact.x, centerY - mining_.artifact.y)
             : 0.0;
         const double anchorDistance = std::hypot(centerX - anchor.x, centerY - anchor.y);
         const double intensityPriority = static_cast<double>(
             hazardRequiredMarkForCell(mining_, *cell));
-        const bool better = !foundCandidate
+        const bool better = priority < bestPriority || (priority == bestPriority && (!foundCandidate
             || (isProtectedLayer != bestIsProtectedLayer && isProtectedLayer)
             || (isProtectedLayer == bestIsProtectedLayer && isProtectedLayer &&
                 artifactDistance < bestArtifactDistance - 0.0001)
@@ -799,8 +822,9 @@ bool HazardDroneCoordinator::acquireAssistAssignment(MiningMiniDroneAgent& agent
                     ? std::abs(artifactDistance - bestArtifactDistance) <= 0.0001
                     : std::abs(anchorDistance - bestAnchorDistance) <= 0.0001) &&
                 intensityPriority == bestIntensity &&
-                (bestY < 0 || key < cellKey(bestX, bestY)));
+                (bestY < 0 || key < cellKey(bestX, bestY)))));
         if (better) {
+            bestPriority = priority;
             foundCandidate = true;
             bestIsProtectedLayer = isProtectedLayer;
             bestArtifactDistance = artifactDistance;

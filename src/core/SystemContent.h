@@ -58,6 +58,7 @@ struct SystemAsteroid {
 };
 const std::vector<SystemAsteroid>& solarAsteroidBelt();
 bool crossesSolarAsteroidBelt(SystemVector from, SystemVector to);
+bool approachingSolarAsteroidBelt(SystemVector position, SystemVector velocity);
 const SystemBodyDefinition *systemBody(const SystemDefinition &, std::string_view id);
 const SystemBodyDefinition *bodyForEnvironment(const SystemDefinition &, std::string_view id);
 // Authored opening launch berth and departure impulse in Earth-relative units.

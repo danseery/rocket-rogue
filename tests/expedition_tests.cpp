@@ -618,6 +618,50 @@ void campaignGuidanceTests()
 {
     using namespace rocket;
     {
+        MiningRunState site;
+        site.terrain.width = 40; site.terrain.height = 24;
+        site.terrain.cells.resize(40*24);
+        site.returnZoneX = 20; site.returnZoneY = 4;
+        for (int y=0; y<24; ++y) for (int x=0; x<40; ++x) {
+            auto& cell = site.terrain.cells[y*40+x];
+            const bool shaft = x>=18 && x<=22 && y<8;
+            cell.material = y<4 || shaft ? MiningCellMaterial::Empty : MiningCellMaterial::Regolith;
+            cell.remainingToughness = cell.material == MiningCellMaterial::Empty ? 0 : 10;
+        }
+        double rigX=0,rigY=0;
+        check(surfaceLandingStaging(site,20,8,rigX,rigY) && rigY<4,
+            "A ship at the bottom of a shaft must be able to deploy above its blocked side exits");
+        const auto catalog = createDefaultContent();
+        const auto state = createNewGame(catalog, 914);
+        const auto model = expeditionFlightModel(state,catalog);
+        auto flight = beginLaunchFlight(model,*catalog.findDestination("mars"));
+        flight.active = flight.physicalFlight = true;
+        flight.mode = FlightMode::Landing;
+        flight.landing.altitude = -16.0;
+        flight.landing.heading = 1.5707963267948966;
+        flight.handoff.elapsed = flight_landing::handoffSeconds;
+        const auto touchdown = updateLaunchFlight(flight,model,*catalog.findDestination("mars"),{},.02,&site);
+        check(touchdown.reachedDestination && flight.phase == FlightPhase::Landed,
+            "Stationary supported ship sixteen metres down a shaft must finish landing");
+        check(positionSurfaceLandingTeam(site,flight.landing.touchdownGridX,flight.landing.touchdownGridY),
+            "Committed shaft touchdown must retain a usable deployment position");
+    }
+    for (const double steer : {-1.0, 1.0}) {
+        FlightRunState baseline;
+        for (int frame = 0; frame < 60; ++frame) advanceFlightHeading(baseline, steer, .016, 0);
+        for (int rank = 1; rank <= 3; ++rank) {
+            FlightRunState upgraded;
+            for (int frame = 0; frame < 60; ++frame) advanceFlightHeading(upgraded, steer, .016, rank);
+            check(std::abs(upgraded.angularVelocity / baseline.angularVelocity - (1.0 + .15*rank)) < 1e-9 &&
+                  std::abs(upgraded.heading / baseline.heading - (1.0 + .15*rank)) < 1e-9,
+                "Flight Controls must improve turning response and sustained speed by fifteen percent per rank in both directions");
+            const double before = upgraded.angularVelocity;
+            advanceFlightHeading(upgraded, 0, .016, rank);
+            check(std::abs(upgraded.angularVelocity / before - std::exp(-5.2*.016)) < 1e-9,
+                "Upgraded steering must retain the same release damping");
+        }
+    }
+    {
         const auto catalog = createDefaultContent();
         auto state = std::make_unique<GameState>(createNewGame(catalog, 918));
         initializeLiveExpedition(*state, catalog);
@@ -1136,6 +1180,27 @@ void persistentExpeditionTests()
             crossesSolarAsteroidBelt({30,0},{22,0}) &&
             crossesSolarAsteroidBelt({25,0},{25,0}),
             "Belt entry must handle both directions, swept crossings, and reload inside");
+        check(approachingSolarAsteroidBelt({19,0},{1,0}) &&
+              approachingSolarAsteroidBelt({33,0},{-1,0}) &&
+              approachingSolarAsteroidBelt({21,0},{.01,0}) &&
+              !approachingSolarAsteroidBelt({19,0},{-1,0}) &&
+              !approachingSolarAsteroidBelt({33,0},{1,0}),
+            "Belt warning must give six seconds of approach notice from either side without warning distant departing ships");
+        double smallest = 10, largest = 0;
+        for (const auto& asteroid : solarAsteroidBelt()) {
+            const double r = std::hypot(asteroid.position.x, asteroid.position.y);
+            check(r - asteroid.radius > solarBeltInnerRadius && r + asteroid.radius < solarBeltOuterRadius,
+                "Jittered rocks must stay inside the physical belt envelope");
+            check(std::abs(asteroid.radius - .12*asteroid.scale) < 1e-9,
+                "Asteroid collision radius must match visual scale");
+            check(std::hypot(asteroid.position.x-mars->position.x, asteroid.position.y-mars->position.y) -
+                    asteroid.radius - .075 > mars->influenceRadius + 8.0,
+                "Mars departures must have a full widest-zoom screen of collision-free travel beyond orbit");
+            smallest = std::min(smallest, asteroid.scale);
+            largest = std::max(largest, asteroid.scale);
+        }
+        check(smallest < .7 && largest > 1.3 && solarAsteroidBelt().size() > 500 && solarAsteroidBelt().size() < 640,
+            "Belt variation and density must remain outside the local Mars clearing");
         auto state = createNewGame(catalog,0xB317);
         auto model = expeditionFlightModel(state,catalog);
         model.heatEnabled = false;
@@ -1504,6 +1569,24 @@ void persistentExpeditionTests()
         const auto step = [&](double dt) {
             return advanceExpeditionFlight(expedition, flight, model, destination, system, {}, dt);
         };
+        check(service_dock::captureHalfDepth * 2.0 == service_dock::shipLength &&
+              service_dock::captureHalfWidth == service_dock::hullRadius,
+            "Docking target must use the ship hull's rectangular proportions");
+        for (const double side : {-1.0, 1.0}) {
+            resetDock();
+            flight.docking.enteredMouth = true;
+            flight.docking.positionX = side * service_dock::captureHalfWidth * 1.049;
+            flight.docking.positionY = service_dock::captureCenterY + .08;
+            flight.docking.captureSeconds = .49;
+            check(step(.02).dockSecuringStarted,
+                "Ship inside the rectangular berth including five-percent edge grace must secure");
+            resetDock();
+            flight.docking.enteredMouth = true;
+            flight.docking.positionX = side * service_dock::captureHalfWidth * 1.051;
+            flight.docking.captureSeconds = .49;
+            check(!step(.02).dockSecuringStarted && flight.docking.captureSeconds == 0.0,
+                "Outside five-percent berth grace must not capture");
+        }
         resetDock();
         flight.docking.positionX = .25;
         flight.docking.velocityX = .01;
@@ -1538,11 +1621,17 @@ void persistentExpeditionTests()
         flight.docking.enteredMouth = true;
         flight.docking.captureSeconds = .49;
         check(step(.02).dockSecuringStarted, "Stable capture starts the securing sequence");
+        flight.docking.securingStartX = flight.docking.positionX = .08;
+        flight.docking.securingStartY = flight.docking.positionY = service_dock::captureCenterY + .06;
         int lockEvents = 0;
         for (int i = 0; i < 39; ++i) {
             const auto result = advanceExpeditionFlight(expedition, flight, model, destination, system,
                 {1, 1, false, true, 1}, .05);
             lockEvents += result.dockClampLocked;
+            const double progress = service_dock::clampProgress(flight.docking.securingSeconds);
+            check(std::abs(flight.docking.positionX - .08 * (1.0 - progress)) < 1e-6 &&
+                  std::abs(flight.docking.positionY - (service_dock::captureCenterY + .06 * (1.0 - progress))) < 1e-6,
+                "Ship holds until arms move, then settles with clamp closure, including after reload");
             check(!result.dockCaptured && !flight.docking.settlementReady,
                 "Dock services cannot open before two seconds");
             check(flight.selectedThrottle == 0 && flight.velocityX == 0 && flight.velocityY == 0,

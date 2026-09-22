@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include "core/FlightSystem.h"
 #include "core/GameTypes.h"
 #include "core/LaunchSimulation.h"
@@ -32,15 +33,23 @@ inline constexpr double hullRadius = 0.10;
 inline constexpr double hullHalfLength = 0.14;
 inline constexpr double shipLength = 2.0 * (hullHalfLength + hullRadius);
 inline constexpr double captureCenterY = 0.42;
-inline constexpr double captureHalfDepth = 0.05;
-inline constexpr double captureHalfWidth = 0.12;
-inline constexpr double guideHalfDepth = 0.12;
+// The visible target and capture region share the ship's hull proportions.
+inline constexpr double captureHalfDepth = shipLength * 0.5;
+inline constexpr double captureHalfWidth = hullRadius;
+inline constexpr double captureGraceScale = 1.05;
+inline constexpr double guideHalfDepth = captureHalfDepth;
 inline constexpr double captureHeadingRadians = 0.2617993877991494;
 inline constexpr double captureForwardSpeed = 2.0;
 inline constexpr double captureLateralSpeed = 1.0;
 inline constexpr double captureSeconds = 0.5;
-inline constexpr double settleSeconds = 0.35;
+inline constexpr double clampStartSeconds = 0.35;
 inline constexpr double clampLockSeconds = 0.85;
+// Ship alignment and clamp extension use the same saved arrival timeline.
+inline double clampProgress(double seconds) {
+    const double t = std::clamp((seconds - clampStartSeconds) /
+        (clampLockSeconds - clampStartSeconds), 0.0, 1.0);
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
 inline constexpr double arrivalFadeSeconds = 1.75;
 inline constexpr double securingSeconds = 2.0;
 inline constexpr double contactRearmSeconds = 0.15;

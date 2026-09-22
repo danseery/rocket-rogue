@@ -670,7 +670,15 @@ FlightCameraView physicalFlightCamera(
         // body-centered orbit camera. Distant targets use an edge marker.
         const Vec2 center {static_cast<float>(snapshot.launchPositionX-dx*fraction*.5),
             static_cast<float>(snapshot.launchPositionY-dy*fraction*.5)};
-        const float scale = static_cast<float>(std::clamp(1.45/(fitRange+.70),.25,.90));
+        float scale = static_cast<float>(std::clamp(1.45/(fitRange+.70),.25,.90));
+        if (snapshot.system.id == "solar") {
+            const double solarRadius = std::hypot(snapshot.launchPositionX + frameOffset.x,
+                snapshot.launchPositionY + frameOffset.y);
+            const double beltDistance = std::max({solarBeltInnerRadius - solarRadius,
+                solarRadius - solarBeltOuterRadius, 0.0});
+            const float preview = smootherstep(static_cast<float>(1.0 - beltDistance / 5.0));
+            scale = std::lerp(scale, std::min(scale, .45F), preview);
+        }
         // Earth below-left and Moon above-right use their real system positions.
         constexpr float departureRotation = kPi / 3.0F;
         result.transfer = {center,{0,0},scale,departureRotation};
@@ -5701,21 +5709,25 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
     }
 
     if (damagePressure > 0.01F) {
+        // Damage is a viewport warning, not a terrain boundary. The surface
+        // camera can expose sky above the original finite mining grid.
+        const float warningWidth = backdropRight - backdropLeft;
+        const float warningHeight = viewportTop - backdropBottom;
         const float heartbeat = miningDamageHeartbeat(damagePressure, snapshot.animationTime);
         const float severityAlpha = 0.08F + damagePressure * 0.28F;
         const float edgeAlpha = severityAlpha * (0.73F + heartbeat * 0.27F);
-        const float gradientWidth = std::min(0.20F, (top - bottom) * 0.14F);
+        const float gradientWidth = std::min(0.20F, warningHeight * 0.14F);
         const float frameWidth = 0.004F;
         const float feather = 0.004F;
         const float cornerRadius = 0.032F;
         std::vector<SceneVertex>& warningVertices = scratchVertices(48);
         const Color vertexColor {1.0F, 1.0F, 1.0F, 1.0F};
-        pushVertex(warningVertices, left, bottom, vertexColor, 0.0F, 0.0F);
-        pushVertex(warningVertices, right, bottom, vertexColor, 1.0F, 0.0F);
-        pushVertex(warningVertices, right, top, vertexColor, 1.0F, 1.0F);
-        pushVertex(warningVertices, left, bottom, vertexColor, 0.0F, 0.0F);
-        pushVertex(warningVertices, right, top, vertexColor, 1.0F, 1.0F);
-        pushVertex(warningVertices, left, top, vertexColor, 0.0F, 1.0F);
+        pushVertex(warningVertices, backdropLeft, backdropBottom, vertexColor, 0.0F, 0.0F);
+        pushVertex(warningVertices, backdropRight, backdropBottom, vertexColor, 1.0F, 0.0F);
+        pushVertex(warningVertices, backdropRight, viewportTop, vertexColor, 1.0F, 1.0F);
+        pushVertex(warningVertices, backdropLeft, backdropBottom, vertexColor, 0.0F, 0.0F);
+        pushVertex(warningVertices, backdropRight, viewportTop, vertexColor, 1.0F, 1.0F);
+        pushVertex(warningVertices, backdropLeft, viewportTop, vertexColor, 0.0F, 1.0F);
         submit(
             warningVertices,
             TextureId::None,
@@ -5723,7 +5735,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             PipelineClass::RoundedFrame,
             {damageColor.r, damageColor.g, damageColor.b, edgeAlpha},
             {gradientWidth, frameWidth, feather, cornerRadius},
-            {right - left, top - bottom});
+            {warningWidth, warningHeight});
     }
     // The backing capacity is retained, but frame-lifetime snapshot pointers
     // must not escape the synchronous mining render.
@@ -6347,8 +6359,8 @@ void SceneComposer::drawDockFeedback(const RenderSnapshot& snapshot)
         }
     }
     const double time = snapshot.launchDockSecuringSeconds;
-    const float close = snapshot.launchDockSecuring ? smootherstep(static_cast<float>(
-        (time - service_dock::settleSeconds) / (service_dock::clampLockSeconds - service_dock::settleSeconds))) : 0.0F;
+    const float close = snapshot.launchDockSecuring
+        ? static_cast<float>(service_dock::clampProgress(time)) : 0.0F;
     const bool locked = snapshot.launchDockSecuring && time >= service_dock::clampLockSeconds;
     const Color light = locked ? Color {.25F, 1.0F, .65F, 1.0F} : Color {1.0F, .65F, .18F, .85F};
     for (const double side : {-1.0, 1.0}) {
@@ -6400,7 +6412,7 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
             const float channel = static_cast<float>(service_dock::channelHalfWidth) * view.camera.scale;
             const float pocket = static_cast<float>(service_dock::captureCenterY) * view.camera.scale;
             const float pocketHalfWidth = static_cast<float>(service_dock::captureHalfWidth) * view.camera.scale;
-            const float pocketHalfDepth = static_cast<float>(service_dock::guideHalfDepth) * view.camera.scale;
+            const float pocketHalfDepth = static_cast<float>(service_dock::captureHalfDepth) * view.camera.scale;
             const float tick = static_cast<float>(service_dock::hullRadius) * view.camera.scale;
             const float handoff = smootherstep(static_cast<float>(snapshot.launchDockHandoffProgress));
             const float guideAlpha = (snapshot.launchDockSecuring ? 0.16F :
@@ -6922,8 +6934,11 @@ void SceneComposer::drawLaunchAsteroids(const RenderSnapshot& snapshot)
             else drawCircle(p.x,p.y,size*.5F,{.58F,.50F,.46F,1},12);
         }
         const double radius = std::hypot(snapshot.launchPositionX+offset.x,snapshot.launchPositionY+offset.y);
-        if (radius>=solarBeltInnerRadius-1.5 && radius<=solarBeltOuterRadius+1.5)
-            drawPoiLabel(0,.82F,.004F,"ASTEROID BELT",PoiGuidanceKind::Ship);
+        if (approachingSolarAsteroidBelt({snapshot.launchPositionX+offset.x,snapshot.launchPositionY+offset.y},
+                {snapshot.launchVelocityX,snapshot.launchVelocityY}))
+            drawPoiLabel(0,.82F,.004F,
+                radius>=solarBeltInnerRadius && radius<=solarBeltOuterRadius ? "ASTEROID BELT" : "BELT AHEAD - SLOW DOWN",
+                PoiGuidanceKind::Ship);
         return;
     }
     if (snapshot.launchLandingLocalFrame || !snapshot.launchAsteroidsEnabled || snapshot.launchAsteroidCount <= 0) {

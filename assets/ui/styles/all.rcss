@@ -10876,8 +10876,11 @@ button,
 /* A block formatting context prevents tall button label line-heights from
    shifting the badge text. The overlay does not move the centered label. */
 .rr-controller-confirm-glyph {
-    display: block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     position: absolute;
+    z-index: 1;
     top: -7px;
     right: 6px;
     visibility: hidden;
@@ -10894,6 +10897,16 @@ button,
     border-color: #ffd166;
     border-radius: 3px;
     pointer-events: none;
+}
+.rr-controller-confirm-glyph .rr-controller-confirm-label {
+    display: block;
+    position: relative;
+    line-height: 14px;
+    font-size: 10px;
+    font-weight: bold;
+    color: #fff4ce;
+    text-transform: none;
+    white-space: nowrap;
 }
 body.controller-focus-visible .rr-controller-focus .rr-controller-confirm-glyph {
     visibility: visible;

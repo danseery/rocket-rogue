@@ -4467,6 +4467,32 @@ int main(int argc, char** argv)
         overCapacity.runner.shutdown();
     }
 
+    // Fuel recovery guidance appears only for an empty tank, including resumed runs.
+    for (const bool empty : {false, true}) {
+        const auto catalog = rocket::createDefaultContent();
+        auto state = rocket::createNewGame(catalog, 0xF0E1ULL);
+        const auto saved = rocket::deserializeSaveData(activeMiningSave(0.0));
+        assert(saved);
+        rocket::restoreSaveData(state, catalog, *saved);
+        state.incomingMessages = {};
+        state.run.mining.rigFuel.current = empty ? 0.0 : 1.0;
+        AppFixture fixture;
+        fixture.saves.value = rocket::serializeSaveData(rocket::captureSaveData(state));
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
+        fixture.host.now += 1.0 / 60.0;
+        fixture.runner.frame();
+        const auto result = rocket::deserializeSaveData(fixture.saves.value);
+        assert(result);
+        const auto count = std::count_if(result->incomingMessages.pending.begin(),
+            result->incomingMessages.pending.end(), [](const auto& message) {
+                return message.messageId == "rig_fuel_empty_tip";
+            });
+        assert(count == (empty ? 1 : 0));
+        fixture.runner.shutdown();
+    }
+
     // Depart Planet keeps the landed scene alive for the complete bay-close,
     // ignition, and ascent ritual. Settlement happens once in memory, but the
     // save is not replaced until the cinematic hands off to the next screen.

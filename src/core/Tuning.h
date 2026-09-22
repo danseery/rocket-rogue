@@ -331,6 +331,7 @@ inline constexpr double returnTelemetryCrashMargin = 0.02;
 // Rewards and control upgrades for continuous physical flight.
 namespace physicalFlight {
 inline constexpr double flightControlsThrustAssistPerRank = 0.10;
+inline constexpr double flightControlsRotationAssistPerRank = 0.15;
 inline constexpr int goodBlueprintGain = 1;
 inline constexpr int perfectBlueprintGain = 2;
 inline constexpr double goodRewardFactor = 0.55;

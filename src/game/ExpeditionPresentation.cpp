@@ -113,7 +113,7 @@ std::string benefit(const ShipModule& m) {
     if (m.surfaceDepthUpgradeKind == SurfaceDepthUpgradeKind::BoreSystem) return "Drill one additional surveyed layer.";
     switch (m.launchUpgradeKind) {
     case LaunchUpgradeKind::FuelTanks: return num(launchFuelCapacityForRank(m.launchUpgradeRank)) + " ship fuel capacity.";
-    case LaunchUpgradeKind::FlightControls: return "+10% physical thrust at the same burn rate.";
+    case LaunchUpgradeKind::FlightControls: return "+10% thrust and +15% turning per rank. Same fuel burn rate.";
     case LaunchUpgradeKind::Cooling: return "Reduce powered heat and improve coast cooling.";
     case LaunchUpgradeKind::Hull: return num(tuning::launch::hullBaseIntegrity + m.launchUpgradeRank*tuning::launch::hullIntegrityPerRank) + " maximum hull integrity.";
     default: return "";
