@@ -582,8 +582,12 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         (earthDocking ? "<div class=\"expedition-dock-action\"><strong>EARTH DOCK / " + esc(earthDockingGuidance(flight)) + "</strong></div>"
             : dockInRange && e.location.bodyId == "earth"
                 ? "<div class=\"expedition-dock-action\"><strong>EARTH DOCK / MANEUVER ENGAGED</strong></div>"
-            : dockInRange ? "<div class=\"expedition-dock-action\">" + button(e.course.targetBodyId == "straylight" ? "Dock with Straylight" : "DOCK", "expedition:dock", dockReady, "ok", flightDefaultAvailable && dockReady) + "</div>"
-                          : action("Dock", "dock", false));
+            // Earth has no UI docking affordance: entering its approach radius
+            // starts the physical berth maneuver. Straylight keeps its distinct
+            // story-corridor interaction until its own docking design exists.
+            : dockInRange && e.course.targetBodyId == "straylight"
+                ? "<div class=\"expedition-dock-action\">" + button("Enter Straylight corridor", "expedition:dock", dockReady, "ok", flightDefaultAvailable && dockReady) + "</div>"
+                : std::string{});
         for (const auto& wreck : e.wrecks) {
             if (!canSalvageWreck(e, flight, system, wreck.id, false)) continue;
             const bool ready = canSalvageWreck(e, flight, system, wreck.id);

@@ -230,6 +230,32 @@ void focusPass(int width, int height)
     assert(lines.size() == 1);
     assert(lines.front().width > 0);
     assert(badge->GetBox().GetSize(Rml::BoxArea::Content).x >= lines.front().width);
+
+    // Dock route controls share the compact action row, whose outer panel clips
+    // overflow. Their Circle badge must remain a complete, readable chip.
+    ui.setPanelPresentation(panel("<div class=\"expedition-home\"><div class=\"expedition-dock-route-actions\">"
+        "<button class=\"dock-depart\" data-ui-focus-id=\"depart\" data-rr-action=\"depart\" data-ui-default-focus=\"1\">"
+        "<span class=\"rr-button-label\">DEPART FOR Titan</span></button>"
+        "<button class=\"dock-waypoint\" data-ui-focus-id=\"waypoint\" data-rr-action=\"map\">"
+        "<span class=\"rr-button-label\">Change waypoint</span></button></div></div>"));
+    for (const auto* id : {"depart", "waypoint"}) {
+        ui.requestFocus(id);
+        ui.render();
+        auto* routeButton = soleFocus(ui);
+        auto* routeBadge = routeButton->QuerySelector(".rr-controller-confirm-glyph");
+        assert(routeBadge);
+        const auto routeButtonTop = routeButton->GetAbsoluteOffset(Rml::BoxArea::Border).y;
+        const auto routeBadgeTop = routeBadge->GetAbsoluteOffset(Rml::BoxArea::Border).y;
+        assert(routeBadgeTop >= routeButtonTop);
+        assert(routeBadgeTop + routeBadge->GetBox().GetSize(Rml::BoxArea::Border).y <=
+            routeButtonTop + routeButton->GetBox().GetSize(Rml::BoxArea::Border).y);
+        assert(routeBadge->QuerySelector(".rr-controller-confirm-label")->GetInnerRML() == "Circle");
+        auto* routeBadgeText = routeBadge->GetChild(0)->GetChild(0);
+        assert(routeBadgeText);
+        const auto& routeLines = static_cast<Rml::ElementText*>(routeBadgeText)->GetLines();
+        assert(routeLines.size() == 1 && routeLines.front().width > 0);
+        assert(routeBadge->GetBox().GetSize(Rml::BoxArea::Content).x >= routeLines.front().width);
+    }
     ui.setPanelPresentation(presentation);
     ui.requestFocus("land");
     presentation.contentMarkup += "<p>Telemetry update</p>";

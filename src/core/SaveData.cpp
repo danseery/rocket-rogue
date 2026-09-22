@@ -3321,6 +3321,7 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     normalizeRestoredMiningHazards(state.run.mining);
     normalizeRestoredHazardDroneAssignments(state.run.mining);
     migrateAdjacentCocoonTiles(state.run.mining);
+    repairLegacyDepthBoundaries(state.run.mining);
     for (auto& site : state.run.expedition.sites) {
         const auto& location = state.run.expedition.location;
         const bool activeSite = state.run.mining.active && site.systemId == location.systemId &&

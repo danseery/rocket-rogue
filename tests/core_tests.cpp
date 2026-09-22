@@ -2559,6 +2559,64 @@ void miningTerrainIsDeterministicAndDepthScales()
     };
     require(!hasReturnShaft(a),
         "a fresh mining layer should stay normal until the player leaves it for a deeper depth");
+    for (int x = 1; x < a.width - 1; ++x) {
+        require(miningCellAt(a, x, a.height - 1)->material != MiningCellMaterial::Bedrock,
+            "intermediate depth floors must remain excavatable");
+    }
+    for (int y = 0; y < a.height; ++y) {
+        require(miningCellAt(a, 0, y)->material == MiningCellMaterial::Bedrock &&
+                miningCellAt(a, a.width - 1, y)->material == MiningCellMaterial::Bedrock,
+            "bedrock must continue to frame the sides of every depth");
+    }
+    const MiningTerrain finalDepth = generateMiningTerrain(
+        state,
+        outerPlanets,
+        SurfaceSiteProfile::OreShelf,
+        tuning::surfaceDepthProgression::maximumDepthRating);
+    for (int x = 1; x < finalDepth.width - 1; ++x) {
+        require(miningCellAt(finalDepth, x, finalDepth.height - 1)->material == MiningCellMaterial::Bedrock,
+            "the final supported depth must retain its bedrock floor");
+    }
+    MiningRunState legacyBoundaries;
+    legacyBoundaries.terrain = a;
+    for (int x = 1; x < legacyBoundaries.terrain.width - 1; ++x) {
+        miningCellAt(legacyBoundaries.terrain, x, legacyBoundaries.terrain.height - 1)->material =
+            MiningCellMaterial::Bedrock;
+    }
+    MiningDepthLayerState legacyFinal;
+    legacyFinal.depthZone = tuning::surfaceDepthProgression::maximumDepthRating;
+    legacyFinal.terrain = finalDepth;
+    legacyBoundaries.depthLayers.push_back(legacyFinal);
+    repairLegacyDepthBoundaries(legacyBoundaries);
+    for (int x = 1; x < legacyBoundaries.terrain.width - 1; ++x) {
+        require(miningCellAt(legacyBoundaries.terrain, x, legacyBoundaries.terrain.height - 1)->material !=
+                MiningCellMaterial::Bedrock,
+            "save repair must remove obsolete intermediate bedrock floors");
+        require(miningCellAt(legacyBoundaries.depthLayers.front().terrain, x,
+                legacyBoundaries.depthLayers.front().terrain.height - 1)->material == MiningCellMaterial::Bedrock,
+            "save repair must preserve the final-depth bedrock floor");
+    }
+    for (int x = 1; x < legacyBoundaries.terrain.width - 1; ++x) {
+        miningCellAt(legacyBoundaries.terrain, x, legacyBoundaries.terrain.height - 1)->material =
+            MiningCellMaterial::Bedrock;
+    }
+    legacyBoundaries.active = true;
+    legacyBoundaries.destinationId = outerPlanets.id;
+    GameState legacySaveState = state;
+    legacySaveState.screen = Screen::Mining;
+    legacySaveState.run.planetaryExpedition.active = true;
+    legacySaveState.run.mining = legacyBoundaries;
+    const auto legacySave = deserializeSaveData(serializeSaveData(captureSaveData(legacySaveState)));
+    require(legacySave.has_value(), "legacy intermediate bedrock fixture must serialize");
+    GameState repairedSave = createNewGame(catalog, 91919);
+    restoreSaveData(repairedSave, catalog, *legacySave);
+    require(repairedSave.run.mining.active,
+        "depth-boundary repair must preserve the active mining save");
+    for (int x = 1; x < repairedSave.run.mining.terrain.width - 1; ++x) {
+        require(miningCellAt(repairedSave.run.mining.terrain, x,
+                repairedSave.run.mining.terrain.height - 1)->material != MiningCellMaterial::Bedrock,
+            "loading a save must repair its obsolete intermediate bedrock floor");
+    }
     require(elementalHazards > 0, "Act 1 Pressure terrain should include environmental hazard pockets");
     const MiningArenaRules actOneEarly = resolveMiningArenaRules({MiningAct::ActOne, 1, 1});
     const MiningArenaRules actOneLate = resolveMiningArenaRules({MiningAct::ActOne, 10, 1});
@@ -6713,7 +6771,7 @@ void miningDepthLayersAreBidirectionalAndPersistent()
     MiningCell* entryMarker = miningCellAt(entry.terrain, 5, 5);
     require(entryMarker != nullptr, "entry depth should expose a persistence marker cell");
     *entryMarker = {MiningCellMaterial::RareOre, 17.0, 6.5, true, false};
-    for (int y = entry.terrain.height - 5; y < entry.terrain.height; ++y) {
+    for (int y = entry.terrain.height - 8; y < entry.terrain.height; ++y) {
         for (int x = 0; x < entry.terrain.width; ++x) {
             if (MiningCell* cell = miningCellAt(entry.terrain, x, y)) {
                 *cell = {MiningCellMaterial::Empty, 0.0, 0.0, true, false};
@@ -6721,12 +6779,20 @@ void miningDepthLayersAreBidirectionalAndPersistent()
         }
     }
     entry.droneX = static_cast<double>(entry.terrain.width) * 0.5;
-    entry.droneY = static_cast<double>(entry.terrain.height) - 2.1;
+    entry.droneY = static_cast<double>(entry.terrain.height) - 7.0;
+    entry.hullDirX = entry.aimDirX = 0.0;
+    entry.hullDirY = entry.aimDirY = 1.0;
+    entry.moveX = 0.0;
+    entry.moveY = 1.0;
     const double hazardBeforeDescent = entry.hazardDelta;
-    updateMiningRun(state, catalog, 0.01);
+    for (int tick = 0; tick < 180 && state.run.mining.depthZone == entryDepth; ++tick) {
+        updateMiningRun(state, catalog, 0.08);
+    }
+    state.run.mining.moveY = 0.0;
 
     MiningRunState& deep = state.run.mining;
-    require(deep.depthZone == entryDepth + 1, "crossing the lower edge should descend exactly one depth");
+    require(deep.depthZone == entryDepth + 1,
+        "driving through a physically open lower seam should descend exactly one depth");
     require(deep.entryDepthZone == entryDepth && deep.deepestDepthZone == entryDepth + 1,
         "the entry depth should remain fixed while deepest depth advances");
     require(deep.depthLayers.size() == 1 && deep.depthLayers.front().depthZone == entryDepth,
@@ -8673,7 +8739,8 @@ void controllerPanelDefaultsAndOrbitalActions()
     flight.destinationId = content::destination::moon;
     flight.mode = FlightMode::Orbit;
     flight.selectedThrottle = 0.0;
-    flight.orbit.captured = flight.orbit.loopQualifies = true;
+    flight.orbit.captured = true;
+    flight.orbit.loopQualifies = false;
     OrbitalWorkState work;
     context.launchFlight = &flight;
     context.orbitalWork = &work;
@@ -8686,9 +8753,9 @@ void controllerPanelDefaultsAndOrbitalActions()
     panel = buildGamePanelPresentation(context);
     require(panel.contentMarkup.find("action:resume_orbital_flight") == std::string::npos,
         "ordinary piloting must not offer Resume Flight when orbital work is inactive");
-    require(panel.contentMarkup.find("ESTABLISH A SAFE LOOP") != std::string::npos &&
+    require(panel.contentMarkup.find("COAST TO SCAN") != std::string::npos &&
         panel.contentMarkup.find("action:orbital_scan") == std::string::npos,
-        "an unsafe powered loop must remain status rather than offer an unavailable Scan");
+        "powered flight must remain status rather than offer Scan");
     flight.selectedThrottle = 0.0;
 
     work.phase = OrbitalWorkPhase::Surveying;
@@ -8701,8 +8768,13 @@ void controllerPanelDefaultsAndOrbitalActions()
     work.surveyComplete = true;
     work.phase = OrbitalWorkPhase::LaserReady;
     context.orbitalLandingEligible = true;
+    context.orbitalArtifactDepth = 2;
     panel = buildGamePanelPresentation(context);
     defaultIs(panel.contentMarkup, "action:orbital_drill");
+    require(panel.contentMarkup.find("Artifact at Depth +2") != std::string::npos,
+        "a completed scan must state the artifact depth in the action panel");
+    require(!flight.orbit.loopQualifies,
+        "restored captured orbit must expose Drill and Land without transient loop requalification");
     require(panel.contentMarkup.find("data-ui-activation=\"continuous\"") != std::string::npos,
         "focused Drill must advertise continuous hold activation");
     const auto drillPosition = panel.contentMarkup.find("action:orbital_drill");

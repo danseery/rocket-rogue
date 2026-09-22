@@ -10483,6 +10483,10 @@ body.controller-focus-visible .rr-controller-focus .rr-controller-confirm-glyph 
     /* Mining controls intentionally clip overflow; keep their badge inside. */
     top: 3px;
 }
+.expedition-dock-route-actions .rr-controller-confirm-glyph {
+    /* Route buttons sit on a clipped dock row, so do not float the badge above them. */
+    top: 3px;
+}
 
 /* Physical Io mission guidance remains available after its transmission is
    acknowledged. Keep it separate from the compact, fixed-height service dock. */
@@ -10604,6 +10608,15 @@ body.controller-focus-visible .rr-controller-focus .rr-controller-confirm-glyph 
 .mission-scan-result strong { color: #ead9ff; }
 .mission-scan-result p { margin: 6dp 0; }
 .mission-scan-result small { color: #9edfc6; }
+.mission-scan-result .titan-depth-title { display: block; margin-top: 8dp; color: #ffd166; }
+.mission-scan-result .titan-depth-route {
+    margin-top: 10dp;
+    margin-bottom: 2dp;
+    border-color: #b88a2f;
+    background-color: #0b1820;
+}
+.mission-scan-result .titan-depth-route .flight-status-row span { color: #a8c4cf; }
+.mission-scan-result .titan-depth-route .flight-status-row strong { color: #ffd166; }
 .mission-log-entry { padding: 12dp 0; border-bottom: 1dp #284653; }
 .mission-log-entry h3 { margin: 0 0 6dp; }
 .mission-log-entry p { margin: 5dp 0; }

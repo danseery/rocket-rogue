@@ -889,7 +889,11 @@ MiningCellMaterial generatedMaterial(
     int width,
     int height)
 {
-    if (x <= 0 || x >= width - 1 || y >= height - 1) {
+    // Side walls frame every layer. Only the deepest supported layer has a
+    // bedrock floor; intermediate layer seams must remain excavatable so
+    // ordinary generation can never strand an artifact below the player.
+    if (x <= 0 || x >= width - 1 ||
+        (y >= height - 1 && depthZone >= tuning::surfaceDepthProgression::maximumDepthRating)) {
         return MiningCellMaterial::Bedrock;
     }
     if (y < 4) {
@@ -6333,12 +6337,18 @@ void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int di
         if (!canOccupyControlledActor(target->terrain,transitionX,arrivalY,suitTravels,mining.hullDirX,mining.hullDirY,geometry)) return;
         const double radius=suitTravels ? tuning::mining::operatorColliderRadiusCells :
             std::max(rig_geometry::drillTip, rig_geometry::effectiveHalfWidth(geometry));
-        // Check the adjoining lips, not just the destination spawn point.
-        for (double y=radius+0.01; y<=4.0; y+=0.25) {
-            const double nextY=direction>0 ? y : target->terrain.height-y;
-            const double oldY=direction>0 ? mining.terrain.height-y : y;
-            if (!canOccupyControlledActor(target->terrain,transitionX,nextY,suitTravels,mining.hullDirX,mining.hullDirY,geometry) ||
-                !canOccupyControlledActor(mining.terrain,transitionX,oldY,suitTravels,mining.hullDirX,mining.hullDirY,geometry)) return;
+        // Check the adjoining lips for EVA travel. A rig crossing the seam is
+        // intentionally outside each finite layer for part of the handoff, so
+        // validating it against either layer in isolation turns the open seam
+        // into an invisible wall. The joined-terrain sweep below is the
+        // authoritative rig check and still includes the full drill geometry.
+        if (suitTravels) {
+            for (double y=radius+0.01; y<=4.0; y+=0.25) {
+                const double nextY=direction>0 ? y : target->terrain.height-y;
+                const double oldY=direction>0 ? mining.terrain.height-y : y;
+                if (!canOccupyControlledActor(target->terrain,transitionX,nextY,true,mining.hullDirX,mining.hullDirY,geometry) ||
+                    !canOccupyControlledActor(mining.terrain,transitionX,oldY,true,mining.hullDirX,mining.hullDirY,geometry)) return;
+            }
         }
         if (!suitTravels || tetheredRigTravels) {
             // Sweep across the real seam, including the drill, rather than
@@ -8019,6 +8029,30 @@ MiningTerrain generateMiningTerrain(const GameState& state, const Destination& d
     return terrain;
 }
 
+void repairLegacyDepthBoundaries(MiningRunState& mining)
+{
+    const auto repair = [](MiningTerrain& terrain) {
+        if (terrain.depthZone >= tuning::surfaceDepthProgression::maximumDepthRating ||
+            terrain.width < 3 || terrain.height < 1 ||
+            static_cast<int>(terrain.cells.size()) != terrain.width * terrain.height) {
+            return;
+        }
+        const int y = terrain.height - 1;
+        for (int x = 1; x < terrain.width - 1; ++x) {
+            MiningCell* cell = miningCellAt(terrain, x, y);
+            if (cell == nullptr || cell->material != MiningCellMaterial::Bedrock) {
+                continue;
+            }
+            *cell = makeCell(MiningCellMaterial::Regolith, terrain.depthZone);
+            markDirty(terrain, x, y);
+        }
+    };
+    repair(mining.terrain);
+    for (auto& layer : mining.depthLayers) {
+        repair(layer.terrain);
+    }
+}
+
 void applySurfaceProspects(
     MiningTerrain& terrain,
     const PlanetaryExpeditionState& expedition,
@@ -9378,6 +9412,7 @@ void repairRestoredOrbitalObjectives(MiningRunState& target, OrbitalSiteProgress
 
 void repairSavedOrbitalObjectives(MiningRunState& mining, OrbitalSiteProgress& progress, const ContentCatalog& catalog)
 {
+    repairLegacyDepthBoundaries(mining);
     if (progress.surveyedDepth < 0 || mining.terrain.cells.empty()) return;
     // Loading an active deployment must preserve its actors, tethers and
     // resources. The revisit path resets those before running this repair.
@@ -9829,6 +9864,7 @@ PreparedSurfaceLanding restoreSurfaceLanding(const GameState& state, const Conte
     p.expeditionTemplate = site.surface;
     p.miningTemplate = site.mining;
     migrateAdjacentCocoonTiles(p.miningTemplate);
+    repairLegacyDepthBoundaries(p.miningTemplate);
     p.miningSites = state.meta.miningSites;
     p.postSolarSystemRosters = state.meta.postSolarSystemRosters;
     p.landingOrdinal = request.landingOrdinal;

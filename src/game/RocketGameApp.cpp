@@ -647,11 +647,25 @@ void RocketGameApp::resumeOrbitalFlight()
 
 bool RocketGameApp::orbitalLandingEligible() const
 {
-    return state_.screen == Screen::Flight && session_.flight.active &&
+    const bool physicallyEligible = state_.screen == Screen::Flight && session_.flight.active &&
         session_.flight.mode == FlightMode::Orbit && session_.flight.orbit.captured &&
         session_.orbitalWork.surveyComplete &&
         shipInsideOrbitalWorkZone() && surfaceArrival_.prepared && surfaceArrival_.prepared->valid &&
         preparedSurfaceLandingCurrent(state_, catalog_, *surfaceArrival_.prepared);
+    if (!physicallyEligible) return false;
+
+    // Titan is the first depth-route lesson. At its active mission site the
+    // scan identifies a deeper artifact, so landing stays unavailable until
+    // the orbital shaft is ready. Protected terrain is the explicit fallback:
+    // it restores landing and teaches the player to continue with surface tools.
+    const auto mission = missionView(
+        state_, catalog_, surfaceArrival_.prepared->bodyId,
+        &session_.flight, session_.orbitalWork.surveyComplete);
+    const bool titanMissionSite = surfaceArrival_.prepared->bodyId == "titan" &&
+        mission.available && !mission.complete && mission.targetId == "titan" &&
+        surfaceArrival_.selectedZoneId == mission.sectorId;
+    return !titanMissionSite || surfaceArrival_.prepared->laserComplete ||
+        surfaceArrival_.prepared->laserBlocked;
 }
 
 void RocketGameApp::landFromOrbit()
@@ -710,7 +724,7 @@ void RocketGameApp::orbitalWorkInput(bool held)
     }
     auto& flight = session_.flight;
     if (!flight.active || flight.mode != FlightMode::Orbit || !flight.orbit.captured ||
-        work.captureDelay > 0.0 || std::abs(flight.selectedThrottle) > 0.001 || flight.burnRatePerSecond > 0.001 || !assessOrbitLoop(flight).qualifies) return;
+        work.captureDelay > 0.0 || std::abs(flight.selectedThrottle) > 0.001 || flight.burnRatePerSecond > 0.001) return;
     const auto* destination = catalog_.findDestination(flight.destinationId);
     if (!destination || !destinationSupportsSurface(*destination)) return;
     prepareSurfaceArrivalIfNeeded(*destination);
@@ -799,6 +813,7 @@ bool RocketGameApp::advanceOrbitalWork(double seconds, const Destination& destin
         resumeOrbitalFlight();
     work.overlay = std::clamp(work.overlay + (work.active() ? dt * 3.0 : -dt * 1.5), 0.0, 1.0);
     if (!work.active()) return false;
+    bool persistOrbitalProgress = false;
     if (work.phase == OrbitalWorkPhase::Surveying) {
         work.elapsed = std::min(2.0, work.elapsed + dt);
         surfaceArrival_.prepared->surveyElapsed = work.elapsed;
@@ -807,11 +822,10 @@ bool RocketGameApp::advanceOrbitalWork(double seconds, const Destination& destin
             surfaceArrival_.prepared->surveyComplete = true;
             work.phase = OrbitalWorkPhase::LaserReady;
             work.releaseRequired = work.held;
+            persistOrbitalProgress = true;
             if (surfaceArrival_.prepared->bodyId == "moon" &&
                 state_.run.expedition.missionScanIntro == MissionScanIntro::Unseen) {
                 state_.run.expedition.missionScanIntro = MissionScanIntro::Showing;
-                storeOrbitalSite();
-                save();
             }
             panelDirty_ = true;
         }
@@ -832,7 +846,12 @@ bool RocketGameApp::advanceOrbitalWork(double seconds, const Destination& destin
     }
     if (updateArrivalTutorial(state_, catalog_, session_.flight, work.surveyComplete,
             surfaceArrival_.prepared ? &*surfaceArrival_.prepared : nullptr)) {
-        save(); panelDirty_ = true;
+        persistOrbitalProgress = true;
+        panelDirty_ = true;
+    }
+    if (persistOrbitalProgress) {
+        session_.autosaveElapsed = 0.0;
+        save();
     }
     (void)destination;
     session_.autosaveElapsed += dt;
@@ -6097,6 +6116,15 @@ void RocketGameApp::save()
 
 PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& flightModel) const
 {
+    int orbitalArtifactDepth = -1;
+    if (surfaceArrival_.prepared && session_.orbitalWork.surveyComplete) {
+        for (const auto& layer : surfaceArrival_.prepared->surveyLayers) {
+            if (layer.artifact) {
+                orbitalArtifactDepth = layer.depth;
+                break;
+            }
+        }
+    }
     return {
         state_,
         catalog_,
@@ -6148,6 +6176,7 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         orbitalLandingEligible(),
         missionChangeSeconds_ > 0,
         showCompletedMissions_,
+        orbitalArtifactDepth,
     };
 }
 
@@ -6979,6 +7008,8 @@ RenderSnapshot RocketGameApp::snapshot() const
                 result.missionSectorLabel = "MISSION LANDING SITE / " + missionSectorName(mission.sectorId);
                 if (result.orbitalZone.id == mission.sectorId && work.surveyComplete && work.phase != OrbitalWorkPhase::Firing)
                     result.orbitalZoneLabel.clear();
+                else if (work.surveyComplete && result.orbitalZone.id != mission.sectorId)
+                    result.orbitalZoneLabel.clear();
             }
         }
         for (const auto& site : activeExpedition.sites) {
@@ -7005,15 +7036,21 @@ RenderSnapshot RocketGameApp::snapshot() const
                     mining.returnZoneX, mining.terrain.width),
                 std::clamp(depth, 0.08, 5.0)});
         }
-        result.orbitalOverlay = work.overlay * (1.0 - scaleProfile.landingBlend);
+        // A completed survey is a persistent map of this orbital sector, not
+        // a transient scan effect. Keep its cutaway visible while piloting in
+        // captured orbit; landing still fades it with the normal handoff.
+        const double surveyCutaway = work.surveyComplete && session_.flight.mode == FlightMode::Orbit &&
+                session_.flight.orbit.captured
+            ? 1.0 : work.overlay;
+        result.orbitalOverlay = surveyCutaway * (1.0 - scaleProfile.landingBlend);
         result.orbitalSurveyProgress = work.surveyComplete ? 1.0 : std::clamp(work.elapsed / 2.0, 0.0, 1.0);
         result.orbitalSurveyDepth = work.surveyDepth;
         result.orbitalSurveying = work.phase == OrbitalWorkPhase::Surveying;
         result.orbitalLaserFiring = work.phase == OrbitalWorkPhase::Firing && work.held && !work.releaseRequired;
         if (surfaceArrival_.prepared && (work.surveyComplete || work.active()))
             result.orbitalSurveyLayers = surfaceArrival_.prepared->surveyLayers;
-        if (!localMission.artifactLocated)
-            for (auto& layer : result.orbitalSurveyLayers) layer.artifact = false;
+        // Orbital survey reports the artifact's depth band, while the surface
+        // scanner remains responsible for locating its exact position.
         if (surfaceArrival_.prepared) result.orbitalLaserDepth =
             surfaceArrival_.prepared->laserDepth - surfaceArrival_.prepared->miningTemplate.entryDepthZone +
             static_cast<double>(surfaceArrival_.prepared->laserRow) /

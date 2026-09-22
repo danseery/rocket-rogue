@@ -132,6 +132,7 @@ std::uint64_t surfaceLandingBuildKey(const GameState&, const ContentCatalog&, co
 void excavateOrbitalShaft(PreparedSurfaceLanding&, int maximumDepth, double seconds);
 bool orbitalShaftAvoidsProtectedObjectives(const MiningRunState&, int shaftX);
 void repairSavedOrbitalObjectives(MiningRunState&, OrbitalSiteProgress&, const ContentCatalog&);
+void repairLegacyDepthBoundaries(MiningRunState&);
 
 PreparedSurfaceLanding prepareSurfaceLanding(
     const GameState& state,

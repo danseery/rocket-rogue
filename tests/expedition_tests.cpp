@@ -364,6 +364,9 @@ void orbitalObjectiveSafetyTests()
         auto titanBore=prepareSurfaceLanding(titan,catalog,titanRequest);
         check(titanBore.valid && prepareOrbitalSurvey(titan,catalog,titanBore,2),
             "Known Titan blocker seeds must prepare a depth-two bore");
+        check(std::any_of(titanBore.surveyLayers.begin(),titanBore.surveyLayers.end(),
+            [](const auto& layer){return layer.artifact && layer.depth==2;}),
+            "Titan's scan must report its artifact at depth two");
         excavateOrbitalShaft(titanBore,2,10.0);
         check(titanBore.laserComplete && !titanBore.laserBlocked,
             "Ordinary Titan terrain must never stop the orbital laser");
@@ -374,6 +377,10 @@ void orbitalObjectiveSafetyTests()
             for (const auto& layer : titanBore.miningTemplate.depthLayers)
                 if (layer.depthZone==depth) {terrain=&layer.terrain; break;}
             check(terrain!=nullptr,"Every bored Titan depth must remain cached");
+            if (depth < tuning::surfaceDepthProgression::maximumDepthRating)
+                for (int x=1; x<terrain->width-1; ++x)
+                    check(miningCellAt(*terrain,x,terrain->height-1)->material!=MiningCellMaterial::Bedrock,
+                        "Intermediate Titan depths must not retain an artificial bedrock floor");
             const int firstRow=depth==entry ? 4 : 0;
             const int lastRow=terrain->height-(depth==entry+2 ? 4 : 1);
             for (int y=firstRow; y<=lastRow; ++y)

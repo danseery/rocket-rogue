@@ -60,6 +60,7 @@ struct PanelRenderContext {
     bool orbitalLandingEligible = false;
     bool missionChanged = false;
     bool showCompletedMissions = false;
+    int orbitalArtifactDepth = -1;
 };
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);

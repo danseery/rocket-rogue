@@ -50,12 +50,41 @@ bool orbitalWorkVisible(const PanelRenderContext& c)
 
 std::string orbitalLaserHint(const PanelRenderContext& c)
 {
-    const std::string limit = "Depth " + std::to_string(
+    const std::string artifact = c.orbitalArtifactDepth < 0 ? std::string{} :
+        c.orbitalArtifactDepth == 0 ? "Artifact at Surface" :
+        "Artifact at Depth +" + std::to_string(c.orbitalArtifactDepth);
+    const std::string limit = "Drill reach +" + std::to_string(
         surfaceDepthRating(c.state, SurfaceDepthUpgradeKind::BoreSystem));
-    if (c.orbitalLaserBlocked) return limit + " · Surface tools needed";
-    if (c.orbitalLaserComplete) return limit + (c.orbitalLandingEligible
+    const std::string prefix = artifact.empty() ? std::string{} : artifact + " · ";
+    if (c.orbitalLaserBlocked) return prefix + limit + " · Surface tools needed";
+    if (c.orbitalLaserComplete) return prefix + limit + (c.orbitalLandingEligible
         ? " · Ready to land" : !c.orbitalInsideZone ? " · Return to selected wedge" : " · Shaft ready");
-    return limit + " · Hold to drill";
+    return prefix + limit + " · Hold to drill";
+}
+
+int miningArtifactTargetDepth(const MiningRunState& mining)
+{
+    int target = -1;
+    const auto inspect = [&](const MiningArtifactObject& artifact, int depth) {
+        if (artifact.present && artifact.state != MiningArtifactState::Delivered)
+            target = target < 0 ? depth : std::min(target, depth);
+    };
+    inspect(mining.artifact, mining.depthZone);
+    for (const auto& layer : mining.depthLayers) inspect(layer.artifact, layer.depthZone);
+    return target;
+}
+
+std::string miningDownRouteLabel(const MiningRunState& mining)
+{
+    const int currentDepth = std::max(0, mining.depthZone);
+    const int artifactDepth = miningArtifactTargetDepth(mining);
+    if (artifactDepth > currentDepth)
+        return "DESCEND · ARTIFACT DEPTH +" + std::to_string(artifactDepth);
+    if (artifactDepth == currentDepth)
+        return "ARTIFACT DEPTH +" + std::to_string(artifactDepth) + " · SCAN HERE";
+    if (currentDepth >= tuning::surfaceDepthProgression::maximumDepthRating)
+        return "FINAL DEPTH";
+    return "DESCEND · DEPTH +" + std::to_string(currentDepth + 1);
 }
 
 bool surfaceDescentForContext(const PanelRenderContext& context)
@@ -2983,16 +3012,34 @@ std::string buildGamePanelMarkup(
                 mission.id == state.run.expedition.location.bodyId && mission.targetId == mission.id && mission.stepId != "claim";
             const bool missionSlice = missionScan && state.run.expedition.selectedOrbitZone == mission.sectorId;
             const bool marsTutorial = missionScan && mission.id == "mars";
+            const bool titanDepthTutorial = missionScan && mission.id == "titan" && missionSlice;
             if (missionScan) {
                 out << "<section class=\"mission-scan-result\"><strong>YOUR MISSION / " << htmlEscape(mission.location) << "</strong>";
                 if (mission.id == "moon" && state.run.expedition.missionScanIntro == MissionScanIntro::Showing)
                     out << "<p>" << htmlEscape(firstMoonMissionInstructions(state, catalog)) << "</p><small>" << htmlEscape(mission.reward) << "</small>";
+                else if (!missionSlice) out << "<p>This is not the mission sector. Resume flight to "
+                    << htmlEscape(missionSectorName(mission.sectorId))
+                    << " and scan there before preparing the descent route.</p>";
                 else if (marsTutorial) out << "<p>Mission site is " << htmlEscape(missionSectorName(mission.sectorId))
                     << ". Mars's artifact is underground. "
                     << (!missionSlice ? "Fly to the mission sector, then scan and prepare a shaft."
                         : context.orbitalLaserBlocked ? "Protected terrain blocks the shaft. Land and use surface tools to reach the artifact."
                         : context.orbitalLaserComplete ? "Shaft ready. Land and use the surface scanner to locate the artifact."
                         : "Hold Drill to prepare a shaft, then land and use the surface scanner to locate it.") << "</p>";
+                else if (titanDepthTutorial) {
+                    const int artifactDepth = std::max(1, context.orbitalArtifactDepth);
+                    const int drillReach = surfaceDepthRating(state, SurfaceDepthUpgradeKind::BoreSystem);
+                    const std::string routeState = context.orbitalLaserBlocked
+                        ? "Surface route required"
+                        : context.orbitalLaserComplete ? "Shaft ready" : "Required before landing";
+                    out << "<strong class=\"titan-depth-title\">DEPTH ROUTE REQUIRED</strong>"
+                        << "<p>Titan's artifact signal is below the landing layer. Open the descent route from orbit, then follow it underground with the surface scanner.</p>"
+                        << "<div class=\"flight-status-list titan-depth-route\">"
+                        << flightStatusRow("rr-titan-artifact-depth", "Artifact signal", "Depth +" + std::to_string(artifactDepth))
+                        << flightStatusRow("rr-titan-drill-reach", "Orbital drill reach", "Depth +" + std::to_string(drillReach))
+                        << flightStatusRow("rr-titan-route-state", "Descent route", routeState)
+                        << "</div>";
+                }
                 else out << "<p>Mission site is " << htmlEscape(missionSectorName(mission.sectorId))
                     << (mission.arrivalStage ? ". Scan this sector and land. Recovery briefing follows touchdown.</p>" : ". Collect Artifact and complete the mission requirements.</p>");
                 out << "</section>";
@@ -3000,44 +3047,52 @@ std::string buildGamePanelMarkup(
             if (w.phase == OrbitalWorkPhase::LandingAlignment) {
                 out << "<p class=\"phase-copy\">ALIGNING FOR DESCENT</p>";
             } else {
-                const bool ready = w.active() || (context.launchFlight->orbit.loopQualifies &&
-                    std::abs(context.launchFlight->selectedThrottle) <= 0.001);
+                // Captured orbit is authoritative. A restored flight must not have
+                // to rebuild transient loop-assessment history before site work.
+                const bool ready = w.active() || std::abs(context.launchFlight->selectedThrottle) <= 0.001;
                 const bool outside = w.surveyComplete && !context.orbitalInsideZone;
                 const bool scanning = w.phase == OrbitalWorkPhase::Surveying;
                 const bool canScan = ready && !w.surveyComplete && !scanning;
                 const bool canDrill = ready && w.surveyComplete && !outside &&
                     !context.orbitalLaserBlocked && !context.orbitalLaserComplete;
+                const bool showDrill = canDrill && (!missionScan || missionSlice);
                 const bool canLand = context.orbitalLandingEligible;
-                const bool teachDrill = marsTutorial && missionSlice && canDrill;
-                const bool workDefault = canScan || (canDrill && (!missionScan || teachDrill));
+                const bool teachDrill = marsTutorial && missionSlice && showDrill;
+                const bool requireTitanDrill = titanDepthTutorial && showDrill;
+                const bool workDefault = canScan || (showDrill && (!missionScan || teachDrill || requireTitanDrill));
                 if (missionScan) {
                     if (missionSlice && canLand && !marsTutorial)
                         out << button("Land at mission site", ui::actions::landFromOrbit, teachDrill ? "ghost" : "ok", !teachDrill);
-                    else if (!missionSlice && w.active())
+                    else if (!missionSlice)
                         out << button("Resume flight to mission sector", ui::actions::resumeOrbitalFlight, "ok", true);
                 }
                 out << "<div data-orbital-work=\"1\" class=\"orbit-primary-action\">";
                 if (canScan) {
                     out << button("SCAN", ui::actions::orbitalWork, "ok", true, "action:orbital_scan");
-                } else if (canDrill) {
+                } else if (showDrill) {
                     // Distinct identities prevent a held Scan confirm from turning
                     // into a Drill hold when the survey refreshes the panel.
-                    out << button(marsTutorial ? "Hold to Drill" : missionScan ? "Optional: prepare a shaft" : "DRILL", ui::actions::orbitalWork, workDefault ? "ok" : "ghost", workDefault,
+                    out << button(titanDepthTutorial ? "Hold to Drill Descent Shaft" : marsTutorial ? "Hold to Drill" : missionScan ? "Prepare descent shaft" : "DRILL", ui::actions::orbitalWork, workDefault ? "ok" : "ghost", workDefault,
                         "action:orbital_drill", "continuous");
                 } else {
-                    const std::string_view status = scanning ? "SCANNING..."
-                        : !ready ? "ESTABLISH A SAFE LOOP"
+                    const std::string status = scanning ? "SCANNING..."
+                        : !ready ? (w.surveyComplete ? "COAST TO OPERATE" : "COAST TO SCAN")
+                        : missionScan && !missionSlice ? ("MISSION SITE: " + missionSectorName(mission.sectorId))
                         : outside ? "RETURN TO SELECTED WEDGE"
                         : context.orbitalLaserBlocked ? "SURFACE TOOLS REQUIRED"
                         : context.orbitalLaserComplete ? "SHAFT READY" : "";
                     out << "<p class=\"orbit-work-state\" role=\"status\">" << status << "</p>";
                 }
                 out << "</div><p id=\"rr-orbital-status\" class=\"phase-copy\">"
-                    << (w.surveyComplete ? orbitalLaserHint(context)
+                    << (w.surveyComplete ? (missionScan && !missionSlice
+                            ? "Travel to " + missionSectorName(mission.sectorId) + " and scan the mission site"
+                            : orbitalLaserHint(context))
                         : "Scan depth " + std::to_string(surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray)))
                     << "</p>";
                 if (marsTutorial && missionSlice && canLand)
                     out << button("Land at mission site", ui::actions::landFromOrbit, teachDrill ? "ghost" : "ok", !teachDrill);
+                if (titanDepthTutorial && !canLand && !context.orbitalLaserBlocked && !context.orbitalLaserComplete)
+                    out << "<button class=\"ghost rr-text-button\" disabled data-ui-focus-skip=\"1\"><span class=\"rr-button-label\">Land after shaft is ready</span></button>";
                 if (canLand && !(missionScan && missionSlice)) out << button(missionScan ? "Land here instead" : "LAND", ui::actions::landFromOrbit, missionScan ? "ghost" : "ok", !missionScan && !workDefault);
                 if (w.active() && (!missionScan || missionSlice))
                     out << button("RESUME FLIGHT", ui::actions::resumeOrbitalFlight, "ghost", !missionScan && !workDefault && !canLand);
@@ -3324,7 +3379,7 @@ std::string buildGamePanelMarkup(
                     ? std::string("SURFACE \xE2\x80\xA2 SHIP HERE")
                     : std::string("ASCEND \xE2\x80\xA2 SHIP \xE2\x86\x91 ") + std::to_string(currentDepth))
             << "</span><span id=\"rr-hud-mining-route-down\" class=\"mining-route-down\">"
-            << htmlEscape(std::string("DESCEND \xE2\x80\xA2 DEPTH +") + std::to_string(currentDepth + 1))
+            << htmlEscape(miningDownRouteLabel(mining))
             << "</span></div>";
         out << "<footer class=\"mining-bottom-rail\"><section class=\"mining-payload-strip ui-kpi-strip rr-metric-strip\">"
             << "<article class=\"mining-ore-manifest mining-payload-ownership\"><header><span>PAYLOAD</span>"
@@ -4584,7 +4639,7 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
     appendHudText(
         result,
         "rr-hud-mining-route-down",
-        std::string("DESCEND \xE2\x80\xA2 DEPTH +") + std::to_string(currentDepth + 1));
+        miningDownRouteLabel(mining));
 
     const double activeOxygenCapacity = miningActiveOxygenCapacity(state, catalog);
     const double oxygenPressure = activeOxygenCapacity > 0.0
@@ -4753,6 +4808,7 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
             << static_cast<int>(context.orbitalWork->phase) << ':' << context.orbitalWork->surveyComplete << ':'
             << context.orbitalLaserBlocked << ':' << context.orbitalLaserComplete << ':'
             << context.orbitalInsideZone << ':' << context.orbitalLandingEligible << ':'
+            << context.orbitalArtifactDepth << ':'
             << (context.launchFlight && context.launchFlight->orbit.loopQualifies) << ':'
             << (context.launchFlight && std::abs(context.launchFlight->selectedThrottle) > 0.001) << '|';
         key << context.surfaceArrivalActive << '|' << context.surfaceArrivalPhase << '|'

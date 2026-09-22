@@ -264,8 +264,9 @@ struct OrbitalLandingTestAccess {
         const auto snapshot = app.snapshot();
         assert(snapshot.missionSectorVisible && snapshot.missionSector.id == "zone_1");
         assert(!snapshot.orbitalArtifactLocalized);
-        assert(std::none_of(snapshot.orbitalSurveyLayers.begin(), snapshot.orbitalSurveyLayers.end(),
-            [](const auto& layer) { return layer.artifact; }));
+        const bool artifactLayer = std::any_of(snapshot.orbitalSurveyLayers.begin(), snapshot.orbitalSurveyLayers.end(),
+            [](const auto& layer) { return layer.artifact; });
+        assert(artifactLayer == (snapshot.orbitalZone.id == snapshot.missionSector.id));
         app.storeOrbitalSite();
         const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(app.state_)));
         assert(saved);
@@ -274,8 +275,29 @@ struct OrbitalLandingTestAccess {
         app.session_.orbitalWork = {};
         app.prepareSurfaceArrivalIfNeeded(currentDestination(app.state_, app.catalog_));
         assert(app.session_.orbitalWork.active());
+        assert(app.session_.orbitalWork.surveyComplete);
         assert(app.state_.run.expedition.missionScanIntro == MissionScanIntro::Showing);
+
+        const std::string scannedZone = snapshot.orbitalZone.id;
+        const std::string otherZone = scannedZone == "zone_1" ? "zone_2" : "zone_1";
+        app.prepareSurfaceArrivalIfNeeded(currentDestination(app.state_, app.catalog_), otherZone);
+        assert(!app.session_.orbitalWork.surveyComplete);
+        app.prepareSurfaceArrivalIfNeeded(currentDestination(app.state_, app.catalog_), scannedZone);
+        assert(app.session_.orbitalWork.surveyComplete);
         app.refreshPanel();
+    }
+    static void scannedCutawayPersistsWhilePiloting(RocketGameApp& app) {
+        assert(app.session_.orbitalWork.surveyComplete);
+        assert(app.session_.orbitalWork.phase == OrbitalWorkPhase::Inactive);
+        app.session_.orbitalWork.overlay = 0.0;
+        const auto snapshot = app.snapshot();
+        assert(snapshot.orbitalZoneSurveyed);
+        assert(snapshot.orbitalOverlay == 1.0);
+        const bool artifactLayer = std::any_of(snapshot.orbitalSurveyLayers.begin(), snapshot.orbitalSurveyLayers.end(),
+            [](const auto& layer) { return layer.artifact; });
+        assert(artifactLayer == (snapshot.orbitalZone.id == snapshot.missionSector.id));
+        // Knowing the depth band must not bypass surface localization.
+        assert(!snapshot.orbitalArtifactLocalized);
     }
     static void rigControllerMovementFollowsScreen(RocketGameApp& app) {
         app.debugStartMining();
@@ -451,6 +473,49 @@ struct OrbitalLandingTestAccess {
         assert(app.session_.orbitalWork.surveyComplete);
         assert(!app.session_.orbitalWork.active());
         assert(app.surfaceArrival_.prepared->laserComplete);
+        assert(app.orbitalLandingEligible());
+    }
+    static void titanLandingRequiresDepthRoute(RocketGameApp& app) {
+        app.debugStartExpedition();
+        app.state_.incomingMessages = {};
+        app.services_.ui.closeModal();
+        auto& expedition = app.state_.run.expedition;
+        expedition.travelInitialized = expedition.active = true;
+        expedition.location = {"solar", "titan", CoordinateFrame::Body, {}, {}, 0.0, ""};
+        expedition.selectedOrbitBody = "titan";
+        expedition.selectedOrbitZone = artifactSectorForBody(app.state_, "solar", "titan");
+        expedition.trackedMissionId = "titan";
+        if (std::find(app.state_.meta.unlockKeys.begin(), app.state_.meta.unlockKeys.end(),
+                content::unlock::routeSaturn) == app.state_.meta.unlockKeys.end())
+            app.state_.meta.unlockKeys.push_back(content::unlock::routeSaturn);
+        const auto* mission = solarMissionForBody(app.catalog_, "titan");
+        assert(mission != nullptr);
+        assert(acceptSolarMission(app.state_, app.catalog_, *mission).accepted);
+        app.state_.screen = Screen::Flight;
+        app.state_.launchConfig.destinationId = content::destination::saturn;
+        for (std::size_t index = 0; index < app.catalog_.destinations.size(); ++index)
+            if (app.catalog_.destinations[index].id == content::destination::saturn)
+                app.state_.run.destinationIndex = static_cast<int>(index);
+        const auto* zone = planetLandingZone(expedition.selectedOrbitZone);
+        assert(zone != nullptr);
+        auto& flight = app.session_.flight;
+        flight.active = flight.physicalFlight = true;
+        flight.destinationId = content::destination::saturn;
+        flight.mode = FlightMode::Orbit;
+        flight.orbit.captured = true;
+        flight.positionX = .70 * std::cos(zone->centerBearing);
+        flight.positionY = .70 * std::sin(zone->centerBearing);
+        app.surfaceArrival_ = {};
+        app.prepareSurfaceArrivalIfNeeded(*app.catalog_.findDestination(content::destination::saturn), zone->id);
+        assert(app.surfaceArrival_.prepared && app.surfaceArrival_.prepared->valid);
+        app.session_.orbitalWork.phase = OrbitalWorkPhase::LaserReady;
+        app.session_.orbitalWork.surveyComplete = true;
+        app.surfaceArrival_.prepared->surveyComplete = true;
+        assert(!app.orbitalLandingEligible());
+        app.surfaceArrival_.prepared->laserComplete = true;
+        assert(app.orbitalLandingEligible());
+        app.surfaceArrival_.prepared->laserComplete = false;
+        app.surfaceArrival_.prepared->laserBlocked = true;
         assert(app.orbitalLandingEligible());
     }
 };
@@ -1980,6 +2045,12 @@ void straylightApproachRunsAndEndsActOne()
 
 void missionScanPresentationAndNavigation()
 {
+    {
+        auto fixture = std::make_unique<AppFixture>();
+        assert(fixture->runner.initialize());
+        rocket::OrbitalLandingTestAccess::titanLandingRequiresDepthRoute(fixture->runner.app());
+        fixture->runner.shutdown();
+    }
     for (int destination : {0, 1}) {
         auto fixture = std::make_unique<AppFixture>();
         assert(fixture->runner.initialize());
@@ -2045,7 +2116,7 @@ void missionScanPresentationAndNavigation()
         const auto& html = fixture->ui.html;
         assert(html.find("YOUR MISSION / Moon") != std::string::npos);
         assert(html.find("Land in Sector 1, marked MISSION LANDING SITE. Establish Moon orbit") != std::string::npos);
-        assert(html.find("Optional: prepare a shaft") != std::string::npos);
+        assert((html.find("Prepare descent shaft") != std::string::npos) == (phase == 29));
         assert(html.find("expedition-flight-bar") == std::string::npos);
         assert(html.find(phase == 29 ? "Land at mission site" : "Resume flight to mission sector") != std::string::npos);
         assert((html.find("Land here instead") != std::string::npos) == (phase == 30));
@@ -2093,9 +2164,10 @@ void missionScanPresentationAndNavigation()
         fixture->ui.dispatchAction("expedition:missions_close");
         app.resumeOrbitalFlight();
         app.tick(.05);
+        rocket::OrbitalLandingTestAccess::scannedCutawayPersistsWhilePiloting(app);
         app.renderUi();
         assert(fixture->ui.html.find("YOUR MISSION / Moon") == std::string::npos ||
-            fixture->ui.html.find("<p>Mission site is Sector 1.") != std::string::npos);
+            fixture->ui.html.find("Sector 1") != std::string::npos);
         fixture->ui.dispatchAction("expedition:plot:earth");
         app.tick(.05);
         assert(fixture->ui.presentation.missionTrackerMarkup.find("Return to mission") != std::string::npos);
@@ -2103,6 +2175,51 @@ void missionScanPresentationAndNavigation()
         app.tick(.05);
         assert(fixture->ui.presentation.missionTrackerMarkup.find("Return to mission") == std::string::npos);
         fixture->runner.shutdown();
+    }
+    {
+        const auto catalog = rocket::createDefaultContent();
+        auto state = std::make_unique<rocket::GameState>(rocket::createNewGame(catalog, 713));
+        rocket::initializeLiveExpedition(*state, catalog);
+        state->meta.unlockKeys.push_back(rocket::content::unlock::routeSaturn);
+        state->run.expedition.trackedMissionId = "titan";
+        state->run.expedition.location.systemId = "solar";
+        state->run.expedition.location.bodyId = "titan";
+        state->run.expedition.selectedOrbitZone = rocket::artifactSectorForBody(*state, "solar", "titan");
+        state->screen = rocket::Screen::Flight;
+        auto& flight = state->run.flight;
+        flight.active = true; flight.destinationId = "saturn"; flight.mode = rocket::FlightMode::Orbit;
+        flight.orbit.captured = true; flight.orbit.loopQualifies = true;
+        rocket::PersistentSiteState wrongSectorScan;
+        wrongSectorScan.systemId = "solar";
+        wrongSectorScan.bodyId = "titan";
+        wrongSectorScan.siteId = "titan:test:zone_1";
+        wrongSectorScan.orbital.surveyComplete = true;
+        if (wrongSectorScan.siteId.ends_with(state->run.expedition.selectedOrbitZone))
+            wrongSectorScan.siteId = "titan:test:zone_2";
+        state->run.expedition.sites.push_back(std::move(wrongSectorScan));
+        assert(rocket::trackedMissionView(*state, catalog, &flight, false).stepId == "survey");
+        rocket::OrbitalWorkState work;
+        work.phase = rocket::OrbitalWorkPhase::LaserReady; work.surveyComplete = true;
+        rocket::PreparedLaunch launch;
+        rocket::PanelRenderContext context{*state, catalog, launch, launch};
+        context.launchFlight = &flight; context.orbitalWork = &work;
+        context.orbitalInsideZone = true; context.orbitalLandingEligible = false;
+        context.orbitalArtifactDepth = 2;
+        FakeUi ui;
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+        assert(ui.html.find("DEPTH ROUTE REQUIRED") != std::string::npos);
+        assert(ui.html.find("Artifact signal") != std::string::npos);
+        assert(ui.html.find("Depth +2") != std::string::npos);
+        assert(ui.html.find("Hold to Drill Descent Shaft") != std::string::npos);
+        assert(ui.html.find("Land after shaft is ready") != std::string::npos);
+        assert(ui.html.find("Optional") == std::string::npos);
+        assert(ui.html.find("action:orbital_drill") < ui.html.find("Land after shaft is ready"));
+
+        context.orbitalLaserComplete = true;
+        context.orbitalLandingEligible = true;
+        ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+        assert(ui.html.find("Shaft ready") != std::string::npos);
+        assert(ui.html.find("Land at mission site") != std::string::npos);
     }
 }
 

@@ -157,6 +157,7 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
     const std::string dock = servicingDockName("earth");
     v.purpose = m->bodyId == "moon" ? firstMoonMissionInstructions(s, catalog) : "Collect the artifact, then complete the mission at the " + dock + ". Artifacts aboard are at risk until then.";
     if (m->bodyId == "mars") v.purpose = "Mars's artifact is underground. Scan the mission sector, hold Drill to prepare a shaft, then land and use the surface scanner to locate it. Return the ore and artifact to your ship, then complete the mission at Earth dock.";
+    if (m->bodyId == "titan") v.purpose = "Titan's artifact is at Depth +2. Scan the mission sector, hold Drill to open the descent shaft, then land and follow the route underground with the surface scanner.";
     int delivered = 0, required = 0;
     bool prerequisites = true;
     for (const auto& step : def->steps) {
@@ -202,9 +203,26 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
             (mining.scenarioId == m->scenarioId ||
                 (mining.scenarioId.empty() && mining.destinationId == m->bodyId)));
     const bool miningHere = s.screen == Screen::Mining && mining.active && surfaceBodyMatches;
+    int artifactTargetDepth = -1;
+    if (surfaceBodyMatches) {
+        const auto inspectDepth = [&](const MiningArtifactObject& artifact, int depth) {
+            if (artifact.present && artifact.state != MiningArtifactState::Delivered)
+                artifactTargetDepth = artifactTargetDepth < 0 ? depth : std::min(artifactTargetDepth, depth);
+        };
+        inspectDepth(mining.artifact, mining.depthZone);
+        for (const auto& layer : mining.depthLayers) inspectDepth(layer.artifact, layer.depthZone);
+    }
     const bool atBody = miningHere || e.location.bodyId == m->bodyId;
-    v.sectorKnown = (atBody && surveyed) ||
-        std::any_of(e.sites.begin(), e.sites.end(), [&](const auto& site) { return site.bodyId == m->bodyId && site.orbital.surveyComplete; });
+    const bool missionSectorSurveyed =
+        (atBody && surveyed && e.selectedOrbitZone == v.sectorId) ||
+        std::any_of(e.sites.begin(), e.sites.end(), [&](const auto& site) {
+            return site.bodyId == m->bodyId && site.siteId.ends_with(v.sectorId) &&
+                site.orbital.surveyComplete;
+        });
+    v.sectorKnown = missionSectorSurveyed ||
+        std::any_of(e.sites.begin(), e.sites.end(), [&](const auto& site) {
+            return site.bodyId == m->bodyId && site.orbital.surveyComplete;
+        });
     v.artifactLocated = revealed || aboard || banked || wreck;
     if (required) v.progress.push_back("Common Ore collected " + std::to_string(std::min(delivered, required)) + "/" + std::to_string(required));
     const std::string artifactState = banked ? "secured at dock" : wreck ? "in wreck" : aboard ? "aboard ship" : tethered ? "return to ship" : exposed ? "collect artifact" : revealed ? "collect artifact" : !prerequisites ? (required ? "after Common Ore collection" : "after mission requirements") : "not collected";
@@ -221,21 +239,18 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
         wreck ? "Recover from Wreck " + std::to_string(wreckId) :
         banked || aboard ? "Aboard ship" : tethered ? "Return to ship" :
         exposed || revealed ? "Collect Artifact" :
-        !prerequisites ? (required && delivered < required ? "After Common Ore collection" : "After mission requirements") : "Use the surface scanner"});
+        !prerequisites ? (required && delivered < required ? "After Common Ore collection" : "After mission requirements") :
+        m->bodyId == "titan" && artifactTargetDepth >= 0 ? "Reach Depth +" + std::to_string(artifactTargetDepth) + " · use the surface scanner" : "Use the surface scanner"});
     v.trackerGoals.push_back({"Return to " + dock, banked || v.complete,
         v.complete ? "Mission complete" : banked ? "Ready to complete" : aboard ? "Complete the mission at the dock" : "Bring the artifact aboard first"});
     v.recoveryGoals = v.trackerGoals;
     const int tutorial = arrivalTutorialIndex(m->bodyId);
     if (tutorial >= 0) {
         const auto& t = e.arrivalTutorials[tutorial];
-        const bool missionSurvey = (atBody && surveyed && e.selectedOrbitZone == v.sectorId) ||
-            std::any_of(e.sites.begin(), e.sites.end(), [&](const auto& site) {
-                return site.bodyId == m->bodyId && site.siteId.ends_with(v.sectorId) && site.orbital.surveyComplete;
-            });
         // A scan elsewhere can reveal the mission bearing, but only a scan
         // of the actual mission sector completes the tutorial checklist.
         v.arrivalGoals = {{"Establish " + body->name + " orbit", t.orbit || (atBody && f.orbit.captured)},
-            {"Scan landing site", t.scanned || missionSurvey, missionSectorName(v.sectorId)}};
+            {"Scan landing site", t.scanned || missionSectorSurveyed, missionSectorName(v.sectorId)}};
         if (tutorial == 1) v.arrivalGoals.push_back({"Prepare shaft with orbital laser", t.drilled,
             t.drillBypassed ? "Bypassed - use surface tools" : "Hold Drill in the mission sector"});
         v.arrivalGoals.push_back({"Land", t.landed, missionSectorName(v.sectorId)});
@@ -280,7 +295,10 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
         else if (!prerequisites) {
             const auto objective = solarMissionObjectiveForBody(s, catalog, m->bodyId);
             set(objective.stepId, objective.goal.empty() ? objective.detail : objective.goal);
-        } else if (!revealed) set("scan_artifact", "Pulse the surface scanner to locate the artifact");
+        } else if (!revealed) set("scan_artifact",
+            m->bodyId == "titan" && artifactTargetDepth >= 0
+                ? "Descend to Depth +" + std::to_string(artifactTargetDepth) + ", then pulse the surface scanner to locate the artifact"
+                : "Pulse the surface scanner to locate the artifact");
         else if (tethered) set("carry", "Return to ship with the artifact");
         else if (m->bodyId == "moon") set("recover", "Exit the rig; clear the crevice, then Collect Artifact");
         else set("recover", m->bodyId == "mars" ? "Excavate underground to the scanner signal, then Collect Artifact and return to ship" : "Excavate the site, then Collect Artifact");
@@ -292,16 +310,17 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
         return v;
     }
     if (!f.orbit.captured) set("orbit", "Establish a safe orbit around " + body->name);
-    else if (v.arrivalStage && e.selectedOrbitZone != v.sectorId)
+    else if (e.selectedOrbitZone != v.sectorId)
         set("mission_sector", "Fly to " + missionSectorName(v.sectorId) + " and scan the landing site");
-    else if (!v.sectorKnown || (v.arrivalStage && !v.arrivalGoals[1].complete)) set("survey", "Scan a landing sector");
-    else if (m->bodyId == "mars") {
+    else if (!missionSectorSurveyed) set("survey", "Scan the mission landing sector");
+    else if (m->bodyId == "mars" || m->bodyId == "titan") {
         const PersistentSiteState* site = nullptr;
         for (const auto& candidate : e.sites)
             if (candidate.bodyId == m->bodyId && candidate.siteId.ends_with(v.sectorId)) site = &candidate;
         if (e.selectedOrbitZone != v.sectorId) set("mission_sector", "Fly to " + missionSectorName(v.sectorId) + " to scan and prepare a shaft");
         else if (site && site->orbital.laserBlocked) set("land", "Protected terrain blocks the shaft. Land and use surface tools to reach the underground artifact");
         else if (site && site->orbital.laserComplete) set("land", "Shaft ready. Land and use the surface scanner to locate the underground artifact");
+        else if (m->bodyId == "titan") set("drill", "Hold Drill to open the descent shaft to Depth +2 before landing");
         else set("drill", "Hold Drill to prepare a shaft, then land. Mars's artifact is underground");
     } else { set("land", "Land at the mission site in " + missionSectorName(v.sectorId)); }
     return v;
