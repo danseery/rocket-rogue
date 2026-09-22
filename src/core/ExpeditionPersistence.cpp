@@ -340,7 +340,9 @@ std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view 
                 std::any_of(e.artifacts.begin(),e.artifacts.end(),[&](const auto& old){return old.key==a.key;})) return std::nullopt;
             a.artifact.kind = static_cast<ArtifactKind>(kind); a.artifact.rewardType = static_cast<ArtifactRewardType>(reward);
             a.owner = static_cast<ArtifactCustody>(owner);
-            if (a.completed && a.owner != ArtifactCustody::Banked) return std::nullopt;
+            // Completion records the mission hand-in, not present custody.
+            // Completed beacons can legitimately be aboard a ship or wreck
+            // while being transported from Earth to Straylight.
             e.artifacts.push_back(std::move(a));
         }
         in >> std::ws;

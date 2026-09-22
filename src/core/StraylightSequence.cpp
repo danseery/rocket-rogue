@@ -3,6 +3,7 @@
 #include "core/GameState.h"
 #include "core/PostSolarSystem.h"
 #include <algorithm>
+#include <cmath>
 
 namespace rocket {
 namespace {
@@ -54,6 +55,23 @@ void arrive(GameState& s, const ContentCatalog& catalog) {
 }
 }
 
+SystemDefinition solarPresentationSystem(const GameState& s) {
+    auto system = solarSystemDefinition();
+    if (!straylightIdentityKnown(s.meta.straylightStage))
+        for (auto& body : system.bodies) if (body.id == "straylight") body.name = "The Anomaly";
+    return system;
+}
+bool straylightRevealInRange(const GameState& s, const FlightRunState& flight) {
+    if (!flight.active ||
+        !s.run.expedition.travelInitialized || s.run.expedition.location.systemId != "solar") return false;
+    const auto& system = solarSystemDefinition();
+    const auto* neptune = systemBody(system, "neptune");
+    auto location = s.run.expedition.location;
+    captureSystemLocation(location, flight);
+    const auto pose = convertSystemFrame(location, CoordinateFrame::System, "", system);
+    return std::hypot(pose.position.x - neptune->position.x, pose.position.y - neptune->position.y)
+        <= neptune->influenceRadius * 1.5;
+}
 double straylightCinematicDuration(StraylightStage stage) {
     switch (stage) {
     case Stage::Reveal: return 12;
@@ -88,16 +106,20 @@ bool revealStraylightOnDelivery(GameState& s, const ContentCatalog&) {
     s.meta.ark.condition = ArkCondition::DerelictOperable;
     s.run.expedition.straylightRevealed = true;
     s.meta.straylightDiscoveryAcknowledged = false;
-    waypoint(s, "straylight");
-    s.statusLine = "CONTACT RESOLVED - STRAYLIGHT / WAYPOINT SET";
+    waypoint(s, "neptune");
+    s.statusLine = "THE ANOMALY / WAYPOINT SET";
     return true;
 }
 std::optional<CampaignObjective> straylightObjective(const GameState& s) {
     const auto stage = s.meta.straylightStage;
     if (stage == Stage::Hidden || (stage == Stage::Complete && !straylightCommitted(s))) return std::nullopt;
+    if (stage == Stage::RevealPending)
+        return CampaignObjective{CampaignObjectiveKind::Mission, "neptune", {}, "Return to Neptune",
+            "The Anomaly is beyond Neptune. Return there to resolve the distant signal.", 0};
     if (stage < Stage::RetrieveBeacons)
-        return CampaignObjective{CampaignObjectiveKind::Mission, "straylight", {}, "Approach Straylight",
-            "Contact resolved beyond Neptune. Dock with the illuminated corridor.", 0};
+        return CampaignObjective{CampaignObjectiveKind::Mission, "straylight", {},
+            straylightIdentityKnown(stage) ? "Approach Straylight" : "Investigate The Anomaly",
+            "An unidentified signal beyond Neptune. Follow its illuminated approach corridor.", 0};
     if (stage <= Stage::ConfirmOnline) {
         for (const auto& b : s.run.expedition.batteries)
             if (b.owner == BatteryOwner::EarthStorage)

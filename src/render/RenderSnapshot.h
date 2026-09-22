@@ -270,6 +270,7 @@ struct RenderSnapshot {
     double surfaceAnchorX = 0.0;
     double surfaceAnchorY = 0.0;
     int miningFrameTopRow = 0;
+    int miningLayerSiteTopRow = 0;
     int miningFrameHeight = 0;
     int miningActiveDepth = 0;
     bool manualSurfaceDeparture = false;
@@ -341,6 +342,7 @@ struct RenderSnapshot {
     double animationTime = 0.0;
     // Renderer-only transient override; never persisted or used by simulation.
     bool flightCameraOverride = false;
+    float flightCameraLandingBlend = 0.0F;
     std::array<float, 6> flightCameraTransform {}; // focus XY, anchor XY, scale, rotation
     // Transient presentation envelope for the survivor-style Level Up board.
     // One is the impact frame and zero is fully settled; it is intentionally
@@ -442,6 +444,8 @@ struct RenderSnapshot {
     PoiGuidanceTarget miningPoiGuidance;
     std::span<const MiningGateMarker> miningGateMarkers;
     std::span<const MiningCell> miningCells;
+    std::span<const MiningCell> miningCellsAbove, miningCellsBelow;
+    int miningAboveHeight = 0;
     std::span<const MiningEnemy> miningEnemies;
     MiningEnemyTheme miningEnemyTheme = MiningEnemyTheme::Neutral;
     std::span<const MiningMiniDroneAgent> miningMiniDrones;
@@ -479,6 +483,14 @@ struct RenderSnapshot {
             miningTriangulation.radius += 1.45;
         }
         miningCells = mining.terrain.cells;
+        miningCellsAbove = {}; miningCellsBelow = {}; miningAboveHeight = 0;
+        if (mining.surfaceOriginBound) for (const auto& layer : mining.depthLayers) {
+            if (layer.terrain.width != mining.terrain.width) continue;
+            if (layer.depthZone == mining.depthZone - 1) {
+                miningCellsAbove = layer.terrain.cells; miningAboveHeight = layer.terrain.height;
+            }
+            if (layer.depthZone == mining.depthZone + 1) miningCellsBelow = layer.terrain.cells;
+        }
         miningEnemies = mining.enemies;
         miningMiniDrones = mining.miniDrones;
         miningLooseObjects = mining.looseObjects;

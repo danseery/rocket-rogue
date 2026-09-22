@@ -60,17 +60,46 @@ void straylightSequenceTests()
     e.artifacts.push_back(tritonArtifact);
     e.artifactCustodyLoaded = true;
     e.coursePlayerSelected=true;
-    check(revealStraylightOnDelivery(s,catalog) && e.course.targetBodyId=="straylight" && !e.coursePlayerSelected,
-        "Ship delivery immediately replaces manual course with Straylight");
-    check(!s.meta.straylightDiscoveryAcknowledged && recommendedCampaignObjective(s,catalog).targetId=="straylight",
+    check(revealStraylightOnDelivery(s,catalog) && e.course.targetBodyId=="neptune" && !e.coursePlayerSelected,
+        "Ship delivery directs the return to Neptune before the reveal");
+    check(!s.meta.straylightDiscoveryAcknowledged && recommendedCampaignObjective(s,catalog).targetId=="neptune",
         "Earth banking must not steal first-contact guidance");
     check(!revealStraylightOnDelivery(s,catalog), "Reveal must be idempotent");
+    {
+        const auto savedLocation = e.location;
+        auto flight = s.run.flight;
+        flight.active = false;
+        check(!straylightRevealInRange(s,flight), "Earth dock must not start the reveal");
+        flight.active = true;
+        check(!straylightRevealInRange(s,flight), "Launching at Earth must not start the reveal");
+        e.location.frame = CoordinateFrame::System;
+        flight.positionX = neptune->position.x + neptune->influenceRadius * 1.6;
+        flight.positionY = neptune->position.y;
+        check(!straylightRevealInRange(s,flight), "Distant travel must keep the reveal pending");
+        flight.positionX = neptune->position.x + neptune->influenceRadius * 1.4;
+        check(straylightRevealInRange(s,flight), "Neptune approach must enable the reveal");
+        e.location.frame = CoordinateFrame::Body; e.location.bodyId = "neptune";
+        flight.positionX = neptune->influenceRadius * 1.4; flight.positionY = 0;
+        check(straylightRevealInRange(s,flight), "Body and system frames must agree on proximity");
+        e.location = savedLocation;
+    }
+    check(systemBody(solarPresentationSystem(s), "straylight")->name == "The Anomaly",
+        "Distant contact must not reveal the ship name");
+    check(trackedMissionView(s,catalog).location == "THE ANOMALY",
+        "Mission tracker must use the unknown contact name");
+    check(courseTargetName(e,solarPresentationSystem(s),"straylight") == "The Anomaly",
+        "Departure waypoint must not imply a known dock");
+    check(!straylightIdentityKnown(Stage::Approach) && !straylightIdentityKnown(Stage::Docking) &&
+        straylightIdentityKnown(Stage::FirstContact), "Identity is learned at first contact, not at Earth");
     const auto roundTrip = [&] {
         const auto saved=deserializeSaveData(serializeSaveData(captureSaveData(s)));
         check(saved.has_value(), "Every sequence boundary must serialize");
         auto restored=std::make_unique<GameState>(createNewGame(catalog,1));
         restoreSaveData(*restored,catalog,*saved);
         check(restored->meta.straylightStage==s.meta.straylightStage, "Reload must preserve the sequence stage");
+        check(systemBody(solarPresentationSystem(*restored), "straylight")->name ==
+            (straylightIdentityKnown(s.meta.straylightStage) ? "Straylight" : "The Anomaly"),
+            "Restored contact labels must follow the saved identity reveal");
         check(restored->run.expedition.batteries[0].owner==e.batteries[0].owner,
             "Reload must preserve beacon ownership");
     };
@@ -91,11 +120,40 @@ void straylightSequenceTests()
     e.cargo.materials.common=999;
     e.batteries[0].owner=BatteryOwner::Wreck;
     e.batteries[0].wreckId=420;
+    WreckState beaconWreck;
+    beaconWreck.id=420;
+    beaconWreck.location=e.location;
+    e.wrecks.push_back(beaconWreck);
+    e.nextWreckId=421;
+    reconcileArtifactCustody(s,catalog);
+    // This phase follows the six explicit mission hand-ins. Model their saved
+    // completion independently of current custody, including crash recovery.
+    for (auto& artifact : e.artifacts) artifact.completed = true;
     check(applyStraylightAction(s,catalog,"collect"), "One action collects all Earth beacons despite a full hold");
+    for (int tick=0; tick<30; ++tick) reconcileCampaignGuidance(s,catalog);
+    check(std::count_if(e.batteries.begin(),e.batteries.end(),[](const auto& b) {
+        return b.owner==BatteryOwner::Ship;
+    })==5, "Collected beacons must remain aboard while waiting at Earth dock");
+    check(std::all_of(e.artifacts.begin(),e.artifacts.end(),[](const auto& a) { return a.completed; }),
+        "Transport and wreck custody must not undo completed missions");
+    {
+        const auto saved=deserializeSaveData(serializeSaveData(captureSaveData(s)));
+        check(saved.has_value(), "Collected beacons must serialize");
+        auto restored=std::make_unique<GameState>(createNewGame(catalog,1));
+        restoreSaveData(*restored,catalog,*saved);
+        reconcileCampaignGuidance(*restored,catalog);
+        check(std::count_if(restored->run.expedition.batteries.begin(),restored->run.expedition.batteries.end(),
+            [](const auto& b) {return b.owner==BatteryOwner::Ship;})==5,
+            "Reload at Earth must not unload the Straylight shipment");
+    }
     check(e.batteries[0].owner==BatteryOwner::Wreck && straylightObjective(s)->targetId=="wreck:420",
         "Collection must not invent a missing wreck beacon");
     e.batteries[0].owner=BatteryOwner::Ship;
     e.batteries[0].wreckId=0;
+    reconcileCampaignGuidance(s,catalog);
+    check(e.course.targetBodyId=="straylight" &&
+        std::all_of(e.batteries.begin(),e.batteries.end(),[](const auto& b) {return b.owner==BatteryOwner::Ship;}),
+        "Recovered shipment must stay aboard and keep the Straylight departure waypoint");
     check(!applyStraylightAction(s,catalog,"collect"), "Repeated collection must not duplicate beacons");
     e.location={"solar","straylight",CoordinateFrame::Body,ark->dockOffset,{},0,"straylight.dock"};
     check(applyStraylightAction(s,catalog,"install"), "Install all carried beacons");
@@ -167,6 +225,121 @@ void straylightSequenceTests()
     legacy.expedition.arkActivated=true;
     restoreSaveData(*restored,catalog,legacy);
     check(restored->meta.straylightStage==Stage::Online, "Activated legacy saves never regress to beacon retrieval");
+}
+
+void titanPhysicalDepthTraversalTests()
+{
+    using namespace rocket;
+    const auto catalog = createDefaultContent();
+    for (std::uint64_t seed : {11U,12U,24U,137U}) {
+        for (bool manual : {false,true}) {
+            auto state = std::make_unique<GameState>(createNewGame(catalog,seed));
+            auto& s = *state;
+            s.meta.unlockKeys.push_back(content::unlock::routeSaturn);
+            s.run.expedition.travelInitialized = true;
+            s.run.expedition.location.systemId = "solar";
+            s.run.expedition.location.bodyId = "titan";
+            s.run.expedition.rigFuel = {100,100};
+            SurfaceLandingBuildRequest request;
+            request.destinationId = "saturn"; request.bodyId = "titan";
+            request.zoneId = artifactSectorForBody(s,"solar","titan"); request.siteSeed = seed;
+            auto bore = prepareSurfaceLanding(s,catalog,request);
+            check(bore.valid && prepareOrbitalSurvey(s,catalog,bore,1),"Titan must prepare with baseline Survey");
+            bore.surveyComplete = true;
+            excavateOrbitalShaft(bore,1,100);
+            check(bore.laserComplete && bore.laserDepth == 1,"Base Bore must finish Depth +1");
+            if (!manual) {
+                s.meta.surfaceDepthUpgrades.boreSystem = 1;
+                const int column = bore.shaftX;
+                // Persist a completed shallow site, then restore with Bore I.
+                PersistentSiteState site;
+                site.mining = bore.miningTemplate; site.surface = bore.expeditionTemplate;
+                site.orbital = static_cast<const OrbitalSiteProgress&>(bore);
+                auto upgraded = restoreSurfaceLanding(s,catalog,request,site);
+                check(upgraded.valid && !upgraded.laserComplete,"Upgrading Bore must reopen completed saved shafts");
+                check(upgraded.shaftX == column && upgraded.surveyedDepth == 1,"Extending Bore must preserve column and scan knowledge");
+                for (const auto& surveyed : upgraded.surveyLayers)
+                    if (surveyed.depth > 1) check(!surveyed.common && !surveyed.rare && !surveyed.exotic,
+                        "Preparing deeper Bore terrain must not reveal unscanned resources");
+                excavateOrbitalShaft(upgraded,2,100);
+                check(upgraded.laserComplete && upgraded.laserDepth == 2,"Bore I must reach Depth +2 with Survey +1");
+                bore = std::move(upgraded);
+            }
+            const double shaftX = bore.shaftX + orbital_laser::shaftCenterOffset;
+            check(commitPreparedSurfaceLanding(s,std::move(bore),5),"Actual Titan prepared landing must commit");
+            s.screen = Screen::Mining;
+            auto& m = s.run.mining;
+            check(m.surfaceOriginBound && m.depthZone == 0,"Test must use real layered landing terrain");
+            // Start at the mouth of the already excavated shaft; no terrain
+            // edits, forced depth transfers, or pre-cleared destination rows.
+            m.droneX = shaftX; m.droneY = 5;
+            const double headingX = .2;
+            const double headingY = std::sqrt(1.0-headingX*headingX);
+            m.hullDirX = m.aimDirX = headingX; m.hullDirY = m.aimDirY = headingY;
+            m.cargo = 24; m.temporaryMaterials.common = 24; m.moveY = 1; m.drilling = manual;
+            m.rigOxygen = {1000,1000}; m.rigFuel = {1000,1000};
+            bool reloaded = false;
+            for (int tick=0; tick<5000 && s.run.mining.depthZone < 2; ++tick) {
+                auto& live = s.run.mining;
+                if (!reloaded && live.depthZone == 1 && live.droneY > live.terrain.height-5) {
+                    const auto save = deserializeSaveData(serializeSaveData(captureSaveData(s)));
+                    check(save.has_value(),"Seam save must deserialize");
+                    restoreSaveData(s,catalog,*save);
+                    reloaded = true;
+                }
+                s.run.mining.moveY = 1; s.run.mining.drilling = manual;
+                updateMiningRun(s,catalog,.04);
+            }
+            if (s.run.mining.depthZone != 2)
+                std::cerr << "Titan seed " << seed << " manual=" << manual << " stuck at depth " << s.run.mining.depthZone
+                    << " y=" << s.run.mining.droneY << " height=" << s.run.mining.terrain.height
+                    << " fuel=" << s.run.mining.rigFuel.current << " heat=" << s.run.mining.drillHeat << '\n';
+            check(s.run.mining.depthZone == 2,"Normal movement and drilling must reach Titan Depth +2");
+            check(reloaded,"Every Titan route must exercise save/load before the seam");
+            check(s.run.mining.artifact.present,"Titan artifact must survive traversal");
+            check(s.run.mining.droneY < 1,"Crossing must preserve continuous position rather than snap to row four");
+            check(std::abs(s.run.mining.aimDirY-headingY) < .001 && s.run.mining.rigVelocityY > 0,"Crossing preserves diagonal heading and motion");
+            // Back up through the same seam without turning or teleporting.
+            s.run.mining.moveY = -1; s.run.mining.drilling = false;
+            for (int tick=0; tick<300 && s.run.mining.depthZone == 2; ++tick)
+                updateMiningRun(s,catalog,.04);
+            check(s.run.mining.depthZone == 1,"The excavated seam must support continuous ascent");
+            auto& eva = s.run.mining;
+            eva.operatorPresent = true; eva.operatorMode = MiningOperatorMode::Jetpack;
+            eva.operatorX = eva.droneX; eva.operatorY = eva.droneY - .5;
+            eva.operatorRigTethered = true;
+            eva.suitOxygen = {1000,1000}; eva.moveY = 1;
+            for (int tick=0; tick<300 && s.run.mining.depthZone == 1; ++tick)
+                updateMiningRun(s,catalog,.04);
+            check(s.run.mining.depthZone == 2 && s.run.mining.rigDepthZone == 2 && s.run.mining.operatorRigTethered,
+                "EVA and tethered rig must cross the physical seam together without losing the tether");
+            check(std::abs(s.run.mining.operatorY-s.run.mining.droneY) < 5,
+                "Crossing must preserve the physical tow separation");
+        }
+    }
+    std::cout << "Titan physical depth routes: 8/8 (orbital/manual, reload, ascent, EVA tow)\n";
+
+    auto boundary = createNewGame(catalog,11);
+    boundary.meta.surfaceDepthUpgrades.boreSystem = 3;
+    SurfaceLandingBuildRequest boundaryRequest;
+    boundaryRequest.destinationId="saturn"; boundaryRequest.bodyId="titan";
+    boundaryRequest.siteSeed=11; boundaryRequest.allowScenarioObjectives=false;
+    auto full = prepareSurfaceLanding(boundary,catalog,boundaryRequest);
+    check(prepareOrbitalSurvey(boundary,catalog,full,1),"Final-depth fixture must scan");
+    excavateOrbitalShaft(full,4,100);
+    check(full.laserComplete && full.laserDepth==4,"Maximum Bore reaches the final layer");
+    for (const auto& layer : full.miningTemplate.depthLayers) {
+        const auto& terrain = layer.terrain;
+        for (int y=0; y<terrain.height; ++y) {
+            check(miningCellAt(terrain,0,y)->material==MiningCellMaterial::Bedrock &&
+                miningCellAt(terrain,terrain.width-1,y)->material==MiningCellMaterial::Bedrock,
+                "Boring must preserve both side walls");
+        }
+        if (layer.depthZone==4) check(miningCellAt(terrain,full.shaftX,terrain.height-1)->material==MiningCellMaterial::Bedrock,
+            "Maximum Bore must retain the final world floor");
+        else check(miningCellAt(terrain,full.shaftX,terrain.height-1)->material==MiningCellMaterial::Empty,
+            "Intermediate bored layers must not retain three artificial bottom rows");
+    }
 }
 
 void orbitalObjectiveSafetyTests()
@@ -1024,6 +1197,7 @@ void persistentExpeditionTests()
     campaignGuidanceTests();
     missionGuidanceTests();
     orbitalObjectiveSafetyTests();
+    titanPhysicalDepthTraversalTests();
     {
         const auto catalog = createDefaultContent();
         const auto& system = solarSystemDefinition();
@@ -1096,9 +1270,19 @@ void persistentExpeditionTests()
                     "Cooldown must really stop fuel use and cool the engine");
                 pauses+=!cooling && e.cruise.cooling;
                 resumes+=cooling && !e.cruise.cooling;
+                check(std::hypot(flight.velocityX,flight.velocityY)*flight_geometry::velocityToMetersPerSecond<=50.000001,
+                    "Cruise must never exceed 50 m/s at any timestep or cooling rank");
             }
-            check(pauses>=2 && resumes>=2 && e.cruise.active && flight.positionX>0,
-                "Cruise must repeatedly cool and resume forward progress without user input");
+            check(e.cruise.active && flight.positionX>0,
+                "Speed-limited cruise must continue making forward progress");
+            flight.velocityX=3; flight.velocityY=4;
+            advanceExpeditionFlight(e,flight,model,catalog.destinations[1],openSpace,{},dt);
+            check(std::hypot(flight.velocityX,flight.velocityY)*flight_geometry::velocityToMetersPerSecond<=50.000001,
+                "Engaging cruise above the limit must govern diagonal speed too");
+            flight.velocityX=3; flight.velocityY=4;
+            advanceExpeditionFlight(e,flight,model,catalog.destinations[1],openSpace,{.2,0,false,false},dt);
+            check(!e.cruise.active && std::hypot(flight.velocityX,flight.velocityY)*flight_geometry::velocityToMetersPerSecond>50,
+                "Manual flight must not inherit the cruise speed cap");
         }
     }
     {

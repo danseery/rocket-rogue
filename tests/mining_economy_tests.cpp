@@ -697,6 +697,52 @@ void supportDroneRecallIsPhysicalAndExplicit()
     require(!mining.droneLoadoutRecallActive,"Leaving service must release parked drones for ordinary gameplay");
 }
 
+void droneOpsStowsWithoutRecallOrCargoLoss()
+{
+    const auto catalog = createDefaultContent();
+    for (bool fullHold : {false,true}) {
+        auto state = createNewGame(catalog, 253);
+        state.meta.unlockKeys.push_back(content::unlock::droneBay);
+        state.meta.droneBaySlots=2;
+        state.meta.ownedDroneIds={content::drone::miningDrone,content::drone::miningDrone};
+        state.meta.equippedDroneIds=state.meta.ownedDroneIds;
+        prepareSurface(state,content::destination::mars);
+        require(startMiningRun(state,catalog,{MiningAct::ActOne,3,0xD312ULL},false).applied,"Loadout fixture starts");
+        auto& mining=state.run.mining;
+        mining.droneX=mining.returnZoneX; mining.droneY=mining.returnZoneY;
+        state.meta.materials.common=fullHold ? 1000 : 0;
+        mining.miniDrones[0].x+=8;
+        mining.miniDrones[0].haulMaterials.common=3;
+        mining.miniDrones[0].uncreditedHaulMaterials.common=3;
+        mining.miniDrones[0].carriedLooseObjectId=9001;
+        MiningLooseObject supply;
+        supply.persistentId=9001; supply.kind=MiningLooseObjectKind::FuelCell;
+        supply.carrierFrame=0;
+        mining.looseObjects.push_back(supply);
+        mining.nextLooseObjectId=9002;
+        mining.miniDrones[1].haulMaterials.rare=2;
+        mining.miniDrones[1].x+=12;
+        const auto retainedX=mining.miniDrones[1].x;
+        const auto looseBefore=mining.looseObjects.size();
+        mining.droneLoadoutRecallActive=true; // old saved waiting state
+        require(unequipMiniDroneSlot(state,catalog,0),"Unequip works immediately with remote loaded workers");
+        require(!mining.droneLoadoutRecallActive && mining.miniDrones.size()==1 &&
+            mining.miniDrones[0].equippedFrame==0 && mining.miniDrones[0].haulMaterials.rare==2 &&
+            mining.miniDrones[0].x==retainedX,"Remaining worker and payload survive slot removal");
+        require(mining.stowedMaterials.common==(fullHold ? 0 : 3),"Stow respects ship capacity");
+        require(mining.looseObjects.size()==looseBefore+(fullHold ? 3 : 0),"Overflow and physical supplies remain recoverable");
+        const auto& released=mining.looseObjects.back();
+        require(released.active && released.carrierFrame==-1 && released.persistentId==9001 &&
+            released.x==mining.returnZoneX,"Carried supply is released at ship without duplication");
+        synchronizeMiningSupportDrones(state,catalog);
+        require(mining.miniDrones[0].haulMaterials.rare==2,"Loadout synchronization cannot erase retained cargo");
+        const auto snapshot=captureSaveData(state);
+        const auto restored=deserializeSaveData(serializeSaveData(snapshot));
+        require(restored && restored->mining.miniDrones[0].haulMaterials.rare==2 &&
+            restored->mining.stowedMaterials.common==mining.stowedMaterials.common,"Edited loadout and cargo survive save/load");
+    }
+}
+
 void looseEvaOreAwardsXpWhenTheRigCollectsIt()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -1287,6 +1333,7 @@ int main()
         rigLoadBandsAndHardCapacityAreImmediate();
         supportDroneXpWaitsForAuthoritativeShipDelivery();
         supportDroneRecallIsPhysicalAndExplicit();
+        droneOpsStowsWithoutRecallOrCargoLoss();
         looseEvaOreAwardsXpWhenTheRigCollectsIt();
         firstClearCreditsOnlyExtractedMiningMaterials();
         rewardLedgerAndPendingCreditRoundTrip();

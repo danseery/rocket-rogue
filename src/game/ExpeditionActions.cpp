@@ -46,7 +46,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
             releaseRealtimeInputs(true);
             clearControllerPause();
             straylightElapsed_ = 0;
-            session_.flightArmed = state_.run.flight.active;
+            session_.flightArmed = state_.run.flight.active || e.undockReady;
             save(); refreshPanel();
         }
         return true;
@@ -141,7 +141,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
             queueAudioCue(GameAudioCue::Orbit);
             close();
             state_.statusLine = operationalHomeDocked(e)
-                ? courseTargetName(e,solarSystemDefinition(),e.course.targetBodyId) + " waypoint set. Depart dock when ready."
+                ? courseTargetName(e,solarPresentationSystem(state_),e.course.targetBodyId) + " waypoint set. Depart dock when ready."
                 : e.cruise.active ? "Waypoint set / CRUISE ACTIVE" : "Waypoint set / manual flight";
             state_.run.flight.courseNoticeSeconds = 3.0;
         }
@@ -176,7 +176,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
             close();
             const auto* waypoint = systemBody(solarSystemDefinition(), e.course.targetBodyId);
             state_.statusLine = "Thrust to undock" +
-                (waypoint ? " toward " + waypoint->name : std::string{}) +
+                (waypoint ? " toward " + courseTargetName(e,solarPresentationSystem(state_),waypoint->id) : std::string{}) +
                 ". The waypoint marks direction; flight remains manual.";
         } else state_.statusLine = "Departure is available only from an operational dock.";
     } else if (action == "expedition:dock") {
@@ -214,7 +214,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
                 state_.run.planetaryExpedition = {};
                 session_.flightArmed = false;
                 reconcileCampaignGuidance(state_,catalog_);
-                const std::string nextWaypoint=courseTargetName(e,solarSystemDefinition(),e.course.targetBodyId);
+                const std::string nextWaypoint=courseTargetName(e,solarPresentationSystem(state_),e.course.targetBodyId);
                 state_.statusLine = "DOCKED - Secured " + std::to_string(cargo.common) + " common / " + std::to_string(cargo.rare) +
                     " rare / " + std::to_string(cargo.exotic) + " exotic and " + std::to_string(payout) +
                     " credits. Ship serviced." + (nextWaypoint.empty() ? std::string{} : " Next waypoint: " + nextWaypoint + ".");
@@ -289,7 +289,7 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         }
     } else if (action == "expedition:cruise") { toggleCruiseControl(); return true; }
     else return true;
-    save();
+    save(action == "expedition:dock" && !session_.flight.active && !e.location.siteId.empty());
     panelDirty_ = realtimeHudDirty_ = true;
     refreshPanel();
     return true;

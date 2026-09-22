@@ -493,6 +493,7 @@
           <button type="button" data-debug-action="expedition">Persistent Expedition</button>
           <button type="button" data-debug-action="dock-arrival">Dock arrival sequence</button>
           <button type="button" data-debug-action="dock-bump">Dock bump feedback</button>
+          <button type="button" data-debug-action="travel-camera">Cinematic travel camera</button>
           <button type="button" data-debug-action="straylight-reveal">Straylight reveal</button>
           <button type="button" data-debug-action="straylight-dock">Straylight docking</button>
           <button type="button" data-debug-action="straylight-beacons">Straylight beacon installation</button>
@@ -709,7 +710,7 @@
 
     function requestedDebugLaunchLesson() {
       const rawValue = new URLSearchParams(window.location.search).get("debug_launch_lesson");
-      if (rawValue === null || !/^[0-5]$/.test(rawValue)) return null;
+      if (rawValue === null || !/^[0-6]$/.test(rawValue)) return null;
       return Number(rawValue);
     }
 
@@ -865,6 +866,200 @@
       applyUiViewportLayout();
     }
 
+    // The game stages synchronous snapshots; this queue owns durable completion.
+    // Never report a queued snapshot as durable or discard it on a failed write.
+    function createSaveStorage(indexedDB, readLegacy, notify) {
+      let db, ready = false, running = null;
+      const committed = {}, current = {}, pending = new Map();
+      const legacyKeys = { save: "rocket_rogue_save_v1", checkpoint: "rocket_rogue_checkpoint_v21" };
+      let lastError = "";
+      let milestonePending = false;
+      function report(error = null) {
+        lastError = error ? `${error.name || "StorageError"}: ${error.message || error}` : "";
+        const milestone = !error && pending.size === 0 && milestonePending;
+        if (milestone) milestonePending = false;
+        notify({ ready, pending: pending.size, error: lastError, milestone });
+      }
+      function open() {
+        return new Promise((resolve, reject) => {
+          const request = indexedDB.open("orebit-progress", 1);
+          request.onupgradeneeded = () => request.result.createObjectStore("snapshots");
+          request.onerror = () => reject(request.error);
+          request.onblocked = () => reject(new Error("Save storage is blocked by another game tab. Close that tab and retry."));
+          request.onsuccess = () => {
+            db = request.result;
+            db.onversionchange = () => { db.close(); db = null; };
+            resolve();
+          };
+        });
+      }
+      function read(key) {
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction("snapshots", "readonly");
+          const request = tx.objectStore("snapshots").get(key);
+          tx.oncomplete = () => resolve(request.result);
+          tx.onabort = () => reject(tx.error || new Error("Save read aborted"));
+          tx.onerror = () => {};
+        });
+      }
+      // Compare-and-swap prevents another open game from silently overwriting
+      // newer progress. Backup, write and readback are one atomic transaction.
+      function write(key, payload, expected) {
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction("snapshots", "readwrite", { durability: "strict" });
+          const store = tx.objectStore("snapshots");
+          let failure;
+          tx.oncomplete = resolve;
+          tx.onabort = () => reject(failure || tx.error || new Error("Save write aborted"));
+          tx.onerror = () => {};
+          const previous = store.get(key);
+          previous.onsuccess = () => {
+            if (previous.result !== expected) {
+              failure = new Error("Another game tab changed this save. Download recovery before closing this tab.");
+              tx.abort();
+              return;
+            }
+            if (typeof previous.result === "string" && previous.result) store.put(previous.result, `${key}-previous`);
+            store.put(payload, key);
+            const verification = store.get(key);
+            verification.onsuccess = () => {
+              if (verification.result !== payload) {
+                failure = new Error("Save verification failed");
+                tx.abort();
+              }
+            };
+          };
+        });
+      }
+      async function initialize() {
+        try {
+          if (!db) await open();
+          for (const key of Object.keys(legacyKeys)) {
+            let payload = await read(key);
+            if (payload === undefined) {
+              payload = readLegacy(legacyKeys[key]) || "";
+              current[key] = payload;
+              await write(key, payload, undefined);
+              // Keep legacy keys untouched, even after verified migration.
+            }
+            if (typeof payload !== "string") throw new Error("Unrecognized save record; existing data was preserved");
+            committed[key] = current[key] = payload;
+          }
+          ready = true;
+          report();
+        } catch (error) { report(error); throw error; }
+      }
+      function flush() {
+        if (running) return running;
+        running = (async () => {
+          try {
+            if (!db) await open();
+            while (pending.size) {
+              const [key, payload] = pending.entries().next().value;
+              await write(key, payload, committed[key]);
+              committed[key] = payload;
+              if (pending.get(key) === payload) pending.delete(key);
+            }
+            report();
+          } catch (error) { report(error); }
+          finally { running = null; }
+        })();
+        return running;
+      }
+      function stage(key, payload, milestone = false) {
+        if (!ready) throw new Error("Save storage has not finished loading");
+        milestonePending ||= milestone;
+        current[key] = payload;
+        pending.set(key, payload);
+        // Keep a previous error visible until a retry actually commits.
+        notify({ ready, pending: pending.size, error: lastError });
+        void flush();
+      }
+      return {
+        initialize, flush,
+        load: key => current[key] || "",
+        store: (key, payload, milestone = false) => stage(key, String(payload || ""), milestone),
+        clear: key => stage(key, ""), // Tombstone: never reimport a deleted legacy save.
+        unsafeToLeave: () => !ready || pending.size > 0,
+        error: () => lastError
+      };
+    }
+
+    // A quiet confirmation for meaningful arrivals/deposits, never a heartbeat.
+    const savedIndicator = document.createElement("div");
+    savedIndicator.setAttribute("role", "status");
+    savedIndicator.setAttribute("aria-label", "Progress saved");
+    savedIndicator.style.cssText = "position:fixed;top:calc(var(--ui-scene-y, 0px) + 16px);left:calc(var(--ui-scene-x, 0px) + var(--ui-scene-width, 100vw) - 48px);width:32px;height:32px;z-index:10000;pointer-events:none;opacity:0;transition:opacity .3s ease";
+    const savedIcon = document.createElement("img");
+    savedIcon.src = "assets/ui/save-icon.png";
+    savedIcon.alt = "";
+    savedIcon.width = savedIcon.height = 32;
+    savedIcon.style.cssText = "border-radius:50%;width:32px;height:32px";
+    savedIndicator.append(savedIcon);
+    document.body.append(savedIndicator);
+    let lastSaveIndicatorTime = -Infinity;
+    function showMilestoneSaved(now = performance.now()) {
+      // Multiple drone deliveries and clustered milestone saves share one cue.
+      if (now - lastSaveIndicatorTime < 20000) return;
+      lastSaveIndicatorTime = now;
+      savedIndicator.style.opacity = "0.85";
+      savedIcon.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }],
+        { duration: 1000, iterations: 1, easing: "ease-in-out" });
+      setTimeout(() => { savedIndicator.style.opacity = "0"; }, 2200);
+    }
+
+    const saveNotice = document.createElement("section");
+    saveNotice.setAttribute("role", "status");
+    saveNotice.setAttribute("aria-live", "polite");
+    saveNotice.style.cssText = "position:fixed;bottom:12px;left:12px;right:12px;z-index:2147483647;background:#10242e;color:#fff;border:2px solid #efb94f;padding:12px;font:14px sans-serif;display:none;box-shadow:0 4px 20px #000";
+    const saveMessage = document.createElement("span");
+    const saveRetry = document.createElement("button");
+    saveRetry.textContent = "Retry save";
+    const saveDownload = document.createElement("button");
+    saveDownload.textContent = "Download recovery save";
+    for (const button of [saveRetry, saveDownload]) {
+      button.style.cssText = "margin-left:12px;padding:8px;background:#204655;color:white;border:1px solid #b1dde7;cursor:pointer";
+    }
+    saveNotice.append(saveMessage, saveRetry, saveDownload);
+    document.body.append(saveNotice);
+    let finishSaveStartup = null;
+    const saveStorage = createSaveStorage(window.indexedDB,
+      key => window.localStorage.getItem(key), status => {
+        saveNotice.style.display = status.error ? "block" : "none";
+        saveMessage.textContent = status.error ? `Progress not saved—don't refresh. ${status.error}` : "";
+        if (status.error) savedIndicator.style.opacity = "0";
+        else if (status.milestone) showMilestoneSaved();
+        saveRetry.hidden = !status.error;
+        saveDownload.hidden = !status.error;
+        if (status.error) console.error("OREBIT save storage:", status.error);
+      });
+    saveRetry.onclick = async () => {
+      saveRetry.disabled = true;
+      try {
+        if (finishSaveStartup) {
+          await saveStorage.initialize();
+          finishSaveStartup();
+          finishSaveStartup = null;
+        } else await saveStorage.flush();
+      } catch (_) { /* The persistent notice retains the error. */ }
+      finally { saveRetry.disabled = false; }
+    };
+    saveDownload.onclick = () => {
+      const payload = saveStorage.load("save");
+      if (!payload) return;
+      const url = URL.createObjectURL(new Blob([payload], { type: "text/plain;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `orebit-recovery-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    window.addEventListener("beforeunload", event => {
+      if (!saveStorage.unsafeToLeave()) return;
+      event.preventDefault();
+      event.returnValue = "Progress has not finished saving.";
+    });
+
     window.RocketBridge = {
       setUiHostContext,
       setUiViewportLayout: setSuppliedUiViewportLayout,
@@ -880,22 +1075,22 @@
       setResolutionPreset,
       syncDebugToolsControls: syncDebugToolsVisibility,
       loadSave() {
-        return window.localStorage.getItem("rocket_rogue_save_v1") || "";
+        return saveStorage.load("save");
       },
-      storeSave(data) {
-        window.localStorage.setItem("rocket_rogue_save_v1", data || "");
+      storeSave(data, milestone = false) {
+        saveStorage.store("save", data, milestone);
       },
       clearSave() {
-        window.localStorage.removeItem("rocket_rogue_save_v1");
+        saveStorage.clear("save");
       },
       loadCheckpoint() {
-        return window.localStorage.getItem("rocket_rogue_checkpoint_v21") || "";
+        return saveStorage.load("checkpoint");
       },
       storeCheckpoint(data) {
-        window.localStorage.setItem("rocket_rogue_checkpoint_v21", data || "");
+        saveStorage.store("checkpoint", data);
       },
       clearCheckpoint() {
-        window.localStorage.removeItem("rocket_rogue_checkpoint_v21");
+        saveStorage.clear("checkpoint");
       },
       gameSpeedMultiplier
     };
@@ -1104,6 +1299,7 @@
       "expedition": () => rrCall("rr_debug_expedition"),
       "dock-arrival": () => rrCall("rr_debug_dock_arrival", [0]),
       "dock-bump": () => rrCall("rr_debug_dock_arrival", [1]),
+      "travel-camera": () => rrCall("rr_debug_launch_lesson", [6]),
       "straylight-reveal": () => rrCall("rr_debug_straylight", [0]),
       "straylight-dock": () => rrCall("rr_debug_straylight", [1]),
       "straylight-beacons": () => rrCall("rr_debug_straylight", [2]),
@@ -1513,6 +1709,14 @@
 
     var Module = {
       canvas,
+      preRun: [() => {
+        addRunDependency("orebit-save-storage");
+        finishSaveStartup = () => removeRunDependency("orebit-save-storage");
+        saveStorage.initialize().then(() => {
+          finishSaveStartup();
+          finishSaveStartup = null;
+        }).catch(() => { /* Do not start a blank game after a failed load. */ });
+      }],
       onRuntimeInitialized() {
         randomizeDebugMiningSeed();
         window.setTimeout(() => {

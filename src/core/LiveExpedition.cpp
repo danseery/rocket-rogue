@@ -41,7 +41,7 @@ std::string wreckDisplayName(const PersistentExpeditionState& e, std::uint64_t w
 }
 std::string courseTargetName(const PersistentExpeditionState& e,const SystemDefinition& system,std::string_view target) {
     if (const auto* wreck=courseWreck(e,target)) return wreckDisplayName(e, wreck->id);
-    if (const auto* body=systemBody(system,target)) return body->name + (body->dock ? " Dock" : "");
+    if (const auto* body=systemBody(system,target)) return body->name + (body->dock && body->name != "The Anomaly" ? " Dock" : "");
     return "None";
 }
 CampaignObjective recommendedCampaignObjective(const GameState& state,const ContentCatalog& catalog) {
@@ -93,7 +93,7 @@ bool reconcileCampaignGuidance(GameState& state,const ContentCatalog& catalog,bo
 FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool laserComplete) {
     const auto& e = state.run.expedition;
     const auto& f = state.run.flight;
-    const auto& system = solarSystemDefinition();
+    const auto system = solarPresentationSystem(state);
     FlightGuidance g;
     const auto* frame = e.location.frame == CoordinateFrame::Body ? systemBody(system,e.location.bodyId) : nullptr;
     const auto* target = systemBody(system,e.course.targetBodyId);

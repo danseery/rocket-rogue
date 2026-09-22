@@ -13,17 +13,19 @@ EM_JS(char*, rr_load_save_js, (), {
     return ptr;
 });
 
-EM_JS(int, rr_store_save_js, (const char* savePtr), {
+EM_JS(int, rr_store_save_js, (const char* savePtr, int milestone), {
     const value = UTF8ToString(savePtr);
     try {
-        if (window.RocketBridge && window.RocketBridge.storeSave) window.RocketBridge.storeSave(value);
+        if (!window.RocketBridge || !window.RocketBridge.storeSave) throw new Error("Save bridge unavailable");
+        window.RocketBridge.storeSave(value, !!milestone);
         return 1;
-    } catch (error) { return 0; }
+    } catch (error) { console.error("Save staging failed:", error); return 0; }
 });
 
 EM_JS(int, rr_clear_save_js, (), {
     try {
-        if (window.RocketBridge && window.RocketBridge.clearSave) window.RocketBridge.clearSave();
+        if (!window.RocketBridge || !window.RocketBridge.clearSave) throw new Error("Save bridge unavailable");
+        window.RocketBridge.clearSave();
         return 1;
     } catch (error) { return 0; }
 });
@@ -50,9 +52,8 @@ EM_JS(int, rr_store_checkpoint_js, (const char* savePtr), {
 
 EM_JS(int, rr_clear_checkpoint_js, (), {
     try {
-        if (window.RocketBridge && window.RocketBridge.clearCheckpoint) {
-            window.RocketBridge.clearCheckpoint();
-        }
+        if (!window.RocketBridge || !window.RocketBridge.clearCheckpoint) return 0;
+        window.RocketBridge.clearCheckpoint();
         return 1;
     } catch (error) { return 0; }
 });
@@ -68,7 +69,18 @@ std::string WebSaveStore::load()
 bool WebSaveStore::storeAtomic(std::string_view saveData)
 {
     const std::string copy(saveData);
-    if (rr_store_save_js(copy.c_str()) != 0) {
+    if (rr_store_save_js(copy.c_str(), 0) != 0) {
+        lastError_.clear();
+        return true;
+    }
+    lastError_ = "Browser save storage failed.";
+    return false;
+}
+
+bool WebSaveStore::storeMilestoneAtomic(std::string_view saveData)
+{
+    const std::string copy(saveData);
+    if (rr_store_save_js(copy.c_str(), 1) != 0) {
         lastError_.clear();
         return true;
     }

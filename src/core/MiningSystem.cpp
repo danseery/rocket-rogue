@@ -1053,7 +1053,8 @@ bool canOccupyActor(
     double y,
     double colliderRadius,
     bool allowSuitOnlyPassage,
-    double minimumY = 0.0)
+    double minimumY = 0.0,
+    rig_geometry::Profile profile = {})
 {
     if (minimumY < 0.0 && y - colliderRadius < minimumY - 1e-8) return false;
     constexpr std::array<std::pair<double, double>, 9> samples {{
@@ -1071,7 +1072,7 @@ bool canOccupyActor(
         const int cellX = static_cast<int>(std::floor(x + sampleX * colliderRadius));
         const int cellY = static_cast<int>(std::floor(y + sampleY * colliderRadius));
         if (minimumY < 0.0 && cellY < 0 && cellX >= 0 && cellX < terrain.width) continue;
-        const MiningCell* cell = miningCellAt(terrain, cellX, cellY);
+        const MiningCell* cell = rig_geometry::cellAt(terrain, cellX, cellY, profile);
         if (cell == nullptr || miningMaterialSolid(cell->material) ||
             (cell->suitOnlyPassage && !allowSuitOnlyPassage)) {
             return false;
@@ -1106,7 +1107,7 @@ bool canOccupyControlledActor(
             x,
             y,
             tuning::mining::operatorColliderRadiusCells,
-            true, profile.minimumY)
+            true, profile.minimumY, profile)
         : canOccupyRigHull(terrain, x, y, hullDirX, hullDirY, profile);
 }
 
@@ -2905,13 +2906,16 @@ std::vector<DrillFootprintCell> drillFootprintCells(
     const double totalHalfWidth = baseHalfWidth + (suit ? 0.0 : std::max(0.0, stats.sideCutterReach));
     const int minX = std::max(0, static_cast<int>(std::floor(originX - footprintLength - totalHalfWidth)));
     const int maxX = std::min(mining.terrain.width - 1, static_cast<int>(std::ceil(originX + footprintLength + totalHalfWidth)));
-    const int minY = std::max(0, static_cast<int>(std::floor(originY - footprintLength - totalHalfWidth)));
-    const int maxY = std::min(mining.terrain.height - 1, static_cast<int>(std::ceil(originY + footprintLength + totalHalfWidth)));
+    const auto geometry = rig_geometry::surfaceProfile(mining, stats.headWidthScale, stats.sideCutterReach);
+    const int minY = std::max(geometry.above ? -geometry.above->height : 0,
+        static_cast<int>(std::floor(originY - footprintLength - totalHalfWidth)));
+    const int maxY = std::min(mining.terrain.height - 1 + (geometry.below ? geometry.below->height : 0),
+        static_cast<int>(std::ceil(originY + footprintLength + totalHalfWidth)));
 
     std::vector<DrillFootprintCell> cells;
     for (int y = minY; y <= maxY; ++y) {
         for (int x = minX; x <= maxX; ++x) {
-            const MiningCell* cell = miningCellAt(mining.terrain, x, y);
+            const MiningCell* cell = rig_geometry::cellAt(mining.terrain, x, y, geometry);
             if (!drillableCell(cell) && !(includeBedrock && cell && cell->material == MiningCellMaterial::Bedrock)) {
                 continue;
             }
@@ -2976,6 +2980,47 @@ std::vector<DrillFootprintCell> drillFootprintCells(
     return cells;
 }
 
+// Briefly route a terrain operation to its owning layer. Actor coordinates
+// are translated, but the actor never changes depth or earns a visit reward.
+class ScopedMiningCellLayer {
+    MiningRunState& mining;
+    MiningDepthLayerState* layer = nullptr;
+    int oldDepth;
+    double offset = 0;
+    std::size_t pickups, numbers;
+    void swapLayer() {
+        std::swap(mining.terrain, layer->terrain);
+        std::swap(mining.artifact, layer->artifact);
+        std::swap(mining.gate, layer->gate);
+        std::swap(mining.enemies, layer->enemies);
+        std::swap(mining.looseObjects, layer->looseObjects);
+    }
+public:
+    int row;
+    ScopedMiningCellLayer(MiningRunState& value, int y) : mining(value), oldDepth(value.depthZone),
+        pickups(value.pickupEvents.size()), numbers(value.damageNumbers.size()), row(y) {
+        if (!mining.surfaceOriginBound || (y >= 0 && y < mining.terrain.height)) return;
+        const int target = oldDepth + (y < 0 ? -1 : 1);
+        for (auto& candidate : mining.depthLayers) if (candidate.depthZone == target) { layer = &candidate; break; }
+        if (!layer) return;
+        offset = y < 0 ? -layer->terrain.height : mining.terrain.height;
+        row -= static_cast<int>(offset);
+        swapLayer();
+        mining.depthZone = target;
+        mining.droneY -= offset;
+        mining.operatorY -= offset;
+    }
+    ~ScopedMiningCellLayer() {
+        if (!layer) return;
+        mining.droneY += offset;
+        mining.operatorY += offset;
+        for (std::size_t i=pickups; i<mining.pickupEvents.size(); ++i) mining.pickupEvents[i].y += offset;
+        for (std::size_t i=numbers; i<mining.damageNumbers.size(); ++i) mining.damageNumbers[i].y += offset;
+        mining.depthZone = oldDepth;
+        swapLayer();
+    }
+};
+
 bool applyDrillFootprintDamage(GameState& state, const MiningDrillStats& stats, double dirX, double dirY, double dt)
 {
     MiningRunState& mining = state.run.mining;
@@ -3019,20 +3064,21 @@ bool applyDrillFootprintDamage(GameState& state, const MiningDrillStats& stats, 
     bool touchedSoftMaterial = false;
     bool brokeAny = false;
     for (const DrillFootprintCell& contact : cells) {
-        MiningCell* cell = miningCellAt(mining.terrain, contact.x, contact.y);
+        ScopedMiningCellLayer owner(mining, contact.y);
+        MiningCell* cell = miningCellAt(mining.terrain, contact.x, owner.row);
         if (cell == nullptr) {
             continue;
         }
-        if (!operatorControlled(mining) && cell->material != MiningCellMaterial::ArtifactCache &&
+        if (cell->material != MiningCellMaterial::ArtifactCache &&
             cocoonCellVisible(mining,*cell) && !cell->revealed) {
             cell->revealed = true;
-            markDirty(mining.terrain,contact.x,contact.y);
+            markDirty(mining.terrain,contact.x,owner.row);
         }
         const double contactDt = dt * contact.powerScale;
         touchedSoftMaterial = touchedSoftMaterial || softMiningMaterial(cell->material);
         touchedHardMaterial = touchedHardMaterial || !softMiningMaterial(cell->material);
         touchedHardRock = touchedHardRock || cell->material == MiningCellMaterial::HardRock;
-        brokeAny = applyDrillDamage(state, actorStats, contact.x, contact.y, contactDt) || brokeAny;
+        brokeAny = applyDrillDamage(state, actorStats, contact.x, owner.row, contactDt) || brokeAny;
     }
 
     if (arenaRules.mechanics.drillHeat || arenaRules.mechanics.drillIntegrity) {
@@ -5563,6 +5609,9 @@ void applyMiningEnemyCombat(GameState& state, const ContentCatalog& catalog, dou
 
 void refreshTargetCell(MiningRunState& mining)
 {
+    const auto geometry = rig_geometry::surfaceProfile(mining,1.0,0.0);
+    const int minimumRow = geometry.above ? -geometry.above->height : 0;
+    const int maximumRow = mining.terrain.height - 1 + (geometry.below ? geometry.below->height : 0);
     double dx = controlledAimX(mining);
     double dy = controlledAimY(mining);
     double length = std::sqrt(dx * dx + dy * dy);
@@ -5591,15 +5640,15 @@ void refreshTargetCell(MiningRunState& mining)
         static_cast<double>(mining.terrain.width - 1));
     const double maxTipY = std::clamp(
         originY + dy * drillRange,
-        0.0,
-        static_cast<double>(mining.terrain.height - 1));
+        static_cast<double>(minimumRow),
+        static_cast<double>(maximumRow));
 
     int targetX = std::clamp(static_cast<int>(std::floor(maxTipX)), 0, mining.terrain.width - 1);
-    int targetY = std::clamp(static_cast<int>(std::floor(maxTipY)), 0, mining.terrain.height - 1);
+    int targetY = std::clamp(static_cast<int>(std::floor(maxTipY)), minimumRow, maximumRow);
     double tipX = maxTipX;
     double tipY = maxTipY;
     const int actorCellX = std::clamp(static_cast<int>(std::floor(originX)), 0, mining.terrain.width - 1);
-    const int actorCellY = std::clamp(static_cast<int>(std::floor(originY)), 0, mining.terrain.height - 1);
+    const int actorCellY = std::clamp(static_cast<int>(std::floor(originY)), minimumRow, maximumRow);
     constexpr double step = 0.10;
     bool foundSolidOnRay = false;
     for (double distance = step; distance <= drillRange + 0.0001; distance += step) {
@@ -5609,14 +5658,14 @@ void refreshTargetCell(MiningRunState& mining)
             static_cast<double>(mining.terrain.width - 1));
         const double probeY = std::clamp(
             originY + dy * distance,
-            0.0,
-            static_cast<double>(mining.terrain.height - 1));
+            static_cast<double>(minimumRow),
+            static_cast<double>(maximumRow));
         const int probeCellX = std::clamp(static_cast<int>(std::floor(probeX)), 0, mining.terrain.width - 1);
-        const int probeCellY = std::clamp(static_cast<int>(std::floor(probeY)), 0, mining.terrain.height - 1);
+        const int probeCellY = std::clamp(static_cast<int>(std::floor(probeY)), minimumRow, maximumRow);
         if (probeCellX == actorCellX && probeCellY == actorCellY) {
             continue;
         }
-        const MiningCell* probe = miningCellAt(mining.terrain, probeCellX, probeCellY);
+        const MiningCell* probe = miningSiteCellAt(mining, probeCellX, probeCellY);
         if (probe != nullptr && miningMaterialSolid(probe->material)) {
             targetX = probeCellX;
             targetY = probeCellY;
@@ -5627,7 +5676,7 @@ void refreshTargetCell(MiningRunState& mining)
         }
     }
 
-    const MiningCell* directTarget = miningCellAt(mining.terrain, targetX, targetY);
+    const MiningCell* directTarget = miningSiteCellAt(mining, targetX, targetY);
     if (!operatorControlled(mining)) {
         const auto contacts=drillFootprintCells(mining,MiningDrillStats{},dx,dy);
         if (!contacts.empty()) {
@@ -5644,7 +5693,7 @@ void refreshTargetCell(MiningRunState& mining)
     mining.targetCellY = targetY;
     mining.targetTipX = tipX;
     mining.targetTipY = tipY;
-    if (const MiningCell* cell = miningCellAt(mining.terrain, targetX, targetY)) {
+    if (const MiningCell* cell = miningSiteCellAt(mining, targetX, targetY)) {
         mining.targetMaterial = cell->material;
         mining.targetRemainingToughness = cell->remainingToughness;
         mining.targetMaxToughness = cell->maxToughness;
@@ -6313,8 +6362,6 @@ void initializeMiningDepth(GameState& state, const ContentCatalog& catalog, cons
 void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int direction)
 {
     MiningRunState& mining = state.run.mining;
-    const MiningDrillStats drillStats = miningDrillStats(state, catalog);
-    const rig_geometry::Profile geometry {drillStats.headWidthScale, drillStats.sideCutterReach};
     const Destination* destination = catalog.findDestination(mining.destinationId);
     if (destination == nullptr || direction == 0) {
         return;
@@ -6333,41 +6380,38 @@ void transitionDepthZone(GameState& state, const ContentCatalog& catalog, int di
         const auto target=std::find_if(mining.depthLayers.begin(),mining.depthLayers.end(),
             [targetDepth](const auto& layer){return layer.depthZone==targetDepth;});
         if (target==mining.depthLayers.end()) return;
-        const double arrivalY=direction>0 ? 4.0 : target->terrain.height-3.5;
-        if (!canOccupyControlledActor(target->terrain,transitionX,arrivalY,suitTravels,mining.hullDirX,mining.hullDirY,geometry)) return;
-        const double radius=suitTravels ? tuning::mining::operatorColliderRadiusCells :
-            std::max(rig_geometry::drillTip, rig_geometry::effectiveHalfWidth(geometry));
-        // Check the adjoining lips for EVA travel. A rig crossing the seam is
-        // intentionally outside each finite layer for part of the handoff, so
-        // validating it against either layer in isolation turns the open seam
-        // into an invisible wall. The joined-terrain sweep below is the
-        // authoritative rig check and still includes the full drill geometry.
-        if (suitTravels) {
-            for (double y=radius+0.01; y<=4.0; y+=0.25) {
-                const double nextY=direction>0 ? y : target->terrain.height-y;
-                const double oldY=direction>0 ? mining.terrain.height-y : y;
-                if (!canOccupyControlledActor(target->terrain,transitionX,nextY,true,mining.hullDirX,mining.hullDirY,geometry) ||
-                    !canOccupyControlledActor(mining.terrain,transitionX,oldY,true,mining.hullDirX,mining.hullDirY,geometry)) return;
-            }
+        // Motion already swept the real adjoining tiles. Switching the active
+        // layer is only a coordinate rebase, never a jump to a staging point.
+        const double offset = direction > 0 ? -mining.terrain.height : target->terrain.height;
+        MiningArtifactObject carried;
+        if (mining.artifact.present && mining.artifact.tethered) {
+            if (target->artifact.present) return;
+            carried = std::move(mining.artifact);
+            mining.artifact = {};
         }
+        storeActiveDepthLayer(mining);
+        (void)restoreDepthLayer(mining, targetDepth);
+        if (suitTravels) mining.operatorY += offset;
         if (!suitTravels || tetheredRigTravels) {
-            // Sweep across the real seam, including the drill, rather than
-            // treating the edge of each loaded layer as a solid world wall.
-            if (mining.terrain.width != target->terrain.width) return;
-            MiningTerrain joined;
-            joined.width = mining.terrain.width;
-            joined.height = mining.terrain.height + target->terrain.height;
-            const auto& upper = direction > 0 ? mining.terrain : target->terrain;
-            const auto& lower = direction > 0 ? target->terrain : mining.terrain;
-            joined.cells = upper.cells;
-            joined.cells.insert(joined.cells.end(), lower.cells.begin(), lower.cells.end());
-            const double startY = mining.droneY + (direction > 0 ? 0 : upper.height);
-            const double rigArrivalY = arrivalY + (tetheredRigTravels ? (direction > 0 ? -.9 : .9) : 0);
-            const double endY = rigArrivalY + (direction > 0 ? upper.height : 0);
-            const double heading = std::atan2(mining.hullDirY,mining.hullDirX);
-            if (!canOccupyRigHull(target->terrain,transitionX,rigArrivalY,mining.hullDirX,mining.hullDirY,geometry) ||
-                rig_geometry::sweep(joined,mining.droneX,startY,heading,transitionX,endY,heading,geometry).fraction < 1) return;
+            mining.droneY += offset;
+            mining.rigDepthZone = targetDepth;
         }
+        if (carried.present) { carried.y += offset; mining.artifact = std::move(carried); }
+        mining.aimY += offset;
+        mining.rigContactY += static_cast<int>(offset);
+        for (auto& number : mining.damageNumbers) number.y += offset;
+        for (auto& pickup : mining.pickupEvents) pickup.y += offset;
+        if (targetDepth > mining.deepestDepthZone) {
+            mining.deepestDepthZone = targetDepth;
+            mining.hazardDelta += tuning::mining::depthHazardRisk;
+        }
+        mining.rigGeometryValidated = true;
+        mining.depthTransitionCooldownSeconds = 0.0;
+        resetMiningFollowersAfterDepthTransition(mining);
+        markMiningGateDerivedStateDirty(mining);
+        refreshTargetCell(mining);
+        state.statusLine = "Depth +" + std::to_string(targetDepth) + " reached.";
+        return;
     }
     MiningArtifactObject travelingArtifact;
     const bool artifactTravels =
@@ -6519,10 +6563,11 @@ void recordRigContact(MiningRunState& mining, const rig_geometry::Contact& conta
     mining.rigContactX=contact.x; mining.rigContactY=contact.y;
     mining.rigContactNormalX=contact.normal.x; mining.rigContactNormalY=contact.normal.y;
     mining.rigContactPassage=contact.passage;
-    if (MiningCell* cell=miningCellAt(mining.terrain,contact.x,contact.y);
+    ScopedMiningCellLayer owner(mining, contact.y);
+    if (MiningCell* cell=miningCellAt(mining.terrain,contact.x,owner.row);
         cell && cell->material != MiningCellMaterial::ArtifactCache && cocoonCellVisible(mining,*cell) && !cell->revealed) {
         cell->revealed=true;
-        markDirty(mining.terrain,contact.x,contact.y);
+        markDirty(mining.terrain,contact.x,owner.row);
     }
 }
 
@@ -6547,7 +6592,7 @@ double advanceActorToCollisionBoundary(
                 probeX,
                 probeY,
                 colliderRadius,
-                allowSuitOnlyPassage, profile.minimumY);
+                allowSuitOnlyPassage, profile.minimumY, profile);
     };
     if (!canOccupyProbe(startX, startY)) {
         return 0.0;
@@ -6669,9 +6714,11 @@ void simulateMiningActorMotion(
     const double minimumX = 1.0 + boundaryExtent;
     const double maximumX =
         static_cast<double>(mining.terrain.width - 1) - boundaryExtent;
-    const double minimumY = (geometry.minimumY < 0.0 ? geometry.minimumY : 1.0) + boundaryExtent;
+    const double minimumY = geometry.above ? -static_cast<double>(geometry.above->height) :
+        (geometry.minimumY < 0.0 ? geometry.minimumY : 1.0) + boundaryExtent;
     const double maximumY =
-        static_cast<double>(mining.terrain.height - 1) - boundaryExtent;
+        static_cast<double>(mining.terrain.height - 1) - boundaryExtent +
+        (geometry.below ? geometry.below->height : 0);
     const double nextX = suit ? std::clamp(positionX + velocityX * dt, minimumX, maximumX) : positionX + velocityX * dt;
     const double nextY = suit ? std::clamp(positionY + velocityY * dt, minimumY, maximumY) : positionY + velocityY * dt;
 
@@ -7257,6 +7304,11 @@ const MiningCell* miningCellAt(const MiningTerrain& terrain, int x, int y)
     return &terrain.cells[index];
 }
 
+const MiningCell* miningSiteCellAt(const MiningRunState& mining, int x, int y)
+{
+    return rig_geometry::cellAt(mining.terrain,x,y,rig_geometry::surfaceProfile(mining,1.0,0.0));
+}
+
 std::vector<DrillFootprintCell> miningDrillFootprintCells(
     const MiningRunState& mining, const MiningDrillStats& stats)
 {
@@ -7293,7 +7345,7 @@ MiningDrillFeedback miningDrillFeedback(const MiningRunState& mining, const Mini
         mining.drillThermalLock || (!operatorControlled(mining) && (mining.rigDisabled || mining.rigFuel.current <= 0.0))) return feedback;
     const auto activeStats = operatorControlled(mining) ? miningOperatorDrillStats() : stats;
     for (const auto& contact : drillFootprintCells(mining, activeStats, controlledAimX(mining), controlledAimY(mining), true)) {
-        const auto* cell = miningCellAt(mining.terrain, contact.x, contact.y);
+        const auto* cell = miningSiteCellAt(mining, contact.x, contact.y);
         // Contact may identify ordinary rock, but never reveal a hidden objective or seal.
         if (!cell || !cocoonCellVisible(mining, *cell) ||
             (!cell->revealed && (cell->cocoonLayer >= 0 || cell->material == MiningCellMaterial::ArtifactCache))) continue;
@@ -7786,6 +7838,66 @@ void clearMiningDroneLoadoutRecall(GameState& state)
     mining.droneLoadoutRecallActive=false;
     for (auto& agent : mining.miniDrones)
         if (agent.behavior==MiningMiniDroneBehavior::Docked) agent.behavior=MiningMiniDroneBehavior::Following;
+}
+
+void stowMiningSupportDrone(GameState& state, const ContentCatalog& catalog, int slotIndex)
+{
+    auto& mining = state.run.mining;
+    clearMiningDroneLoadoutRecall(state);
+    if (!mining.active) return;
+    const auto found = std::find_if(mining.miniDrones.begin(), mining.miniDrones.end(),
+        [&](const auto& drone) { return drone.equippedFrame == slotIndex; });
+    if (found == mining.miniDrones.end()) return;
+    auto& drone = *found;
+    const bool atShip = miningAtReturnZone(mining);
+    const int depth = atShip ? mining.depthZone :
+        drone.transitDepthZone < 0 ? mining.depthZone : drone.transitDepthZone;
+    const double x = atShip ? mining.returnZoneX : drone.x;
+    const double y = atShip ? mining.returnZoneY-1.0 : drone.y;
+    if (atShip) {
+        const auto owned = unloadMiniDroneCargoAtShip(state, catalog, drone);
+        awardExpeditionExperience(state, miningMaterialExperience(owned), Screen::Mining);
+    }
+    // Full holds (or field loadout changes) leave physical cargo recoverable.
+    // Keep every other worker and its in-flight payload intact.
+    auto* destination = &mining.looseObjects;
+    if (depth != mining.depthZone)
+        for (auto& layer : mining.depthLayers)
+            if (layer.depthZone == depth) destination = &layer.looseObjects;
+    const auto first = mining.looseObjects.size();
+    spawnLooseMaterialChunks(mining, drone.haulMaterials, x, y);
+    if (destination != &mining.looseObjects) {
+        destination->insert(destination->end(), mining.looseObjects.begin()+first, mining.looseObjects.end());
+        mining.looseObjects.resize(first);
+    }
+    std::optional<MiningLooseObject> carried;
+    const auto release = [&](auto& objects) {
+        for (auto& object : objects) {
+            if (drone.carriedLooseObjectId != 0 && object.active &&
+                object.persistentId == drone.carriedLooseObjectId) {
+                carried = object;
+            } else if (object.carrierFrame > slotIndex) --object.carrierFrame;
+        }
+        if (drone.carriedLooseObjectId != 0)
+            std::erase_if(objects, [&](const auto& object) {
+                return object.persistentId == drone.carriedLooseObjectId;
+            });
+    };
+    release(mining.looseObjects);
+    for (auto& layer : mining.depthLayers) release(layer.looseObjects);
+    if (carried) {
+        carried->carrierFrame = -1;
+        carried->x = x; carried->y = y;
+        carried->velocityX = carried->velocityY = 0;
+        destination->push_back(*carried);
+    }
+    mining.miniDrones.erase(found);
+    int roleIndices[6] = {};
+    for (auto& agent : mining.miniDrones) {
+        if (agent.equippedFrame > slotIndex) --agent.equippedFrame;
+        agent.roleIndex = roleIndices[static_cast<int>(agent.role)]++;
+        agent.stableFormationSlot = agent.roleIndex;
+    }
 }
 
 bool miningRigAtReturnZone(const MiningRunState& mining)
@@ -9085,6 +9197,7 @@ bool prepareLandingLayers(const GameState& state, const ContentCatalog& catalog,
 {
     const auto* destination = catalog.findDestination(mining.destinationId);
     if (!destination || mining.terrain.cells.empty()) return false;
+    throughDepth = std::min(throughDepth, tuning::surfaceDepthProgression::maximumDepthRating);
     if (!mining.surfaceOriginBound) {
         mining.surfacePadX = mining.returnZoneX;
         mining.surfacePadY = mining.returnZoneY;
@@ -9093,6 +9206,11 @@ bool prepareLandingLayers(const GameState& state, const ContentCatalog& catalog,
     }
     // Generation uses a private state and never advances actors, RNG, visits,
     // rewards, or geological progression. Existing layers are never regenerated.
+    bool missing = false;
+    for (int depth = mining.entryDepthZone; depth <= throughDepth; ++depth)
+        if (depth != mining.depthZone && std::none_of(mining.depthLayers.begin(), mining.depthLayers.end(),
+            [depth](const auto& layer) { return layer.depthZone == depth; })) missing = true;
+    if (!missing) return true;
     GameState preview = state;
     preview.run.mining = mining;
     const int active = mining.depthZone;
@@ -9697,8 +9815,7 @@ bool prepareOrbitalSurvey(const GameState& state, const ContentCatalog& catalog,
         storeActiveDepthLayer(mining);
         (void)restoreDepthLayer(mining, entry);
     }
-    // Exact objective localization does not grant deeper resource knowledge
-    // or increase the laser's surveyed-depth allowance.
+    // Exact objective localization does not grant deeper resource knowledge.
     for (const auto& layer : mining.depthLayers) {
         if (layer.depthZone <= entry+depth || !layer.artifact.present ||
             layer.artifact.state == MiningArtifactState::Delivered) continue;
@@ -9709,18 +9826,41 @@ bool prepareOrbitalSurvey(const GameState& state, const ContentCatalog& catalog,
     }
     prepared.miningTemplate = std::move(mining);
     prepared.surveyedDepth = depth;
+    refreshOrbitalBoreReach(state, catalog, prepared);
     validateOrbitalShaft(prepared);
     return true;
 }
 
+void refreshOrbitalBoreReach(const GameState& state, const ContentCatalog& catalog,
+    PreparedSurfaceLanding& prepared)
+{
+    if (!prepared.valid || prepared.surveyedDepth < 0) return;
+    auto& mining = prepared.miningTemplate;
+    const int maximum = std::min(tuning::surfaceDepthProgression::maximumDepthRating,
+        mining.entryDepthZone + surfaceDepthRating(state, SurfaceDepthUpgradeKind::BoreSystem));
+    if (!prepareLandingLayers(state, catalog, mining, maximum)) return;
+    // Completion belongs to a cursor and a reach, not permanently to a site.
+    // Legacy cursors stop three rows early and naturally resume at that row.
+    const MiningTerrain* terrain = mining.depthZone == prepared.laserDepth ? &mining.terrain : nullptr;
+    for (const auto& layer : mining.depthLayers)
+        if (layer.depthZone == prepared.laserDepth) terrain = &layer.terrain;
+    const int lastRow = terrain ? terrain->height -
+        (prepared.laserDepth == tuning::surfaceDepthProgression::maximumDepthRating ? 2 : 1) : 0;
+    prepared.laserComplete = prepared.laserDepth > maximum ||
+        (prepared.laserDepth == maximum && terrain && prepared.laserRow > lastRow);
+    validateOrbitalShaft(prepared);
+}
+
 void excavateOrbitalShaft(PreparedSurfaceLanding& prepared, int maximumDepth, double seconds)
 {
-    if (!prepared.valid || prepared.laserComplete || seconds <= 0.0) return;
+    if (!prepared.valid || prepared.surveyedDepth < 0 || seconds <= 0.0) return;
     validateOrbitalShaft(prepared);
     if (prepared.laserBlocked) return;
     auto& mining = prepared.miningTemplate;
     const int entry = mining.entryDepthZone;
-    const int maximum = entry + std::max(0, std::min(prepared.surveyedDepth, maximumDepth));
+    const int maximum = std::min(tuning::surfaceDepthProgression::maximumDepthRating,
+        entry + std::max(0, maximumDepth));
+    prepared.laserComplete = false;
     if (prepared.laserDepth > maximum) { prepared.laserComplete = true; return; }
     const int active = mining.depthZone;
     prepared.laserRowWork += seconds;
@@ -9730,7 +9870,8 @@ void excavateOrbitalShaft(PreparedSurfaceLanding& prepared, int maximumDepth, do
             if (!restoreDepthLayer(mining, prepared.laserDepth)) { prepared.laserBlocked = true; break; }
         }
         const int y = prepared.laserRow;
-        const int lastRow = mining.terrain.height - (prepared.laserDepth == maximum ? 4 : 1);
+        const int lastRow = mining.terrain.height -
+            (prepared.laserDepth == tuning::surfaceDepthProgression::maximumDepthRating ? 2 : 1);
         if (y > lastRow) {
             if (prepared.laserDepth >= maximum) { prepared.laserComplete = true; break; }
             ++prepared.laserDepth;
@@ -10768,11 +10909,10 @@ void updateMiningArtifact(GameState& state, const ContentCatalog& catalog, doubl
         artifact.velocityY *= std::max(0.0, 1.0 - dt * 1.8);
     }
 
+    const auto artifactGeometry = rig_geometry::surfaceProfile(mining,1.0,0.0);
     auto solidAt = [&](double x, double y) {
-        const int cellX = std::clamp(static_cast<int>(std::floor(x)), 0, mining.terrain.width - 1);
-        const int cellY = std::clamp(static_cast<int>(std::floor(y)), 0, mining.terrain.height - 1);
-        const MiningCell* cell = miningCellAt(mining.terrain, cellX, cellY);
-        return cell != nullptr && miningMaterialSolid(cell->material);
+        const MiningCell* cell = miningSiteCellAt(mining,static_cast<int>(std::floor(x)),static_cast<int>(std::floor(y)));
+        return cell == nullptr || miningMaterialSolid(cell->material);
     };
     auto impactDamage = [&]() {
         const double speed = std::sqrt(artifact.velocityX * artifact.velocityX + artifact.velocityY * artifact.velocityY);
@@ -10789,7 +10929,9 @@ void updateMiningArtifact(GameState& state, const ContentCatalog& catalog, doubl
         artifact.velocityX *= -0.46;
     }
 
-    const double nextY = std::clamp(artifact.y + artifact.velocityY * dt, 1.0, static_cast<double>(mining.terrain.height - 2));
+    const double nextY = std::clamp(artifact.y + artifact.velocityY * dt,
+        artifactGeometry.above ? -static_cast<double>(artifactGeometry.above->height) : 1.0,
+        static_cast<double>(mining.terrain.height - 2) + (artifactGeometry.below ? artifactGeometry.below->height : 0));
     if (!solidAt(artifact.x, nextY)) {
         artifact.y = nextY;
     } else {
@@ -10822,6 +10964,9 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
         return;
     }
     updateMiningShipSupport(mining, dt);
+    if (mining.surfaceOriginBound &&
+        controlledActorY(mining) > mining.terrain.height - 8.0)
+        prepareLandingLayers(state, catalog, mining, mining.depthZone + 1);
     const MiningSiteDefinition* authoredSite =
         attachActiveAuthoredMiningSite(state, catalog);
     const MiningDrillStats stats = miningDrillStats(state, catalog);
@@ -11060,13 +11205,13 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     const double activeY = controlledActorY(mining);
     if (mining.depthTransitionCooldownSeconds <= 0.0 &&
         mining.depthZone > mining.entryDepthZone &&
-        activeY < 3.0 &&
-        (!suitActive || canOccupyControlledActor(mining.terrain,activeX,activeY-.8,true,mining.hullDirX,mining.hullDirY))) {
+        activeY < (mining.surfaceOriginBound ? 0.0 : 3.0) &&
+        (mining.surfaceOriginBound || !suitActive || canOccupyControlledActor(mining.terrain,activeX,activeY-.8,true,mining.hullDirX,mining.hullDirY))) {
         transitionDepthZone(state, catalog, -1);
     } else if (mining.depthTransitionCooldownSeconds <= 0.0 &&
-        !operatorCanReenterRig(mining) &&
-        activeY > static_cast<double>(mining.terrain.height - 3) &&
-        (!suitActive || canOccupyControlledActor(mining.terrain,activeX,activeY+.8,true,mining.hullDirX,mining.hullDirY))) {
+        (mining.surfaceOriginBound || !operatorCanReenterRig(mining)) &&
+        activeY > static_cast<double>(mining.terrain.height - (mining.surfaceOriginBound ? 0 : 3)) &&
+        (mining.surfaceOriginBound || !suitActive || canOccupyControlledActor(mining.terrain,activeX,activeY+.8,true,mining.hullDirX,mining.hullDirY))) {
         transitionDepthZone(state, catalog, 1);
     }
 

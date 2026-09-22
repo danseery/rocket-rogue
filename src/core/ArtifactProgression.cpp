@@ -101,7 +101,11 @@ void reconcileArtifactCustody(GameState& s, const ContentCatalog& c) {
             a->bankedAt = b.owner == BatteryOwner::ArkSlot ? "straylight" : "earth";
         const auto* instance = findScenarioInstance(s.meta,m->scenarioId);
         const auto* progress = instance ? findScenarioStepProgress(*instance,m->claimStepId) : nullptr;
-        a->completed = a->owner == ArtifactCustody::Banked && progress && progress->claimed;
+        // Mission hand-in is permanent; physical custody can subsequently move
+        // through ship, wreck and Ark while transporting the same beacon.
+        // Clearing completion here makes the dock immediately bank a collected
+        // beacon again during the next guidance reconciliation.
+        a->completed = a->completed || (progress && progress->claimed);
         a->experienceAwarded = old != s.meta.artifacts.end();
         a->objectiveExperienceAwarded = progress && progress->completed;
     }

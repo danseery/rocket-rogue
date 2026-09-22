@@ -26,6 +26,7 @@
 #include "core/ResearchSystem.h"
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
+#include "core/SystemContent.h"
 #include "core/SaveData.h"
 #include "core/SaveSchema.h"
 #include "core/ShipPresentation.h"
@@ -37,6 +38,7 @@
 #endif
 #include "game/GamePanel.h"
 #include "render/RenderSnapshot.h"
+#include "render/MiningFogPresentation.h"
 
 #include <cassert>
 #include <algorithm>
@@ -51,6 +53,32 @@
 #include <vector>
 
 using namespace rocket;
+
+void beltWarningFollowsTravelDirection()
+{
+    // Reproduce both inbound and outbound crossings, including the old buffer
+    // that incorrectly brought "belt ahead" back after leaving the ring.
+    for (double angle : {0.0, 0.7, 2.4, 4.1}) {
+        const auto point = [=](double radius) {
+            return SystemVector{radius * std::cos(angle), radius * std::sin(angle)};
+        };
+        for (double speed : {.01, 1.0, 5.0}) {
+            assert(approachingSolarAsteroidBelt(point(solarBeltInnerRadius-1), point(speed)));
+            assert(!approachingSolarAsteroidBelt(point(solarBeltInnerRadius-1), point(-speed)));
+            assert(approachingSolarAsteroidBelt(point(solarBeltOuterRadius+1), point(-speed)));
+            assert(!approachingSolarAsteroidBelt(point(solarBeltOuterRadius+1), point(speed)));
+            assert(approachingSolarAsteroidBelt(point(25), point(speed)));
+            assert(approachingSolarAsteroidBelt(point(25), point(-speed)));
+        }
+    }
+    assert(approachingSolarAsteroidBelt({19,0},{1,0}));
+    assert(approachingSolarAsteroidBelt({33,0},{-1,0}));
+    assert(approachingSolarAsteroidBelt({25,0},{0,0}));
+    assert(!approachingSolarAsteroidBelt({22,0},{0,0}));
+    assert(!approachingSolarAsteroidBelt({29,0},{0,0}));
+    assert(!approachingSolarAsteroidBelt({29,0},{0,1}));
+    assert(!approachingSolarAsteroidBelt({29,0},{-.01,1}));
+}
 
 namespace {
 
@@ -8787,7 +8815,7 @@ void controllerPanelDefaultsAndOrbitalActions()
         context.orbitalLaserBlocked = blocked;
         panel = buildGamePanelPresentation(context);
         defaultIs(panel.contentMarkup, "action:land_from_orbit");
-        require(panel.contentMarkup.find(blocked ? "SURFACE TOOLS REQUIRED" : "SHAFT READY") != std::string::npos &&
+        require(panel.contentMarkup.find(blocked ? "SURFACE TOOLS REQUIRED" : "BORE REACH EXCAVATED") != std::string::npos &&
             panel.contentMarkup.find("data-rr-action=\"orbital_work\"") == std::string::npos,
             "a completed or blocked laser must be status, never a false Drill default");
     }
@@ -9622,6 +9650,41 @@ void parkedShipLosesExcavatedSupport()
 
 int main(int argc, char** argv)
 {
+    {
+        std::vector<MiningCell> above(5 * 4);
+        for (auto& cell : above) cell.material = MiningCellMaterial::HardRock;
+        for (int row=0;row<4;++row) {
+            auto& cell=above[row*5+2];
+            cell.material=MiningCellMaterial::Empty; cell.revealed=true;
+        }
+        int edges=0;
+        const auto edge=[&](int x0,int y0,int x1,int y1) {
+            ++edges;
+            require(x0==x1 && (x0==2 || x0==3) && y0<0 && y1<=0,
+                "Shaft contour follows both walls above baseline without false seam caps");
+        };
+        forEachMiningUpperPassageEdge(2,above,5,4,edge);
+        require(edges==8,"Known shaft walls remain readable over upper fog");
+        edges=0;
+        forEachMiningUpperPassageEdge(0,above,5,4,edge);
+        require(edges==0,"Surface sky needs no upper shaft contour");
+        for(auto& cell:above) cell.revealed=false;
+        forEachMiningUpperPassageEdge(2,above,5,4,edge);
+        require(edges==0,"Unknown open caves must not leak through fog");
+        for(auto& cell:above) {cell.revealed=true;cell.material=MiningCellMaterial::CommonOre;}
+        forEachMiningUpperPassageEdge(2,above,5,4,edge);
+        require(edges==0,"Scanned resources must not produce through-fog outlines");
+    }
+    for (int depth : {1, 2, 4}) {
+        require(miningUpperBoundaryFog(depth, -100.0F) == 1.0F &&
+            miningUpperBoundaryFog(depth, 0.0F) == 1.0F,
+            "Underground space above the baseline remains opaque regardless of scanning");
+        require(miningUpperBoundaryFog(depth, 1.0F) == .5F &&
+            miningUpperBoundaryFog(depth, 2.0F) == 0.0F,
+            "Permanent upper fog feathers into the first two terrain rows only");
+    }
+    require(miningUpperBoundaryFog(0, -100.0F) == 0.0F,
+        "Surface sky must not inherit the underground upper fog cap");
     parkedShipLosesExcavatedSupport();
     if (argc > 1 && std::string_view(argv[1]) == "--ship-support-only") return 0;
     if (argc > 1 && std::string_view(argv[1]) == "--flight-controls-only") {
@@ -9845,6 +9908,7 @@ int main(int argc, char** argv)
     treasurePingMarksRareFirstAndSkipsExcludedMaterials();
     postSolarBodiesAndGeologiesAreDeterministicAndPersistent();
 
+    beltWarningFollowsTravelDirection();
     std::cout << "rocket_core_tests passed\n";
     return 0;
 }

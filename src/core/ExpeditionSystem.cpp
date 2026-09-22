@@ -720,8 +720,11 @@ FlightInput cruiseInput(PersistentExpeditionState &e, const FlightRunState &flig
         e.cruise.cooling = false;
     else if (flight.heat >= tuning::launch::cruiseCoolingStart)
         e.cruise.cooling = true;
+    const double speed = std::hypot(flight.velocityX, flight.velocityY) * flight_geometry::velocityToMetersPerSecond;
+    const double throttle = e.cruise.cooling ? 0.0 :
+        std::clamp((cruiseMaximumSpeedMetersPerSecond-speed)/5.0,0.0,1.0);
     return {std::clamp(-flightWrappedAngleDelta(flight.heading, desired) * 2.0, -1.0, 1.0),
-        e.cruise.cooling ? 0.0 : 1.0, e.cruise.cooling, true};
+        throttle, e.cruise.cooling || throttle == 0.0, true};
 }
 int batteryResearchRank(const PersistentExpeditionState &e)
 {
@@ -781,6 +784,16 @@ LaunchFlightStep advanceExpeditionFlight(PersistentExpeditionState &e, FlightRun
     auto result = updateLaunchFlight(flight, launch, destination, input, dt, site, &system, &e.location);
     if (flight.mode == FlightMode::Landing)
         return result;
+    // Cruise governs total speed, including lateral drift and gravity. Manual
+    // input cancels cruise above, so ordinary flight remains unrestricted.
+    if (e.cruise.active && !result.failed) {
+        const double limit = cruiseMaximumSpeedMetersPerSecond / flight_geometry::velocityToMetersPerSecond;
+        const double speed = std::hypot(flight.velocityX,flight.velocityY);
+        if (speed > limit) {
+            flight.velocityX *= limit/speed;
+            flight.velocityY *= limit/speed;
+        }
+    }
     captureSystemLocation(e.location, flight);
     if (result.failed)
         return result;

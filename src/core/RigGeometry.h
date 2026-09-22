@@ -25,13 +25,30 @@ struct Profile {
     double headWidthScale = 1.0;
     double sideCutterReach = 0.0;
     double minimumY = 0.0;
+    const MiningTerrain* above = nullptr;
+    const MiningTerrain* below = nullptr;
 };
 inline Profile surfaceProfile(const MiningRunState& mining, double headWidthScale, double sideCutterReach) {
     const double padY = mining.surfaceOriginBound ? mining.surfacePadY : mining.returnZoneY;
     const double ceiling = mining.depthZone == 0
         ? std::min(0.0, padY - tuning::mining::returnZoneCenterHeightCells - tuning::mining::returnZoneRadiusCells)
         : 0.0;
-    return {headWidthScale, sideCutterReach, ceiling};
+    Profile profile{headWidthScale, sideCutterReach, ceiling};
+    if (mining.surfaceOriginBound) for (const auto& layer : mining.depthLayers) {
+        if (layer.depthZone == mining.depthZone - 1) profile.above = &layer.terrain;
+        if (layer.depthZone == mining.depthZone + 1) profile.below = &layer.terrain;
+    }
+    return profile;
+}
+// Coordinates remain relative to the active layer, including contacts across
+// either seam. Missing neighbors and the actual world boundaries stay solid.
+inline const MiningCell* cellAt(const MiningTerrain& terrain, int x, int y, Profile profile = {}) {
+    const MiningTerrain* source = &terrain;
+    if (y < 0 && profile.above) { source = profile.above; y += source->height; }
+    else if (y >= terrain.height && profile.below) { source = profile.below; y -= terrain.height; }
+    if (x < 0 || x >= source->width || y < 0 || y >= source->height) return nullptr;
+    const auto index = static_cast<std::size_t>(y * source->width + x);
+    return index < source->cells.size() ? &source->cells[index] : nullptr;
 }
 inline double effectiveHalfWidth(Profile profile) {
     return drillHalfWidth * std::max(1.0, profile.headWidthScale) +
@@ -91,9 +108,7 @@ inline std::vector<Contact> contacts(const MiningTerrain& terrain,double x,doubl
     for(int cy=static_cast<int>(std::floor(top));cy<=static_cast<int>(std::floor(bottom));++cy)
         for(int cx=static_cast<int>(std::floor(left));cx<=static_cast<int>(std::floor(right));++cx) {
             if (profile.minimumY < 0.0 && cy < 0 && cx >= 0 && cx < terrain.width) continue;
-            const bool outside=cx<0 || cy<0 || cx>=terrain.width || cy>=terrain.height;
-            const auto index=static_cast<std::size_t>(std::max(0,cy)*terrain.width+std::max(0,cx));
-            const MiningCell* cell=!outside && index<terrain.cells.size() ? &terrain.cells[index]:nullptr;
+            const MiningCell* cell=cellAt(terrain,cx,cy,profile);
             if(cell && cell->material==MiningCellMaterial::Empty && !cell->suitOnlyPassage) continue;
             auto body=circleContact(x,y,cx,cy), drill=triangleContact(bit,cx,cy);
             auto hit=body.depth>drill.depth ? body:drill;

@@ -12,6 +12,7 @@ struct SurfaceCameraPresentation {
     float cellWidth = 0.0F;
     float cellHeight = 0.0F;
     int frameTopRow = 0;
+    int miningLayerSiteTopRow = 0;
     double lastTime = -1.0;
     double followX = 0.0;
     double followY = 0.0;

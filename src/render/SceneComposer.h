@@ -3,6 +3,7 @@
 #include "render/RenderSnapshot.h"
 #include "render/ScenePacket.h"
 #include "render/SurfaceCameraPresentation.h"
+#include "render/TravelCameraPresentation.h"
 
 #include <array>
 #include <cstddef>
@@ -221,6 +222,13 @@ private:
         std::string targetId, frameId;
         double transitionStart = -1.0;
         std::array<float, 6> from {}, current {};
+        travel_camera::State travel;
+        double lastTime = -1.0;
+        double originX = 0, originY = 0, units = 1;
+        bool docking = false, dockSourceValid = false;
+        std::array<float, 6> dockSource {};
+        double abortSeconds = -1.0;
+        float landingBlend = 0;
     };
 
     SceneViewport viewport_;

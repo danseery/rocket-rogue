@@ -376,7 +376,7 @@ private:
     void captureDebugDroneLoadout();
     void applyDebugDroneLoadout();
     void applyDebugActOneCheckpoint();
-    void save();
+    void save(bool milestone = false);
     void beginTitleLaunch(bool newCampaign);
     void completeTitleLaunch();
     void finishTitleLaunch();

@@ -1856,7 +1856,12 @@ bool unequipMiniDroneSlot(GameState& state, const ContentCatalog& catalog, int s
 
     const std::string droneId = state.meta.equippedDroneIds[static_cast<std::size_t>(slotIndex)];
     const MiniDrone* drone = catalog.findMiniDrone(droneId);
+    stowMiningSupportDrone(state, catalog, slotIndex);
     state.meta.equippedDroneIds.erase(state.meta.equippedDroneIds.begin() + slotIndex);
+    auto& assignments = state.run.expedition.progression.droneModuleAssignments;
+    std::erase_if(assignments, [&](const auto& assignment) { return assignment.equippedFrame == slotIndex; });
+    for (auto& assignment : assignments)
+        if (assignment.equippedFrame > slotIndex) --assignment.equippedFrame;
     state.statusLine = (drone != nullptr ? drone->name : std::string("Drone")) + " removed from Drone Loadout.";
     return true;
 }

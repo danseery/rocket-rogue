@@ -61,6 +61,7 @@ struct PanelRenderContext {
     bool missionChanged = false;
     bool showCompletedMissions = false;
     int orbitalArtifactDepth = -1;
+    int orbitalBoreDepth = 0;
 };
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);

@@ -8,6 +8,7 @@ namespace rocket
 {
 inline constexpr double expeditionDockRadius = 2.0;
 inline constexpr double expeditionDockSpeed = 1.0;
+inline constexpr double cruiseMaximumSpeedMetersPerSecond = 50.0;
 namespace service_dock {
 // Enter the close-up only when the dock is visually relevant. The wider
 // exit boundary prevents an abort/re-entry loop while the player backs away.

@@ -117,8 +117,9 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
     if (id == "straylight") {
         const auto objective = straylightObjective(s);
         if (!objective) return v;
-        v.available = true; v.id = "straylight"; v.location = "STRAYLIGHT";
-        v.title = "Awaken the Ark"; v.stepId = std::to_string(static_cast<int>(s.meta.straylightStage));
+        const bool known = straylightIdentityKnown(s.meta.straylightStage);
+        v.available = true; v.id = "straylight"; v.location = known ? "STRAYLIGHT" : "THE ANOMALY";
+        v.title = known ? "Awaken the Ark" : "Unknown signal"; v.stepId = std::to_string(static_cast<int>(s.meta.straylightStage));
         v.instruction = objective->title; v.purpose = objective->detail; v.targetId = objective->targetId;
         v.kind = objective->kind; v.wreckId = objective->wreckId;
         using Stage = StraylightStage;
@@ -137,7 +138,7 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
             v.requirements = {{"Install all six beacons", installed == 6}, {"Bring Straylight online", stage >= Stage::Awakening},
                 {"Coordinate evacuation", stage >= Stage::EvacuationBriefing}, {"Complete boarding", stage >= Stage::Boarded},
                 {"Secure the Ark", stage >= Stage::Secured}, {"Depart for Aaru Vale", stage >= Stage::Arrived}};
-        } else v.requirements = {{"Dock with Straylight and learn its purpose", stage >= Stage::FirstContact}};
+        } else v.requirements = {{known ? "Dock with Straylight and learn its purpose" : "Reach The Anomaly and identify the signal", stage >= Stage::FirstContact}};
         return v;
     }
     const auto* m = solarMissionForBody(catalog, id);
@@ -319,8 +320,10 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
             if (candidate.bodyId == m->bodyId && candidate.siteId.ends_with(v.sectorId)) site = &candidate;
         if (e.selectedOrbitZone != v.sectorId) set("mission_sector", "Fly to " + missionSectorName(v.sectorId) + " to scan and prepare a shaft");
         else if (site && site->orbital.laserBlocked) set("land", "Protected terrain blocks the shaft. Land and use surface tools to reach the underground artifact");
-        else if (site && site->orbital.laserComplete) set("land", "Shaft ready. Land and use the surface scanner to locate the underground artifact");
-        else if (m->bodyId == "titan") set("drill", "Hold Drill to open the descent shaft to Depth +2 before landing");
+        else if (site && site->orbital.laserComplete) set("land", m->bodyId == "titan" && site->orbital.laserDepth < 2
+            ? "Land and drill manually to Depth +2, or upgrade Bore to extend the shaft"
+            : "Shaft ready. Land and use the surface scanner to locate the underground artifact");
+        else if (m->bodyId == "titan") set("drill", "Hold Drill to excavate to Bore reach, then land. Continue manually to Depth +2 if needed");
         else set("drill", "Hold Drill to prepare a shaft, then land. Mars's artifact is underground");
     } else { set("land", "Land at the mission site in " + missionSectorName(v.sectorId)); }
     return v;

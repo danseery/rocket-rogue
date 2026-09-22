@@ -163,7 +163,11 @@ class ISaveStore {
 public:
     virtual ~ISaveStore() = default;
     virtual std::string load() = 0;
+    // True accepts an atomic snapshot. Synchronous stores have committed it;
+    // deferred web stores must retain pending data, surface commit failures,
+    // and guard navigation until their transaction actually completes.
     virtual bool storeAtomic(std::string_view data) = 0;
+    virtual bool storeMilestoneAtomic(std::string_view data) { return storeAtomic(data); }
     virtual bool clear() = 0;
     // A checkpoint is independent from the active campaign slot.  It is only
     // written after a stable, audited hub state, so recovery never needs to

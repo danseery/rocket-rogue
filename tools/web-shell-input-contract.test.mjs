@@ -207,7 +207,7 @@ test("web console exposes launch-lesson visual verification hooks", () => {
   );
   assert.match(
     shell,
-    /get\("debug_launch_lesson"\)[\s\S]*?\^\[0-5\]\$[\s\S]*?window\.rr\.debugLaunchLesson\(lessonIndex\)/,
-    "debug_launch_lesson must safely select the lessons or the main-belt crossing/collision sandboxes",
+    /get\("debug_launch_lesson"\)[\s\S]*?\^\[0-6\]\$[\s\S]*?window\.rr\.debugLaunchLesson\(lessonIndex\)/,
+    "debug_launch_lesson must safely select lessons, belt collisions, or the travel-camera sandbox",
   );
 });

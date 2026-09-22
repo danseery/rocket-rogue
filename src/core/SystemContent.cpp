@@ -50,10 +50,22 @@ bool crossesSolarAsteroidBelt(SystemVector from, SystemVector to)
 
 bool approachingSolarAsteroidBelt(SystemVector position, SystemVector velocity)
 {
-    // Six seconds of coasting lookahead, plus a spatial buffer at low speed.
+    // Inside the belt, retain the region label even while stopped. Outside it,
+    // the low-speed buffer must describe an approach, never the belt behind us.
     const double radius = std::hypot(position.x, position.y);
-    return (radius >= solarBeltInnerRadius - 3.0 && radius <= solarBeltOuterRadius + 3.0) ||
-        crossesSolarAsteroidBelt(position, {position.x + velocity.x * 6.0, position.y + velocity.y * 6.0});
+    if (radius >= solarBeltInnerRadius && radius <= solarBeltOuterRadius) return true;
+    if (crossesSolarAsteroidBelt(position,
+            {position.x + velocity.x * 6.0, position.y + velocity.y * 6.0})) return true;
+
+    const double radialMotion = position.x * velocity.x + position.y * velocity.y;
+    if (radius < solarBeltInnerRadius)
+        return radius >= solarBeltInnerRadius - 3.0 && radialMotion > 0.0;
+    if (radius > solarBeltOuterRadius + 3.0 || radialMotion >= 0.0) return false;
+    // An outer-side flyby can approach the ring radially but still miss it.
+    const double speedSquared = velocity.x * velocity.x + velocity.y * velocity.y;
+    const double closestTime = -radialMotion / speedSquared;
+    return std::hypot(position.x + velocity.x * closestTime,
+        position.y + velocity.y * closestTime) <= solarBeltOuterRadius;
 }
 
 double systemBodyApproachBlend(const SystemBodyDefinition &body, double radius)

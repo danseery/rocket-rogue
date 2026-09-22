@@ -54,6 +54,7 @@ struct DrillFootprintCell {
 };
 std::vector<DrillFootprintCell> miningDrillFootprintCells(
     const MiningRunState& mining, const MiningDrillStats& stats);
+const MiningCell* miningSiteCellAt(const MiningRunState&, int x, int y);
 
 enum class RigLoadBand {
     Light,
@@ -128,6 +129,7 @@ struct PreparedSurfaceLanding : OrbitalSiteProgress {
 };
 
 bool prepareOrbitalSurvey(const GameState&, const ContentCatalog&, PreparedSurfaceLanding&, int depth);
+void refreshOrbitalBoreReach(const GameState&, const ContentCatalog&, PreparedSurfaceLanding&);
 std::uint64_t surfaceLandingBuildKey(const GameState&, const ContentCatalog&, const SurfaceLandingBuildRequest&);
 void excavateOrbitalShaft(PreparedSurfaceLanding&, int maximumDepth, double seconds);
 bool orbitalShaftAvoidsProtectedObjectives(const MiningRunState&, int shaftX);
@@ -270,6 +272,7 @@ struct MiningDroneRecoveryStatus {
 MiningDroneRecoveryStatus miningDroneRecoveryStatus(const MiningRunState& mining, bool includeDeployedDrones = false);
 bool requestMiningDroneRecall(GameState& state, bool includeDeployedDrones = false);
 void clearMiningDroneLoadoutRecall(GameState& state);
+void stowMiningSupportDrone(GameState& state, const ContentCatalog& catalog, int slotIndex);
 void synchronizeMiningSupportDrones(GameState& state, const ContentCatalog& catalog);
 // Safe-load/site-entry compatibility; never call during live simulation.
 void migrateAdjacentCocoonTiles(MiningRunState& mining);

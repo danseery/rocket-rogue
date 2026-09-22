@@ -10,7 +10,8 @@ const targets = [
   "rocket_mining_economy_tests",
   "rocket_controller_input_tests",
   "rocket_app_services_tests",
-  "rocket_controller_focus_tests"
+  "rocket_controller_focus_tests",
+  "rocket_travel_camera_tests"
 ];
 
 function artifacts(target) {

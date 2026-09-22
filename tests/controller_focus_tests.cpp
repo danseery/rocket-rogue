@@ -697,8 +697,7 @@ void generatedPanelPass(int width, int height)
     assert(!state->run.mining.miniDrones.empty());
     while (!state->incomingMessages.pending.empty())
         assert(rocket::acknowledgeIncomingMessage(state->incomingMessages, state->incomingMessages.pending.front().id));
-    // Separately exercise an owned/unassigned frame while a loadout recall
-    // is in progress; normal additive assignments no longer require recall.
+    // Old recall state, remote workers and cargo must not disable Drone Ops.
     state->meta.equippedDroneIds.clear();
     state->run.mining.miniDrones.clear();
     state->run.mining.droneLoadoutRecallActive = true;
@@ -706,29 +705,30 @@ void generatedPanelPass(int width, int height)
     assert(ioPanel.contentMarkup.find("data-hazard-support=\"unassigned\"") != std::string::npos);
     assert(ioPanel.contentMarkup.find("Commission Hazard Drone") == std::string::npos);
     audit("Io owned unassigned away from service");
-    const auto assertAssignmentDisabled = [&] {
+    const auto assertAssignmentReady = [&] {
         Rml::ElementList actions;
         document()->GetElementById("rr-panel")->QuerySelectorAll(actions, "button[data-rr-action]");
+        const auto owned = std::find_if(catalog.miniDrones.begin(), catalog.miniDrones.end(),
+            [](const auto& drone) { return drone.id == rocket::content::drone::hazardDrone; });
+        const auto ownedAction = rocket::ui::actions::equipDrone(static_cast<int>(owned-catalog.miniDrones.begin()));
+        bool found = false;
         for (auto* action : actions) {
             const auto id = action->GetAttribute<Rml::String>("data-rr-action", "");
-            if (id.starts_with("equip_drone:") || id.starts_with("unequip_drone_slot:")) assert(action->HasAttribute("disabled"));
+            if (id == ownedAction) { found = true; assert(!action->HasAttribute("disabled")); }
         }
+        assert(found);
+        assert(!document()->GetElementById("rr-panel")->QuerySelector("button[data-rr-action=\"mining_wait_for_drones\"]"));
     };
-    assertAssignmentDisabled();
+    assertAssignmentReady();
     state->run.mining.droneX = state->run.mining.returnZoneX;
     rocket::MiningMiniDroneAgent hauling;
     hauling.haulMaterials.common = 3;
     state->run.mining.miniDrones.push_back(hauling);
     audit("Io service outstanding drones");
-    assertAssignmentDisabled();
-    assert(document()->GetElementById("rr-panel")->QuerySelector("button[data-rr-action=\"mining_wait_for_drones\"]"));
+    assertAssignmentReady();
     ui.requestFocus("modal:surface");
     assert(ui.navigate(rocket::UiDirection::Down));
-    assert(ui.focusedId() == "action:mining_wait_for_drones");
-    assert(ui.navigate(rocket::UiDirection::Down));
     assert(soleFocus(ui)->Closest(".drone-controller-choice-row"));
-    assert(ui.navigate(rocket::UiDirection::Up));
-    assert(ui.focusedId() == "action:mining_wait_for_drones");
     assert(ui.navigate(rocket::UiDirection::Up));
     assert(soleFocus(ui)->Closest(".drone-workspace-actions"));
     auto& deployedWorker = state->run.mining.miniDrones.back();
@@ -739,8 +739,7 @@ void generatedPanelPass(int width, int height)
     assert(rocket::miningDroneRecoveryStatus(state->run.mining).outstandingDrones == 0);
     assert(rocket::miningDroneRecoveryStatus(state->run.mining, true).outstandingDrones > 0);
     audit("Io service empty deployed worker");
-    assertAssignmentDisabled();
-    assert(document()->GetElementById("rr-panel")->QuerySelector("button[data-rr-action=\"mining_wait_for_drones\"]"));
+    assertAssignmentReady();
     deployedWorker.x = state->run.mining.returnZoneX;
     deployedWorker.behavior = rocket::MiningMiniDroneBehavior::Docked;
     assert(rocket::miningDroneRecoveryStatus(state->run.mining, true).outstandingDrones == 0);

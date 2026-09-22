@@ -39,6 +39,32 @@
 
 namespace rocket {
 struct OrbitalLandingTestAccess {
+    static void straylightRevealDeparture(RocketGameApp& app, bool skip) {
+        app.debugStartExpedition();
+        app.state_.incomingMessages = {};
+        app.services_.ui.closeModal();
+        auto& e=app.state_.run.expedition;
+        auto& f=app.session_.flight;
+        const auto* earth=systemBody(solarSystemDefinition(),"earth");
+        e.location={"solar","earth",CoordinateFrame::Body,earth->dockOffset,{},0,earth->siteId};
+        e.active=false; e.undockReady=false; e.straylightRevealed=true;
+        f.active=false; f.fuelRemaining=25; f.hullRemaining=100;
+        restoreSystemLocation(e.location,f);
+        assert(departHome(app.state_,app.catalog_)==ExpeditionResult::Applied);
+        app.session_.preparedLaunch=expeditionFlightModel(app.state_,app.catalog_);
+        app.state_.meta.straylightStage=StraylightStage::Reveal;
+        if(skip) app.runUiAction("expedition:straylight:skip");
+        else for(int i=0;i<52;++i) app.advancePresentation(.25);
+        assert(app.state_.meta.straylightStage==StraylightStage::Invitation);
+        assert(app.session_.flightArmed && e.undockReady && !f.active);
+        app.runUiAction("expedition:straylight:invitation");
+        assert(app.session_.flightArmed && e.undockReady && !f.active);
+        app.launchMove(0,0);
+        app.launchMove(0,1);
+        app.tick(.05);
+        assert(f.active && !e.undockReady && e.location.siteId.empty());
+        assert(f.fuelRemaining<25);
+    }
     static void dockingArrival(RocketGameApp& app) {
         app.debugStartExpedition();
         app.state_.incomingMessages = {};
@@ -465,7 +491,10 @@ struct OrbitalLandingTestAccess {
         app.surfaceArrival_ = {};
     }
     static void revisitSurveyedShaft(RocketGameApp& app, const PlanetLandingZone& zone) {
-        app.surfaceArrival_.prepared->laserComplete = true;
+        refreshOrbitalBoreReach(app.state_, app.catalog_, *app.surfaceArrival_.prepared);
+        excavateOrbitalShaft(*app.surfaceArrival_.prepared,
+            surfaceDepthRating(app.state_, SurfaceDepthUpgradeKind::BoreSystem), 100.0);
+        assert(app.surfaceArrival_.prepared->laserComplete);
         app.storeOrbitalSite();
         app.surfaceArrival_ = {};
         app.session_.orbitalWork = {};
@@ -475,7 +504,7 @@ struct OrbitalLandingTestAccess {
         assert(app.surfaceArrival_.prepared->laserComplete);
         assert(app.orbitalLandingEligible());
     }
-    static void titanLandingRequiresDepthRoute(RocketGameApp& app) {
+    static void titanLandingAllowsManualDepthRoute(RocketGameApp& app) {
         app.debugStartExpedition();
         app.state_.incomingMessages = {};
         app.services_.ui.closeModal();
@@ -511,7 +540,7 @@ struct OrbitalLandingTestAccess {
         app.session_.orbitalWork.phase = OrbitalWorkPhase::LaserReady;
         app.session_.orbitalWork.surveyComplete = true;
         app.surfaceArrival_.prepared->surveyComplete = true;
-        assert(!app.orbitalLandingEligible());
+        assert(app.orbitalLandingEligible()); // Manual excavation never requires an orbital bore.
         app.surfaceArrival_.prepared->laserComplete = true;
         assert(app.orbitalLandingEligible());
         app.surfaceArrival_.prepared->laserComplete = false;
@@ -1946,6 +1975,8 @@ void straylightSequenceActionsAndArrival()
     auto fixture = std::make_unique<AppFixture>();
     assert(fixture->runner.initialize());
     auto& app=fixture->runner.app();
+    rocket::OrbitalLandingTestAccess::straylightRevealDeparture(app,false);
+    rocket::OrbitalLandingTestAccess::straylightRevealDeparture(app,true);
     app.debugStartStraylight(0);
     for (int i=0;i<10;++i) app.advancePresentation(.1);
     for (int i=0;i<120;++i) app.tick(.03);
@@ -1956,12 +1987,12 @@ void straylightSequenceActionsAndArrival()
     assert(fixture->ui.html.find("data-modal=\"system_menu\"")!=std::string::npos);
     assert(fixture->ui.html.find("data-modal=\"settings\"")!=std::string::npos);
     fixture->ui.dispatchAction("expedition:straylight:skip");
-    assert(fixture->ui.html.find("Signal recognized. All six fragments accounted for.")!=std::string::npos);
+    assert(fixture->ui.html.find("Bring me the artifacts you recovered.")!=std::string::npos);
     fixture->ui.dispatchAction("expedition:straylight:skip");
-    assert(fixture->ui.html.find("Signal recognized.")!=std::string::npos);
+    assert(fixture->ui.html.find("I can still think")!=std::string::npos);
     app.debugStartStraylight(1);
     fixture->ui.dispatchAction("expedition:straylight:skip");
-    assert(fixture->ui.html.find("beacons left by Straylight")!=std::string::npos);
+    assert(fixture->ui.html.find("That is the name on my hull.")!=std::string::npos);
     fixture->ui.dispatchAction("expedition:straylight:retrieve");
     assert(fixture->ui.html.find("Install carried beacons")!=std::string::npos);
     assert(fixture->ui.html.find("MISSION ARTIFACTS READY")==std::string::npos);
@@ -2048,7 +2079,7 @@ void missionScanPresentationAndNavigation()
     {
         auto fixture = std::make_unique<AppFixture>();
         assert(fixture->runner.initialize());
-        rocket::OrbitalLandingTestAccess::titanLandingRequiresDepthRoute(fixture->runner.app());
+        rocket::OrbitalLandingTestAccess::titanLandingAllowsManualDepthRoute(fixture->runner.app());
         fixture->runner.shutdown();
     }
     for (int destination : {0, 1}) {
@@ -2203,7 +2234,7 @@ void missionScanPresentationAndNavigation()
         rocket::PreparedLaunch launch;
         rocket::PanelRenderContext context{*state, catalog, launch, launch};
         context.launchFlight = &flight; context.orbitalWork = &work;
-        context.orbitalInsideZone = true; context.orbitalLandingEligible = false;
+        context.orbitalInsideZone = true; context.orbitalLandingEligible = true;
         context.orbitalArtifactDepth = 2;
         FakeUi ui;
         ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
@@ -2211,14 +2242,14 @@ void missionScanPresentationAndNavigation()
         assert(ui.html.find("Artifact signal") != std::string::npos);
         assert(ui.html.find("Depth +2") != std::string::npos);
         assert(ui.html.find("Hold to Drill Descent Shaft") != std::string::npos);
-        assert(ui.html.find("Land after shaft is ready") != std::string::npos);
+        assert(ui.html.find("Land at mission site") != std::string::npos);
         assert(ui.html.find("Optional") == std::string::npos);
-        assert(ui.html.find("action:orbital_drill") < ui.html.find("Land after shaft is ready"));
+        assert(ui.html.find("Survey upgrades reveal deeper detail") != std::string::npos);
 
         context.orbitalLaserComplete = true;
         context.orbitalLandingEligible = true;
         ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
-        assert(ui.html.find("Shaft ready") != std::string::npos);
+        assert(ui.html.find("Upgrade Bore or land and drill deeper manually") != std::string::npos);
         assert(ui.html.find("Land at mission site") != std::string::npos);
     }
 }
@@ -2619,7 +2650,6 @@ void ioCommissioningReceiptsAndMiningRepairStayExplicit()
         const auto repeated = deserializeSaveData(fixture->saves.value);
         assert(repeated && hazardCount(*repeated) == 1 && repeated->equippedDroneIds == before->equippedDroneIds);
         fixture->ui.dispatchAction("drone_ops");
-        const auto serviceBefore = fixture->saves.value;
         const auto hazard = std::find_if(catalog.miniDrones.begin(), catalog.miniDrones.end(),
             [](const auto& drone) { return drone.id == content::drone::hazardDrone; });
         assert(hazard != catalog.miniDrones.end());
@@ -2627,20 +2657,15 @@ void ioCommissioningReceiptsAndMiningRepairStayExplicit()
         fixture->ui.dispatchAction("equip_drone:" + std::to_string(std::distance(catalog.miniDrones.begin(), hazard)));
         const auto assigned = deserializeSaveData(fixture->saves.value);
         assert(assigned);
-        if (hauling || remoteWorker) {
-            assert(fixture->saves.value == serviceBefore);
-            assert(assigned->equippedDroneIds == before->equippedDroneIds &&
-                assigned->mining.miniDrones.front().haulMaterials.common == (hauling ? 3 : 0));
-            fixture->ui.dispatchAction("mining_wait_for_drones");
-            assert(fixture->runner.app().currentScreen() == static_cast<int>(Screen::Mining));
-            const auto recalled = deserializeSaveData(fixture->saves.value);
-            assert(recalled && recalled->mining.miniDrones.size() == 2 &&
-                recalled->equippedDroneIds == before->equippedDroneIds &&
-                recalled->mining.miniDrones.front().haulMaterials.common == (hauling ? 3 : 0));
-        } else {
-            assert(assigned->equippedDroneIds.size() == 2 &&
-                std::count(assigned->equippedDroneIds.begin(), assigned->equippedDroneIds.end(), content::drone::hazardDrone) == 1);
-        }
+        assert(assigned->equippedDroneIds.size() == 2 &&
+            std::count(assigned->equippedDroneIds.begin(), assigned->equippedDroneIds.end(), content::drone::hazardDrone) == 1);
+        assert(assigned->mining.miniDrones.size() == 2 && !assigned->mining.droneLoadoutRecallActive);
+        assert(assigned->mining.stowedMaterials.common == before->mining.stowedMaterials.common + (hauling ? 3 : 0));
+        assert(fixture->runner.app().currentScreen() == static_cast<int>(Screen::DroneOps));
+        fixture->ui.dispatchAction("back_to_surface_ops");
+        fixture->ui.dispatchAction("drone_ops");
+        const auto reopened = deserializeSaveData(fixture->saves.value);
+        assert(reopened && reopened->mining.stowedMaterials.common == assigned->mining.stowedMaterials.common);
         fixture->runner.shutdown();
     }
 }
@@ -3027,14 +3052,18 @@ int main(int argc, char** argv)
         assert(before.active && changed.active);
         assert(std::hypot(changed.shipX-before.shipX,changed.shipY-before.shipY) < .01);
         composer.setPresentationTime(10.625);
+        view.animationTime = .625;
         const auto middle = composer.compose(view).flightPointer;
-        assert(std::hypot(middle.shipX-before.shipX,middle.shipY-before.shipY) > 1.0);
-        // A second retarget during the blend must start at the displayed pose.
+        // Waypoint changes may ease zoom, but no longer displace a coasting
+        // ship toward the leading edge of the travel viewport.
+        assert(std::hypot(middle.shipX-before.shipX,middle.shipY-before.shipY) < .01);
+        // A second retarget also preserves the displayed ship position.
         view.flightGuidance.targetId = "wreck:2";
         view.flightGuidance.targetPosition = {48,51};
         const auto interrupted = composer.compose(view).flightPointer;
         assert(std::hypot(interrupted.shipX-middle.shipX,interrupted.shipY-middle.shipY) < .01);
         composer.setPresentationTime(11.875);
+        view.animationTime = 1.875;
         const auto finished = composer.compose(view).flightPointer;
         rocket::SceneComposer fresh;
         fresh.setViewport({1280,800,1280,800,1.0F});
@@ -4616,13 +4645,15 @@ int main(int argc, char** argv)
     {
         AppFixture fixture;
         fixture.saves.value = readyMiningDepartureSave();
-        const std::string preDepartureSave = fixture.saves.value;
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
         completeTitleLaunch(fixture);
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
         assert(fixture.ui.html.find("data-rr-action=\"mining_depart\"") != std::string::npos);
         const int storesBeforeDeparture = fixture.saves.storeCount;
+        // Ship-side deliveries can save during resumed gameplay; compare the
+        // ritual against the latest committed state immediately before departure.
+        const std::string preDepartureSave = fixture.saves.value;
 
         fixture.ui.dispatchAction("mining_depart");
         fixture.host.now += 1.0 / 120.0;
@@ -4861,8 +4892,16 @@ int main(int argc, char** argv)
         assert(fixture.saves.value == originalSave);
 
         const std::uint64_t stateBeforeInvalidLesson = fixture.runner.app().deterministicStateHash();
-        fixture.runner.app().debugStartLaunchLesson(6);
+        fixture.runner.app().debugStartLaunchLesson(7);
         assert(fixture.runner.app().deterministicStateHash() == stateBeforeInvalidLesson);
+        assert(fixture.saves.value == originalSave);
+        fixture.runner.app().debugStartLaunchLesson(6);
+        for (int frame=0;frame<120;++frame) {
+            fixture.host.now += 1.0/60.0;
+            fixture.runner.frame();
+        }
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Flight));
+        assert(fixture.saves.storeCount == originalStoreCount);
         assert(fixture.saves.value == originalSave);
         fixture.runner.app().debugStartLaunchLesson(4);
         for (int frame=0;frame<48;++frame) {

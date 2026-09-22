@@ -2,6 +2,9 @@
 #include "core/ExpeditionSystem.h"
 
 namespace rocket {
+constexpr bool straylightIdentityKnown(StraylightStage stage) { return stage >= StraylightStage::FirstContact; }
+SystemDefinition solarPresentationSystem(const GameState&);
+bool straylightRevealInRange(const GameState&, const FlightRunState&);
 bool straylightOwnsPresentation(const GameState&);
 bool straylightCommitted(const GameState&);
 double straylightCinematicDuration(StraylightStage);

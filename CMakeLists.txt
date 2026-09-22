@@ -76,6 +76,7 @@ endforeach()
 file(GLOB_RECURSE ROCKET_UI_ASSET_FILES CONFIGURE_DEPENDS
     "${ROCKET_UI_ASSET_DIRECTORY}/*.rml"
     "${ROCKET_UI_ASSET_DIRECTORY}/*.rcss"
+    "${ROCKET_UI_ASSET_DIRECTORY}/save-icon.png"
     "${ROCKET_UI_ASSET_DIRECTORY}/portraits/*.png"
     "${ROCKET_UI_ASSET_DIRECTORY}/planets/*.png")
 list(SORT ROCKET_UI_ASSET_FILES)
@@ -263,6 +264,10 @@ add_executable(rocket_scene_atlas_tests tests/scene_atlas_tests.cpp)
 target_include_directories(rocket_scene_atlas_tests PRIVATE src)
 set_target_properties(rocket_scene_atlas_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
 
+add_executable(rocket_travel_camera_tests tests/travel_camera_tests.cpp)
+target_link_libraries(rocket_travel_camera_tests PRIVATE rocket_app)
+set_target_properties(rocket_travel_camera_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tests")
+
 set(ROCKET_TEST_TARGETS
     rocket_core_tests
     rocket_mining_progression_tests
@@ -272,7 +277,8 @@ set(ROCKET_TEST_TARGETS
     rocket_controller_focus_tests
     rocket_performance_metrics_tests
     rocket_frame_capture_tests
-    rocket_scene_atlas_tests)
+    rocket_scene_atlas_tests
+    rocket_travel_camera_tests)
 foreach(test_target IN LISTS ROCKET_TEST_TARGETS)
     # The lightweight tests use assert() for both execution and verification. Keep
     # those checks live in Release/RelWithDebInfo so optimized test runs exercise
@@ -289,6 +295,7 @@ if(EMSCRIPTEN)
     foreach(test_target IN LISTS ROCKET_TEST_TARGETS)
         target_link_options(${test_target} PRIVATE -sSTACK_SIZE=2097152 -sALLOW_MEMORY_GROWTH=1)
     endforeach()
+    target_link_options(rocket_travel_camera_tests PRIVATE -sASSERTIONS=1 -g)
     # Shared UI tests load real documents and fonts. Node's WebAssembly
     # filesystem cannot read the checkout without explicitly packaged assets.
     target_link_options(rocket_app_services_tests PRIVATE
@@ -311,6 +318,7 @@ if(EMSCRIPTEN)
     add_test(NAME rocket_performance_metrics_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_performance_metrics_tests>")
     add_test(NAME rocket_frame_capture_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_frame_capture_tests>")
     add_test(NAME rocket_scene_atlas_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_scene_atlas_tests>")
+    add_test(NAME rocket_travel_camera_tests COMMAND "${ROCKET_TEST_NODE}" "$<TARGET_FILE:rocket_travel_camera_tests>")
 else()
     add_test(NAME rocket_core_tests COMMAND rocket_core_tests)
     add_test(NAME rocket_mining_progression_tests COMMAND rocket_mining_progression_tests)
@@ -321,6 +329,7 @@ else()
     add_test(NAME rocket_performance_metrics_tests COMMAND rocket_performance_metrics_tests)
     add_test(NAME rocket_frame_capture_tests COMMAND rocket_frame_capture_tests)
     add_test(NAME rocket_scene_atlas_tests COMMAND rocket_scene_atlas_tests)
+    add_test(NAME rocket_travel_camera_tests COMMAND rocket_travel_camera_tests)
 endif()
 
 find_program(ROCKET_NODE_EXECUTABLE NAMES node node.exe REQUIRED)
@@ -332,6 +341,8 @@ add_test(NAME rocket_rmlui_resource_graph_tests
     COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/validate-rmlui-resources.test.mjs")
 add_test(NAME rocket_web_shell_input_contract_tests
     COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/web-shell-input-contract.test.mjs")
+add_test(NAME rocket_web_save_storage_tests
+    COMMAND "${ROCKET_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/web-save-storage.test.mjs")
 set(ROCKET_UI_VALIDATION_STAMP "${CMAKE_CURRENT_BINARY_DIR}/validate-rocket-ui-resources.stamp")
 add_custom_command(
     OUTPUT "${ROCKET_UI_VALIDATION_STAMP}"

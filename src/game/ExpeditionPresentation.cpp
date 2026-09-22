@@ -266,7 +266,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         panel.runtime.responsiveViewport=true;
         return;
     }
-    const auto& system = solarSystemDefinition();
+    const auto system = solarPresentationSystem(state);
     const auto& flight = c.launchFlight ? *c.launchFlight : state.run.flight;
     auto location = e.location;
     captureSystemLocation(location, flight);
@@ -421,7 +421,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         << "</p>";
     if (mapTarget) {
         const bool alreadyDockedHere = atOperationalDock && e.location.bodyId == mapTarget->id;
-        const std::string mapTargetName = mapTarget->dock ? mapTarget->name + " Orbital Dock" : mapTarget->name;
+        const std::string mapTargetName = mapTarget->dock && mapTarget->name != "The Anomaly" ? mapTarget->name + " Orbital Dock" : mapTarget->name;
         map << "<section class=\"solar-selection\"><div class=\"solar-selection-copy\"><h3>" << esc(mapTargetName)
             << "</h3><p>" << (alreadyDockedHere ? "Currently docked here. The planet surface is not landable; choose another revealed world" :
                 mapTarget->dock ? "Rendezvous with the service dock; the planet surface is not landable" :
@@ -528,7 +528,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         panel.runtime.responsiveViewport = true;
     }
     if (stage == Stage::RevealPending) {
-        panel.contentMarkup += "<section class=\"straylight-contact\"><strong>CONTACT RESOLVED - STRAYLIGHT</strong><p>WAYPOINT SET / Depart when ready.</p></section>";
+        panel.contentMarkup += "<section class=\"straylight-contact\"><strong>THE ANOMALY</strong><p>UNIDENTIFIED SIGNAL / Waypoint set. Depart when ready.</p></section>";
     }
     if (stage == Stage::RetrieveBeacons && atOperationalDock && e.location.bodyId == "earth") {
         const bool stored = std::any_of(e.batteries.begin(), e.batteries.end(), [](const auto& b) { return b.owner == BatteryOwner::EarthStorage; });
@@ -586,7 +586,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
             // starts the physical berth maneuver. Straylight keeps its distinct
             // story-corridor interaction until its own docking design exists.
             : dockInRange && e.course.targetBodyId == "straylight"
-                ? "<div class=\"expedition-dock-action\">" + button("Enter Straylight corridor", "expedition:dock", dockReady, "ok", flightDefaultAvailable && dockReady) + "</div>"
+                ? "<div class=\"expedition-dock-action\">" + button(straylightIdentityKnown(stage) ? "Enter Straylight corridor" : "Enter The Anomaly corridor", "expedition:dock", dockReady, "ok", flightDefaultAvailable && dockReady) + "</div>"
                 : std::string{});
         for (const auto& wreck : e.wrecks) {
             if (!canSalvageWreck(e, flight, system, wreck.id, false)) continue;
