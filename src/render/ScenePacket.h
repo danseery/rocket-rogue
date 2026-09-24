@@ -109,6 +109,7 @@ enum class TextureId : std::uint8_t {
     MiningTunnelBackdrop,
     EnemySecurityDrone,
     StraylightDock,
+    Sun,
     Count
 };
 

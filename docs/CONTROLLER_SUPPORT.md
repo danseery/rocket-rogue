@@ -88,3 +88,13 @@ Incoming Messages use the shared modal focus scope: Accept activates the single 
 ## Earth launch and dock departure
 
 The first-flight Mission Control card shows current steering and thrust bindings and requires an explicit Ready to launch acknowledgement. The ship remains held at Earth afterward. Activate the focused Launch button with Accept (Enter / controller South), or click it, to begin flight; fresh steering and thrust inputs are required. Earth appears below-left and Moon above-right. Right-stick horizontal input steers; the left stick supplies strafe and forward/reverse thrust with the configured Y inversion. After Depart dock, forward thrust releases the dock; plotting a course never steers or undocks. The selected-target marker, coast trajectory and next-action hint are shared with keyboard/web play.
+
+## Campaign guidance and comfortable departures
+
+Mission targets follow artifact custody automatically: the required Earth/Straylight delivery dock, or the named artifact wreck. Explicit exploration waypoints remain selected through routine handoffs until Return to mission, Track mission, or target invalidation. Navigation never enables cruise by itself. Landing areas are consistently called Sector.
+
+Powered ship ascent shares an 8 m/s acceleration governor from underground ignition, including manual left-stick throttle. Held thrust continues across the surface-to-orbit handoff; steering, lateral movement and manual braking remain available. Sustained outward thrust can still escape orbit. Every planet and moon has at least 8U beyond its influence radius free of belt collisions. Deep shafts retain local ship camera scale during initial descent and ascent.
+
+After the Moon tutorial, orbital drilling opens the top of the mission artifact layer. Use the rig to excavate the remaining approach; higher Bore ranks do not drill directly to the artifact. Existing shafts stay excavated.
+
+Informational Fennec transmissions wait eight seconds of active gameplay between acknowledgements and defer during drilling, combat, docking and local flight. Essential instructions and story decisions retain explicit acknowledgement. Drone unlocks never replace equipped drones; use Drone Ops to assign available drones when bays are occupied.

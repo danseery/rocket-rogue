@@ -59,6 +59,23 @@ void incomingMessageTests() {
         pulseMiningScanner(state, catalog);
         check(pending() == 0, "Acknowledged hazard reminder does not replay");
     }
+    {
+        auto full=createNewGame(catalog,19);
+        full.meta.unlockKeys.push_back(content::unlock::routeJupiter);
+        full.meta.unlockKeys.push_back(content::unlock::droneBay);
+        full.meta.droneBaySlots=2;
+        full.meta.ownedDroneIds={content::drone::miningDrone,content::drone::miningDrone};
+        full.meta.equippedDroneIds=full.meta.ownedDroneIds;
+        const auto equipped=full.meta.equippedDroneIds;
+        check(performScenarioAction(full,catalog,content::scenario::volcanicDescent,"commission",ScenarioActionKind::BeginActivity).applied,
+            "Io commission grants Hazard support with occupied bays");
+        check(full.meta.equippedDroneIds==equipped,"Unlock never replaces equipped drones");
+        check(std::any_of(full.incomingMessages.pending.begin(),full.incomingMessages.pending.end(),[](const auto& message) {
+            return message.messageId=="drone_arrival_"+std::string(content::drone::hazardDrone);
+        }),"Occupied bays still announce unlocked drone");
+        enqueueIncomingMessage(full.incomingMessages,catalog,{"io.brief","io_mission_briefing","default"});
+        check(reconcileMessageRelevance(full,catalog),"Associated Io briefing consolidates its duplicate drone notice");
+    }
     for (const auto& drone : catalog.miniDrones) {
         const std::string id = "drone_arrival_" + drone.id;
         check(incomingMessage(catalog, id) != nullptr, "Every drone type has a shared first-arrival introduction");
@@ -145,8 +162,10 @@ void incomingMessageTests() {
           "Missing variants must not enqueue");
     check(enqueueIncomingMessage(queue, catalog, {"repair.1", "repair_report", "default"}),
           "Second speaker must enqueue");
-    check(!acknowledgeIncomingMessage(queue, "repair.1"),
-          "Cannot acknowledge an occurrence behind the visible head");
+    auto priorityQueue=queue;
+    check(acknowledgeIncomingMessage(priorityQueue, "repair.1").has_value() && priorityQueue.pending.front().id=="scan.1",
+          "Eligible essential messages can acknowledge ahead of a deferred informational head");
+    check(priorityQueue.informationalCooldown==8,"Acknowledgements space informational messages by eight active seconds");
     const auto ack = acknowledgeIncomingMessage(queue, "scan.1");
     check(ack && ack->messageId == "lunar_scan", "Acknowledgement must return its typed message identity");
     check(!enqueueIncomingMessage(queue, catalog, {"scan.3", "lunar_scan", "default"}),
@@ -208,6 +227,23 @@ void incomingMessageTests() {
           "Message needs explicit acknowledgement");
     check(find(panel)->bodyMarkup.find("Your suit can fit") != std::string::npos,
           "Renderer must consume the selected content variant");
+    {
+        const auto keep=game.incomingMessages;
+        game.incomingMessages={};
+        enqueueIncomingMessage(game.incomingMessages,catalog,{"tip","rig_full_tip","default"});
+        game.incomingMessages.informationalCooldown=8;
+        auto cooling=buildGamePanelPresentation(context);
+        check(find(cooling)==cooling.modals.end(),
+              "Informational tip must wait through cooldown");
+        game.incomingMessages.informationalCooldown=0;
+        mining.drilling=true;
+        auto deferred=buildGamePanelPresentation(context);
+        check(find(deferred)==deferred.modals.end(),"Drilling defers informational interruption");
+        mining.drilling=false;
+        check(reconcileMessageRelevance(game,catalog) && game.incomingMessages.pending.empty(),
+              "Unloaded rig retires stale full-cargo tip");
+        game.incomingMessages=keep;
+    }
     mining.scannerPulseSeconds = 0.2;
     panel = buildGamePanelPresentation(context);
     check(find(panel) == panel.modals.end(), "Discovery animation must finish before the card opens");

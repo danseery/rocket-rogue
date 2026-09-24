@@ -7,11 +7,19 @@
 #include "core/ScenarioSystem.h"
 #include "core/ResearchSystem.h"
 #include "core/SolarProgression.h"
+#include "core/PostSolarSystem.h"
 #include <algorithm>
 #include <cmath>
 #include <charconv>
 
 namespace rocket {
+namespace {
+SystemDefinition guidanceSystem(const GameState& state) {
+    if (const auto* roster = findPostSolarSystemRoster(state.meta, state.run.expedition.location.systemId))
+        return systemDefinitionForRoster(*roster);
+    return solarPresentationSystem(state);
+}
+}
 const WreckState* courseWreck(const PersistentExpeditionState& e, std::string_view target) {
     if (!target.starts_with("wreck:")) return nullptr;
     target.remove_prefix(6);
@@ -23,7 +31,7 @@ const WreckState* courseWreck(const PersistentExpeditionState& e, std::string_vi
 }
 std::optional<SystemLocation> courseTargetLocation(const PersistentExpeditionState& e,
     const SystemDefinition& system, std::string_view target) {
-    if (const auto* wreck = courseWreck(e,target))
+    if (const auto* wreck = courseWreck(e,target); wreck && wreck->location.systemId==system.id)
         return convertSystemFrame(wreck->location,CoordinateFrame::System,"",system);
     if (const auto* body = systemBody(system,target))
         return SystemLocation{system.id,body->id,CoordinateFrame::System,systemNavigationPosition(*body),body->velocity,0,{}};
@@ -53,47 +61,40 @@ bool reconcileCampaignGuidance(GameState& state,const ContentCatalog& catalog,bo
     reconcileArtifactCustody(state,catalog);
     bankMissionArtifacts(state,catalog);
     auto& e=state.run.expedition;
-    if (!e.travelInitialized || e.location.systemId!="solar") return false;
+    if (!e.travelInitialized) return false;
+    const auto system = guidanceSystem(state);
+    if (system.id != e.location.systemId) return false;
     const auto& f=state.run.flight;
     bool changed=reconcileTrackedMission(state,catalog);
     const bool docked=operationalHomeDocked(e);
     if (e.coursePlayerSelected && followNow) { e.coursePlayerSelected=false; changed=true; }
-    if (e.coursePlayerSelected && !e.course.targetBodyId.starts_with("wreck:") &&
-        e.location.bodyId == e.course.targetBodyId) {
-        const auto* selectedBody = systemBody(solarSystemDefinition(), e.course.targetBodyId);
-        const bool reachedDock = selectedBody != nullptr && selectedBody->dock &&
-            e.location.siteId == selectedBody->siteId;
-        const bool capturedHere = state.run.flight.orbit.captured &&
-            state.run.flight.mode == FlightMode::Orbit;
-        const bool landedHere = state.run.flight.landing.siteCommitted;
-        if (reachedDock || capturedHere || landedHere) { e.coursePlayerSelected=false; changed=true; }
-    }
-    if (e.course.targetBodyId.starts_with("wreck:") && !courseWreck(e,e.course.targetBodyId)) {
+    if (!e.course.targetBodyId.empty() && !courseTargetLocation(e,system,e.course.targetBodyId)) {
         e.course={}; e.cruise={}; e.coursePlayerSelected=false; changed=true;
     }
     const auto objective=recommendedCampaignObjective(state,catalog);
-    if (!e.coursePlayerSelected && (docked || followNow) && e.course.targetBodyId!=objective.targetId) {
+    if (!e.coursePlayerSelected && e.course.targetBodyId!=objective.targetId) {
         if (objective.targetId.empty()) e.course={};
-        else if (plotSystemCourse(e,f,solarSystemDefinition(),objective.targetId)!=ExpeditionResult::Applied) return changed;
+        else if (plotSystemCourse(e,f,system,objective.targetId)!=ExpeditionResult::Applied) return changed;
         e.cruise={}; changed=true;
     }
-    if (docked && state.meta.shipsLost > 0 && !e.wrecks.empty()) {
+    if (docked && state.meta.shipsLost > 0 && !e.wrecks.empty() && objective.kind!=CampaignObjectiveKind::RecoverArtifact) {
         changed |= enqueueIncomingMessage(state.incomingMessages, catalog,
             {"tutorial.wreck_salvage", "wreck_salvage_intro", "default"});
     }
     if (docked && objective.kind==CampaignObjectiveKind::RecoverArtifact) {
+        changed |= std::erase_if(state.incomingMessages.pending, [](const auto& message) { return message.messageId == "wreck_salvage_intro"; }) > 0;
         const bool queued = enqueueIncomingMessage(state.incomingMessages,catalog,
             {"recovery.wreck."+std::to_string(objective.wreckId),"artifact_wreck_recovery","default"});
         changed |= queued;
         if (queued) state.statusLine = "RECOVERY REQUIRED - Artifact in Wreck " +
-            std::to_string(objective.wreckId) + ". Rendezvous, salvage it, then return to the Earth dock to complete the mission.";
+            std::to_string(objective.wreckId) + ". Salvage it, then follow the mission's delivery waypoint.";
     }
     return changed;
 }
 FlightGuidance expeditionGuidance(const GameState& state, bool surveyed, bool laserComplete) {
     const auto& e = state.run.expedition;
     const auto& f = state.run.flight;
-    const auto system = solarPresentationSystem(state);
+    const auto system = guidanceSystem(state);
     FlightGuidance g;
     const auto* frame = e.location.frame == CoordinateFrame::Body ? systemBody(system,e.location.bodyId) : nullptr;
     const auto* target = systemBody(system,e.course.targetBodyId);
@@ -331,7 +332,16 @@ void recordExpeditionArrival(GameState& state, const ContentCatalog& catalog, co
     if (!e.travelInitialized || state.run.flight.phase != FlightPhase::Landed || outcome.type != LaunchResultType::MissionComplete) return;
     const auto* body = systemBody(solarSystemDefinition(), e.location.bodyId);
     if (!body || !body->authoredObjectives || body->dock || body->siteId.empty()) return;
-    if (std::any_of(e.sites.begin(),e.sites.end(),[&](const auto& site) { return site.systemId==e.location.systemId && site.siteId==body->siteId; })) return;
+    // Reuse the saved expedition milestone ledger for an atomic payout receipt.
+    // Legacy saves also retain real touchdown evidence in visited site state.
+    const std::string receipt = "arrival_reward:" + e.location.systemId + ":" + body->id;
+    auto& receipts = e.decision.acknowledgedIds;
+    if (std::find(receipts.begin(),receipts.end(),receipt) != receipts.end()) return;
+    const bool previouslyLanded = std::any_of(e.sites.begin(),e.sites.end(),[&](const auto& site) {
+        return site.systemId==e.location.systemId && site.bodyId==body->id && (site.surface.transferFuelRecovered > 0 || site.mining.elapsedSeconds > 0);
+    });
+    receipts.push_back(receipt);
+    if (previouslyLanded) return;
     e.cargo.credits += std::max(0.0, outcome.payout-outcome.recoveryCost);
     recordScenarioEvent(state,catalog,{ScenarioEventKind::DestinationReached,{},{},{},body->environmentId,1,0});
 }

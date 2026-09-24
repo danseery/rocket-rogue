@@ -155,7 +155,8 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
     v.title = "Ore and artifact recovery"; v.optional = m->optional;
     v.complete = solarMissionClaimed(s, catalog, *m); v.artifactId = m->artifactId;
     v.sectorId = artifactSectorForBody(s, e.location.systemId.empty() ? "solar" : e.location.systemId, m->bodyId);
-    const std::string dock = servicingDockName("earth");
+    const std::string dockId = custody && !custody->requiredDockId.empty() ? custody->requiredDockId : "earth";
+    const std::string dock = servicingDockName(dockId);
     v.purpose = m->bodyId == "moon" ? firstMoonMissionInstructions(s, catalog) : "Collect the artifact, then complete the mission at the " + dock + ". Artifacts aboard are at risk until then.";
     if (m->bodyId == "mars") v.purpose = "Mars's artifact is underground. Scan the mission sector, hold Drill to prepare a shaft, then land and use the surface scanner to locate it. Return the ore and artifact to your ship, then complete the mission at Earth dock.";
     if (m->bodyId == "titan") v.purpose = "Titan's artifact is at Depth +2. Scan the mission sector, hold Drill to open the descent shaft, then land and follow the route underground with the surface scanner.";
@@ -272,17 +273,17 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
         return v;
     }
     if (claim.state == ScenarioStepState::ReadyToClaim && !v.complete) {
-        v.targetId = "earth";
-        set("claim", "Complete " + body->name + " mission at Earth dock");
+        v.targetId = dockId;
+        set("claim", "Complete " + body->name + " mission at the " + dock);
         v.action = ui::actions::scenarioAction(m->scenarioId, m->claimStepId, static_cast<int>(ScenarioActionKind::ClaimReward));
         return v;
     }
     if (aboard && !banked) {
-        v.kind = CampaignObjectiveKind::SecureArtifact; v.targetId = "earth";
+        v.kind = CampaignObjectiveKind::SecureArtifact; v.targetId = dockId;
         set("dock", "Return to the " + dock + " to complete the mission"); return v;
     }
     if (banked && !v.complete) {
-        v.targetId = "earth"; set("handin", "Complete Mission at the " + dock); return v;
+        v.targetId = dockId; set("handin", "Complete Mission at the " + dock); return v;
     }
     if (v.complete) { set("complete", "Mission complete"); return v; }
     if (v.arrivalStage && e.arrivalTutorials[tutorial].landed) {

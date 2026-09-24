@@ -10,11 +10,9 @@ const std::vector<SystemAsteroid>& solarAsteroidBelt()
 {
     static const auto rocks = [] {
         std::vector<SystemAsteroid> result;
-        const auto* mars = systemBody(solarSystemDefinition(), "mars");
-        // At the widest normal travel scale (.25), a screen spans eight
-        // world units vertically. Keep that much real clearance beyond
-        // Mars's orbital region, including rock and ship collision radii.
-        const double marsClearance = mars ? mars->influenceRadius + 8.0 : 0.0;
+        // Leave the same departure/braking runway on every side of every
+        // planet and moon. Filtering preserves all other authored rocks.
+        const auto& bodies = solarSystemDefinition().bodies;
         constexpr int perRing = 160;
         // Fixed hash: irregular, but identical for rendering, collision and saves.
         const auto jitter = [](std::uint32_t seed) {
@@ -28,8 +26,11 @@ const std::vector<SystemAsteroid>& solarAsteroidBelt()
             const double radius = 24.35 + row*.85 + .60*(jitter(seed*3+1)-.5);
             const double scale = .65 + .70*jitter(seed*3+2);
             const SystemVector position {radius*std::cos(angle),radius*std::sin(angle)};
-            if (mars && std::hypot(position.x-mars->position.x, position.y-mars->position.y) <=
-                    marsClearance + .12*scale + .075) continue;
+            if (std::any_of(bodies.begin(), bodies.end(), [&](const auto& body) {
+                return body.kind != SystemBodyKind::Star && body.kind != SystemBodyKind::Station &&
+                    std::hypot(position.x-body.position.x, position.y-body.position.y) <=
+                        body.influenceRadius + 8.0 + .12*scale + .075;
+            })) continue;
             result.push_back({position, .12*scale, scale});
         }
         return result;

@@ -184,11 +184,12 @@ void planetApproachAndBeltZoom() {
 }
 void boardedShipKeepsCloseUpScale()
 {
-    for (const auto size : {std::pair{1600,900},std::pair{900,1200}}) {
+    for (bool departing : {false,true}) for (const auto size : {std::pair{1600,900},std::pair{1280,800},std::pair{900,1200}}) {
         SceneComposer composer;
         composer.setViewport({size.first,size.second,size.first,size.second,1});
         auto s=fixture();
-        s.surfaceArrivalPrepared=s.manualSurfaceDeparture=s.launchLandingLocalFrame=true;
+        s.surfaceArrivalPrepared=s.launchLandingLocalFrame=true;
+        s.manualSurfaceDeparture=departing;
         s.launchLandingBlend=1;
         s.manualAscentCameraProgress=1;
         s.miningWidth=64; s.miningHeight=600; s.miningFrameHeight=40;

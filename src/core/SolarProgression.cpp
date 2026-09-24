@@ -246,27 +246,12 @@ bool reconcileSolarMissionMessages(GameState& state, const ContentCatalog& catal
     // Mission ownership survives body transitions and ship loss. Deliver any
     // earned completion from that ledger even if the player reached a new
     // body or respawned at Earth before its first safe presentation point.
-    const SolarMissionDefinition* newlyCompletedMain = nullptr;
     for (const auto& mission : catalog.solarMissions) {
         if (!solarMissionClaimed(state, catalog, mission)) continue;
         if (mission.bodyId == "triton" && state.meta.straylightStage != StraylightStage::Hidden) continue;
         const bool queued = enqueueIncomingMessage(messages, catalog,
             {"campaign.solar." + mission.bodyId + ".complete", mission.completionMessageId, "default"});
         changed |= queued;
-        if (queued && !mission.optional) newlyCompletedMain = &mission;
-    }
-    if (inFlight && newlyCompletedMain != nullptr && state.meta.straylightStage == StraylightStage::Hidden) {
-        const bool staleAutomaticCourse =
-            !expedition.coursePlayerSelected &&
-            (expedition.course.targetBodyId.empty() ||
-             expedition.course.targetBodyId == newlyCompletedMain->bodyId);
-        if (staleAutomaticCourse) {
-            const ExpeditionResult result = plotSystemCourse(
-                expedition, state.run.flight, solarSystemDefinition(), "earth");
-            changed |= result == ExpeditionResult::Applied;
-            expedition.coursePlayerSelected = false;
-            expedition.cruise.active = false;
-        }
     }
     const auto* mission = solarMissionForBody(catalog, expedition.location.bodyId);
     if (inFlight && mission != nullptr && solarMissionAvailable(state, *mission) &&

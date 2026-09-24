@@ -4069,6 +4069,26 @@ void testFlightDestructionCinematicUsesExplosionFramesAndAccessibleShake()
     assert(explosionFrame(genericDestroyed) >= 0);
 }
 
+void testSunUsesSharedTexture()
+{
+    using namespace rocket;
+    SceneComposer composer;
+    composer.setViewport({1280,800,1280,800,1});
+    composer.setTextureReady(TextureId::Sun,true);
+    RenderSnapshot snapshot;
+    snapshot.screen=Screen::Flight;
+    snapshot.launchPhysicalFlight=snapshot.systemTravel=true;
+    snapshot.system=solarSystemDefinition();
+    snapshot.systemLocation.frame=CoordinateFrame::System;
+    snapshot.launchPositionX=-3; snapshot.launchPositionY=1;
+    const auto sun=spriteInstance(composer.compose(snapshot),TextureId::Sun,0,0,1,1);
+    assert(std::hypot(sun.axisXx,sun.axisXy)>0);
+    snapshot.straylightStage=StraylightStage::Departing;
+    snapshot.straylightElapsed=6;
+    const auto cinematic=spriteInstance(composer.compose(snapshot),TextureId::Sun,0,0,1,1);
+    assert(std::hypot(cinematic.axisXx,cinematic.axisXy)>0);
+}
+
 void testSolarBeltRendering()
 {
     using namespace rocket;
@@ -4081,7 +4101,7 @@ void testSolarBeltRendering()
     snapshot.system=solarSystemDefinition();
     snapshot.systemLocation.frame=CoordinateFrame::System;
     snapshot.launchPositionX=solarAsteroidBelt().front().position.x;
-    snapshot.launchPositionY=0;
+    snapshot.launchPositionY=solarAsteroidBelt().front().position.y;
     snapshot.launchLandingBlend=0;
     snapshot.flightGuidance.targetPosition={30,9};
     // This path must not depend on the disabled legacy corridor asteroid flag.
@@ -4389,6 +4409,7 @@ int main() try
     testUiViewportLayoutGeometry();
     testFlightPointerMatchesRenderedShip();
     testSolarBeltRendering();
+    testSunUsesSharedTexture();
     testArtifactWreckMarkerUsesOwnership();
     testCommittedDepartureRendering();
     testMiningViewportReservesBothHudLanes();

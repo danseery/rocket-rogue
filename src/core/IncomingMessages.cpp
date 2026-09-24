@@ -1,6 +1,9 @@
 #include "core/IncomingMessages.h"
 #include "core/Content.h"
 #include "core/ContentIds.h"
+#include "core/GameState.h"
+#include "core/MiningSystem.h"
+#include "core/PayloadTransfer.h"
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
@@ -78,14 +81,40 @@ bool enqueueIncomingMessage(IncomingMessageState &state, const ContentCatalog &c
 }
 std::optional<MessageAcknowledgement> acknowledgeIncomingMessage(IncomingMessageState &state,
                                                                  std::string_view occurrenceId) {
-    if (state.pending.empty() || state.pending.front().id != occurrenceId)
+    const auto found = std::find_if(state.pending.begin(), state.pending.end(),
+        [&](const auto& message) { return message.id == occurrenceId; });
+    if (found == state.pending.end())
         return std::nullopt;
-    const auto occurrence = state.pending.front();
-    state.pending.erase(state.pending.begin());
+    const auto occurrence = *found;
+    state.pending.erase(found);
+    state.informationalCooldown = 8.0;
     state.acknowledgedOccurrences.push_back(occurrence.id);
     if (!contains(state.acknowledgedMessages, occurrence.messageId))
         state.acknowledgedMessages.push_back(occurrence.messageId);
     return MessageAcknowledgement{occurrence.id, occurrence.messageId};
+}
+bool reconcileMessageRelevance(GameState& game, const ContentCatalog& catalog) {
+    auto& messages = game.incomingMessages;
+    const auto explains = [&](std::string_view id) {
+        return contains(messages.acknowledgedMessages,id) || std::any_of(messages.pending.begin(), messages.pending.end(),
+            [&](const auto& item) { return item.messageId == id; });
+    };
+    // These narrative messages already explain the exact drone reward and assignment.
+    const bool prospector = explains("moon_mission_complete");
+    const bool hazard = explains("io_mission_briefing");
+    const bool attack = explains("triton_attack_drone");
+    const auto& m = game.run.mining;
+    const bool shipFull = shipHoldUsed(game) >= shipHoldCapacity(game,catalog);
+    const auto before = messages.pending.size();
+    std::erase_if(messages.pending, [&](const auto& item) {
+        if (item.messageId == "rig_full_tip") return !m.active || m.cargo < miningRigCargoCapacityMass(game,catalog) || shipFull;
+        if (item.messageId == "ship_full_tip") return !m.active || !shipFull;
+        if (item.messageId == "rig_fuel_empty_tip") return !m.active || m.rigFuel.current > 0;
+        return (prospector && item.messageId == "drone_arrival_" + std::string(content::drone::miningDrone)) ||
+            (hazard && item.messageId == "drone_arrival_" + std::string(content::drone::hazardDrone)) ||
+            (attack && item.messageId == "drone_arrival_" + std::string(content::drone::attackDrone));
+    });
+    return messages.pending.size() != before;
 }
 std::string serializeIncomingMessages(const IncomingMessageState &state) {
     std::ostringstream out;

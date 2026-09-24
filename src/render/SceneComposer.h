@@ -293,6 +293,8 @@ private:
     float sceneWorldUnitY_ = 360.0F;
     float sceneAspect_ = 16.0F / 9.0F;
     SurfaceCameraPresentation surfaceCamera_;
+    bool localShipFloorActive_ = false;
+    double localShipFloorX_ = 0.0, localShipFloorY_ = 0.0;
     bool rigCollisionDebug_ = false;
     double presentationTimeSeconds_ = -1.0;
     bool cameraShakeEnabled_ = true;

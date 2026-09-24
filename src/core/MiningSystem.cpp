@@ -9263,6 +9263,19 @@ LandingSiteView buildLandingSiteView(const MiningRunState& mining)
 }
 
 namespace {
+// Mission bores provide access to a layer, leaving its final approach for
+// surface excavation. The Moon's introductory authored crevice is unchanged.
+int orbitalMissionEntranceDepth(const MiningRunState& mining) {
+    if (mining.bodyId != "mars" && mining.bodyId != "io" && mining.bodyId != "titan" &&
+        mining.bodyId != "titania" && mining.bodyId != "triton") return -1;
+    const auto unfinished = [](const auto& a) {
+        return a.present && a.state != MiningArtifactState::Delivered && a.state != MiningArtifactState::Destroyed;
+    };
+    if (unfinished(mining.artifact)) return mining.depthZone;
+    for (const auto& layer : mining.depthLayers) if (unfinished(layer.artifact)) return layer.depthZone;
+    return -1;
+}
+
 bool orbitalProtectedCell(const MiningTerrain& terrain, const MiningArtifactObject& artifact, int x, int y)
 {
     const auto* cell = miningCellAt(terrain, x, y);
@@ -9836,15 +9849,17 @@ void refreshOrbitalBoreReach(const GameState& state, const ContentCatalog& catal
 {
     if (!prepared.valid || prepared.surveyedDepth < 0) return;
     auto& mining = prepared.miningTemplate;
-    const int maximum = std::min(tuning::surfaceDepthProgression::maximumDepthRating,
+    int maximum = std::min(tuning::surfaceDepthProgression::maximumDepthRating,
         mining.entryDepthZone + surfaceDepthRating(state, SurfaceDepthUpgradeKind::BoreSystem));
     if (!prepareLandingLayers(state, catalog, mining, maximum)) return;
+    const int entrance = orbitalMissionEntranceDepth(mining);
+    if (entrance >= 0) maximum = std::min(maximum, entrance);
     // Completion belongs to a cursor and a reach, not permanently to a site.
     // Legacy cursors stop three rows early and naturally resume at that row.
     const MiningTerrain* terrain = mining.depthZone == prepared.laserDepth ? &mining.terrain : nullptr;
     for (const auto& layer : mining.depthLayers)
         if (layer.depthZone == prepared.laserDepth) terrain = &layer.terrain;
-    const int lastRow = terrain ? terrain->height -
+    const int lastRow = prepared.laserDepth == entrance ? 5 : terrain ? terrain->height -
         (prepared.laserDepth == tuning::surfaceDepthProgression::maximumDepthRating ? 2 : 1) : 0;
     prepared.laserComplete = prepared.laserDepth > maximum ||
         (prepared.laserDepth == maximum && terrain && prepared.laserRow > lastRow);
@@ -9858,8 +9873,10 @@ void excavateOrbitalShaft(PreparedSurfaceLanding& prepared, int maximumDepth, do
     if (prepared.laserBlocked) return;
     auto& mining = prepared.miningTemplate;
     const int entry = mining.entryDepthZone;
-    const int maximum = std::min(tuning::surfaceDepthProgression::maximumDepthRating,
+    int maximum = std::min(tuning::surfaceDepthProgression::maximumDepthRating,
         entry + std::max(0, maximumDepth));
+    const int entrance = orbitalMissionEntranceDepth(mining);
+    if (entrance >= 0) maximum = std::min(maximum, entrance);
     prepared.laserComplete = false;
     if (prepared.laserDepth > maximum) { prepared.laserComplete = true; return; }
     const int active = mining.depthZone;
@@ -9870,7 +9887,7 @@ void excavateOrbitalShaft(PreparedSurfaceLanding& prepared, int maximumDepth, do
             if (!restoreDepthLayer(mining, prepared.laserDepth)) { prepared.laserBlocked = true; break; }
         }
         const int y = prepared.laserRow;
-        const int lastRow = mining.terrain.height -
+        const int lastRow = prepared.laserDepth == entrance ? 5 : mining.terrain.height -
             (prepared.laserDepth == tuning::surfaceDepthProgression::maximumDepthRating ? 2 : 1);
         if (y > lastRow) {
             if (prepared.laserDepth >= maximum) { prepared.laserComplete = true; break; }
@@ -9989,6 +10006,31 @@ PreparedSurfaceLanding prepareSurfaceLanding(
     validateOrbitalShaft(prepared);
     prepared.laserDepth = site.entryDepthZone;
     prepared.laserRow = 4;
+    // Only fresh sites receive the authored mineable approach. Never refill
+    // a restored excavation, relocate an artifact, or alter its hazard seal.
+    const int entrance = orbitalMissionEntranceDepth(prepared.miningTemplate);
+    if (entrance >= 0) {
+        auto& m = prepared.miningTemplate;
+        const auto approach = [&](MiningTerrain& terrain, const MiningArtifactObject& artifact) {
+            const int goalX = static_cast<int>(std::floor(artifact.x));
+            const int goalY = static_cast<int>(std::floor(artifact.y))-4;
+            const int shaft = prepared.shaftX;
+            const auto fill = [&](int cx,int cy) {
+                for (int y=cy-2;y<=cy+2;++y) for (int x=cx-2;x<=cx+2;++x) {
+                    if (x<2 || x>=terrain.width-2 || y<6 || y>=terrain.height-2 ||
+                        orbitalProtectedCell(terrain,artifact,x,y)) continue;
+                    auto* cell = miningCellAt(terrain,x,y);
+                    // Keep ore and supply budgets; replace only empty rock/bedrock.
+                    if (cell->material == MiningCellMaterial::Bedrock || cell->material == MiningCellMaterial::Empty)
+                        *cell = makeCell(MiningCellMaterial::Regolith,entrance);
+                }
+            };
+            for (int y=8;y<=goalY;++y) fill(shaft,y);
+            for (int x=std::min(shaft,goalX);x<=std::max(shaft,goalX);++x) fill(x,goalY);
+        };
+        if (m.depthZone == entrance) approach(m.terrain,m.artifact);
+        for (auto& layer : m.depthLayers) if (layer.depthZone == entrance) approach(layer.terrain,layer.artifact);
+    }
     prepared.miningSites = std::move(preview.meta.miningSites);
     prepared.postSolarSystemRosters = std::move(preview.meta.postSolarSystemRosters);
     prepared.valid = true;

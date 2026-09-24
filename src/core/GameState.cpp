@@ -462,6 +462,11 @@ int moduleOfferCost(Rarity rarity)
 
 int moduleOfferCost(const ShipModule& module)
 {
+    // Permanent progression prices follow the campaign budget, not loot rarity.
+    const int depth = module.surfaceDepthUpgradeRank;
+    if (depth > 0) return std::array{40,90,115}[std::clamp(depth,1,3)-1];
+    const int rank = std::max(module.launchUpgradeRank,module.rigFuelLoopRank);
+    if (rank > 0) return std::array{35,105,210}[std::clamp(rank,1,3)-1];
     return moduleOfferCost(module.rarity);
 }
 

@@ -9,6 +9,7 @@
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
 #include "core/ExpeditionSystem.h"
+#include "core/StraylightSequence.h"
 
 #include <algorithm>
 #include <array>
@@ -1214,10 +1215,14 @@ void solarCampaignClaimsAdvanceToStraylight()
         state.run.expedition.coursePlayerSelected = false;
         state.run.flight.mode = FlightMode::Orbit;
         require(reconcileSolarMissionMessages(state, catalog),
-            "claim and ascent should queue one completion message and recommend Earth");
-        require(state.run.expedition.course.targetBodyId == "earth" &&
+            "claim and ascent should queue one completion message");
+        require(state.run.expedition.course.targetBodyId==mission->bodyId,
+            "Message delivery must not compete with shared mission navigation");
+        reconcileStraylightSequence(state,catalog);
+        reconcileCampaignGuidance(state,catalog);
+        require(state.run.expedition.course.targetBodyId == (index+1<bodies.size() ? std::string(bodies[index+1]) : "neptune") &&
                 !state.run.expedition.cruise.active,
-            "main mission completion should mark Earth without activating Cruise");
+            "Claimed mission advances shared guidance to the next destination without Cruise");
         state.incomingMessages = {};
         if (index + 1 < bodies.size())
             require(solarBodyRevealed(state, catalog, bodies[index + 1]), "claim should reveal the next mission world");

@@ -19,7 +19,9 @@ control to local Landing physics at the parked ship. A grounded-support latch
 lets the normal throttle ramp lift the ship without immediately retriggering
 touchdown. Subsequent contact uses normal damage and landing rules. Departure
 thrust consumes no fuel until the +46 m surface-relative, upward >=2 m/s Orbit exit;
-gravity, rotation, thrust strength, and collision damage remain active. Local ascent causes no heat damage.
+gravity, rotation, steering and collision damage remain active. Powered ascent smoothly limits acceleration toward 8 m/s from underground ignition, including manual throttle; held thrust continues into orbit and space thrust blends back over the 1.25-second handoff. Local ascent causes no heat damage.
+
+Initial descent and boarded flight share local camera framing with floor interest bounded to six cells sideways and eight below the ship. Nearby floor changes smooth relative to the ship; distant floors never fit the whole shaft into view. Collision and pointer aiming use the same surface transform.
 
 Ship services, return guidance, artifact delivery, and extraction eligibility
 use the parked layer. Support Drone deliveries follow a terrain path through

@@ -102,6 +102,19 @@ void awardUnifiedOrbit(
     if (grade != OrbitGrade::Good && grade != OrbitGrade::Perfect) {
         return;
     }
+    // First-orbit payout is campaign progress, not repeatable income from re-entry.
+    const bool previouslyRewarded = state.run.expedition.travelInitialized &&
+        std::find(state.run.expedition.decision.acknowledgedIds.begin(),state.run.expedition.decision.acknowledgedIds.end(),
+            "orbit_reward:"+state.run.expedition.location.systemId+":"+state.run.expedition.location.bodyId)
+            != state.run.expedition.decision.acknowledgedIds.end();
+    if (previouslyRewarded) return;
+    const bool legacySurveyed = state.run.expedition.travelInitialized &&
+        std::any_of(state.run.expedition.sites.begin(),state.run.expedition.sites.end(),[&](const auto& site) {
+            return site.systemId==state.run.expedition.location.systemId && site.bodyId==state.run.expedition.location.bodyId && site.orbital.surveyComplete;
+        });
+    if (state.run.expedition.travelInitialized)
+        state.run.expedition.decision.acknowledgedIds.push_back("orbit_reward:"+state.run.expedition.location.systemId+":"+state.run.expedition.location.bodyId);
+    if (legacySurveyed) return;
     const int destinationIndex = destinationIndexForId(catalog, destination.id);
     if (destinationIndex >= 0) {
         if (state.meta.destinationOrbits.size() < catalog.destinations.size()) {
@@ -2814,6 +2827,7 @@ void RocketGameApp::tick(double deltaSeconds)
             panelDirty_ = true;
         }
     }
+    if (reconcileMessageRelevance(state_,catalog_)) { save(); panelDirty_ = true; }
     if (!state_.incomingMessages.pending.empty() && !services_.ui.modalOpen()) {
         refreshPanel();
         if (services_.ui.modalOpen()) {
@@ -2857,6 +2871,14 @@ void RocketGameApp::tick(double deltaSeconds)
     }
     if (controllerPauseStopsSimulation(pauseReason_, gameplayInputContext(), services_.ui.modalOpen())) {
         return;
+    }
+
+    if (!services_.ui.modalOpen() && !straylightOwnsPresentation(state_) &&
+        (state_.screen == Screen::Mining || (state_.screen == Screen::Flight && session_.flight.active && !session_.orbitalWork.active())) &&
+        state_.incomingMessages.informationalCooldown > 0) {
+        state_.incomingMessages.informationalCooldown = std::max(0.0,
+            state_.incomingMessages.informationalCooldown-std::clamp(deltaSeconds,0.0,.25));
+        if (state_.incomingMessages.informationalCooldown == 0) panelDirty_ = true;
     }
 
     if (state_.screen == Screen::SurfaceUpgrade) {
@@ -2955,7 +2977,7 @@ void RocketGameApp::tick(double deltaSeconds)
         applyRealtimeInputs();
         double pilotingThrottle = session_.throttleInput;
         if (departureThrustHeld_) {
-            constexpr double assistedClimbSpeed = 8.0;
+            constexpr double assistedClimbSpeed = flight_landing::ascentSpeed;
             const double desiredAcceleration = flight_landing::gravityAcceleration +
                 (assistedClimbSpeed-session_.flight.landing.verticalVelocity)*1.5;
             pilotingThrottle = std::clamp(desiredAcceleration/flight_landing::forwardAcceleration,0.0,1.0);

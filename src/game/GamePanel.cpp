@@ -59,7 +59,7 @@ std::string orbitalLaserHint(const PanelRenderContext& c)
             mission.stepId != "claim" && !mission.sectorId.empty() && expedition.selectedOrbitZone != mission.sectorId)
             return "Travel to " + missionSectorName(mission.sectorId) + " and scan the mission site";
     }
-    if (!c.orbitalInsideZone) return "Return to the selected wedge to continue drilling";
+    if (!c.orbitalInsideZone) return "Return to the selected sector to continue drilling";
     const std::string artifact = c.orbitalArtifactDepth < 0 ? std::string{} :
         c.orbitalArtifactDepth == 0 ? "Artifact at Surface" :
         "Artifact at Depth +" + std::to_string(c.orbitalArtifactDepth);
@@ -72,7 +72,7 @@ std::string orbitalLaserHint(const PanelRenderContext& c)
     if (c.orbitalLaserComplete && c.orbitalArtifactDepth > c.orbitalBoreDepth)
         return prefix + limit + " · Upgrade Bore or land and drill deeper manually";
     if (c.orbitalLaserComplete) return prefix + limit + (c.orbitalLandingEligible
-        ? " · Ready to land" : !c.orbitalInsideZone ? " · Return to selected wedge" : " · Shaft ready");
+        ? " · Ready to land" : !c.orbitalInsideZone ? " · Return to selected sector" : " · Shaft ready");
     return prefix + limit + " · Hold to drill";
 }
 
@@ -530,6 +530,7 @@ void collectSharedUtilityModals()
     const std::string controlsBody = std::string(R"(<div class="controller-controls">
         <div class="controls-callout"><strong>D-PAD = MENU PANELS</strong>
         <p>In mining, orbit, or flight, press the D-pad to select panel actions. Piloting pauses while you choose.</p>
+        <p>Mission waypoints follow artifacts to the delivery dock or named wreck. A manually selected destination stays selected until Return to mission.</p><p>Powered ascent is governed to 8 m/s from deep shafts; held thrust continues into orbit. Brake manually to stay near the planet. After the Moon, orbital drilling opens an entrance: excavate the remaining artifact approach with the rig.</p>
         <div class="controls-flow"><span>SELECT</span><span> / </span><span>CONFIRM</span><span> / </span><span>RESUME PLAY</span></div>
         <p>Actions resume play automatically; interfaces stay open. Back cancels. Release buttons and center sticks to pilot again.</p></div>
         <div class="controls-pad-card"><div class="controls-pad" aria-label="Xbox-style controller reference: left stick upper left, D-pad lower left, right stick lower right, face buttons upper right">
@@ -3094,7 +3095,7 @@ std::string buildGamePanelMarkup(
                     const std::string status = scanning ? "SCANNING..."
                         : !ready ? (w.surveyComplete ? "COAST TO OPERATE" : "COAST TO SCAN")
                         : missionScan && !missionSlice ? ("MISSION SITE: " + missionSectorName(mission.sectorId))
-                        : outside ? "RETURN TO SELECTED WEDGE"
+                        : outside ? "RETURN TO SELECTED SECTOR"
                         : context.orbitalLaserBlocked ? "SURFACE TOOLS REQUIRED"
                         : context.orbitalLaserComplete ? "BORE REACH EXCAVATED" : "";
                     out << "<p class=\"orbit-work-state\" role=\"status\">" << status << "</p>";
@@ -4445,7 +4446,18 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
             && mining.depthTransitionCooldownSeconds <= 0.0 && mining.scannerPulseSeconds <= 0.0));
     if (stableMessageContext && !messages.pending.empty()
         && std::none_of(result.modals.begin(), result.modals.end(), [](const auto& modal) { return modal.autoOpen; })) {
-        const auto& occurrence = messages.pending.front();
+        const auto eligible = std::find_if(messages.pending.begin(), messages.pending.end(), [&](const auto& occurrence) {
+            const auto* message = incomingMessage(context.catalog, occurrence.messageId);
+            if (!message || (message->context == MessageDeliveryContext::Mining && context.state.screen != Screen::Mining)) return false;
+            if (!message->informational) return true;
+            const auto& flight = context.launchFlight ? *context.launchFlight : context.state.run.flight;
+            return messages.informationalCooldown <= 0 &&
+                !(context.orbitalWork && context.orbitalWork->active()) &&
+                !(context.state.screen == Screen::Flight && (flight.mode == FlightMode::Landing || flight.docking.active)) &&
+                !(context.state.screen == Screen::Mining && (mining.drilling || mining.firing || !mining.combatProjectiles.empty()));
+        });
+        if (eligible != messages.pending.end()) {
+        const auto& occurrence = *eligible;
         const auto* message = incomingMessage(context.catalog, occurrence.messageId);
         const auto* speaker = message ? messageSpeaker(context.catalog, message->speakerId) : nullptr;
         const auto* variant = message ? messageVariant(*message, occurrence.variantId) : nullptr;
@@ -4459,6 +4471,7 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
             }
             if (auto card = buildIncomingMessageCard(context, occurrence.messageId, occurrence.variantId, action, {}, {}, acceptLabel))
                 result.modals.push_back(std::move(*card));
+        }
         }
     }
     appendExpeditionPresentation(context, result);
@@ -4786,7 +4799,8 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
             << ':' << canSalvageWreck(e, liveFlight, solarSystemDefinition(), w.id, false) << '|';
     }
     // A scene handoff deliberately unmounts the panel while the renderer owns
-    key << context.incomingMessageDeliveryAllowed << ':' << context.controllerFlightControls << ':';
+    key << context.incomingMessageDeliveryAllowed << ':' << context.controllerFlightControls << ':'
+        << (state.incomingMessages.informationalCooldown > 0) << ':';
     for (const auto& item : state.incomingMessages.pending) key << item.id << ':' << item.variantId << '|';
     key << (state.run.mining.scannerPulseSeconds <= 0.0) << ':' << (state.run.mining.depthTransitionCooldownSeconds <= 0.0) << '|';
     // the blackout. Treat that empty document as a distinct structure so the

@@ -1246,7 +1246,7 @@ ExpeditionResult loseExpedition(PersistentExpeditionState &e, FlightRunState &f,
     e.cruise.active = false;
     e.undockReady = false;
     e.progression = {};
-    e.coursePlayerSelected = false;
+    // Explicit exploration waypoints survive recovery; guidance owns automatic ones.
     e.selectedOrbitBody.clear();
     e.selectedOrbitZone = "zone_1";
     e.course.trajectory.clear();

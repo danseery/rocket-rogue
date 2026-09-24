@@ -250,7 +250,8 @@ enum ArtAsset {
     EnemySpawnerIceAsset = 65,
     EnemySpawnerRadioactiveAsset = 66,
     EnemySpawnerToxicAsset = 67,
-    MiningArtifactAsset = 68
+    MiningArtifactAsset = 68,
+    SunAsset = static_cast<int>(TextureId::Sun)-1
 };
 
 constexpr TextureId textureForAsset(int assetIndex) noexcept
@@ -1879,14 +1880,23 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
                 }
             }
         }
-        if (snapshot.screen == Screen::Flight && snapshot.manualSurfaceDeparture &&
-            snapshot.launchLandingLocalFrame) {
-            // Once boarded, follow the piloted ship through the shaft. A distant
+        if (snapshot.screen == Screen::Flight && (snapshot.launchLandingLocalFrame || departingSurface(snapshot))) {
+            // Follow the piloted ship on initial descent as well as takeoff. A distant
             // floor (or the old parked pad above us) must not turn a local
             // maneuver into a fit of the entire excavated site.
             padX = std::clamp(padX, shipGridX-6.0, shipGridX+6.0);
             padY = std::clamp(padY, shipFootY, shipFootY+8.0);
-        }
+            // Smooth changes in nearby floor interest relative to the ship so
+            // excavating support cannot jerk the camera or lag behind a deep descent.
+            const double x = padX-shipGridX, y = padY-shipFootY;
+            if (!localShipFloorActive_) { localShipFloorX_=x; localShipFloorY_=y; }
+            else {
+                localShipFloorX_=std::lerp(localShipFloorX_,x,followBlend);
+                localShipFloorY_=std::lerp(localShipFloorY_,y,followBlend);
+            }
+            localShipFloorActive_=true;
+            padX=shipGridX+localShipFloorX_; padY=shipFootY+localShipFloorY_;
+        } else localShipFloorActive_=false;
         double focusX = padX, focusY = padY;
         if (snapshot.screen == Screen::Mining) {
             if (wasActive) surfaceCamera_.followY +=
@@ -1946,7 +1956,7 @@ void SceneComposer::beginFrame(const RenderSnapshot& snapshot)
             surfaceCamera_.cellWidth = std::lerp(old.cellWidth,cw,t);
             surfaceCamera_.cellHeight = std::lerp(old.cellHeight,ch,t);
         }
-    } else { surfaceCamera_ = {}; }
+    } else { surfaceCamera_ = {}; localShipFloorActive_=false; }
     packet_.surfaceCamera = surfaceCamera_;
     const bool cameraShakeEnabled = cameraShakeEnabled_;
     if (cameraShakeEnabled && snapshot.launchDockingActive && !snapshot.launchDestructionActive) {
@@ -7561,7 +7571,7 @@ void SceneComposer::drawStraylightSequence(const RenderSnapshot& snapshot)
     // avoiding a new background element popping into the final transition.
     if (stage >= Stage::Awakening && stage <= Stage::Departing) {
         const float departure = stage == Stage::Departing ? ease((t-3)/9) : 0.0F;
-        drawCircle(-.8F-departure*.7F,.35F,.12F*(1-departure*.7F),{1,.65F,.25F,1},32);
+        drawSprite(-.8F-departure*.7F,.35F,.282F*(1-departure*.7F),.282F*(1-departure*.7F),{1,1,1,1},SunAsset);
     }
     drawSprite(x,y,size,size,{light,light,light,1},ArkOperationalAsset);
     const float bayX=x+size*.31F, bayY=y-size*.1F;
@@ -7739,7 +7749,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             }
             if (bodyOffscreen) continue;
             const int asset = systemBodyAsset(body);
-            if (body.kind == SystemBodyKind::Star) drawCircle(p.x,p.y,radius,{1,.65F,.15F,1},64);
+            if (body.kind == SystemBodyKind::Star) drawSprite(p.x,p.y,radius*2.35F,radius*2.35F,{1,1,1,1},SunAsset);
             else if (body.kind == SystemBodyKind::Station) {
                 const float light = snapshot.straylightStage >= StraylightStage::Awakening ? 1.0F : .46F;
                 const auto hullUp = view.camera.vector(0,1);
@@ -7917,7 +7927,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             const float profileOpacity = drawOpacity_;
             drawOpacity_ *= alpha;
             drawPoiLabel(c.x, c.y + radius + 0.08F, 0.0038F,
-                "ZONE " + std::to_string(zone.sectorIndex + 1), PoiGuidanceKind::Ship);
+                "SECTOR " + std::to_string(zone.sectorIndex + 1), PoiGuidanceKind::Ship);
             drawOpacity_ = profileOpacity;
             for (const auto& layer : snapshot.orbitalSurveyLayers) {
                 const float visibility = (layer.artifact && snapshot.orbitalZoneSurveyed ? 1.0F :

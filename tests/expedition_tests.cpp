@@ -670,8 +670,12 @@ void orbitalObjectiveSafetyTests()
                 for (int x=1; x<terrain->width-1; ++x)
                     check(miningCellAt(*terrain,x,terrain->height-1)->material!=MiningCellMaterial::Bedrock,
                         "Intermediate Titan depths must not retain an artificial bedrock floor");
+            if (depth==entry+2) {
+                check(miningCellAt(*terrain,titanBore.shaftX,6)->material!=MiningCellMaterial::Empty,
+                    "Mission layer entrance leaves excavation for the rig");
+            }
             const int firstRow=depth==entry ? 4 : 0;
-            const int lastRow=terrain->height-(depth==entry+2 ? 4 : 1);
+            const int lastRow=depth==entry+2 ? 5 : terrain->height-1;
             for (int y=firstRow; y<=lastRow; ++y)
                 for (int x=titanBore.shaftX-orbital_laser::shaftLeftCells;
                     x<=titanBore.shaftX+orbital_laser::shaftRightCells; ++x)
@@ -1045,14 +1049,21 @@ void campaignGuidanceTests()
             recommendedCampaignObjective(*state,catalog).kind==CampaignObjectiveKind::RecoveryUnavailable,
             "missing wreck invalidates navigation without erasing artifact ownership");
         e.batteries[1].owner=BatteryOwner::Ship; e.batteries[1].wreckId=0;
-        e.active=true; e.coursePlayerSelected=true; e.course.targetBodyId="venus";
+        e.active=true; e.coursePlayerSelected=false; e.course.targetBodyId="mars";
+        e.location={"solar","mars",CoordinateFrame::Body,{1,0},{},0,{}};
+        state->screen=Screen::Flight;
+        reconcileCampaignGuidance(*state,catalog);
+        check(e.course.targetBodyId=="earth","Artifact aboard immediately targets delivery while still away from the dock");
+        e.coursePlayerSelected=true; e.course.targetBodyId="venus";
         check(loseExpedition(e,state->run.flight,solarSystemDefinition())==ExpeditionResult::Applied,
             "crash should preserve artifact in a new wreck");
-        check(!e.coursePlayerSelected && e.batteries[1].owner==BatteryOwner::Wreck,
-            "crash clears exploration override without losing artifact ownership");
+        check(e.coursePlayerSelected && e.batteries[1].owner==BatteryOwner::Wreck,
+            "crash preserves explicit exploration override and artifact ownership");
         reconcileCampaignGuidance(*state,catalog);
+        check(e.course.targetBodyId=="venus","Replacement dock preserves explicit exploration choice");
+        reconcileCampaignGuidance(*state,catalog,true);
         check(e.course.targetBodyId=="wreck:"+std::to_string(e.batteries[1].wreckId),
-            "replacement dock must target the new artifact wreck");
+            "Return to mission targets the new artifact wreck");
         const auto recoveryNoticeCount=state->incomingMessages.pending.size();
         reconcileCampaignGuidance(*state,catalog);
         check(state->incomingMessages.pending.size()==recoveryNoticeCount,"new wreck recovery notice queues exactly once");
@@ -1305,8 +1316,57 @@ void artifactBankingAndPayloadTests()
         "Unknown legacy delivery history must not be fabricated");
 }
 
+void campaignBudgetTests()
+{
+    using namespace rocket;
+    const auto catalog=createDefaultContent();
+    auto state=createNewGame(catalog,123);
+    initializeLiveExpedition(state,catalog);
+    state.run.credits=0;
+    const char* bodies[]={"moon","mars","io","titan","titania","triton"};
+    const LaunchUpgradeKind optional[]={LaunchUpgradeKind::FlightControls,LaunchUpgradeKind::FlightControls,
+        LaunchUpgradeKind::Hull,LaunchUpgradeKind::Cooling,LaunchUpgradeKind::FlightControls,LaunchUpgradeKind::Hull};
+    for (int i=0;i<6;++i) {
+        auto& e=state.run.expedition;
+        const auto* body=systemBody(solarSystemDefinition(),bodies[i]);
+        e.location.bodyId=body->id;
+        e.location.systemId="solar";
+        state.run.flight.phase=FlightPhase::Landed;
+        const auto model=expeditionFlightModel(state,catalog);
+        const auto& destination=expeditionEnvironment(state,catalog);
+        Random random(123+i);
+        const auto arrival=resolveLaunch(model,catalog,state,destination.targetMultiplier,RecoveryMethod::TransferArrival,random,{true});
+        const double orbit=orbitCreditReward(destination,OrbitGrade::Good);
+        state.run.credits+=orbit;
+        recordExpeditionArrival(state,catalog,arrival);
+        const double carried=e.cargo.credits;
+        recordExpeditionArrival(state,catalog,arrival);
+        check(e.cargo.credits==carried,"Repeated landing cannot duplicate arrival credits");
+        const auto saved=deserializeSaveData(serializeSaveData(captureSaveData(state)));
+        check(saved.has_value(),"Budget save must deserialize");
+        restoreSaveData(state,catalog,*saved);
+        state.run.flight.phase=FlightPhase::Landed;
+        recordExpeditionArrival(state,catalog,arrival);
+        check(state.run.expedition.cargo.credits==carried,"Reload cannot duplicate arrival credits");
+        // Settle the carried payout and mark the mission battery's research,
+        // isolating purchasing from the separate custody/claim integration tests.
+        state.run.credits+=carried; e.cargo.credits=0;
+        e.batteries[i].researchEarned=true;
+        e.active=false;
+        e.location={"solar","earth",CoordinateFrame::Body,{}, {},0,"earth.dock"};
+        if (i==1 || i==2 || i==3) {
+            check(installSurfaceDepthUpgrade(state,catalog,SurfaceDepthUpgradeKind::SurveyArray),"Normal campaign affords next survey rank");
+            check(installSurfaceDepthUpgrade(state,catalog,SurfaceDepthUpgradeKind::BoreSystem),"Normal campaign affords next bore rank");
+        }
+        check(installLaunchUpgrade(state,catalog,optional[i]),"Normal mission also affords an optional ship upgrade");
+        std::cout << "Campaign budget " << bodies[i] << " orbit=" << orbit << " carried/banked=" << carried
+            << " balance=" << state.run.credits << '\n';
+    }
+}
+
 void persistentExpeditionTests()
 {
+    campaignBudgetTests();
     artifactBankingAndPayloadTests();
     straylightSequenceTests();
     parallelDockTests();
@@ -1501,13 +1561,16 @@ void persistentExpeditionTests()
                 "Jittered rocks must stay inside the physical belt envelope");
             check(std::abs(asteroid.radius - .12*asteroid.scale) < 1e-9,
                 "Asteroid collision radius must match visual scale");
-            check(std::hypot(asteroid.position.x-mars->position.x, asteroid.position.y-mars->position.y) -
-                    asteroid.radius - .075 > mars->influenceRadius + 8.0,
-                "Mars departures must have a full widest-zoom screen of collision-free travel beyond orbit");
+            for (const auto& body : solarSystemDefinition().bodies) {
+                if (body.kind==SystemBodyKind::Star || body.kind==SystemBodyKind::Station) continue;
+                check(std::hypot(asteroid.position.x-body.position.x, asteroid.position.y-body.position.y) -
+                        asteroid.radius - .075 > body.influenceRadius + 8.0,
+                    "Every planet and moon has 8U of collision-free clearance beyond orbit");
+            }
             smallest = std::min(smallest, asteroid.scale);
             largest = std::max(largest, asteroid.scale);
         }
-        check(smallest < .7 && largest > 1.3 && solarAsteroidBelt().size() > 500 && solarAsteroidBelt().size() < 640,
+        check(smallest < .7 && largest > 1.3 && solarAsteroidBelt().size() > 450 && solarAsteroidBelt().size() < 640,
             "Belt variation and density must remain outside the local Mars clearing");
         auto state = createNewGame(catalog,0xB317);
         auto model = expeditionFlightModel(state,catalog);
@@ -2078,6 +2141,24 @@ void persistentExpeditionTests()
             departureReload->flight.handoff.from==FlightMode::Landing &&
             std::abs(departureReload->flight.handoff.elapsed-.3)<1e-8,
             "Reload must retain the committed departure and landing lock");
+        for (const char* environment : {"moon","saturn","uranus"}) for (int controlsRank : {0,3})
+        for (double startingAltitude : {-800.,-160.,0.}) for (double tilt : {0.,.35}) {
+            auto ascentModel=landingModel;
+            ascentModel.flightControlRank=controlsRank;
+            const auto& ascentDestination=*catalog.findDestination(environment);
+            auto launch=beginLaunchFlight(ascentModel,ascentDestination);
+            launch.mode=FlightMode::Landing;
+            launch.landing.departureActive=true;
+            launch.landing.altitude=startingAltitude;
+            launch.landing.heading=1.5707963267948966+tilt;
+            launch.fuelRemaining=10000;
+            for (int frame=0; frame<5000 && launch.mode==FlightMode::Landing; ++frame) {
+                updateLaunchFlight(launch,ascentModel,ascentDestination,{0,1,false,true},.05);
+                check(std::hypot(launch.landing.lateralVelocity,launch.landing.verticalVelocity)<8.15,
+                    "Continuous manual thrust cannot accumulate excess speed in deep shafts");
+            }
+            check(launch.mode!=FlightMode::Landing,"Governed ascent must still exit the surface");
+        }
         for (double throttle : {-1.0,0.0,1.0}) {
             auto departing=beginLaunchFlight(landingModel,moon);
             departing.mode=FlightMode::Landing;

@@ -23,6 +23,7 @@ struct IncomingMessageDefinition {
     std::vector<MessageVariant> variants;
     MessageDeliveryContext context = MessageDeliveryContext::Any;
     bool concerned = false;
+    bool informational = false;
 };
 struct IncomingMessageOccurrence {
     std::string id, messageId, variantId;
@@ -31,6 +32,7 @@ struct IncomingMessageState {
     std::vector<IncomingMessageOccurrence> pending;
     std::vector<std::string> acknowledgedOccurrences;
     std::vector<std::string> acknowledgedMessages;
+    double informationalCooldown = 0.0; // Active-play time only; not campaign/save state.
 };
 struct MessageAcknowledgement {
     std::string occurrenceId, messageId;
@@ -42,6 +44,7 @@ const IncomingMessageDefinition *incomingMessage(const ContentCatalog &, std::st
 const MessageVariant *messageVariant(const IncomingMessageDefinition &, std::string_view);
 bool validateIncomingMessages(const ContentCatalog &, std::string *error = nullptr);
 bool enqueueIncomingMessage(IncomingMessageState &, const ContentCatalog &, IncomingMessageOccurrence);
+bool reconcileMessageRelevance(GameState &, const ContentCatalog &);
 std::optional<MessageAcknowledgement> acknowledgeIncomingMessage(IncomingMessageState &, std::string_view);
 std::string serializeIncomingMessages(const IncomingMessageState &);
 bool deserializeIncomingMessages(std::string_view, IncomingMessageState &);

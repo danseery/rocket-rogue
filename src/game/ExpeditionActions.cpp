@@ -6,6 +6,7 @@
 #include "core/PayloadTransfer.h"
 #include "core/ResearchSystem.h"
 #include "core/SolarProgression.h"
+#include "core/PostSolarSystem.h"
 #include <charconv>
 
 namespace rocket {
@@ -257,13 +258,15 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
         captureSystemLocation(e.location, session_.flight);
         if (parsed.ec == std::errc() && parsed.ptr == text.data() + text.size()) {
             const bool artifactOnWreck=wreckCarriesArtifact(e,id);
-            const bool following=!e.coursePlayerSelected || e.course.targetBodyId=="wreck:"+std::to_string(id);
-            const auto result = salvageWreck(e, id, solarSystemDefinition(), shipHoldCapacity(state_, catalog_));
+            const bool following=!e.coursePlayerSelected;
+            const auto* roster = findPostSolarSystemRoster(state_.meta,e.location.systemId);
+            const auto system = roster ? systemDefinitionForRoster(*roster) : solarPresentationSystem(state_);
+            const auto result = salvageWreck(e, id, system, shipHoldCapacity(state_, catalog_));
             const bool beaconMission = state_.meta.straylightStage == StraylightStage::RetrieveBeacons;
-            if (result==ExpeditionResult::Applied && (following || (artifactOnWreck && beaconMission)))
+            if (result==ExpeditionResult::Applied && following)
                 reconcileCampaignGuidance(state_,catalog_,true);
             state_.statusLine = result == ExpeditionResult::Applied
-                ? (artifactOnWreck ? (beaconMission ? "Beacon recovered. Recovery waypoint updated. Remaining ore stays salvageable." : "Artifact recovered — return to the Earth dock to complete the mission. Remaining ore stays salvageable.") : "Wreck recovered. Upgrades restored; remaining cargo stays salvageable.")
+                ? (artifactOnWreck ? (beaconMission ? "Beacon recovered. Follow the mission tracker for delivery. Remaining ore stays salvageable." : "Artifact recovered. Return to the mission's delivery dock. Remaining ore stays salvageable.") : "Wreck recovered. Upgrades restored; remaining cargo stays salvageable.")
                 : "Rendezvous with the wreck and match its speed to recover cargo and upgrades.";
         }
     } else if (action == "expedition:graft_conflict:keep" || action == "expedition:graft_conflict:recovered") {

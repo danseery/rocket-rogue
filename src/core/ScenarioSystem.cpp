@@ -498,9 +498,11 @@ void applyReward(
         if (!alreadyOwned && reward.equipIfSlotAvailable && allowSupportDroneAutoAssignment &&
             state.meta.equippedDroneIds.size() < static_cast<std::size_t>(state.meta.droneBaySlots)) {
             state.meta.equippedDroneIds.emplace_back(reward.id);
+            synchronizeMiningSupportDrones(state, catalog);
+        }
+        if (!alreadyOwned) {
             const std::string messageId = "drone_arrival_" + reward.id;
             enqueueIncomingMessage(state.incomingMessages, catalog, {messageId, messageId, "default"});
-            synchronizeMiningSupportDrones(state, catalog);
         }
         break;
     }

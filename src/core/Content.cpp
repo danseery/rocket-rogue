@@ -296,7 +296,7 @@ ContentCatalog createDefaultContent()
     catalog.incomingMessages.push_back({"wreck_salvage_intro", "mission_control_fennec", "Recover your wreck", "Understood", true,
         {{"default", "Your replacement ship is ready at the Earth dock. Carried cargo, unsecured credits, upgrades and artifacts remain in your wreck. Earth Storage is safe. Open Change waypoint and select the wreck. Approach slowly, then use Salvage. Purple diamond markers identify wrecks carrying artifacts. Artifacts and upgrades can be recovered even with a full ore hold; excess ore stays in the wreck.", {}}}});
     catalog.incomingMessages.push_back({"artifact_wreck_recovery", "mission_control_fennec", "Artifact recovery required", "Understood", false,
-        {{"default", "Your unsecured artifact remains in the wreck. Rendezvous and salvage it, then return to the Earth dock to complete the mission.", {}}}});
+        {{"default", "Your unsecured artifact remains in the marked wreck. Approach within 2U and match its speed, then use Salvage. Artifacts and upgrades can be recovered even with a full ore hold; excess ore stays in the wreck. Follow the updated mission waypoint to its delivery dock afterward. Stored artifacts remain safe.", {}}}});
     catalog.incomingMessages.push_back({"asteroid_belt_intro", "mission_control_fennec", "Asteroid belt ahead", "Understood", true,
         {{"default", "The asteroid belt between Mars and Jupiter is ahead. Start slowing down now with thrust opposite your motion; coasting does not brake. Watch your projected path and steer toward the gaps. At Earth's dock, Flight Controls upgrades give you stronger thrust at the same fuel burn rate for course corrections. Hull Plating increases hull integrity and reduces asteroid impact damage. Upgrades help, but avoiding the rocks is still your best defense.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
     const auto addMissionMessages = [&](std::string id, std::string world, std::string objective,
@@ -320,11 +320,11 @@ ContentCatalog createDefaultContent()
     }
     addMissionMessages("moon_mission", "Moon",
         "First, establish orbit: approach the Moon's orbit bands, turn to point along them, and use short thrust pulses to bend your projected path into a loop around the Moon. If the path crosses the surface, thrust opposite your motion to slow down and adjust your course. Once the loop stays clear of the surface, release thrust, reverse and strafe. Coast in a safe loop for two seconds to confirm orbit, then select SCAN in the mission sector and land there. Mission Control will brief you on recovery after touchdown.",
-        "Prospector support and drone slot one are online. Mars is your next mission. Mercury and Venus are also charted for optional exploration.");
+        "Prospector support and drone slot one are online. If your bays are occupied, assign the available Prospector in Drone Ops; equipped drones are kept. Mars is your next mission. Mercury and Venus are also charted for optional exploration.");
     catalog.incomingMessages[catalog.incomingMessages.size() - 2].variants.front().hints =
         {MessageHint::FlightSteer, MessageHint::FlightThrust};
     addMissionMessages("mars_mission", "Mars", "Mars's artifact is underground. Establish Mars orbit, scan the mission sector, hold Drill to prepare a shaft, then land. Mission Control will brief you on recovery after touchdown.", "Drone slot two is online. Jupiter and Io are now charted; Io is the next mission.");
-    addMissionMessages("io_mission", "Io", "Commission Hazard support, cool the thermal seal, excavate all four segments, and Collect Artifact.", "The Io battery is secured. Saturn and Titan are now charted; Titan is the next mission.");
+    addMissionMessages("io_mission", "Io", "Commission your new Hazard Drone. A free bay assigns it automatically; otherwise swap it into your loadout in Drone Ops at ship service. Cool the thermal seal, excavate all four segments, and Collect Artifact.", "The Io battery is secured. Saturn and Titan are now charted; Titan is the next mission.");
     addMissionMessages("titan_mission", "Titan", "Survey the landing site, pulse the buried signal, and Collect Artifact.", "The Titan battery is secured. Uranus and Titania are now charted; Titania is the next mission.");
     addMissionMessages("titania_mission", "Titania", "Survey the landing site, pulse the buried signal, and Collect Artifact.", "The Titania battery is secured. Neptune and Triton are now charted; Triton is the next mission.");
     addMissionMessages("triton_mission", "Triton", "Survey the landing site, pulse the buried signal, and Collect the final Artifact.", "The sixth artifact is secured. An unidentified contact beyond Neptune has appeared: The Anomaly.");
@@ -475,7 +475,7 @@ ContentCatalog createDefaultContent()
     for (const auto& drone : catalog.miniDrones) {
         catalog.incomingMessages.push_back({"drone_arrival_" + drone.id, "mission_control_fennec",
             drone.name + " online", "Let's go", true,
-            {{"default", "Your " + drone.name + " is assigned and ready to support the rig. " + drone.description, {}}}});
+            {{"default", "Your " + drone.name + " is unlocked. A free bay assigns it automatically. If your bays are full, open Drone Ops at ship service to assign it. " + drone.description, {}}}});
     }
 
     catalog.droneModules = {
@@ -982,6 +982,12 @@ ContentCatalog createDefaultContent()
             // switches to Complete Mission only after banking.
             if (step.action == ScenarioActionKind::ClaimReward) step.actionLabel = "Complete Mission";
         }
+    }
+    for (auto& message : catalog.incomingMessages) {
+        message.informational = message.id.ends_with("_tip") || message.id.starts_with("drone_arrival_") ||
+            message.id == "earth_dock_intro" || message.id == "wreck_salvage_intro" ||
+            message.id == "artifact_wreck_recovery";
+        if (message.id == "earth_dock_intro") message.campaignOnce = true;
     }
     return catalog;
 }

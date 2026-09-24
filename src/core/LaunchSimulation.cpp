@@ -741,7 +741,10 @@ LaunchFlightStep updateSpaceFlight(
     const double strafe = input.enginesCut || flight.fuelRemaining <= 0.000001 ? 0.0 : std::clamp(input.strafe,-1.0,1.0);
     const double power = std::abs(signedThrust) + std::abs(strafe)*0.5;
     if (power > 0.001) {
-        const double thrustAssist = system ? 1.0 + launch.flightControlRank * tuning::physicalFlight::flightControlsThrustAssistPerRank : 1.0;
+        const double handoffBlend = flight.handoff.from == FlightMode::Landing && flight.handoff.to == FlightMode::Orbit
+            ? std::clamp(flight.handoff.elapsed / flight_landing::handoffSeconds, 0.0, 1.0) : 1.0;
+        const double thrustAssist = (system ? 1.0 + launch.flightControlRank * tuning::physicalFlight::flightControlsThrustAssistPerRank : 1.0) *
+            std::lerp(.5, 1.0, handoffBlend * handoffBlend * (3.0 - 2.0 * handoffBlend));
         flight.velocityX += (std::cos(flight.heading)*signedThrust + std::sin(flight.heading)*strafe*0.5) * thrustAcceleration * controlDt * thrustAssist;
         flight.velocityY += (std::sin(flight.heading)*signedThrust - std::cos(flight.heading)*strafe*0.5) * thrustAcceleration * controlDt * thrustAssist;
         flight.fuelRemaining = std::max(
@@ -1089,8 +1092,22 @@ LaunchFlightStep updateLocalLandingFlight(FlightRunState& flight, const Prepared
     for (int i=0;i<steps;++i) {
         const LandingState previousPose=land;
         land.heading+=flight.angularVelocity*step;
-        land.lateralVelocity+=(std::cos(land.heading)*acceleration+std::sin(land.heading)*lateralAcceleration)*step;
-        land.verticalVelocity+=(std::sin(land.heading)*acceleration-std::cos(land.heading)*lateralAcceleration-gravity)*step;
+        double ax = std::cos(land.heading)*acceleration+std::sin(land.heading)*lateralAcceleration;
+        double ay = std::sin(land.heading)*acceleration-std::cos(land.heading)*lateralAcceleration;
+        if (land.departureActive) {
+            // Limit powered acceleration along motion, not velocity or heading.
+            // Deep launches get the same exit speed as launches from the surface.
+            const double speed = std::hypot(land.lateralVelocity,land.verticalVelocity);
+            if (speed > 1e-6) {
+                const double vx = land.lateralVelocity/speed, vy = land.verticalVelocity/speed;
+                const double powered = ax*vx+ay*vy;
+                const double allowance = std::max(0.0, gravity*vy +
+                    (flight_landing::ascentSpeed-speed)*1.5);
+                if (powered > allowance) { ax -= vx*(powered-allowance); ay -= vy*(powered-allowance); }
+            }
+        }
+        land.lateralVelocity+=ax*step;
+        land.verticalVelocity+=(ay-gravity)*step;
         land.horizontalPosition+=land.lateralVelocity*step;
         land.altitude+=land.verticalVelocity*step;
         land.surfaceAngle=std::abs(flightWrappedAngleDelta(1.5707963267948966,land.heading));

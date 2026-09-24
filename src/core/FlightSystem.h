@@ -46,6 +46,7 @@ namespace flight_landing {
 inline constexpr double entryAltitude = 60.0;
 inline constexpr double departureAltitude = 46.0;
 inline constexpr double departureSpeed = 2.0;
+inline constexpr double ascentSpeed = 8.0;
 inline constexpr double velocityConversion = 12.0;
 inline constexpr double metersPerOrbitUnit = 250.0;
 inline constexpr double metersPerCell = 4.0;

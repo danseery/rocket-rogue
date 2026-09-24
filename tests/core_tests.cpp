@@ -9785,6 +9785,7 @@ int main(int argc, char** argv)
     _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
     _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
 #endif
+    if (argc > 1 && std::string_view(argv[1]) == "--messages-only") { incomingMessageTests(); return 0; }
     if (argc > 1 && std::string_view(argv[1]) == "--expedition-only") {
         persistentExpeditionTests();
         std::cout << "Expedition checks passed\n";
