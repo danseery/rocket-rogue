@@ -7,6 +7,8 @@
 #include "core/SaveData.h"
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
+#include "core/ExpeditionSystem.h"
+#include "core/MissionGuidance.h"
 #include "core/ArtifactProgression.h"
 #include "game/GamePanel.h"
 #include <algorithm>
@@ -100,9 +102,9 @@ void incomingMessageTests() {
             !enqueueIncomingMessage(belt,catalog,{"return.belt","asteroid_belt_intro","default"}),
             "Belt tutorial must not replay on return or after reload");
         const auto* message = incomingMessage(catalog,"asteroid_belt_intro");
-        check(message && message->variants.front().body.find("Flight Controls")!=std::string::npos &&
-            message->variants.front().body.find("Hull Plating")!=std::string::npos,
-            "Belt tutorial must name the actual ship upgrades");
+        check(message && message->variants.front().body.find("Brake early")!=std::string::npos &&
+            message->variants.front().body.find("coasting won't slow you")!=std::string::npos,
+            "Belt tutorial must explain the immediate braking decision");
     }
     catalog.messageSpeakers.push_back({"engineer", "An Engineer With A Long Display Name", "ENGINEERING",
                                        "portraits/mission-control-fennec.png"});
@@ -135,20 +137,18 @@ void incomingMessageTests() {
     const auto shipFullMessage = incomingMessage(catalog, "ship_full_tip");
     check(shipFullMessage != nullptr && shipFullMessage->concerned &&
               shipFullMessage->title == "Easy there, space squirrel" &&
-              shipFullMessage->variants.front().body.find("Hoarding is frowned upon") != std::string::npos,
+              shipFullMessage->variants.front().body.find("space squirrel") != std::string::npos,
           "Ship overflow must use the concerned anti-hoarding warning");
     const auto moonReturnMessage = incomingMessage(catalog, "moon_mission_complete");
     check(moonReturnMessage != nullptr && moonReturnMessage->campaignOnce &&
               moonReturnMessage->context == MessageDeliveryContext::Any &&
-              moonReturnMessage->variants.front().body.find("Mars is your next mission") != std::string::npos &&
-              moonReturnMessage->variants.front().body.find("Mercury and Venus are also charted for optional exploration") != std::string::npos,
-          "Moon completion guidance must report its reward and newly charted worlds");
-    for (const auto* id : {"moon_mission_complete", "mars_mission_complete", "io_mission_complete",
-                           "titan_mission_complete", "titania_mission_complete"}) {
+              moonReturnMessage->variants.front().body.find("Prospector") != std::string::npos &&
+              moonReturnMessage->variants.front().body.find("Drone Ops") != std::string::npos,
+          "Moon completion guidance must report its new drone without routine travel instructions");
+    for (const auto* id : {"moon_mission_complete", "mars_mission_complete"}) {
         const auto* message = incomingMessage(catalog, id);
-        check(message && message->variants.front().body.starts_with("Artifact delivered to the Earth dock. Mission complete.") &&
-                  message->variants.front().body.find("Earth service is recommended") == std::string::npos,
-              "Artifact completion messages must acknowledge the completed dock hand-in");
+        check(message && message->variants.front().body.find("bay") != std::string::npos,
+              "Retained completion messages announce a new drone bay");
     }
     auto invalid = catalog;
     invalid.incomingMessages.back().speakerId = "missing";
@@ -195,7 +195,32 @@ void incomingMessageTests() {
     mining.artifact.present = true;
     mining.artifact.state = MiningArtifactState::Embedded;
     game.incomingMessages = {};
-    check(reconcileLunarMessages(game, catalog), "Eligible old save must queue scanner instruction");
+    check(!reconcileLunarMessages(game, catalog) && game.incomingMessages.pending.empty(),
+          "Moon deployment at 0/20 must not claim ore is already aboard");
+    check(enqueueIncomingMessage(game.incomingMessages, catalog,
+              {"lunar_scan", "lunar_scan", "default"}),
+          "Legacy save fixture should contain a premature scanner card");
+    check(reconcileLunarMessages(game, catalog) && game.incomingMessages.pending.empty(),
+          "A premature scanner card from an existing save must be retired");
+    check(enqueueIncomingMessage(game.incomingMessages, catalog,
+              {"lunar_scan", "lunar_scan", "default"}) &&
+              acknowledgeIncomingMessage(game.incomingMessages, "lunar_scan").has_value(),
+          "Legacy save fixture should contain a premature acknowledgement");
+    check(reconcileLunarMessages(game, catalog) &&
+              game.incomingMessages.acknowledgedMessages.empty() &&
+              game.incomingMessages.acknowledgedOccurrences.empty(),
+          "Premature scanner acknowledgement must be re-armed for the real delivery");
+    ensureScenarioInstances(game, catalog);
+    auto* lunarScenario = findScenarioInstance(game.meta, content::scenario::lunarProspector);
+    check(lunarScenario != nullptr, "Moon scenario must exist for delivery test");
+    auto* oreDelivery = findScenarioStepProgress(*lunarScenario, "delivery");
+    check(oreDelivery != nullptr, "Moon delivery step must exist");
+    oreDelivery->progress = 19;
+    check(!reconcileLunarMessages(game, catalog) && game.incomingMessages.pending.empty(),
+          "Partial ore delivery must not announce the scanner step");
+    oreDelivery->progress = 20;
+    oreDelivery->completed = true;
+    check(reconcileLunarMessages(game, catalog), "Completed Moon ore delivery must queue scanner instruction");
     check(!reconcileLunarMessages(game, catalog), "Repeated reconciliation must be idempotent");
     mining.artifact.revealed = true;
     mining.operatorMode = MiningOperatorMode::Jetpack;
@@ -225,7 +250,7 @@ void incomingMessageTests() {
           "Eligible message must render through shared modal presentation");
     check(!find(panel)->dismissible && !find(panel)->showClose && find(panel)->autoOpen,
           "Message needs explicit acknowledgement");
-    check(find(panel)->bodyMarkup.find("Your suit can fit") != std::string::npos,
+    check(find(panel)->bodyMarkup.find("Your suit fits") != std::string::npos,
           "Renderer must consume the selected content variant");
     {
         const auto keep=game.incomingMessages;
@@ -366,8 +391,9 @@ void incomingMessageTests() {
     check(nextSolarMission(campaign, catalog)->bodyId == "io" &&
               campaignNextStep(campaign, catalog).destinationId == "io",
           "After Mars, dock guidance must recommend Io independently of stale geology or the selected waypoint");
-    check(reconcileSolarMissionMessages(campaign, catalog) && campaign.incomingMessages.pending.size() == 2,
-          "Both main and optional mission completions must survive returning or respawning away from their body");
+    check(reconcileSolarMissionMessages(campaign, catalog) && campaign.incomingMessages.pending.size() == 1 &&
+              campaign.incomingMessages.pending.front().messageId == "mars_mission_complete",
+          "Only Mars's new drone bay merits a completion card; optional hand-ins remain in Missions");
     while (!campaign.incomingMessages.pending.empty())
         check(acknowledgeIncomingMessage(campaign.incomingMessages,
                   campaign.incomingMessages.pending.front().id).has_value(), "Pending completions must acknowledge");
@@ -378,6 +404,61 @@ void incomingMessageTests() {
     check(!reconcileSolarMissionMessages(campaign, catalog) && campaign.incomingMessages.pending.empty() &&
               campaign.run.expedition.course.targetBodyId == "mars",
           "A deliberate revisit must not reopen completed mission instructions or replace its waypoint");
+    {
+        auto later=createNewGame(catalog,0x713A);
+        initializeLiveExpedition(later,catalog);
+        later.meta.unlockKeys.push_back(content::unlock::routeSaturn);
+        later.run.expedition.location.bodyId="titan";
+        later.screen=Screen::Flight;
+        later.run.flight.mode=FlightMode::Orbit;
+        const auto* titan=solarMissionForBody(catalog,"titan");
+        check(titan && enqueueIncomingMessage(later.incomingMessages,catalog,
+            {"legacy.titan.briefing",titan->briefingMessageId,"default"}),
+            "Existing saves may contain the retired Titan briefing");
+        check(reconcileSolarMissionMessages(later,catalog) && later.incomingMessages.pending.empty(),
+            "Retired routine briefing disappears without acknowledgement or mission acceptance");
+        const auto view=missionView(later,catalog,"titan");
+        check(view.available && view.stepId=="accept" && !view.action.empty() &&
+              !solarMissionAccepted(later,catalog,*titan),
+            "Titan acceptance remains an explicit mission action");
+        check(acceptSolarMission(later,catalog,*titan).accepted &&
+              solarMissionAccepted(later,catalog,*titan),
+            "Mission acceptance action still advances progress exactly once");
+    }
+    {
+        auto landing=createNewGame(catalog,0x71A0);
+        initializeLiveExpedition(landing,catalog);
+        landing.screen=Screen::Flight;
+        landing.run.expedition.location.bodyId="moon";
+        landing.run.flight.mode=FlightMode::Landing;
+        landing.run.flight.landing.siteCommitted=true;
+        landing.run.flight.landing.hardLanding=true;
+        landing.run.flight.landing.siteKey=77;
+        landing.incomingMessages.informationalCooldown=8;
+        landing.incomingMessages.pending.push_back({"campaign.hard_landing_tip","hard_landing_tip","default"});
+        landing.incomingMessages.pending.push_back({"campaign.hard_landing_tip:77","hard_landing_tip","default"});
+        check(reconcileMessageRelevance(landing,catalog) && landing.incomingMessages.pending.size()==1 &&
+              landing.incomingMessages.pending.front().id=="campaign.hard_landing_tip:77",
+            "Only this touchdown's warning remains pending");
+        PreparedLaunch prepared;
+        PanelRenderContext touchdownPanel{landing,catalog,prepared,prepared};
+        touchdownPanel.surfaceArrivalActive=true;
+        touchdownPanel.surfaceArrivalPhase=3;
+        touchdownPanel.incomingMessageDeliveryAllowed=true;
+        const auto immediate=buildGamePanelPresentation(touchdownPanel);
+        check(std::any_of(immediate.modals.begin(),immediate.modals.end(),[](const auto& modal) {
+            return modal.id=="incoming_message" && modal.autoOpen &&
+                modal.bodyMarkup.find("That impact damaged the hull")!=std::string::npos;
+        }),"Hard touchdown lesson opens at the safe landing pause despite informational cooldown");
+        const auto persisted=deserializeSaveData(serializeSaveData(captureSaveData(landing)));
+        check(persisted.has_value(),"Touchdown message survives save serialization");
+        restoreSaveData(landing,catalog,*persisted);
+        check(!reconcileMessageRelevance(landing,catalog) && landing.incomingMessages.pending.size()==1,
+            "Reload at the same touchdown retains the lesson");
+        landing.run.flight.landing.siteKey=78;
+        check(reconcileMessageRelevance(landing,catalog) && landing.incomingMessages.pending.empty(),
+            "A later touchdown retires the old warning");
+    }
 
     auto badMissionCatalog = catalog;
     badMissionCatalog.solarMissions.front().completionMessageId = "missing_completion";

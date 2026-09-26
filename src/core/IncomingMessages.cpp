@@ -105,8 +105,18 @@ bool reconcileMessageRelevance(GameState& game, const ContentCatalog& catalog) {
     const bool attack = explains("triton_attack_drone");
     const auto& m = game.run.mining;
     const bool shipFull = shipHoldUsed(game) >= shipHoldCapacity(game,catalog);
+    const auto& landing = game.run.flight.landing;
+    const bool currentHardTouchdown = game.screen == Screen::Flight &&
+        game.run.flight.mode == FlightMode::Landing && landing.siteCommitted &&
+        landing.hardLanding && !landing.departureActive;
+    const std::string currentHardId = "campaign.hard_landing_tip:" + std::to_string(landing.siteKey);
     const auto before = messages.pending.size();
     std::erase_if(messages.pending, [&](const auto& item) {
+        if (item.messageId == "hard_landing_tip")
+            return !currentHardTouchdown || item.id != currentHardId;
+        if ((item.messageId == "moon_arrival_complete" || item.messageId == "mars_arrival_complete") &&
+            item.variantId == "hard")
+            return !currentHardTouchdown || item.messageId != game.run.expedition.location.bodyId + "_arrival_complete";
         if (item.messageId == "rig_full_tip") return !m.active || m.cargo < miningRigCargoCapacityMass(game,catalog) || shipFull;
         if (item.messageId == "ship_full_tip") return !m.active || !shipFull;
         if (item.messageId == "rig_fuel_empty_tip") return !m.active || m.rigFuel.current > 0;

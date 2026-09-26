@@ -1551,7 +1551,7 @@ void testExistingOrbitalShaftsRemainVisibleOutsideTheirActiveWedge()
     const auto withoutMission = shaftComposer.compose(snapshot).instances.size();
     snapshot.missionSectorVisible = true;
     snapshot.missionSector = snapshot.landingZones[0];
-    snapshot.missionSectorLabel = "MISSION LANDING SITE / Sector 1";
+    snapshot.missionSectorLabel = "MISSION LANDING SITE - Sector 1";
     const ScenePacket mission = shaftComposer.compose(snapshot);
     assert(mission.instances.size() > withoutMission + 26U);
     // Selecting another scan wedge must not move the mission outline.
@@ -1993,6 +1993,34 @@ RenderSnapshot miningSnapshot(rocket::MiningRunState& mining)
     snapshot.miningShipPresent = mining.depthZone == mining.entryDepthZone;
     snapshot.bindMiningFrameViews(mining);
     return snapshot;
+}
+
+void testContextualInteractionAnchorsFollowVisibleMiningTargets()
+{
+    rocket::MiningRunState mining;
+    mining.active = true;
+    mining.terrain.width = 8;
+    mining.terrain.height = 8;
+    mining.terrain.cells.resize(64);
+    mining.droneX = mining.returnZoneX = 3.5;
+    mining.droneY = mining.returnZoneY = 3.5;
+    mining.targetTipX = mining.droneX;
+    mining.targetTipY = mining.droneY;
+    rocket::SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningAtReturnZone = true;
+    snapshot.miningInteractionVisible = true;
+    snapshot.miningInteractionX = mining.droneX;
+    snapshot.miningInteractionY = mining.droneY;
+    const auto& visible = composer.compose(snapshot).interactionAnchors;
+    assert(visible.target.visible && visible.ship.visible);
+    assert(visible.target.x >= 0 && visible.target.x <= 1280);
+    assert(visible.target.y >= 0 && visible.target.y <= 800);
+    snapshot.miningAtReturnZone = false;
+    snapshot.miningInteractionVisible = false;
+    const auto& hidden = composer.compose(snapshot).interactionAnchors;
+    assert(!hidden.target.visible && !hidden.ship.visible);
 }
 
 
@@ -2489,6 +2517,53 @@ void testMiningLooseObjectsAreVisibleWorldEntities()
         assert(withChunk.instances.size() > baselineInstances);
         assert(containsMiningMaterialMarker(withChunk, material, color));
     }
+}
+
+void testRigFuelCellHasArtifactScaleSprite()
+{
+    rocket::MiningRunState mining;
+    mining.terrain.width = 4;
+    mining.terrain.height = 4;
+    mining.terrain.cells.resize(16);
+    mining.droneX = 1.0;
+    mining.droneY = 1.0;
+    mining.targetTipX = 1.0;
+    mining.targetTipY = 2.0;
+    rocket::MiningLooseObject fuel;
+    fuel.kind = rocket::MiningLooseObjectKind::FuelCell;
+    fuel.x = 2.0;
+    fuel.y = 2.0;
+    mining.looseObjects.push_back(fuel);
+
+    RenderSnapshot snapshot = miningSnapshot(mining);
+    snapshot.miningShipPresent = false;
+    snapshot.miningArtifact = {
+        true, fuel.x, fuel.y, 1.0, 1.0, 0, 0,
+        static_cast<int>(rocket::MiningArtifactState::Loose), true, false
+    };
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1.0F});
+    composer.setTextureReady(TextureId::MiningRigFuelCell, true);
+    composer.setTextureReady(TextureId::MiningArtifact, true);
+    const ScenePacket& packet = composer.compose(snapshot);
+    const auto spriteFor = [&](TextureId texture) {
+        const rocket::SceneAtlasUvRect uv = rocket::mapSceneAtlasUvRect(texture, 0.0F, 0.0F, 1.0F, 1.0F);
+        const auto found = std::find_if(packet.instances.begin(), packet.instances.end(), [&](const PackedSceneInstance& packed) {
+            const SceneInstance instance = rocket::unpackSceneInstance(packed);
+            return instance.textured && std::abs(instance.u0 - uv.u0) < 0.001F &&
+                std::abs(instance.v0 - uv.v0) < 0.001F &&
+                std::abs(instance.u1 - uv.u1) < 0.001F &&
+                std::abs(instance.v1 - uv.v1) < 0.001F;
+        });
+        assert(found != packet.instances.end());
+        return rocket::unpackSceneInstance(*found);
+    };
+    const SceneInstance cell = spriteFor(TextureId::MiningRigFuelCell);
+    const SceneInstance artifact = spriteFor(TextureId::MiningArtifact);
+    assert(std::abs(cell.centerX - artifact.centerX) < 0.002F);
+    assert(std::abs(cell.centerY - artifact.centerY) < 0.002F);
+    assert(std::abs(std::hypot(cell.axisYx, cell.axisYy) -
+                    std::hypot(artifact.axisYx, artifact.axisYy)) < 0.002F);
 }
 
 void testMiningLooseObjectsUseContinuousWorldCoordinates()
@@ -4444,10 +4519,12 @@ int main() try
     testMiningEvaDeathAddsPresentationWithoutReplacingTheSuit();
     testMiningActiveAnchorOwnsDefenseEffects();
     testMiningLooseObjectsAreVisibleWorldEntities();
+    testRigFuelCellHasArtifactScaleSprite();
     testMiningLooseObjectsUseContinuousWorldCoordinates();
     testMiningCellsAndScannerMarksUseMaterialSilhouettes();
     testCocoonHasNoConnectingArms();
     testSceneTransitionFadesEverySceneToBlack();
+    testContextualInteractionAnchorsFollowVisibleMiningTargets();
     testTetheredArtifactAuraHasNoRectangularOverlay();
     testTriangulationUsesOneThreeSliceAuraAndHidesArtifactGlow();
     testMiningPickupHistoryDoesNotReplayAfterLevelUp();

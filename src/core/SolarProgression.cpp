@@ -234,6 +234,10 @@ bool reconcileSolarMissionMessages(GameState& state, const ContentCatalog& catal
         }
         return std::any_of(catalog.solarMissions.begin(), catalog.solarMissions.end(),
             [&](const SolarMissionDefinition& mission) {
+                const bool routineBriefing = mission.bodyId != "moon" && mission.bodyId != "mars" && mission.bodyId != "io";
+                const bool routineCompletion = mission.bodyId != "moon" && mission.bodyId != "mars" && mission.bodyId != "triton";
+                if ((routineBriefing && occurrence.messageId == mission.briefingMessageId) ||
+                    (routineCompletion && occurrence.messageId == mission.completionMessageId)) return true;
                 return (occurrence.messageId == mission.briefingMessageId && solarMissionClaimed(state, catalog, mission)) ||
                     (occurrence.messageId == mission.completionMessageId && !solarMissionClaimed(state,catalog,mission));
             });
@@ -248,6 +252,7 @@ bool reconcileSolarMissionMessages(GameState& state, const ContentCatalog& catal
     // body or respawned at Earth before its first safe presentation point.
     for (const auto& mission : catalog.solarMissions) {
         if (!solarMissionClaimed(state, catalog, mission)) continue;
+        if (mission.bodyId != "moon" && mission.bodyId != "mars" && mission.bodyId != "triton") continue;
         if (mission.bodyId == "triton" && state.meta.straylightStage != StraylightStage::Hidden) continue;
         const bool queued = enqueueIncomingMessage(messages, catalog,
             {"campaign.solar." + mission.bodyId + ".complete", mission.completionMessageId, "default"});
@@ -255,7 +260,8 @@ bool reconcileSolarMissionMessages(GameState& state, const ContentCatalog& catal
     }
     const auto* mission = solarMissionForBody(catalog, expedition.location.bodyId);
     if (inFlight && mission != nullptr && solarMissionAvailable(state, *mission) &&
-        !solarMissionClaimed(state, catalog, *mission)) {
+        !solarMissionClaimed(state, catalog, *mission) &&
+        (mission->bodyId == "moon" || mission->bodyId == "mars" || mission->bodyId == "io")) {
         changed |= enqueueIncomingMessage(messages, catalog,
             {"campaign.solar." + mission->bodyId + ".briefing", mission->briefingMessageId, "default"});
     }

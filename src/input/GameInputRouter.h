@@ -29,6 +29,10 @@ enum class GameInputAction : std::size_t {
     MiningOperatorToggle,
     MiningRepairDrill,
     MiningRepairRig,
+    MiningDroneOps,
+    MiningWaitForDrones,
+    MiningDepart,
+    SalvageNearbyWreck,
     MiningFailureAcknowledge,
     EnterUiFocus,
     Count
@@ -111,6 +115,8 @@ public:
             : ControllerButton::East;
         const double activationHoldSeconds = std::max(0.0, focusedActivationHoldSeconds);
         const std::bitset<controllerButtonCount> holdTriggeredBeforeUpdate = holdTriggered_;
+        const bool enteringShipService = context == InputContext::MiningService
+            && lastContext_.has_value() && *lastContext_ != context;
         const auto fenceHeldInput = [&]() {
             holdTriggered_ |= frame.down;
             confirmFenced_ = confirmFenced_ || frame.isDown(confirmButton);
@@ -182,7 +188,18 @@ public:
             add(GameInputAction::OpenInventory);
             return result;
         }
-        if ((context == InputContext::Launch || context == InputContext::MiningActive || context == InputContext::MiningService)
+        if (context == InputContext::MiningService) {
+            if (enteringShipService) return result;
+            if (frame.wasPressed(ControllerButton::DpadLeft)) {
+                fenceHeldInput();
+                enterUiFocusFromDpad(frame, result);
+                return result;
+            }
+            if (frame.wasPressed(ControllerButton::DpadUp)) add(GameInputAction::MiningDroneOps);
+            if (frame.wasPressed(ControllerButton::DpadRight)) add(GameInputAction::MiningWaitForDrones);
+            if (holdCrossed(frame, ControllerButton::DpadDown, 0.6)) add(GameInputAction::MiningDepart);
+        }
+        if ((context == InputContext::Launch || context == InputContext::MiningActive)
             && dpadPressed(frame)) {
             fenceHeldInput();
             enterUiFocusFromDpad(frame, result);
@@ -257,6 +274,7 @@ public:
             result.orbitalHeld = frame.isDown(confirmButton) && !confirmFenced_;
             lastContinuousOutput_ = result.orbitalHeld;
             if (frame.wasPressed(ControllerButton::LeftStick)) add(GameInputAction::ToggleCruise);
+            if (frame.wasPressed(ControllerButton::North)) add(GameInputAction::SalvageNearbyWreck);
             break;
 
         case InputContext::MiningActive:

@@ -115,6 +115,7 @@ public:
     void miningStow();
     void miningWaitForDrones();
     void miningDepart();
+    void salvageNearbyWreck();
     void deploySurfaceTeam();
     void departSurfaceUndeployed();
     void miningAbort();
@@ -466,6 +467,7 @@ private:
     bool flightPointerValid_ = false;
     std::string missionStepKey_;
     double missionChangeSeconds_ = 0;
+    double missionSectorPulseSeconds_ = 0;
     bool showCompletedMissions_ = false;
     double flightPointerX_ = 0.0, flightPointerY_ = 0.0;
     RealtimeInputState controllerRealtimeInput_;

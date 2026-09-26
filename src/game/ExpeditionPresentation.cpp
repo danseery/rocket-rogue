@@ -548,6 +548,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
             // screens while the artifact is still aboard and at risk.
             const auto* artifact = missionArtifact(state, mission.scenarioId, mission.claimStepId);
             if (!artifact || !artifactHandInAvailable(state, *artifact)) continue;
+            if (mission.bodyId != "moon" && mission.bodyId != "mars") continue;
             const auto* body = systemBody(system, mission.bodyId);
             const std::string title = (body ? body->name : mission.bodyId) + " mission ready";
             const std::string claimAction = ui::actions::scenarioAction(claim.scenarioId, claim.stepId, static_cast<int>(claim.action));
@@ -564,38 +565,6 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
             }
             break;
         }
-    }
-    if (state.screen == Screen::Flight && !c.surfaceArrivalActive &&
-        !(c.orbitalWork && c.orbitalWork->active())) {
-        const bool earthDocking = serviceDockingActive(flight);
-        const bool dockInRange = expeditionDockInRange(e, flight, system);
-        const bool dockReady = canDockExpedition(e, flight, system);
-        const bool flightDefaultAvailable = panel.contentMarkup.find("data-ui-default-focus=") == std::string::npos;
-        const std::string hazardMission = hazardDroneMissionMarkup(c);
-        panel.contentMarkup += "<div class=\"expedition-flight-bar" +
-        std::string(hazardMission.empty() ? "" : " expedition-flight-mission-flow") + "\"><p>" + esc(region ? region->name : "Solar space") +
-        " / Target: " + esc(selectedName) + " / " + (e.cruise.active ?
-            (e.cruise.cooling ? "CRUISE COOLING" : "CRUISE ACTIVE") : "MANUAL") + "</p>" +
-        hazardMission +
-        action(e.cruise.active ? "Cruise off [C / L3]" : "Cruise [C / L3]", "cruise", flight.active && flight.mode != FlightMode::Landing && flight.mode != FlightMode::Docking && !e.undockReady,
-            flightDefaultAvailable && !dockReady) +
-        (earthDocking ? "<div class=\"expedition-dock-action\"><strong>" +
-            std::string(flight.docking.dockId == "earth" ? "EARTH DOCK / " : "") + esc(earthDockingGuidance(flight)) +
-            "</strong><p>" + (flight.docking.dockId == "straylight"
-                ? "Align parallel in either direction. Hold Shift + A/D to strafe; controller: left stick left/right."
-                : "Enter the berth nose first.") + "</p></div>" :
-            dockInRange && e.location.bodyId == "earth" ?
-                "<div class=\"expedition-dock-action\">EARTH DOCK / MANEUVER ENGAGED</div>" : std::string{});
-        for (const auto& wreck : e.wrecks) {
-            if (!canSalvageWreck(e, flight, system, wreck.id, false)) continue;
-            const bool ready = canSalvageWreck(e, flight, system, wreck.id);
-            panel.contentMarkup += "<p class=\"" + std::string(wreckCarriesArtifact(e, wreck.id) ? "wreck-artifact-copy" : "") + "\">" +
-                esc(wreckDisplayName(e, wreck.id)) + " / " +
-                (ready ? "Ready to salvage. Artifacts and upgrades fit even with a full ore hold." : "Match the wreck's speed to salvage.") + "</p>" +
-                action(wreckCarriesArtifact(e, wreck.id) ? "Salvage artifact / Wreck " + std::to_string(wreck.id) : "Salvage wreck " + std::to_string(wreck.id),
-                    "recover:" + std::to_string(wreck.id), ready);
-        }
-        panel.contentMarkup += "</div>";
     }
     const auto& d = e.decision;
     if (!d.pendingId.empty() && !d.awaitingAscent && state.screen == Screen::Flight && flight.mode != FlightMode::Landing && c.incomingMessageDeliveryAllowed && e.progression.pendingRunUpgradeChoices == 0 &&
@@ -616,7 +585,9 @@ void appendMissionPresentation(const PanelRenderContext& c, PanelDocumentPresent
     int completedCount = 0;
     for (const auto& item : missionLog(s, c.catalog)) {
         std::string entry = "<section class=\"mission-log-entry\"><h3>" + esc(item.location + " / " + item.title) +
-            (item.optional ? " (optional)" : "") + "</h3><p>" + esc(item.purpose) + "</p><ol>";
+            (item.optional ? " (optional)" : "") + "</h3>";
+        if (item.recoveryGoals.empty() || item.id == "io") entry += "<p>" + esc(item.purpose) + "</p>";
+        entry += "<ol>";
         const auto appendGoals = [&](const auto& goals) {
             for (const auto& row : goals)
                 entry += "<li class=\"" + std::string(row.complete ? "mission-done" : "mission-pending") + "\">" +
@@ -629,11 +600,13 @@ void appendMissionPresentation(const PanelRenderContext& c, PanelDocumentPresent
             entry += "</ol><h4>Recovery</h4><ol>";
         }
         appendGoals(item.recoveryGoals.empty() ? item.requirements : item.recoveryGoals);
-        entry += "</ol><p>" + esc(item.instruction) + "</p>";
-        for (const auto& progress : item.progress) entry += "<p>" + esc(progress) + "</p>";
+        entry += "</ol>";
+        if (item.recoveryGoals.empty()) entry += "<p>" + esc(item.instruction) + "</p>";
         if (!item.reward.empty()) entry += "<p class=\"mission-reward\">" + esc(item.reward) + "</p>";
         if (!item.complete) entry += button(item.id == v.id ? "Tracked mission" : "Track mission", "expedition:track:" + item.id,
             item.id != v.id && !straylightCommitted(s));
+        if (!item.action.empty() && (item.stepId == "accept" || item.stepId == "claim"))
+            entry += button(item.stepId == "accept" ? "Accept mission" : "Complete Mission", item.action, true, "ok");
         entry += "</section>";
         if (item.complete) { completed += entry; ++completedCount; } else log += entry;
     }
@@ -645,20 +618,57 @@ void appendMissionPresentation(const PanelRenderContext& c, PanelDocumentPresent
     replaceModal(panel, {"missions", "MISSIONS", log, "expedition:missions_close", false, true, true, ModalTone::Neutral});
     if (!v.available || straylightCinematicDuration(s.meta.straylightStage) > 0 ||
         std::any_of(panel.modals.begin(), panel.modals.end(), [](const auto& modal) { return modal.autoOpen; })) return;
+    const bool approachingMission = s.screen == Screen::Flight && c.launchFlight && c.launchFlight->active &&
+        v.targetId == v.id && v.id == e.location.bodyId && !v.sectorId.empty() &&
+        v.stepId != "accept" && !v.complete;
+    std::vector<MissionRequirementView> visibleGoals;
+    if (approachingMission) {
+        const auto add = [&](std::string text, std::string detail = {}) {
+            visibleGoals.push_back({std::move(text), false, std::move(detail)});
+        };
+        const std::string sector = missionSectorName(v.sectorId);
+        if (!c.launchFlight->orbit.captured) {
+            add("Establish orbit");
+            add("Scan a landing sector");
+            add("Land");
+        } else if (!v.sectorKnown) {
+            add("Scan a landing sector");
+            add("Land");
+        } else if (e.selectedOrbitZone != v.sectorId) {
+            add("Fly to mission sector", sector);
+            add("Scan mission sector");
+            add("Land");
+        } else if (!c.orbitalWork || !c.orbitalWork->surveyComplete) {
+            add("Scan mission sector", sector);
+            add("Land");
+        } else {
+            add("Land", sector);
+        }
+        for (const auto& goal : v.recoveryGoals) {
+            if (visibleGoals.size() >= 3) break;
+            if (!goal.complete) visibleGoals.push_back(goal);
+        }
+    } else visibleGoals = v.trackerGoals;
+    const auto* approachBody = approachingMission ? systemBody(solarSystemDefinition(), v.id) : nullptr;
+    const std::string trackerHeading = approachBody ? approachBody->name + " / " + v.title : v.location + " / " + v.title;
     std::string tracker = "<section id=\"rr-mission-tracker\" class=\"mission-tracker" +
-        std::string(c.missionChanged ? " mission-changed" : "") + "\"><strong>" + esc(v.location + " / " + v.title) +
+        std::string(c.missionChanged ? " mission-changed" : "") + "\"><strong>" + esc(trackerHeading) +
         "</strong>";
-    if (!v.trackerGoals.empty()) {
+    if (!visibleGoals.empty()) {
         tracker += "<div class=\"mission-goals\" role=\"list\">";
-        for (const auto& goal : v.trackerGoals) {
+        bool currentGoalShown = false;
+        for (const auto& goal : visibleGoals) {
+            const bool current = !goal.complete && !currentGoalShown;
+            if (current) currentGoalShown = true;
             tracker += "<div role=\"listitem\" class=\"mission-goal " + std::string(goal.complete ? "mission-done" : "mission-pending") +
+                (current ? " mission-current" : " mission-upcoming") +
                 "\"><span class=\"mission-checkbox\" aria-label=\"" + (goal.complete ? "Complete" : "Incomplete") + "\">" +
                 (goal.complete ? "x" : "") + "</span><div class=\"mission-goal-copy\">" + esc(goal.text);
             if (!goal.detail.empty()) tracker += "<small>" + esc(goal.detail) + "</small>";
             tracker += "</div></div>";
         }
         tracker += "</div>";
-        if (v.stepId != "ore" && v.stepId != "orbit" && v.stepId != "complete")
+        if (!approachingMission && (v.stepId == "accept" || v.stepId == "wrong_site" || v.stepId == "drill"))
             tracker += "<p class=\"mission-next\">" + esc(v.instruction) + "</p>";
     } else {
         tracker += "<p class=\"mission-next\">" + esc(v.instruction) + "</p><p class=\"mission-progress\">";
@@ -666,21 +676,23 @@ void appendMissionPresentation(const PanelRenderContext& c, PanelDocumentPresent
         tracker += "</p>";
     }
     tracker += "<div class=\"mission-tracker-actions\">" + button("Missions", "expedition:missions");
+    if (const auto* mission = solarMissionForBody(c.catalog, e.location.bodyId);
+        (s.screen == Screen::Flight || s.screen == Screen::Mining)
+            && mission && mission->bodyId == "io") {
+        const auto acceptance = solarMissionAcceptanceForBody(s, c.catalog, mission->bodyId);
+        const std::string acceptanceAction = ui::actions::scenarioAction(acceptance.scenarioId,
+            acceptance.stepId, static_cast<int>(acceptance.action));
+        if (acceptance.available && acceptanceAction != v.action)
+            tracker += button(acceptance.actionLabel, acceptanceAction, true, "ok");
+    }
+    if (!v.action.empty() && (v.stepId == "accept" || v.stepId == "claim"))
+        tracker += button(v.stepId == "accept" ? "Accept mission" : "Complete Mission", v.action, true, "ok");
     if (e.coursePlayerSelected && e.course.targetBodyId != v.targetId && !v.targetId.empty())
         tracker += button("Return to mission", "expedition:follow_mission");
     tracker += "</div></section>";
-    if (s.screen == Screen::Flight || s.screen == Screen::Mining) {
-        panel.missionTrackerMarkup = tracker;
-    } else if (s.screen == Screen::Hangar && panel.templateKind == PanelTemplateKind::LegacyRaw) {
-        // The dock has a full-width shipyard/menu surface. Keep the mission
-        // status in a sibling column so it cannot push the departure controls
-        // or shipyard cards down the page.
-        panel.contentMarkup =
-            "<div class=\"expedition-dock-layout\"><aside class=\"expedition-mission-sidebar\">" +
-            tracker + "</aside><div class=\"expedition-dock-main\">" +
-            panel.contentMarkup + "</div></div>";
-    } else {
-        panel.contentMarkup = tracker + panel.contentMarkup;
-    }
+    // The tracker is mounted in the scene overlay on every screen. Keeping it
+    // out of the page layout prevents mission changes from moving dock, map,
+    // and upgrade controls, especially when the viewport is narrow.
+    panel.missionTrackerMarkup = tracker;
 }
 } // namespace rocket

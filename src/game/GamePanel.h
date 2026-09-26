@@ -62,6 +62,7 @@ struct PanelRenderContext {
     bool showCompletedMissions = false;
     int orbitalArtifactDepth = -1;
     int orbitalBoreDepth = 0;
+    const std::vector<OrbitalSurveyLayer>* orbitalSurveyLayers = nullptr;
 };
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);

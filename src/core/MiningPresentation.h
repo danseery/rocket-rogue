@@ -600,7 +600,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
                     ui::actions::miningTether,
                     "warn");
             } else if (tetherTarget.target == MiningTetherTarget::FuelCell) {
-                tetherAction = panelActionButton("Tether fuel cell", ui::actions::miningTether, "warn");
+                tetherAction = panelActionButton("Tether rig fuel cell", ui::actions::miningTether, "warn");
             } else if (tetherTarget.blocker == MiningTetherBlocker::ArtifactGateLocked) {
                 tetherAction = disabledPanelButton("Complete gate to tether artifact");
             } else if (tetherTarget.blocker == MiningTetherBlocker::ArtifactUnexposed) {

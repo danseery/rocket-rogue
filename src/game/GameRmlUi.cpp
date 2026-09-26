@@ -1832,6 +1832,26 @@ std::string withOpeningControllerLabels(std::string markup, ControllerFamily fam
     return markup;
 }
 
+std::string withInteractionControllerSymbols(std::string markup, ControllerFamily family)
+{
+    const ControllerFamily resolved = promptControllerFamily(family);
+    const bool playstation = resolved == ControllerFamily::PlayStation;
+    const bool deck = resolved == ControllerFamily::SteamDeck;
+    const auto replaceToken = [&](std::string_view token, std::string_view value) {
+        std::size_t position = 0;
+        while ((position = markup.find(token, position)) != std::string::npos) {
+            markup.replace(position, token.size(), value);
+            position += value.size();
+        }
+    };
+    replaceToken("{{controller_north}}", playstation ? "△" : "Y");
+    replaceToken("{{controller_west}}", playstation ? "□" : "X");
+    replaceToken("{{controller_south}}", playstation ? "×" : "A");
+    replaceToken("{{controller_lb}}", playstation || deck ? "L1" : "LB");
+    replaceToken("{{controller_rb}}", playstation || deck ? "R1" : "RB");
+    return markup;
+}
+
 std::string inputPromptBar(
     const PanelDocumentPresentation& presentation,
     ControllerFamily family,
@@ -2927,6 +2947,7 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
         && presentation_.runtime.miningAbortAvailable == presentation.runtime.miningAbortAvailable
         && presentation_.runtime.overlayValue == presentation.runtime.overlayValue
         && presentation_.missionTrackerMarkup == presentation.missionTrackerMarkup
+        && presentation_.interactionMarkup == presentation.interactionMarkup
         && presentation_.runtime.expeditionLevel == presentation.runtime.expeditionLevel
         && presentation_.runtime.expeditionExperienceCurrent == presentation.runtime.expeditionExperienceCurrent
         && presentation_.runtime.expeditionExperienceRequired == presentation.runtime.expeditionExperienceRequired
@@ -3044,6 +3065,11 @@ void GameRmlUi::setRealtimeHudState(const RealtimeHudState& state)
     }
 }
 
+void GameRmlUi::setInteractionAnchors(const SceneInteractionAnchors& anchors)
+{
+    interactionAnchors_ = anchors;
+}
+
 void GameRmlUi::render()
 {
     if (!initialized_ || !g_context) {
@@ -3081,7 +3107,8 @@ void GameRmlUi::render()
         viewport.drawableHeight,
     });
     Rml::Rectanglei rootClip;
-    if (!openModalId_.empty() || controllerPresentationActive_ || presentation_.runtime.gameplayInputHelper
+    if (!openModalId_.empty() || !presentation_.interactionMarkup.empty()
+        || controllerPresentationActive_ || presentation_.runtime.gameplayInputHelper
         || presentation_.runtime.sceneTransitionActive
         || performanceStatsVisible_ || presentation_.metadata.overlay != PanelOverlayKind::None) {
         rootClip = Rml::Rectanglei::FromSize({viewportWidth, viewportHeight});
@@ -3089,6 +3116,25 @@ void GameRmlUi::render()
         rootClip = expandedPanelClip(panelMode_);
     }
     renderHost_.setRootClip({rootClip.Left(), rootClip.Top(), rootClip.Right(), rootClip.Bottom()});
+    const auto placeInteraction = [&](const char* id, SceneInteractionAnchor anchor, int width, int height, bool ship) {
+        Rml::Element* element = g_document->GetElementById(id);
+        if (!element) return;
+        element->SetProperty("display", anchor.visible && openModalId_.empty() ? "block" : "none");
+        if (!anchor.visible) return;
+        const UiSurfaceKind surface = presentation_.metadata.surface == PanelSurfaceKind::Mining
+            ? UiSurfaceKind::Mining : uiSurfaceKindForScreen(presentation_.metadata.screen);
+        const UiRect scene = resolveUiViewportLayout(viewportWidth, viewportHeight, surface).sceneRect;
+        const int left = std::clamp(static_cast<int>(anchor.x) + (ship ? 44 : -width / 2),
+            scene.x + 10, std::max(scene.x + 10, scene.x + scene.width - width - 10));
+        const int desiredTop = ship ? static_cast<int>(anchor.y) - height / 2 : static_cast<int>(anchor.y) - 66;
+        const int top = std::clamp(desiredTop, scene.y + (surface == UiSurfaceKind::Mining ? 102 : 16),
+            std::max(scene.y + (surface == UiSurfaceKind::Mining ? 102 : 16), scene.y + scene.height - height - 12));
+        element->SetProperty("left", std::to_string(left) + "px");
+        element->SetProperty("top", std::to_string(top) + "px");
+    };
+    placeInteraction("rr-context-interaction", interactionAnchors_.target, 248, 48, false);
+    placeInteraction("rr-ship-services", interactionAnchors_.ship, 258, 322, true);
+    placeInteraction("rr-dock-cue", interactionAnchors_.dock, 190, 38, false);
     refreshAutoPowerStatusElement();
     g_context->Update();
     if (renderHost_.beginFrame()) {
@@ -3328,6 +3374,12 @@ bool GameRmlUi::navigateImpl(UiDirection direction)
     }
 
     const ControllerFocusRow currentRow = controllerFocusRow(*current);
+    if (!modalScope && direction == UiDirection::Left &&
+        (currentRow == ControllerFocusRow::Titlebar || currentRow == ControllerFocusRow::Utilities) &&
+        !directionalControllerRowTarget(*current, currentRow, direction)) {
+        if (FocusTarget* mission = findFocusTarget("action:expedition:missions"))
+            return applyControllerFocus(mission, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+    }
     if (currentRow == ControllerFocusRow::DroneLoadout) {
         if (FocusTarget* gridTarget = droneLoadoutGridTarget(*current, direction)) {
             return applyControllerFocus(
@@ -3587,6 +3639,8 @@ void GameRmlUi::setControllerPresentation(bool active, ControllerFamily family)
     }
     const bool controllerLabelsChanged = controllerFamily_ != family
         && presentation_.contentMarkup.find("{{controller_") != std::string::npos;
+    const bool interactionLabelsChanged = controllerFamily_ != family
+        && presentation_.interactionMarkup.find("{{controller_") != std::string::npos;
     controllerPresentationActive_ = active;
     controllerFamily_ = family;
     if (initialized_) {
@@ -3594,7 +3648,7 @@ void GameRmlUi::setControllerPresentation(bool active, ControllerFamily family)
             controllerLabelsChanged,
             false,
             false,
-            false,
+            interactionLabelsChanged,
             true,
             false);
     }
@@ -4112,21 +4166,36 @@ bool GameRmlUi::rebuildOverlayHost()
             "Failed to apply RmlUi layout properties to #rr-scene-overlay-host.");
         return false;
     }
+    if (Rml::Element* panel = g_document->GetElementById("rr-panel")) {
+        panel->SetClass("mission-overlay-compact-visible",
+            !presentation_.missionTrackerMarkup.empty() && rr_rml_viewport_width() < 1100 &&
+            presentation_.metadata.surface != PanelSurfaceKind::Mining &&
+            uiSurfaceKindForScreen(presentation_.metadata.screen) == UiSurfaceKind::Fullscreen);
+    }
     const ModalPresentation* activeModal = findModal(presentation_.modals, openModalId_);
     std::string overlays = nativeSceneOverlayMarkup(presentation_);
     if (!presentation_.missionTrackerMarkup.empty()) {
         // Landed flight also uses the mining HUD. Anchor to that presentation,
         // rather than the gameplay screen's flight-sidebar geometry.
         const bool surfaceHud = presentation_.metadata.surface == PanelSurfaceKind::Mining;
-        const auto layout = resolveUiViewportLayout(std::max(1, rr_rml_viewport_width()),
-            std::max(1, rr_rml_viewport_height()), surfaceHud ? UiSurfaceKind::Mining : uiSurfaceKindForScreen(presentation_.metadata.screen));
+        const int viewportWidth = std::max(1, rr_rml_viewport_width());
+        const UiSurfaceKind surface = surfaceHud ? UiSurfaceKind::Mining : uiSurfaceKindForScreen(presentation_.metadata.screen);
+        const bool fullscreen = surface == UiSurfaceKind::Fullscreen;
+        const bool compact = fullscreen && viewportWidth < 1100;
+        const auto layout = resolveUiViewportLayout(viewportWidth,
+            std::max(1, rr_rml_viewport_height()), surface);
         // The surface XP strip occupies the first 38px of the scene; leave a
         // 12px gap below it and align with the other HUD elements' left edge.
-        overlays += "<div class=\"mission-overlay\" style=\"left:" + std::to_string(layout.sceneRect.x + (surfaceHud ? 0 : 12)) +
-            "px;top:" + std::to_string(layout.sceneRect.y + (surfaceHud ? 50 : 64)) + "px;width:" +
-            std::to_string(std::min(330, std::max(240, layout.sceneRect.width / 3))) + "px;\">" +
+        overlays += "<div class=\"mission-overlay" + std::string(fullscreen ? " mission-overlay-fullscreen" : "") +
+            (compact ? " mission-overlay-compact" : "") + "\" style=\"left:" +
+            std::to_string(layout.sceneRect.x + (surfaceHud ? 0 : 12)) +
+            "px;top:" + std::to_string(layout.sceneRect.y + (compact ? 0 : fullscreen ? 12 : surfaceHud ? 50 : 64)) + "px;width:" +
+            std::to_string(compact ? 160 : fullscreen ? std::min(250, std::max(210, layout.sceneRect.width / 4))
+                : std::min(330, std::max(240, layout.sceneRect.width / 3))) + "px;\">" +
             presentation_.missionTrackerMarkup + "</div>";
     }
+    if (!presentation_.interactionMarkup.empty())
+        overlays += withInteractionControllerSymbols(presentation_.interactionMarkup, controllerFamily_);
     overlayHost->SetInnerRML(activeModal ? std::string {} : overlays);
     return true;
 }

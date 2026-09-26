@@ -1126,6 +1126,7 @@
       departSurfaceUndeployed: () => rrCall("rr_depart_surface_undeployed"),
       surfaceArrivalActive: () => rrCall("rr_surface_arrival_active", [], [], "number") !== 0,
       returnHome: () => rrCall("rr_return_home"),
+      salvageNearbyWreck: () => rrCall("rr_salvage_nearby"),
       miningMove: (xAxis, yAxis) => rrCall("rr_mining_move", [xAxis, yAxis], ["number", "number"]),
       miningPointerAim: (x, y) => rrCall("rr_mining_pointer_aim", [x, y], ["number", "number"]),
       miningFire: (active) => rrCall("rr_mining_fire", [active ? 1 : 0], ["number"]),
@@ -1534,6 +1535,8 @@
           rr.returnHome();
         } else if (!event.repeat && key === "c") {
           rrCall("rr_toggle_cruise");
+        } else if (!event.repeat && key === "f") {
+          rr.salvageNearbyWreck();
         } else if (!event.repeat && key === "m") {
           rrCall("rr_open_navigation");
         } else {

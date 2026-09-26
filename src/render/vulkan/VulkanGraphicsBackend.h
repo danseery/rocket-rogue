@@ -40,6 +40,7 @@ public:
     bool initialize() override;
     void render(const RenderSnapshot& snapshot) override;
     FlightPointerPresentation flightPointerPresentation() const override { return composer_.flightPointerPresentation(); }
+    SceneInteractionAnchors interactionAnchors() const override { return composer_.interactionAnchors(); }
     GraphicsFrameStatus endFrameAndPresent() override;
     GraphicsFrameStatus frameStatus() const override;
     void shutdown() override;

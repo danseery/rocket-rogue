@@ -1,6 +1,7 @@
 #pragma once
 #include "render/SurfaceCameraPresentation.h"
 #include "core/FlightPointerInput.h"
+#include "core/SceneInteractionAnchors.h"
 
 #include "core/UiViewportLayout.h"
 
@@ -110,6 +111,7 @@ enum class TextureId : std::uint8_t {
     EnemySecurityDrone,
     StraylightDock,
     Sun,
+    MiningRigFuelCell,
     Count
 };
 
@@ -477,6 +479,7 @@ struct SceneTransform {
 // this packet synchronously before the next compose() call.
 struct ScenePacket {
     FlightPointerPresentation flightPointer;
+    SceneInteractionAnchors interactionAnchors;
     SurfaceCameraPresentation surfaceCamera;
     std::span<const PackedSceneVertex> vertices;
     std::span<const PackedSceneVertex> miningTerrainVertices;

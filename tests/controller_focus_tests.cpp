@@ -498,6 +498,22 @@ void generatedPanelPass(int width, int height)
         ui.setPanelPresentation(presentation);
         const auto label = "screen " + std::to_string(static_cast<int>(screen)) + " @" + std::to_string(width);
         auditRenderedGraph(ui, label);
+        if (!presentation.missionTrackerMarkup.empty()) {
+            assert(presentation.contentMarkup.find("rr-mission-tracker") == std::string::npos);
+            auto* panelButton = document()->GetElementById("rr-panel")->QuerySelector("button[data-rr-action]");
+            assert(panelButton);
+            const auto withMission = panelButton->GetAbsoluteOffset();
+            assert(document()->GetElementById("rr-scene-overlay-host")->GetElementById("rr-mission-tracker"));
+            presentation.missionTrackerMarkup.clear();
+            ui.setPanelPresentation(presentation);
+            ui.render();
+            panelButton = document()->GetElementById("rr-panel")->QuerySelector("button[data-rr-action]");
+            assert(panelButton);
+            const auto withoutMission = panelButton->GetAbsoluteOffset();
+            assert(std::abs(withMission.x - withoutMission.x) <= 1.0F);
+            assert(std::abs(withMission.y - withoutMission.y) <= 1.0F);
+            ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+        }
         if (screen == rocket::Screen::Hangar) {
             for (const auto& modal : presentation.modals) {
                 ui.openModal(modal.id);
@@ -678,18 +694,14 @@ void generatedPanelPass(int width, int height)
     state->run.mining.droneX = state->run.mining.returnZoneX + 8;
     state->run.mining.droneY = state->run.mining.returnZoneY;
     auto ioPanel = rocket::buildGamePanelPresentation(context);
-    assert(ioPanel.contentMarkup.find("data-hazard-support=\"uncommissioned\"") != std::string::npos);
-    assert(ioPanel.contentMarkup.find("Commission Hazard Drone") != std::string::npos);
-    assert(ioPanel.contentMarkup.find("data-rr-action=\"drone_ops\"") != std::string::npos);
-    audit("Io mining persistent commission");
-    assertActionLabelFits(document()->GetElementById("rr-panel"), commissionAction, "Commission Hazard Drone");
-    auto* missionStrip = document()->QuerySelector(".mining-hazard-mission");
-    auto* serviceDock = document()->QuerySelector(".mining-bottom-rail");
-    assert(missionStrip && serviceDock);
-    assert(missionStrip->GetAbsoluteOffset(Rml::BoxArea::Border).y + missionStrip->GetBox().GetSize(Rml::BoxArea::Border).y <=
-        serviceDock->GetAbsoluteOffset(Rml::BoxArea::Border).y);
+    assert(ioPanel.contentMarkup.find("data-hazard-support=\"uncommissioned\"") == std::string::npos);
+    assert(ioPanel.contentMarkup.find("mining-command-dock") == std::string::npos);
+    assert(ioPanel.missionTrackerMarkup.find(commissionAction) != std::string::npos);
+    audit("Io mining commission in mission tracker");
+    assertActionLabelFits(document()->GetElementById("rr-mission-tracker"), commissionAction, "Commission Hazard Drone");
     state->screen = rocket::Screen::DroneOps;
     ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+    ui.requestFocus("action:" + commissionAction);
     assert(ui.focusedId() == "action:" + commissionAction);
     auditRenderedGraph(ui, "Io Drone Ops commission @" + std::to_string(width));
     assert(rocket::acceptSolarMission(*state, catalog, *io).accepted);
@@ -757,7 +769,7 @@ void generatedPanelPass(int width, int height)
     state->meta.equippedDroneIds.push_back(rocket::content::drone::hazardDrone);
     state->screen = rocket::Screen::Mining;
     ioPanel = rocket::buildGamePanelPresentation(context);
-    assert(ioPanel.contentMarkup.find("data-hazard-support=\"assigned\"") != std::string::npos);
+    assert(ioPanel.contentMarkup.find("data-hazard-support=") == std::string::npos);
     audit("Io assigned mining support");
 
     // Commission prompts bind to the authored acceptance label, while unrelated
@@ -879,6 +891,71 @@ void recoveredDockKeepsSubmittingVisibleGeometry(int width, int height, float de
     // pixels. A WebGL cache/context failure still requires live browser QA.
     ui.shutdown();
 }
+void contextualOverlayPass(int width, int height)
+{
+    Preferences preferences;
+    Host host;
+    host.viewport = {width, height, width, height, 1.0F};
+    Bridge bridge;
+    RenderHost renderer;
+    rocket::GameRmlUi ui(preferences, host, bridge, renderer, assetRoot());
+    std::string action;
+    assert(ui.initialize([&](const std::string& value) { action = value; }));
+    ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
+    auto presentation = panel(button("base"));
+    presentation.metadata.screen = rocket::Screen::Mining;
+    presentation.metadata.surface = rocket::PanelSurfaceKind::Mining;
+    presentation.interactionMarkup =
+        "<div id=\"rr-context-interaction\" class=\"context-interaction is-ready\">"
+        "<button class=\"interaction-action\" data-rr-action=\"mining_tether\" "
+        "data-ui-focus-id=\"interaction:mining_tether\"><span class=\"interaction-key controller-key\">"
+        "{{controller_north}} {{controller_lb}}</span><span class=\"interaction-label\">Tether artifact</span></button></div>";
+    ui.setPanelPresentation(presentation);
+    rocket::SceneInteractionAnchors anchors;
+    anchors.target = {true, static_cast<float>(width - 12), static_cast<float>(height - 24)};
+    ui.setInteractionAnchors(anchors);
+    ui.render();
+    auto* prompt = document()->GetElementById("rr-context-interaction");
+    assert(prompt && prompt->IsVisible(true));
+    const auto position = prompt->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto size = prompt->GetBox().GetSize(Rml::BoxArea::Border);
+    assert(position.x >= 0 && position.y >= 0 && position.x + size.x <= width && position.y + size.y <= height);
+    assert(prompt->GetInnerRML().find("Y") != std::string::npos);
+    ui.setControllerPresentation(true, rocket::ControllerFamily::PlayStation);
+    prompt = document()->GetElementById("rr-context-interaction");
+    assert(prompt && prompt->GetInnerRML().find("△ L1") != std::string::npos);
+    ui.setControllerPresentation(true, rocket::ControllerFamily::SteamDeck);
+    prompt = document()->GetElementById("rr-context-interaction");
+    assert(prompt && prompt->GetInnerRML().find("Y L1") != std::string::npos);
+    ui.render();
+    const auto click = prompt->QuerySelector("button")->GetAbsoluteOffset(Rml::BoxArea::Border);
+    ui.mouseMove(static_cast<int>(click.x + 12), static_cast<int>(click.y + 12));
+    ui.mouseDown(static_cast<int>(click.x + 12), static_cast<int>(click.y + 12), 0);
+    ui.mouseUp(static_cast<int>(click.x + 12), static_cast<int>(click.y + 12), 0);
+    ui.render();
+    assert(action == "mining_tether");
+    presentation.interactionMarkup =
+        "<section id=\"rr-ship-services\" class=\"context-ship-services\">"
+        "<strong>SHIP SERVICES</strong><button class=\"interaction-action\" "
+        "data-rr-action=\"mining_depart\" data-ui-focus-id=\"interaction:mining_depart\">"
+        "Depart planet</button></section>";
+    ui.setPanelPresentation(presentation);
+    anchors.target = {};
+    anchors.ship = {true, static_cast<float>(width - 12), static_cast<float>(height - 12)};
+    ui.setInteractionAnchors(anchors);
+    ui.render();
+    auto* services = document()->GetElementById("rr-ship-services");
+    assert(services && services->IsVisible(true));
+    const auto shipPosition = services->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto shipSize = services->GetBox().GetSize(Rml::BoxArea::Border);
+    assert(shipPosition.x >= 0 && shipPosition.y >= 0
+        && shipPosition.x + shipSize.x <= width && shipPosition.y + shipSize.y <= height);
+    ui.setInteractionAnchors({});
+    ui.render();
+    assert(!document()->GetElementById("rr-ship-services")->IsVisible(true));
+    ui.shutdown();
+}
+
 } // namespace
 
 int main()
@@ -895,6 +972,8 @@ int main()
     focusPass(800, 600);
     focusPass(1280, 800);
     focusPass(1600, 900);
+    contextualOverlayPass(1280, 800);
+    contextualOverlayPass(1600, 900);
     generatedPanelPass(800, 600);
     generatedPanelPass(1280, 800);
     generatedPanelPass(1600, 900);

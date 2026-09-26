@@ -390,6 +390,11 @@ void rr_toggle_cruise() { if (g_app) g_app->toggleCruiseControl(); }
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_salvage_nearby() { if (g_app) g_app->salvageNearbyWreck(); }
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_debug_expedition() { if (g_app) g_app->debugStartExpedition(); }
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE

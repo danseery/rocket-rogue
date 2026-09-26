@@ -57,6 +57,7 @@ public:
     bool initialize(ActionHandler actionHandler) override;
     void setPanelPresentation(const PanelDocumentPresentation& presentation) override;
     void setRealtimeHudState(const RealtimeHudState& state) override;
+    void setInteractionAnchors(const SceneInteractionAnchors& anchors) override;
     void render() override;
 
     bool mouseMove(int x, int y) override;
@@ -145,6 +146,7 @@ private:
     bool performanceStatsVisible_ = false;
     bool deferModalOpen_ = false;
     ControllerFamily controllerFamily_ = ControllerFamily::Generic;
+    SceneInteractionAnchors interactionAnchors_;
     Rml::Element* pressedButton_ = nullptr;
     bool orbitalPointerHeld_ = false;
     double pressedButtonAtSeconds_ = 0.0;

@@ -219,6 +219,15 @@ struct OrbitalLandingTestAccess {
     static bool recoveryAcknowledged(const RocketGameApp& app, int destination) {
         return app.state_.run.expedition.arrivalTutorials[destination].acknowledged;
     }
+    static void markHardArrival(RocketGameApp& app) {
+        auto& messages=app.state_.incomingMessages;
+        assert(messages.pending.size()==1);
+        messages.pending.front().variantId="hard";
+    }
+    static bool hardLandingLessonAcknowledged(const RocketGameApp& app) {
+        const auto& acknowledged=app.state_.incomingMessages.acknowledgedMessages;
+        return std::find(acknowledged.begin(),acknowledged.end(),"hard_landing_tip")!=acknowledged.end();
+    }
     static void returnToVisitedSurface(RocketGameApp& app) {
         for (int destination : {0, 1}) {
             app.debugStartSurfaceArrival(destination, 3);
@@ -2097,8 +2106,10 @@ void missionScanPresentationAndNavigation()
             [](const auto& modal) { return modal.id == "incoming_message" && modal.autoOpen && !modal.dismissible; }));
         assert(!rocket::OrbitalLandingTestAccess::recoveryAcknowledged(app, destination));
         const std::string body = destination == 0 ? "moon" : "mars";
+        if (destination == 1) rocket::OrbitalLandingTestAccess::markHardArrival(app);
         fixture->ui.dispatchAction("ack_incoming_message:campaign." + body + "_arrival_complete");
         assert(rocket::OrbitalLandingTestAccess::recoveryAcknowledged(app, destination));
+        if (destination == 1) assert(rocket::OrbitalLandingTestAccess::hardLandingLessonAcknowledged(app));
         fixture->ui.dispatchAction("ack_incoming_message:campaign." + body + "_arrival_complete");
         assert(rocket::OrbitalLandingTestAccess::recoveryAcknowledged(app, destination));
         fixture->runner.shutdown();
@@ -2126,15 +2137,15 @@ void missionScanPresentationAndNavigation()
             context.orbitalLaserComplete = stage == 1;
             context.orbitalLaserBlocked = stage == 2;
             ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
-            assert(ui.html.find("Optional: prepare a shaft") == std::string::npos);
-            assert(ui.html.find("Land at mission site") != std::string::npos);
-            assert((ui.html.find("Hold to Drill") != std::string::npos) == (stage == 0));
+            assert(ui.html.find("mission-scan-result") == std::string::npos);
+            assert(ui.html.find("Land in "+rocket::missionSectorName(state->run.expedition.selectedOrbitZone)) != std::string::npos);
+            assert((ui.html.find("Prepare descent shaft") != std::string::npos) == (stage == 0));
             if (stage == 0) {
-                assert(ui.html.find("Hold to Drill") < ui.html.find("Land at mission site"));
+                assert(ui.html.find("Land in ") < ui.html.find("Prepare descent shaft"));
                 assert(ui.html.find("continuous") != std::string::npos);
             }
-            if (stage == 1) assert(ui.html.find("Shaft ready.") != std::string::npos);
-            if (stage == 2) assert(ui.html.find("Protected terrain blocks") != std::string::npos);
+            if (stage == 1) assert(ui.html.find("Bore +") != std::string::npos);
+            if (stage == 2) assert(ui.html.find("Surface tools needed") != std::string::npos);
         }
     }
     for (const int phase : {29, 30}) {
@@ -2143,6 +2154,11 @@ void missionScanPresentationAndNavigation()
         auto& app = fixture->runner.app();
         app.debugStartSurfaceArrival(0, phase);
         app.tick(.05);
+        app.renderUi();
+        if (phase == 29) {
+            assert(fixture->ui.presentation.missionTrackerMarkup.find("Scan a landing sector") != std::string::npos);
+            assert(fixture->ui.presentation.missionTrackerMarkup.find("Sector 1") == std::string::npos);
+        }
         app.orbitalWorkInput(false);
         app.orbitalWorkInput(true);
         app.orbitalWorkInput(false);
@@ -2150,18 +2166,19 @@ void missionScanPresentationAndNavigation()
         app.renderScene();
         app.renderUi();
         const auto& html = fixture->ui.html;
-        assert(html.find("YOUR MISSION / Moon") != std::string::npos);
-        assert(html.find("Land in Sector 1, marked MISSION LANDING SITE. Establish Moon orbit") != std::string::npos);
+        assert(html.find("mission-scan-result") == std::string::npos);
         assert((html.find("Prepare descent shaft") != std::string::npos) == (phase == 29));
+        assert(html.find("orbit-survey-readout") != std::string::npos);
         assert(html.find("expedition-flight-bar") == std::string::npos);
-        assert(html.find(phase == 29 ? "Land at mission site" : "Resume flight to mission sector") != std::string::npos);
+        assert(html.find(phase == 29 ? "Land in Sector 1" : "Fly to mission Sector 1") != std::string::npos);
         assert((html.find("Land here instead") != std::string::npos) == (phase == 30));
         assert(fixture->ui.presentation.missionTrackerMarkup.find("Sector 1") != std::string::npos);
         assert(fixture->ui.presentation.missionTrackerMarkup.find("mission-checkbox") != std::string::npos);
-        assert(fixture->ui.presentation.missionTrackerMarkup.find("Establish Moon orbit") != std::string::npos);
-        assert(fixture->ui.presentation.missionTrackerMarkup.find("Scan landing site") != std::string::npos);
-        assert(fixture->ui.presentation.missionTrackerMarkup.find("Collect Common Ore") == std::string::npos);
-        assert(fixture->ui.presentation.missionTrackerMarkup.find("Collect Artifact") == std::string::npos);
+        assert(fixture->ui.presentation.missionTrackerMarkup.find("Establish Moon orbit") == std::string::npos);
+        assert(fixture->ui.presentation.missionTrackerMarkup.find("Scan landing site") == std::string::npos);
+        assert((fixture->ui.presentation.missionTrackerMarkup.find("Collect Common Ore") != std::string::npos) == (phase == 29));
+        assert((fixture->ui.presentation.missionTrackerMarkup.find("Collect Artifact") != std::string::npos) == (phase == 29));
+        assert(fixture->ui.presentation.missionTrackerMarkup.find("mission-current") != std::string::npos);
         assert(fixture->ui.presentation.missionTrackerMarkup.find("Common Ore collected 0/20 / Artifact") == std::string::npos);
         if (phase == 29) for (const auto size : {std::pair{1280,800}, std::pair{1920,1080}}) {
             FakePreferenceStore preferences;
@@ -2193,7 +2210,7 @@ void missionScanPresentationAndNavigation()
             ui.shutdown();
         }
         rocket::OrbitalLandingTestAccess::reloadMissionScan(app);
-        assert(fixture->ui.html.find("YOUR MISSION / Moon") != std::string::npos);
+        assert(fixture->ui.html.find("mission-scan-result") == std::string::npos);
         fixture->ui.dispatchAction("expedition:missions");
         assert(fixture->ui.lastOpenedModal == "missions");
         assert(fixture->ui.html.find("Collect Artifact") != std::string::npos);
@@ -2202,8 +2219,7 @@ void missionScanPresentationAndNavigation()
         app.tick(.05);
         rocket::OrbitalLandingTestAccess::scannedCutawayPersistsWhilePiloting(app);
         app.renderUi();
-        assert(fixture->ui.html.find("YOUR MISSION / Moon") == std::string::npos ||
-            fixture->ui.html.find("Sector 1") != std::string::npos);
+        assert(fixture->ui.presentation.missionTrackerMarkup.find("Sector 1") != std::string::npos);
         fixture->ui.dispatchAction("expedition:plot:earth");
         app.tick(.05);
         assert(fixture->ui.presentation.missionTrackerMarkup.find("Return to mission") != std::string::npos);
@@ -2233,6 +2249,17 @@ void missionScanPresentationAndNavigation()
         if (wrongSectorScan.siteId.ends_with(state->run.expedition.selectedOrbitZone))
             wrongSectorScan.siteId = "titan:test:zone_2";
         state->run.expedition.sites.push_back(std::move(wrongSectorScan));
+        assert(rocket::trackedMissionView(*state,catalog,&flight,false).stepId=="accept");
+        rocket::PreparedLaunch beforeAcceptLaunch;
+        rocket::PanelRenderContext beforeAcceptContext{*state,catalog,beforeAcceptLaunch,beforeAcceptLaunch};
+        beforeAcceptContext.launchFlight=&flight;
+        const auto beforeAcceptPanel=rocket::buildGamePanelPresentation(beforeAcceptContext);
+        assert(beforeAcceptPanel.missionTrackerMarkup.find("Accept mission")!=std::string::npos);
+        assert(std::any_of(beforeAcceptPanel.modals.begin(),beforeAcceptPanel.modals.end(),[](const auto& modal) {
+            return modal.id=="missions" && modal.bodyMarkup.find("Accept mission")!=std::string::npos;
+        }));
+        const auto* titanMission=rocket::solarMissionForBody(catalog,"titan");
+        assert(titanMission && rocket::acceptSolarMission(*state,catalog,*titanMission).accepted);
         assert(rocket::trackedMissionView(*state, catalog, &flight, false).stepId == "survey");
         rocket::OrbitalWorkState work;
         work.phase = rocket::OrbitalWorkPhase::LaserReady; work.surveyComplete = true;
@@ -2243,19 +2270,18 @@ void missionScanPresentationAndNavigation()
         context.orbitalArtifactDepth = 2;
         FakeUi ui;
         ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
-        assert(ui.html.find("DEPTH ROUTE REQUIRED") != std::string::npos);
-        assert(ui.html.find("Artifact signal") != std::string::npos);
+        assert(ui.html.find("DEPTH ROUTE REQUIRED") == std::string::npos);
+        assert(ui.html.find("Signal: Depth +2") != std::string::npos);
         assert(ui.html.find("Depth +2") != std::string::npos);
-        assert(ui.html.find("Hold to Drill Descent Shaft") != std::string::npos);
-        assert(ui.html.find("Land at mission site") != std::string::npos);
-        assert(ui.html.find("Optional") == std::string::npos);
-        assert(ui.html.find("Survey upgrades reveal deeper detail") != std::string::npos);
+        assert(ui.html.find("Prepare descent shaft") != std::string::npos);
+        assert(ui.html.find("Land in "+rocket::missionSectorName(state->run.expedition.selectedOrbitZone)) != std::string::npos);
+        assert(ui.html.find("Survey upgrades reveal deeper detail") == std::string::npos);
 
         context.orbitalLaserComplete = true;
         context.orbitalLandingEligible = true;
         ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
-        assert(ui.html.find("Upgrade Bore or land and drill deeper manually") != std::string::npos);
-        assert(ui.html.find("Land at mission site") != std::string::npos);
+        assert(ui.html.find("Surface drilling needed") != std::string::npos);
+        assert(ui.html.find("Land in "+rocket::missionSectorName(state->run.expedition.selectedOrbitZone)) != std::string::npos);
     }
 }
 
@@ -3364,14 +3390,15 @@ int main(int argc, char** argv)
                 return modal.autoOpen && modal.closeAction.starts_with("ack_incoming_message:");
             });
             if (message == modals.end()) break;
-            assert(fixture.ui.html.find("rr-mission-tracker") == std::string::npos);
+            assert(fixture.ui.presentation.missionTrackerMarkup.empty());
             const auto acknowledge = message->closeAction;
             fixture.ui.dispatchAction(acknowledge);
             fixture.runner.app().tick(.01);
             fixture.runner.app().renderUi();
         }
-        assert(fixture.ui.html.find("rr-mission-tracker") != std::string::npos);
-        assert(fixture.ui.html.find("Reach Moon and establish orbit") != std::string::npos);
+        assert(fixture.ui.presentation.missionTrackerMarkup.find("rr-mission-tracker") != std::string::npos);
+        assert(fixture.ui.presentation.missionTrackerMarkup.find("Moon") != std::string::npos);
+        assert(fixture.ui.presentation.missionTrackerMarkup.find("mission-current") != std::string::npos);
         assert(fixture.ui.html.find("WAYPOINT: Moon") != std::string::npos);
         assert(fixture.ui.html.find("DEPART FOR Moon") != std::string::npos);
         fixture.ui.dispatchAction("expedition:map");
@@ -3410,8 +3437,8 @@ int main(int argc, char** argv)
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
         completeTitleLaunch(fixture);
-        assert(fixture.ui.html.find("class=\"expedition-dock-action\"") != std::string::npos);
-        assert(fixture.ui.html.find("EARTH DOCK /") != std::string::npos);
+        assert(fixture.ui.presentation.interactionMarkup.find("expedition-dock-cue") != std::string::npos);
+        assert(fixture.ui.html.find("expedition-flight-bar") == std::string::npos);
         assert(fixture.ui.html.find("data-rr-action=\"expedition:dock\"") == std::string::npos);
         assert(fixture.ui.html.find("In range —") == std::string::npos);
         fixture.runner.shutdown();
@@ -4654,7 +4681,7 @@ int main(int argc, char** argv)
         fixture.ui.dispatchAction("continue_game");
         completeTitleLaunch(fixture);
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
-        assert(fixture.ui.html.find("data-rr-action=\"mining_depart\"") != std::string::npos);
+        assert(fixture.ui.presentation.interactionMarkup.find("data-rr-action=\"mining_depart\"") != std::string::npos);
         const int storesBeforeDeparture = fixture.saves.storeCount;
         // Ship-side deliveries can save during resumed gameplay; compare the
         // ritual against the latest committed state immediately before departure.
@@ -4826,7 +4853,7 @@ int main(int argc, char** argv)
         assert(saved->expedition.progression.expeditionLevel == 2);
         assert(saved->expedition.progression.runRigUpgradeRanks.size() == 1);
         assert(saved->expedition.wrecks.empty());
-        assert(fixture.ui.presentation.contentMarkup.find("data-rr-action=\"mining_depart\"") != std::string::npos);
+        assert(fixture.ui.presentation.interactionMarkup.find("data-rr-action=\"mining_depart\"") != std::string::npos);
         assertNoLegacyRecoveryActions(fixture.ui.presentation);
         fixture.runner.shutdown();
     }
@@ -4914,8 +4941,7 @@ int main(int argc, char** argv)
             fixture.runner.frame();
         }
         assert(fixture.ui.html.find("Asteroid belt ahead")!=std::string::npos);
-        assert(fixture.ui.html.find("Hull Plating")!=std::string::npos);
-        assert(fixture.ui.html.find("Flight Controls")!=std::string::npos);
+        assert(fixture.ui.html.find("Brake early with thrust opposite your motion")!=std::string::npos);
         assert(fixture.saves.value == originalSave);
         assert(fixture.saves.storeCount == originalStoreCount);
         fixture.runner.shutdown();

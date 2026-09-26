@@ -5645,6 +5645,9 @@ body.panel-input-helper-visible #rr-panel.control-panel {
     margin-left: 0px;
     margin-right: 0px;
 }
+#rr-panel.control-panel .cockpit-hud .cockpit-hold-copy {
+    width: 100%;
+}
 #rr-panel.phase-board-panel .panel-head,
 #rr-panel.phase-board-panel .phase-titlebar,
 #rr-panel.phase-board-panel .phase-title-row,
@@ -10239,11 +10242,6 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 
 /* Shared Incoming Message card: content and speakers are supplied by the catalog. */
 .expedition-home { width: 704dp; max-width: 96%; margin: 12dp auto; padding: 16dp; background-color: #0b1118; border: 1dp #407382; overflow-y: auto; max-height: 94%; }
-.expedition-dock-layout { display: flex; flex-direction: row; align-items: flex-start; gap: 16dp; width: 1080dp; max-width: 96%; margin: 12dp auto; }
-.expedition-mission-sidebar { flex: 0 0 330dp; width: 330dp; min-width: 0dp; }
-.expedition-mission-sidebar .mission-tracker { width: auto; max-width: none; margin: 0; box-sizing: border-box; }
-.expedition-dock-main { flex: 1 1 704dp; min-width: 0dp; }
-.expedition-dock-main .expedition-home { width: auto; max-width: none; max-height: none; overflow-y: visible; margin: 0; box-sizing: border-box; }
 .expedition-dock-route-actions { display: flex; flex-direction: row; align-items: stretch; width: 100%; gap: 8dp; }
 #rr-panel .expedition-home .expedition-dock-route-actions button { box-sizing: border-box; width: 0dp; min-width: 0dp; min-height: 56px; height: 56px; margin: 0px; padding: 0px 8px; line-height: 56px; }
 #rr-panel .expedition-home .expedition-dock-route-actions .dock-depart { flex: 3 1 0dp; }
@@ -10332,7 +10330,6 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 .solar-map-manifest { margin: 5dp 0dp 8dp; color: #8297a3; font-size: 10dp; text-align: center; }
 .expedition-warning { color: #ffbd67; }
 #rr-modal.modal-map { width: 760dp; max-width: 88%; min-width: 0dp; box-sizing: border-box; }
-@media (max-width: 900dp) { .expedition-dock-layout { flex-direction: column; width: auto; max-width: 94%; } .expedition-mission-sidebar { flex: 0 0 auto; width: 100%; } .expedition-dock-main { width: 100%; } }
 @media (max-width: 560dp) { .shipyard-track { width: 94%; } .expedition-home { max-width: 88%; } .dock-status-segment { min-width: 42%; border-bottom: 1dp #284856; } .dock-status-segment:nth-child(even) { border-right-width: 0dp; } }
 #rr-modal.modal-incoming_message, #rr-modal.modal-solar_mission_claim { width: 704dp; max-width: 94%; height: auto; max-height: 90%; }
 #rr-modal-scrim.incoming-message-scrim { background-color: #05070ab8; }
@@ -10587,7 +10584,106 @@ body.controller-focus-visible .rr-controller-focus .rr-controller-confirm-glyph 
 .straylight-contact { padding: 12dp; background-color: #103c4aed; color: #a0f8ff; }
 /* One shared mission tracker. Text is quiet; only step transitions accent the border. */
 .mission-overlay { position: absolute; pointer-events: none; }
-.mission-tracker, .mission-scan-result, .mission-log-entry { display: block; }
+.mission-overlay-compact .mission-upcoming { display: none; }
+.mission-overlay-compact .mission-tracker { padding: 5dp 7dp; font-size: 12dp; }
+.mission-overlay-compact .mission-goals { margin: 4dp 0; }
+.mission-overlay-compact .mission-goal { margin: 4dp 0; }
+.mission-overlay-fullscreen .mission-tracker { background-color: #06131df0; }
+.mission-overlay-compact-visible .expedition-home > h2,
+.mission-overlay-compact-visible .expedition-home > p { position: relative; left: 60dp; }
+.context-interaction,
+.context-ship-services {
+    position: absolute;
+    box-sizing: border-box;
+    display: none;
+    color: #e9f7fb;
+    background-color: #06121de8;
+    border-width: 1px;
+    border-color: #64d8e7;
+    border-radius: 6px;
+    pointer-events: auto;
+}
+.context-interaction {
+    width: 248px;
+    min-height: 42px;
+    padding: 4px;
+}
+.context-interaction.is-ready { border-color: #ffd147; }
+.context-interaction.is-blocked { border-color: #8ca6af; }
+.interaction-action {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 34px;
+    padding: 5px 7px;
+    margin: 0px;
+    color: #f3f8f9;
+    font-size: 13px;
+    text-align: left;
+    background-color: #102431;
+    border-width: 1px;
+    border-color: #34596a;
+    border-radius: 4px;
+}
+.interaction-action:hover,
+.interaction-action:focus { border-color: #ffd147; background-color: #173747; }
+.interaction-action.is-unavailable { color: #91a7ad; }
+.interaction-label { flex: 1 1 auto; white-space: normal; line-height: 1.15; }
+.interaction-key {
+    display: inline-block;
+    min-width: 23px;
+    margin-right: 8px;
+    padding: 2px 4px;
+    box-sizing: border-box;
+    color: #fff0b9;
+    font-size: 12px;
+    font-weight: bold;
+    text-align: center;
+    background-color: #17323f;
+    border-width: 1px;
+    border-color: #ffd147;
+    border-radius: 3px;
+}
+.controller-key { display: none; }
+body.controller-connected .controller-key { display: inline-block; }
+body.controller-connected .keyboard-key { display: none; }
+.interaction-requirement { display: block; padding: 7px 9px; color: #ffc77a; font-size: 13px; }
+.context-ship-services { width: 258px; padding: 8px; }
+.context-ship-services > strong {
+    display: block;
+    margin-bottom: 6px;
+    color: #64d8e7;
+    font-size: 11px;
+    letter-spacing: 1px;
+}
+.context-ship-actions { display: block; }
+.context-ship-actions .interaction-action { margin-bottom: 4px; }
+.context-ship-actions .interaction-action:last-child { margin-bottom: 0px; }
+.mining-emergency-cue {
+    position: absolute;
+    top: 158px;
+    right: 18px;
+    padding: 5px 8px;
+    color: #ffd59b;
+    background-color: #28150ddd;
+    border-width: 1px;
+    border-color: #d7824a;
+    font-size: 11px;
+}
+.flight-cruise-state { margin-top: 5px; color: #75dce8; font-size: 11px; }
+.expedition-dock-cue {
+    position: absolute;
+    display: none;
+    width: 190px;
+    padding: 6px 9px;
+    color: #ffd147;
+    font-size: 12px;
+    background-color: #06121de8;
+    border-width: 1px;
+    border-color: #64d8e7;
+}
+.mission-tracker, .mission-log-entry { display: block; }
 .mission-tracker { width: 330dp; max-width: 100%; padding: 8dp 10dp; margin: 0 0 8dp; background-color: #06131ddd; border-left: 2dp #9277b6; color: #d6e7ef; font-size: 14dp; }
 .mission-overlay .mission-tracker { width: auto; }
 .mission-tracker strong { display: block; font-size: 13dp; color: #c7a9ef; }
@@ -10599,24 +10695,13 @@ body.controller-focus-visible .rr-controller-focus .rr-controller-confirm-glyph 
 .mission-done .mission-checkbox { border-color: #92d5b8; background-color: #12362e; }
 .mission-goal-copy { display: block; flex: 1; }
 .mission-goal-copy small { display: block; font-size: 12dp; color: #a8becb; margin-top: 2dp; }
+.mission-current .mission-goal-copy { color: #f4e4ff; font-size: 15dp; font-weight: bold; }
+.mission-current .mission-checkbox { border-color: #c7a9ef; }
 .mission-tracker .mission-next { font-size: 12dp; color: #a8becb; margin: 6dp 0; }
 .mission-tracker.mission-changed { border-left-color: #f4e4ff; background-color: #17273fee; }
-.mission-tracker-actions { display: flex; gap: 8dp; }
-.mission-tracker-actions button { pointer-events: auto; min-width: 0dp; min-height: 24dp; width: auto; padding: 3dp 7dp; margin: 0; font-size: 12dp; }
+.mission-tracker-actions { display: flex; flex-wrap: wrap; gap: 8dp; }
+.mission-tracker-actions button { pointer-events: auto; flex: 0 0 auto; min-width: 0dp; min-height: 24dp; width: auto; padding: 3dp 7dp; margin: 0; font-size: 12dp; }
 .mission-overlay button * { pointer-events: auto; }
-.mission-scan-result { padding: 10dp; margin: 8dp 0; border-left: 3dp #c7a9ef; background-color: #132234; }
-.mission-scan-result strong { color: #ead9ff; }
-.mission-scan-result p { margin: 6dp 0; }
-.mission-scan-result small { color: #9edfc6; }
-.mission-scan-result .titan-depth-title { display: block; margin-top: 8dp; color: #ffd166; }
-.mission-scan-result .titan-depth-route {
-    margin-top: 10dp;
-    margin-bottom: 2dp;
-    border-color: #b88a2f;
-    background-color: #0b1820;
-}
-.mission-scan-result .titan-depth-route .flight-status-row span { color: #a8c4cf; }
-.mission-scan-result .titan-depth-route .flight-status-row strong { color: #ffd166; }
 .mission-log-entry { padding: 12dp 0; border-bottom: 1dp #284653; }
 .mission-log-entry h3 { margin: 0 0 6dp; }
 .mission-log-entry p { margin: 5dp 0; }
@@ -10626,4 +10711,11 @@ body.controller-focus-visible .rr-controller-focus .rr-controller-confirm-glyph 
 .mission-reward { color: #92d5b8; }
 .mission-tabs { margin-bottom: 12dp; }
 #rr-panel .orbit-action-panel button { font-size: 16dp; white-space: normal; min-height: 42dp; padding: 6dp 8dp; margin-top: 6dp; margin-bottom: 6dp; }
+#rr-panel .orbit-action-panel button.ok { height: 58dp; min-height: 58dp; font-size: 18dp; font-weight: bold; }
+#rr-panel .orbit-action-panel button.ghost { height: 42dp; min-height: 42dp; font-size: 15dp; padding: 5dp 8dp; }
+.orbit-survey-readout { margin: 8dp 0 4dp; padding: 6dp 8dp; border: 1dp #284653; background-color: #07131c; }
+.orbit-survey-row { display: flex; justify-content: space-between; gap: 8dp; margin: 3dp 0; font-size: 12dp; }
+.orbit-survey-row span { color: #87acba; }
+.orbit-survey-row strong { color: #d1e8e8; text-align: right; font-weight: normal; }
+.orbit-drill-status { color: #9eb9c5; font-size: 12dp; line-height: 1.3; margin: 6dp 0; }
 #rr-modal.modal-missions { width: 704dp; max-width: 94%; }

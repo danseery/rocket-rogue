@@ -88,6 +88,7 @@
     { "textureId": "MiningTunnelBackdrop", "key": "mining_tunnel_backdrop", "source": "assets/art/mining/tunnel-backdrop.png", "columns": 1, "rows": 1 },
     { "textureId": "EnemySecurityDrone", "key": "enemy_security_drone", "source": "assets/art/enemies/enemy-security-drone-sheet.png", "columns": 20, "rows": 1 },
     { "textureId": "StraylightDock", "key": "straylight_dock", "source": "assets/art/straylight-dock.png", "columns": 1, "rows": 1 },
-    { "textureId": "Sun", "key": "sun", "source": "assets/art/sun.png", "columns": 1, "rows": 1 }
+    { "textureId": "Sun", "key": "sun", "source": "assets/art/sun.png", "columns": 1, "rows": 1 },
+    { "textureId": "MiningRigFuelCell", "key": "mining_rig_fuel_cell", "source": "assets/art/mining-rig-fuel-cell.png", "columns": 1, "rows": 1 }
   ]
 }

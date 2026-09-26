@@ -17,6 +17,7 @@ public:
     bool initialize() override;
     void render(const RenderSnapshot& snapshot) override;
     FlightPointerPresentation flightPointerPresentation() const override { return composer_.flightPointerPresentation(); }
+    SceneInteractionAnchors interactionAnchors() const override { return composer_.interactionAnchors(); }
     void shutdown() override;
     void setPreferences(const AppPreferences& preferences) override;
     RendererDiagnostics diagnostics() const override;

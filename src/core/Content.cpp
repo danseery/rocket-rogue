@@ -274,31 +274,31 @@ ContentCatalog createDefaultContent()
     };
     catalog.incomingMessages = {
         {"lunar_scan", "mission_control_fennec", "Use your tools", "On it", true,
-            {{"default", "Common Ore collection confirmed. There may be something else down there. Send out a scanner pulse and let's see what comes back.", {MessageHint::Scanner}}}},
+            {{"default", "Ore's aboard. There's another signal below us. Pulse the scanner to find it.", {MessageHint::Scanner}}}},
         {"lunar_recovery", "mission_control_fennec", "Anomaly found", "Understood", true,
-            {{"default", "There it is - an anomalous signal. That crevice is too narrow for the Rig. Head out on EVA, clear the seal with your hand drill, then Collect Artifact and return to ship.", {MessageHint::ExitRig, MessageHint::Drill, MessageHint::Tether}},
-             {"eva", "There it is - an anomalous signal. Your suit can fit through that crevice. Clear the seal with your hand drill, then Collect Artifact and return to ship.", {MessageHint::Drill, MessageHint::Tether}}}}
+            {{"default", "That crevice is too narrow for the Rig. Go EVA and hand-drill the seal.", {MessageHint::ExitRig, MessageHint::Drill, MessageHint::Tether}},
+             {"eva", "Your suit fits through that crevice. Hand-drill the seal.", {MessageHint::Drill, MessageHint::Tether}}}}
     };
     for (auto& message : catalog.incomingMessages) message.context = MessageDeliveryContext::Mining;
     catalog.incomingMessages.push_back({"lunar_approach", "mission_control_fennec", "Earth launch clearance", "Ready to launch", true,
-        {{"default", "You're cleared for launch. The Moon is above and to your right. Use thrust to climb away, then steer toward its orbit bands. Your trajectory shows where you will coast; adjust it to establish orbit before surveying a landing site.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
+        {{"default", "Launch clearance granted. The Moon is above-right. Thrust away from Earth, then steer toward its orbit bands. Your projected path shows where you'll coast.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
 
     catalog.incomingMessages.push_back({"opening_retry", "mission_control_fennec", "Emergency recovery", "Retry launch", false,
-        {{"default", "Can you hear me? Your emergency pods deployed. You're safe, but the ship is cooked.", {}},
-         {"heat_tips", "Pods recovered. You're safe, but the engines overheated. Use short thrust pulses, then release both thrust and reverse to coast and cool down. Keep an eye on the temperature gauge: reverse thrust makes heat too.", {MessageHint::FlightThrust}},
-         {"tips", "Pods recovered. You're safe. Try short thrust pulses, then coast. Watch your trajectory: if it crosses the Moon, slow down early and steer it clear. Aim for a loop around the Moon, not through it.", {MessageHint::FlightSteer, MessageHint::FlightThrust}},
-         {"crater", "Pods recovered. Again. Are you trying to set the record for the largest crater? Because we're supposed to be mining the Moon, not becoming part of it. Short burns, brake early, and keep that trajectory clear.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
+        {{"default", "Pods recovered. You're safe. The ship didn't make it.", {}},
+         {"heat_tips", "Pods recovered. The engines overheated. Use short thrust pulses, then coast to cool; reverse thrust heats them too.", {MessageHint::FlightThrust}},
+         {"tips", "Pods recovered. Use short burns and brake early if your projected path crosses the Moon.", {MessageHint::FlightSteer, MessageHint::FlightThrust}},
+         {"crater", "Pods recovered. Another crater? Short burns, brake early, and keep your projected path clear of the Moon.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
 
     catalog.incomingMessages.back().concerned = true;
     catalog.incomingMessages.push_back({"earth_dock_intro", "mission_control_fennec", "Earth orbital dock", "Understood", false,
-        {{"moon_first", "That's Earth's orbital dock. Bring your salvage here to secure it, complete missions, refuel, repair the ship, and install ship upgrades. For now, head to the Moon and complete your first mining contract. The dock will be here when you return.", {}},
-         {"services", "That's Earth's orbital dock. Bring your salvage here to secure it, complete missions, refuel, repair the ship, and install ship upgrades before your next expedition.", {}}}});
+        {{"moon_first", "Earth dock secures your salvage and services the ship. Your Moon assignment is waiting in Missions.", {}},
+         {"services", "Earth dock secures salvage, repairs and refuels your ship, and installs upgrades.", {}}}});
     catalog.incomingMessages.push_back({"wreck_salvage_intro", "mission_control_fennec", "Recover your wreck", "Understood", true,
-        {{"default", "Your replacement ship is ready at the Earth dock. Carried cargo, unsecured credits, upgrades and artifacts remain in your wreck. Earth Storage is safe. Open Change waypoint and select the wreck. Approach slowly, then use Salvage. Purple diamond markers identify wrecks carrying artifacts. Artifacts and upgrades can be recovered even with a full ore hold; excess ore stays in the wreck.", {}}}});
-    catalog.incomingMessages.push_back({"artifact_wreck_recovery", "mission_control_fennec", "Artifact recovery required", "Understood", false,
-        {{"default", "Your unsecured artifact remains in the marked wreck. Approach within 2U and match its speed, then use Salvage. Artifacts and upgrades can be recovered even with a full ore hold; excess ore stays in the wreck. Follow the updated mission waypoint to its delivery dock afterward. Stored artifacts remain safe.", {}}}});
+        {{"default", "Any cargo or artifact you carried is in the wreck. Follow its marker, match speed within 2U, then Salvage. Artifacts fit even with a full ore hold.", {}}}});
+    catalog.incomingMessages.push_back({"artifact_wreck_recovery", "mission_control_fennec", "Artifact recovery required", "Understood", true,
+        {{"default", "The artifact is in the marked wreck. Match speed within 2U, then Salvage. Your mission waypoint will update when it's aboard.", {}}}});
     catalog.incomingMessages.push_back({"asteroid_belt_intro", "mission_control_fennec", "Asteroid belt ahead", "Understood", true,
-        {{"default", "The asteroid belt between Mars and Jupiter is ahead. Start slowing down now with thrust opposite your motion; coasting does not brake. Watch your projected path and steer toward the gaps. At Earth's dock, Flight Controls upgrades give you stronger thrust at the same fuel burn rate for course corrections. Hull Plating increases hull integrity and reduces asteroid impact damage. Upgrades help, but avoiding the rocks is still your best defense.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
+        {{"default", "Belt ahead. Brake early with thrust opposite your motion; coasting won't slow you. Follow the gaps in your projected path.", {MessageHint::FlightSteer, MessageHint::FlightThrust}}}});
     const auto addMissionMessages = [&](std::string id, std::string world, std::string objective,
                                         std::string next) {
         catalog.incomingMessages.push_back({id + "_briefing", "mission_control_fennec",
@@ -306,28 +306,27 @@ ContentCatalog createDefaultContent()
             {{"default", std::move(objective), {}}}});
         catalog.incomingMessages.push_back({id + "_complete", "mission_control_fennec",
             world + " mission complete", "Understood", true,
-            {{"default", "Artifact delivered to the Earth dock. Mission complete. " + std::move(next) +
-                " Prepare your ship here, then depart when ready. Use Change waypoint to choose another destination.", {}}}});
+            {{"default", std::move(next), {}}}});
     };
     for (const auto body : {"moon", "mars"}) {
         const bool mars = std::string_view(body) == "mars";
         catalog.incomingMessages.push_back({std::string(body) + "_arrival_complete", "mission_control_fennec",
             "Arrival complete", "Continue", true,
-            {{"default", std::string(mars ? "Welcome to Mars. Collect 8 Common Ore." : "Welcome to the Moon. Collect 20 Common Ore.") +
-                " Return the ore to your ship, then use the surface scanner to locate the artifact. " +
-                (mars ? "The artifact is underground. Excavate toward the signal; if you landed without a shaft, use your surface tools to reach it. Bring the artifact aboard. " : "Clear the artifact's crevice and bring it aboard. ") +
-                "Return with the artifact to Earth dock and choose Complete Mission. Cargo aboard your ship is at risk until you reach the dock.", {}}}});
+            {{"default", mars ? "Welcome to Mars. The artifact is underground; follow the scanner signal after your ore delivery. The mission checklist has the rest."
+                : "Welcome to the Moon. Ore first, then use the scanner to find the anomaly. Your checklist tracks both.", {}},
+             {"hard", mars ? "Welcome to Mars. The artifact is underground. That impact damaged the hull; stay upright and thrust before touchdown to slow your descent."
+                : "Welcome to the Moon. That impact damaged the hull; stay upright and thrust before touchdown to slow your descent. Your checklist tracks the mission.", {MessageHint::FlightThrust}}}});
     }
     addMissionMessages("moon_mission", "Moon",
-        "First, establish orbit: approach the Moon's orbit bands, turn to point along them, and use short thrust pulses to bend your projected path into a loop around the Moon. If the path crosses the surface, thrust opposite your motion to slow down and adjust your course. Once the loop stays clear of the surface, release thrust, reverse and strafe. Coast in a safe loop for two seconds to confirm orbit, then select SCAN in the mission sector and land there. Mission Control will brief you on recovery after touchdown.",
-        "Prospector support and drone slot one are online. If your bays are occupied, assign the available Prospector in Drone Ops; equipped drones are kept. Mars is your next mission. Mercury and Venus are also charted for optional exploration.");
+        "Match the orbit bands' direction. Use short burns until your projected path loops clear of the Moon, then coast for two seconds. Scan the marked mission sector.",
+        "Prospector and your first drone bay are online. If the bay is occupied, assign Prospector in Drone Ops.");
     catalog.incomingMessages[catalog.incomingMessages.size() - 2].variants.front().hints =
         {MessageHint::FlightSteer, MessageHint::FlightThrust};
-    addMissionMessages("mars_mission", "Mars", "Mars's artifact is underground. Establish Mars orbit, scan the mission sector, hold Drill to prepare a shaft, then land. Mission Control will brief you on recovery after touchdown.", "Drone slot two is online. Jupiter and Io are now charted; Io is the next mission.");
-    addMissionMessages("io_mission", "Io", "Commission your new Hazard Drone. A free bay assigns it automatically; otherwise swap it into your loadout in Drone Ops at ship service. Cool the thermal seal, excavate all four segments, and Collect Artifact.", "The Io battery is secured. Saturn and Titan are now charted; Titan is the next mission.");
-    addMissionMessages("titan_mission", "Titan", "Survey the landing site, pulse the buried signal, and Collect Artifact.", "The Titan battery is secured. Uranus and Titania are now charted; Titania is the next mission.");
-    addMissionMessages("titania_mission", "Titania", "Survey the landing site, pulse the buried signal, and Collect Artifact.", "The Titania battery is secured. Neptune and Triton are now charted; Triton is the next mission.");
-    addMissionMessages("triton_mission", "Triton", "Survey the landing site, pulse the buried signal, and Collect the final Artifact.", "The sixth artifact is secured. An unidentified contact beyond Neptune has appeared: The Anomaly.");
+    addMissionMessages("mars_mission", "Mars", "Mars's artifact is underground. Scan the marked sector and hold Drill to prepare an entrance before landing.", "Your second drone bay is online.");
+    addMissionMessages("io_mission", "Io", "Hazard Drone is yours. Commission it, then let it cool the thermal seal before you excavate. If your bays are full, assign it in Drone Ops.", "Io's thermal seal is behind us. The next mission is on your map.");
+    addMissionMessages("titan_mission", "Titan", "Titan's artifact lies below the surface. Your mission checklist marks the required depth.", "Titan's route is complete.");
+    addMissionMessages("titania_mission", "Titania", "Titania's artifact lies below the surface. Your mission checklist marks the required depth.", "Titania's route is complete.");
+    addMissionMessages("triton_mission", "Triton", "The final artifact is on Triton. The mission checklist marks its sector and depth.", "The final artifact is secured.");
     // Only the post-mission contact belongs to the unidentified ship AI.
     // Keep the mission briefing and reward claim with Mission Control.
     catalog.incomingMessages.back().speakerId = "straylight_ai";
@@ -346,23 +345,23 @@ ContentCatalog createDefaultContent()
     addMissionMessages("venus_mission", "Venus", "Optional recovery: pulse the surface signal and Collect Artifact.", "The optional recovery reward is secured.");
 
     catalog.incomingMessages.push_back({"triton_attack_drone", "mission_control_fennec", "A little insurance", "Understood", true,
-        {{"default", "Those flying security drones are defending the artifact. We stowed away a secret Attack Drone, just in case something like this happened. It's yours now. With a free bay it is assigned automatically; otherwise use Drone Ops at ship service to assign it before deploying. Stay close and let it engage while you mine. The rest of our helpers can wait for the next system.", {}}}});
+        {{"default", "Security drones are defending this site. Attack Drone is yours; it fires while you mine. If your bays are full, assign it in Drone Ops.", {}}}});
     catalog.incomingMessages.push_back({"hard_landing_tip", "mission_control_fennec", "Easy on the landing gear", "Understood", true,
-        {{"default", "You're down safely, but that impact damaged the hull. Keep the ship upright and apply forward thrust before touchdown to slow your descent. Use short pulses to settle gently onto the ground. A softer landing will spare the ship.", {MessageHint::FlightThrust}}}});
+        {{"default", "That impact damaged the hull. Stay upright and thrust before touchdown to slow your descent.", {MessageHint::FlightThrust}}}});
     catalog.incomingMessages.back().concerned = true;
 
     catalog.incomingMessages.push_back({"rig_full_tip", "mission_control_fennec", "Rig cargo full", "Heading back", true,
-        {{"default", "Your Rig is full. Return to the parked ship to unload your ore, then head back out if you have room and supplies to keep mining.", {}}}, MessageDeliveryContext::Mining});
+        {{"default", "Rig full. Unload ore at the parked ship.", {}}}, MessageDeliveryContext::Mining});
     catalog.incomingMessages.push_back({"ship_full_tip", "mission_control_fennec", "Easy there, space squirrel", "Understood", true,
-        {{"default", "Hoarding is frowned upon around here. The ship is full, so anything else you dig up stays behind. Head to the dock and empty the hold before you excavate the whole planet.", {}}}, MessageDeliveryContext::Mining});
+        {{"default", "Easy there, space squirrel. The ship's full; new ore will stay behind until you unload at the dock.", {}}}, MessageDeliveryContext::Mining});
     catalog.incomingMessages.back().concerned = true;
 
     catalog.incomingMessages.push_back({"rig_fuel_empty_tip", "mission_control_fennec", "Rig fuel empty", "I'll bring it home", true,
-        {{"default", "Your Rig is out of fuel, but you don't have to abandon it. Exit into EVA, move close to the Rig and tether it. Tow it back to the parked ship for repairs, or stow it and leave. Repairs restore integrity, not fuel; a fuel cell can get the Rig moving again.", {MessageHint::ExitRig, MessageHint::Tether}}}, MessageDeliveryContext::Mining});
+        {{"default", "Rig out of fuel? Go EVA, tether it, and tow it to the ship. A fuel cell will get it moving again.", {MessageHint::ExitRig, MessageHint::Tether}}}, MessageDeliveryContext::Mining});
     catalog.incomingMessages.back().concerned = true;
 
     catalog.incomingMessages.push_back({"mining_hazard_scan_tip", "mission_control_fennec", "Hazards detected", "Understood", true,
-        {{"default", "The scan has picked up hazardous pockets. Keep the Rig and your EVA suit clear. An assigned Hazard Drone can treat supported pockets once they are revealed; give it time to work before moving in. If it can't treat a pocket, find a safe route around it.", {}}}, MessageDeliveryContext::Mining});
+        {{"default", "Hazardous pockets ahead. Keep clear until your assigned Hazard Drone treats them, or find another route.", {}}}, MessageDeliveryContext::Mining});
     catalog.incomingMessages.back().concerned = true;
 
     catalog.modules = {
@@ -475,7 +474,7 @@ ContentCatalog createDefaultContent()
     for (const auto& drone : catalog.miniDrones) {
         catalog.incomingMessages.push_back({"drone_arrival_" + drone.id, "mission_control_fennec",
             drone.name + " online", "Let's go", true,
-            {{"default", "Your " + drone.name + " is unlocked. A free bay assigns it automatically. If your bays are full, open Drone Ops at ship service to assign it. " + drone.description, {}}}});
+            {{"default", drone.name + " unlocked. " + drone.description + " Check Drone Ops if it isn't assigned.", {}}}});
     }
 
     catalog.droneModules = {
@@ -984,7 +983,7 @@ ContentCatalog createDefaultContent()
         }
     }
     for (auto& message : catalog.incomingMessages) {
-        message.informational = message.id.ends_with("_tip") || message.id.starts_with("drone_arrival_") ||
+        message.informational = (message.id.ends_with("_tip") && message.id != "hard_landing_tip") || message.id.starts_with("drone_arrival_") ||
             message.id == "earth_dock_intro" || message.id == "wreck_salvage_intro" ||
             message.id == "artifact_wreck_recovery";
         if (message.id == "earth_dock_intro") message.campaignOnce = true;

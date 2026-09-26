@@ -10464,9 +10464,11 @@ MiningTetherTargetResolution resolveMiningTetherTarget(const MiningRunState& min
         mining.gate.objectivePassage == MiningPassageClass::SuitOnly &&
         artifact.state != MiningArtifactState::Loose &&
         !evaActive;
-    // Ties belong to the artifact. It is the more time-sensitive recovery
-    // target and avoids a nearby rig stealing a visually overlapping grab.
-    if (result.artifactInRange && (!result.rigInRange || result.artifactDistance <= result.rigDistance)) {
+    // Pick the nearest object so a fuel cell beside the rig can actually be
+    // targeted. The artifact wins ties, then the rig.
+    if (result.artifactInRange &&
+        (!result.rigInRange || result.artifactDistance <= result.rigDistance) &&
+        (!result.fuelCellInRange || result.artifactDistance <= result.fuelCellDistance)) {
         result.target = MiningTetherTarget::Artifact;
         result.blocker = suitRequired
             ? MiningTetherBlocker::SuitRequired
@@ -10475,7 +10477,8 @@ MiningTetherTargetResolution resolveMiningTetherTarget(const MiningRunState& min
                 : MiningTetherBlocker::None);
         return result;
     }
-    if (result.rigInRange) {
+    if (result.rigInRange &&
+        (!result.fuelCellInRange || result.rigDistance <= result.fuelCellDistance)) {
         result.target = MiningTetherTarget::MiningRig;
         result.blocker = MiningTetherBlocker::None;
         return result;
@@ -10566,7 +10569,7 @@ void toggleMiningTether(GameState& state)
             });
         if (found != mining.looseObjects.end()) {
             found->tethered = true;
-            state.statusLine = "Fuel cell tethered. Bring it into contact with the Mining Rig.";
+            state.statusLine = "Rig fuel cell tethered. Bring it into contact with the Mining Rig.";
         }
         return;
     }

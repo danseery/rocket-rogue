@@ -226,6 +226,7 @@ struct RenderSnapshot {
     double orbitalShaftBearing = 0.0;
     bool orbitalArtifactHint = false;
     bool missionSectorVisible = false;
+    bool missionSectorHighlight = false;
     PlanetLandingZone missionSector;
     std::string missionSectorLabel;
     double orbitalArtifactBearing = 0.0;
@@ -376,6 +377,10 @@ struct RenderSnapshot {
     double miningSurfaceRow = 0.0;
     bool miningShipPresent = false;
     bool miningAtReturnZone = false;
+    bool miningInteractionVisible = false;
+    double miningInteractionX = 0.0;
+    double miningInteractionY = 0.0;
+    std::uint64_t interactionWreckId = 0;
     double miningLoad = 0.0;
     double miningLoadSpeedMultiplier = 1.0;
     double miningContactIntensity = 0.0;

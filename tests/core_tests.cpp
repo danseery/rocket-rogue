@@ -2293,6 +2293,31 @@ void physicalMiningArtifactsAreSingleAndDeliveryGated()
     require(state.run.mining.stowedCargo >= tuning::mining::artifactCargo, "delivered artifact should add banked cargo weight");
 }
 
+void miningFuelCellTetherSelectsNearestObject()
+{
+    MiningRunState mining;
+    mining.active = true;
+    mining.operatorMode = MiningOperatorMode::Jetpack;
+    mining.operatorPresent = true;
+    mining.operatorX = 10.0;
+    mining.operatorY = 10.0;
+    mining.droneX = 11.5;
+    mining.droneY = 10.0;
+    mining.rigDepthZone = mining.depthZone;
+    MiningLooseObject fuel;
+    fuel.persistentId = 17;
+    fuel.kind = MiningLooseObjectKind::FuelCell;
+    fuel.x = 10.5;
+    fuel.y = 10.0;
+    mining.looseObjects.push_back(fuel);
+    const MiningTetherTargetResolution selected = resolveMiningTetherTarget(mining);
+    require(selected.target == MiningTetherTarget::FuelCell && selected.fuelCellId == 17,
+        "a nearby rig must not steal the tether action from a closer fuel cell");
+    mining.looseObjects.front().x = 12.0;
+    require(resolveMiningTetherTarget(mining).target == MiningTetherTarget::MiningRig,
+        "the rig remains the tether target when it is closer than the fuel cell");
+}
+
 void miningArtifactTetherAndDestructionRules()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -5599,11 +5624,15 @@ void miningShipRepairsUseBankedMaterialsProportionally()
         "ship radius should expose funded drill and drone repair actions");
     Random repairRng(94950);
     const PreparedLaunch repairLaunch = prepareLaunch(state, catalog, repairRng);
-    const std::string repairHtml = buildGamePanelHtml({state, catalog, repairLaunch, repairLaunch});
-    require(repairHtml.find("data-mining-ship-service=\"1\"") != std::string::npos, "docked repairs should emit a spatial ship-service marker");
-    require(repairHtml.find("data-mining-return-x=") != std::string::npos && repairHtml.find("data-mining-return-y=") != std::string::npos, "ship-service marker should expose the return-zone projection anchor");
-    require(repairHtml.find("data-rr-action=\"mining_repair_drill\"") != std::string::npos, "docked drill repair should render as a native command-dock button");
-    require(repairHtml.find("data-rr-action=\"mining_repair_drone\"") != std::string::npos, "docked drone repair should render as a native command-dock button");
+    const auto repairPanel = buildGamePanelPresentation({state, catalog, repairLaunch, repairLaunch});
+    require(repairPanel.interactionMarkup.find("rr-ship-services") != std::string::npos,
+        "docked repairs should appear in the contextual ship service list");
+    require(repairPanel.interactionMarkup.find("data-rr-action=\"mining_repair_drill\"") != std::string::npos,
+        "docked drill repair should be clickable at the ship");
+    require(repairPanel.interactionMarkup.find("data-rr-action=\"mining_repair_drone\"") != std::string::npos,
+        "docked drone repair should be clickable at the ship");
+    require(repairPanel.contentMarkup.find("mining-command-dock") == std::string::npos,
+        "mining command dock should not duplicate contextual ship services");
 
     require(repairMiningDrill(state), "funded ship service should repair a broken drill bit");
     require(mining.drillIntegrity == 1.0 && !mining.drillBreakNotified, "drill repair should restore integrity and clear the broken latch");
@@ -8798,8 +8827,8 @@ void controllerPanelDefaultsAndOrbitalActions()
     context.orbitalLandingEligible = true;
     context.orbitalArtifactDepth = 2;
     panel = buildGamePanelPresentation(context);
-    defaultIs(panel.contentMarkup, "action:orbital_drill");
-    require(panel.contentMarkup.find("Artifact at Depth +2") != std::string::npos,
+    defaultIs(panel.contentMarkup, "action:land_from_orbit");
+    require(panel.contentMarkup.find("Depth +2") != std::string::npos,
         "a completed scan must state the artifact depth in the action panel");
     require(!flight.orbit.loopQualifies,
         "restored captured orbit must expose Drill and Land without transient loop requalification");
@@ -8808,14 +8837,14 @@ void controllerPanelDefaultsAndOrbitalActions()
     const auto drillPosition = panel.contentMarkup.find("action:orbital_drill");
     const auto landPosition = panel.contentMarkup.find("action:land_from_orbit");
     const auto resumePosition = panel.contentMarkup.find("action:resume_orbital_flight");
-    require(drillPosition < landPosition && landPosition < resumePosition,
-        "orbital controller actions must follow Drill, Land, Resume Flight visual order");
+    require(landPosition < drillPosition && drillPosition < resumePosition,
+        "orbital controller actions must follow Land, optional Drill, Resume Flight visual order");
     for (const bool blocked : {false, true}) {
         context.orbitalLaserComplete = !blocked;
         context.orbitalLaserBlocked = blocked;
         panel = buildGamePanelPresentation(context);
         defaultIs(panel.contentMarkup, "action:land_from_orbit");
-        require(panel.contentMarkup.find(blocked ? "SURFACE TOOLS REQUIRED" : "BORE REACH EXCAVATED") != std::string::npos &&
+        require(panel.contentMarkup.find(blocked ? "Surface tools needed" : "Shaft +") != std::string::npos &&
             panel.contentMarkup.find("data-rr-action=\"orbital_work\"") == std::string::npos,
             "a completed or blocked laser must be status, never a false Drill default");
     }
@@ -9829,6 +9858,7 @@ int main(int argc, char** argv)
     scenarioAndCocoonStateRoundTrips();
     activeFlightRoundTripsThroughSave();
     surfaceMiningUsesRigFuelAndRunsOnce();
+    miningFuelCellTetherSelectsNearestObject();
     miningArtifactTetherAndDestructionRules();
     miningArtifactRewardsResolveOnExtraction();
     miningArtifactSaveRoundTrips();

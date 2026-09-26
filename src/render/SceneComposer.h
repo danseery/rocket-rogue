@@ -33,6 +33,7 @@ public:
     void setTextureReady(TextureId texture, bool ready) noexcept;
     const ScenePacket& compose(const RenderSnapshot& snapshot);
     FlightPointerPresentation flightPointerPresentation() const { return packet_.flightPointer; }
+    SceneInteractionAnchors interactionAnchors() const { return packet_.interactionAnchors; }
     void reset();
 
 private:

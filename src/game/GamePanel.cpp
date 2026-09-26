@@ -2,6 +2,7 @@
 #include "core/ArtifactProgression.h"
 #include "game/GamePanel.h"
 #include "game/ExpeditionPresentation.h"
+#include "game/ContextualInteraction.h"
 #include "core/ExpeditionSystem.h"
 #include "core/StraylightSequence.h"
 #include "core/MissionGuidance.h"
@@ -51,29 +52,20 @@ bool orbitalWorkVisible(const PanelRenderContext& c)
 
 std::string orbitalLaserHint(const PanelRenderContext& c)
 {
-    if (c.state.run.expedition.travelInitialized) {
-        const auto& expedition = c.state.run.expedition;
-        const auto mission = missionView(c.state,c.catalog,expedition.location.bodyId,c.launchFlight,
-            c.orbitalWork && c.orbitalWork->surveyComplete);
-        if (mission.available && !mission.complete && mission.targetId == expedition.location.bodyId &&
-            mission.stepId != "claim" && !mission.sectorId.empty() && expedition.selectedOrbitZone != mission.sectorId)
-            return "Travel to " + missionSectorName(mission.sectorId) + " and scan the mission site";
-    }
-    if (!c.orbitalInsideZone) return "Return to the selected sector to continue drilling";
-    const std::string artifact = c.orbitalArtifactDepth < 0 ? std::string{} :
-        c.orbitalArtifactDepth == 0 ? "Artifact at Surface" :
-        "Artifact at Depth +" + std::to_string(c.orbitalArtifactDepth);
+    if (!c.orbitalInsideZone) return "Survey complete";
+    const bool artifactInReadout = c.orbitalSurveyLayers && std::any_of(
+        c.orbitalSurveyLayers->begin(), c.orbitalSurveyLayers->end(),
+        [](const OrbitalSurveyLayer& layer) { return layer.artifact; });
+    const std::string artifact = c.orbitalArtifactDepth < 0 || artifactInReadout ? std::string{} :
+        "Signal: " + (c.orbitalArtifactDepth == 0 ? std::string("Surface") :
+            "Depth +" + std::to_string(c.orbitalArtifactDepth)) + " · ";
     const int reach = surfaceDepthRating(c.state, SurfaceDepthUpgradeKind::BoreSystem);
-    const std::string limit = "Bore reach +" + std::to_string(reach) +
-        " · Shaft " + (c.orbitalLaserComplete ? std::string("through +") : std::string("working at +")) +
-        std::to_string(c.orbitalBoreDepth);
-    const std::string prefix = artifact.empty() ? std::string{} : artifact + " · ";
-    if (c.orbitalLaserBlocked) return prefix + limit + " · Surface tools needed";
+    const std::string values = artifact + "Bore +" + std::to_string(reach) +
+        " · Shaft +" + std::to_string(c.orbitalBoreDepth);
+    if (c.orbitalLaserBlocked) return values + " · Surface tools needed";
     if (c.orbitalLaserComplete && c.orbitalArtifactDepth > c.orbitalBoreDepth)
-        return prefix + limit + " · Upgrade Bore or land and drill deeper manually";
-    if (c.orbitalLaserComplete) return prefix + limit + (c.orbitalLandingEligible
-        ? " · Ready to land" : !c.orbitalInsideZone ? " · Return to selected sector" : " · Shaft ready");
-    return prefix + limit + " · Hold to drill";
+        return values + " · Surface drilling needed";
+    return values;
 }
 
 int miningArtifactTargetDepth(const MiningRunState& mining)
@@ -353,6 +345,137 @@ std::string button(std::string_view label, std::string_view action, std::string 
         "><span class=\"rr-button-label\">" + htmlEscape(label) + "</span></button>";
 }
 
+std::string interactionKey(std::string_view keyboard, std::string_view controller)
+{
+    return (keyboard == "Click" ? std::string{} :
+        "<span class=\"interaction-key keyboard-key\">" + htmlEscape(keyboard) + "</span>")
+        + "<span class=\"interaction-key controller-key\">" + std::string(controller) + "</span>";
+}
+
+std::string interactionAction(std::string_view label, std::string_view action,
+    std::string_view keyboard, std::string_view controller, bool enabled = true)
+{
+    const std::string content = interactionKey(keyboard, controller)
+        + "<span class=\"interaction-label\">" + htmlEscape(label) + "</span>";
+    if (!enabled) return "<div class=\"interaction-action is-unavailable\"><span class=\"interaction-label\">"
+        + htmlEscape(label) + "</span></div>";
+    return "<button class=\"interaction-action rr-text-button\" data-rr-action=\""
+        + htmlEscape(action) + "\" data-ui-focus-id=\"interaction:" + htmlEscape(action)
+        + "\">" + content + "</button>";
+}
+
+bool miningSafetyCueNeeded(const MiningRunState& mining)
+{
+    if (!mining.active || mining.failurePending || miningAtReturnZone(mining)) return false;
+    const bool eva = mining.operatorMode == MiningOperatorMode::Jetpack && mining.operatorPresent;
+    return mining.rigDisabled || miningActiveOxygenSeconds(mining) <= 6.0
+        || (eva ? mining.operatorIntegrity : mining.droneHealth) <= 0.3;
+}
+
+std::string contextualInteractionMarkup(const PanelRenderContext& context)
+{
+    const GameState& state = context.state;
+    if (context.sceneFadeToBlack > 0.0 || context.titleLaunchActive ||
+        straylightCinematicDuration(state.meta.straylightStage) > 0.0 ||
+        context.miningExtractionActive ||
+        state.screen == Screen::Mining && state.run.mining.failurePending) return {};
+    if (state.screen == Screen::Mining) {
+        const MiningRunState& mining = state.run.mining;
+        if (!mining.active) return {};
+        if (!miningAtReturnZone(mining)) {
+            const ContextualInteraction target = miningContextualInteraction(mining);
+            if (target.visible()) {
+                const std::string text = target.enabled() ? target.label : target.requirement;
+                return "<div id=\"rr-context-interaction\" class=\"context-interaction"
+                    + std::string(target.enabled() ? " is-ready" : " is-blocked") + "\">"
+                    + (target.enabled()
+                        ? interactionAction(text, target.action, "T", "{{controller_north}}")
+                        : "<span class=\"interaction-requirement\">" + htmlEscape(text) + "</span>")
+                    + "</div>";
+            }
+            return {};
+        }
+
+        const MiningRunPresentation run = miningRunPresentation(state, context.catalog);
+        const auto action = [&](std::string_view id) -> const PanelButtonPresentation* {
+            const auto it = std::find_if(run.actions.begin(), run.actions.end(), [&](const auto& item) { return item.actionId == id; });
+            return it == run.actions.end() ? nullptr : &*it;
+        };
+        std::string rows;
+        const bool carriesPayload = mining.cargo > 0 || mining.temporaryMaterials.common > 0 ||
+            mining.temporaryMaterials.rare > 0 || mining.temporaryMaterials.exotic > 0 ||
+            !mining.temporaryArtifacts.empty();
+        if (carriesPayload) rows += interactionAction("Bank payload", ui::actions::miningStow, "R", "{{controller_south}}",
+            action(ui::actions::miningStow) != nullptr);
+        if (const auto* scan = action(ui::actions::miningScanner); scan && scan->enabled)
+            rows += interactionAction("Pulse scanner", scan->actionId, "E", "{{controller_west}}");
+        if (miningDrillRepairCost(mining) > 0) {
+            const auto* repair = action(ui::actions::miningRepairDrill);
+            const std::string repairLabel = "Repair drill · " + std::to_string(miningDrillRepairCost(mining)) + " common";
+            rows += interactionAction(repair && repair->enabled ? repairLabel
+                : "Need " + std::to_string(miningDrillRepairCost(mining)) + " common for repair", ui::actions::miningRepairDrill,
+                "Click", "{{controller_lb}}", repair && repair->enabled);
+        }
+        const bool eva = mining.operatorMode == MiningOperatorMode::Jetpack && mining.operatorPresent;
+        const bool rigNeedsRepair = mining.rigDisabled && miningRigAtReturnZone(mining)
+            || (eva ? mining.operatorIntegrity < 1.0 : miningDroneRepairCost(mining) > 0);
+        if (rigNeedsRepair) {
+            const auto* repair = action(ui::actions::miningRepairDrone);
+            const int cost = mining.rigDisabled && miningRigAtReturnZone(mining) ? 0
+                : (eva ? static_cast<int>(tuning::mining::operatorIntegrityRepairCommonCost)
+                    : miningDroneRepairCost(mining));
+            const std::string repairLabel = mining.rigDisabled && miningRigAtReturnZone(mining)
+                ? "Patch rig · 35%" : std::string(eva ? "Repair suit · " : "Repair rig · ")
+                    + std::to_string(cost) + " common";
+            rows += interactionAction(repair && repair->enabled ? repairLabel
+                : "Need " + std::to_string(cost) + " common for repair", ui::actions::miningRepairDrone,
+                "Click", "{{controller_rb}}", repair && repair->enabled);
+        }
+        if (droneBayUnlocked(state))
+            rows += interactionAction("Drone Ops", ui::actions::droneOps, "Click", "D-pad ↑");
+        const MiningDroneRecoveryStatus recovery = miningDroneRecoveryStatus(mining);
+        if (recovery.outstandingDrones > 0)
+            rows += interactionAction("Wait for drones (" + std::to_string(recovery.outstandingDrones) + ")",
+                ui::actions::miningWaitForDrones, "Click", "D-pad →");
+        const PayloadTransferPlan transfer = planPayloadTransfer(mining.temporaryMaterials,
+            activeContractMaterialNeed(state, context.catalog, mining.destinationId),
+            shipHoldMaterials(state), shipHoldCapacity(state, context.catalog));
+        const int unbankedCargo = materialCargoMass(transfer.remainingAtSource);
+        std::string departLabel = "Depart planet";
+        const int cargoLeft = recovery.outstandingCargoMass + unbankedCargo;
+        if (recovery.outstandingDrones > 0 || cargoLeft > 0) {
+            departLabel = "Depart · leave ";
+            if (recovery.outstandingDrones > 0)
+                departLabel += std::to_string(recovery.outstandingDrones) + " drones";
+            if (cargoLeft > 0) {
+                if (recovery.outstandingDrones > 0) departLabel += " / ";
+                departLabel += std::to_string(cargoLeft) + " cargo";
+            }
+        }
+        rows += interactionAction(departLabel, ui::actions::miningDepart, "Click", "Hold D-pad ↓");
+        return "<section id=\"rr-ship-services\" class=\"context-ship-services\" aria-label=\"Ship services\">"
+            "<strong>SHIP SERVICES</strong><div class=\"context-ship-actions\">" + rows + "</div></section>";
+    }
+    if (state.screen == Screen::Flight && context.launchFlight &&
+        !context.surfaceArrivalActive && !(context.orbitalWork && context.orbitalWork->active())) {
+        if (serviceDockingActive(*context.launchFlight))
+            return "<div id=\"rr-dock-cue\" class=\"expedition-dock-cue\">"
+                + htmlEscape(earthDockingGuidance(*context.launchFlight)) + "</div>";
+        const auto mission = trackedMissionView(state, context.catalog, context.launchFlight,
+            context.orbitalWork && context.orbitalWork->surveyComplete);
+        const ContextualInteraction target = flightWreckInteraction(state.run.expedition,
+            *context.launchFlight, solarPresentationSystem(state), mission.targetId);
+        if (!target.visible()) return {};
+        return "<div id=\"rr-context-interaction\" class=\"context-interaction"
+            + std::string(target.enabled() ? " is-ready" : " is-blocked") + "\">"
+            + (target.enabled()
+                ? interactionAction(target.label, target.action, "F", "{{controller_north}}")
+                : "<span class=\"interaction-requirement\">" + htmlEscape(target.requirement) + "</span>")
+            + "</div>";
+    }
+    return {};
+}
+
 std::string scenarioActionButton(
     const ScenarioObjectivePresentation& objective,
     std::string_view cssClass = "",
@@ -528,8 +651,8 @@ void collectSharedUtilityModals()
         return "<div class=\"controls-card\"><h3>" + htmlEscape(title) + "</h3>" + body + "</div>";
     };
     const std::string controlsBody = std::string(R"(<div class="controller-controls">
-        <div class="controls-callout"><strong>D-PAD = MENU PANELS</strong>
-        <p>In mining, orbit, or flight, press the D-pad to select panel actions. Piloting pauses while you choose.</p>
+        <div class="controls-callout"><strong>ACTIONS APPEAR WHERE THEY MATTER</strong>
+        <p>Use the prompt beside an artifact or wreck. At the landed ship, the Ship Services list shows available work. D-pad Left opens panel focus when you need it.</p>
         <p>Mission waypoints follow artifacts to the delivery dock or named wreck. A manually selected destination stays selected until Return to mission.</p><p>Powered ascent is governed to 8 m/s from deep shafts; held thrust continues into orbit. Brake manually to stay near the planet. After the Moon, orbital drilling opens an entrance: excavate the remaining artifact approach with the rig.</p>
         <div class="controls-flow"><span>SELECT</span><span> / </span><span>CONFIRM</span><span> / </span><span>RESUME PLAY</span></div>
         <p>Actions resume play automatically; interfaces stay open. Back cancels. Release buttons and center sticks to pilot again.</p></div>
@@ -556,6 +679,7 @@ void collectSharedUtilityModals()
             binding("LS left / right", "Strafe relative to the ship") +
             binding("LS up / down", "Forward / reverse thrust") +
             binding("Click LS", "Toggle cruise in ordinary flight") +
+            binding("North / Y", "Salvage a nearby wreck") +
             "<p>Flight-Y inversion follows Settings. Release thrust to coast; use opposite thrust to slow down.</p>") +
         card("03 / Orbital work",
             binding("D-pad / LS", "Select Scan, Drill, or Land", "controls-cyan") +
@@ -578,13 +702,17 @@ void collectSharedUtilityModals()
             binding("West / X", "Pulse scanner", "controls-cyan") +
             binding("North / Y", "Tether / release", "controls-amber") +
             binding("Tap South / A", "Unload payload at the ship", "controls-green") +
+            binding("D-pad Up / Right", "Drone Ops / wait for drones at ship") +
+            binding("Hold D-pad Down", "Depart from ship · 0.6 seconds") +
+            binding("D-pad Left", "Open panel focus") +
             binding("Hold East / B", "Abort · 0.45 seconds", "controls-red") +
-            "<p>Actions require the appropriate range, supplies, and equipment. Use the D-pad to select ship service buttons.</p>") +
+            "<p>Ship Services appears only in the ship zone. Click its entries or use their shown controller shortcuts.</p>") +
         card("Keyboard / Ship",
             binding("A / D", "Rotate · Left / Right arrows also work") +
             binding("Shift + A / D", "Ship-relative strafe") +
             binding("W / S", "Forward / reverse · Up / Down also work") +
-            binding("C", "Toggle cruise in ordinary flight")) +
+            binding("C", "Toggle cruise in ordinary flight") +
+            binding("F", "Salvage a nearby wreck")) +
         card("Keyboard / Surface",
             binding("WASD / arrows", "Move in screen directions") +
             binding("Mouse", "Aim rig / EVA") +
@@ -2592,9 +2720,9 @@ std::string buildGamePanelMarkup(
     };
     settingsDetails.push_back(detailPresentationRow(
         "Controller",
-        std::string_view("Left stick or D-pad navigates menus; Confirm selects; Back returns; Menu pauses. Confirm and Back follow controller settings. D-pad pauses live flight or mining for action selection.")));
+        std::string_view("Left stick or D-pad navigates menus; Confirm selects; Back returns; Menu pauses. Confirm and Back follow controller settings. At the landed ship, D-pad Up opens Drone Ops, Right waits for drones, and held Down departs; Left opens panel focus.")));
     settingsBody << detailStack(settingsDetails);
-    settingsBody << "<h3>Missions</h3><p>The tracker shows your next step. Open Missions on the tracker or beside Map for ordered requirements and rewards. Track mission changes guidance without engaging cruise. A manual waypoint stays selected until you choose Return to mission.</p>";
+    settingsBody << "<h3>Missions</h3><p>The tracker shows your next step. Open Missions on the tracker or beside Map for ordered requirements and rewards. After Mars, accept routine assignments with Accept mission there. Track mission changes guidance without engaging cruise. A manual waypoint stays selected until you choose Return to mission.</p>";
     settingsBody << "<section class=\"settings-control\" data-resolution-settings>"
         << "<div><h3>" << htmlEscape("Display resolution") << "</h3>"
         << "<p>" << htmlEscape("Choose the render target. Auto follows the current display and pixel density.") << "</p></div>"
@@ -2988,7 +3116,9 @@ std::string buildGamePanelMarkup(
             << (context.flightModel.manualControlsEnabled ? "1" : "0")
             << "\" hidden></div>";
 
-        out << "<section class=\"live-hud-header\"><div><h2>" << htmlEscape(launchPanel.sectionTitle)
+        const std::string flightHeading = context.launchFlight && context.launchFlight->mode == FlightMode::Orbit &&
+            context.launchFlight->orbit.captured ? launchPanel.destinationName + " orbit" : launchPanel.sectionTitle;
+        out << "<section class=\"live-hud-header\"><div><h2>" << htmlEscape(flightHeading)
             << "</h2></div></section>";
         const bool physicalFlight = context.launchFlight != nullptr && context.launchFlight->physicalFlight;
         if (!state.run.expedition.travelInitialized && !orbitalWorkVisible(context))
@@ -3026,41 +3156,6 @@ std::string buildGamePanelMarkup(
             const bool missionScan = w.surveyComplete && mission.available && !mission.complete &&
                 mission.id == state.run.expedition.location.bodyId && mission.targetId == mission.id && mission.stepId != "claim";
             const bool missionSlice = missionScan && state.run.expedition.selectedOrbitZone == mission.sectorId;
-            const bool marsTutorial = missionScan && mission.id == "mars";
-            const bool titanDepthTutorial = missionScan && mission.id == "titan" && missionSlice;
-            if (missionScan) {
-                out << "<section class=\"mission-scan-result\"><strong>YOUR MISSION / " << htmlEscape(mission.location) << "</strong>";
-                if (mission.id == "moon" && state.run.expedition.missionScanIntro == MissionScanIntro::Showing)
-                    out << "<p>" << htmlEscape(firstMoonMissionInstructions(state, catalog)) << "</p><small>" << htmlEscape(mission.reward) << "</small>";
-                else if (!missionSlice) out << "<p>This is not the mission sector. Resume flight to "
-                    << htmlEscape(missionSectorName(mission.sectorId))
-                    << " and scan there before preparing the descent route.</p>";
-                else if (marsTutorial) out << "<p>Mission site is " << htmlEscape(missionSectorName(mission.sectorId))
-                    << ". Mars's artifact is underground. "
-                    << (!missionSlice ? "Fly to the mission sector, then scan and prepare a shaft."
-                        : context.orbitalLaserBlocked ? "Protected terrain blocks the shaft. Land and use surface tools to reach the artifact."
-                        : context.orbitalLaserComplete ? "Shaft ready. Land and use the surface scanner to locate the artifact."
-                        : "Hold Drill to prepare a shaft, then land and use the surface scanner to locate it.") << "</p>";
-                else if (titanDepthTutorial) {
-                    const int artifactDepth = std::max(1, context.orbitalArtifactDepth);
-                    const int drillReach = surfaceDepthRating(state, SurfaceDepthUpgradeKind::BoreSystem);
-                    const std::string routeState = context.orbitalLaserBlocked
-                        ? "Surface route required"
-                        : context.orbitalLaserComplete ? (context.orbitalBoreDepth < artifactDepth
-                            ? "Continue with surface tools or upgrade Bore" : "Route excavated") : "Hold Drill to extend shaft";
-                    out << "<strong class=\"titan-depth-title\">DEPTH ROUTE REQUIRED</strong>"
-                        << "<p>Titan's artifact is at Depth +2. Hold Drill to excavate to your Bore reach, then land and follow the shaft. Drill farther manually if needed. Survey upgrades reveal deeper detail; they do not limit drilling.</p>"
-                        << "<div class=\"flight-status-list titan-depth-route\">"
-                        << flightStatusRow("rr-titan-artifact-depth", "Artifact signal", "Depth +" + std::to_string(artifactDepth))
-                        << flightStatusRow("rr-titan-drill-reach", "Orbital drill reach", "Depth +" + std::to_string(drillReach))
-                        << flightStatusRow("rr-titan-shaft-depth", "Shaft progress", "Depth +" + std::to_string(context.orbitalBoreDepth))
-                        << flightStatusRow("rr-titan-route-state", "Descent route", routeState)
-                        << "</div>";
-                }
-                else out << "<p>Mission site is " << htmlEscape(missionSectorName(mission.sectorId))
-                    << (mission.arrivalStage ? ". Scan this sector and land. Recovery briefing follows touchdown.</p>" : ". Collect Artifact and complete the mission requirements.</p>");
-                out << "</section>";
-            }
             if (w.phase == OrbitalWorkPhase::LandingAlignment) {
                 out << "<p class=\"phase-copy\">ALIGNING FOR DESCENT</p>";
             } else {
@@ -3074,43 +3169,65 @@ std::string buildGamePanelMarkup(
                     !context.orbitalLaserBlocked && !context.orbitalLaserComplete;
                 const bool showDrill = canDrill && (!missionScan || missionSlice);
                 const bool canLand = context.orbitalLandingEligible;
-                const bool teachDrill = marsTutorial && missionSlice && showDrill;
-                const bool requireTitanDrill = titanDepthTutorial && showDrill;
-                const bool workDefault = canScan || (showDrill && (!missionScan || teachDrill || requireTitanDrill));
-                if (missionScan) {
-                    if (missionSlice && canLand && !marsTutorial)
-                        out << button("Land at mission site", ui::actions::landFromOrbit, requireTitanDrill ? "ghost" : "ok", !requireTitanDrill);
-                    else if (!missionSlice)
-                        out << button("Resume flight to mission sector", ui::actions::resumeOrbitalFlight, "ok", true);
-                }
+                const bool drillPrimary = showDrill && !canLand && !(missionScan && !missionSlice);
+                if (missionScan && !missionSlice)
+                    out << button("Fly to mission " + missionSectorName(mission.sectorId),
+                        ui::actions::resumeOrbitalFlight, "ok", true);
+                else if (canScan)
+                    out << button("Scan sector", ui::actions::orbitalWork, "ok", true, "action:orbital_scan");
+                else if (canLand)
+                    out << button(missionSlice ? "Land in " + missionSectorName(mission.sectorId) : "Land here",
+                        ui::actions::landFromOrbit, "ok", true);
                 out << "<div data-orbital-work=\"1\" class=\"orbit-primary-action\">";
-                if (canScan) {
-                    out << button("SCAN", ui::actions::orbitalWork, "ok", true, "action:orbital_scan");
-                } else if (showDrill) {
+                if (showDrill) {
                     // Distinct identities prevent a held Scan confirm from turning
                     // into a Drill hold when the survey refreshes the panel.
-                    out << button(titanDepthTutorial ? "Hold to Drill Descent Shaft" : marsTutorial ? "Hold to Drill" : missionScan ? "Prepare descent shaft" : "DRILL", ui::actions::orbitalWork, workDefault ? "ok" : "ghost", workDefault,
+                    out << button("Prepare descent shaft", ui::actions::orbitalWork,
+                        drillPrimary ? "ok" : "ghost", drillPrimary,
                         "action:orbital_drill", "continuous");
-                } else {
+                } else if (!canScan && !canLand && !(missionScan && !missionSlice)) {
                     const std::string status = scanning ? "SCANNING..."
                         : !ready ? (w.surveyComplete ? "COAST TO OPERATE" : "COAST TO SCAN")
-                        : missionScan && !missionSlice ? ("MISSION SITE: " + missionSectorName(mission.sectorId))
                         : outside ? "RETURN TO SELECTED SECTOR"
                         : context.orbitalLaserBlocked ? "SURFACE TOOLS REQUIRED"
-                        : context.orbitalLaserComplete ? "BORE REACH EXCAVATED" : "";
-                    out << "<p class=\"orbit-work-state\" role=\"status\">" << status << "</p>";
+                        : context.orbitalLaserComplete ? "SHAFT READY" : "";
+                    if (!status.empty()) out << "<p class=\"orbit-work-state\" role=\"status\">" << status << "</p>";
                 }
-                out << "</div><p id=\"rr-orbital-status\" class=\"phase-copy\">"
-                    << (w.surveyComplete ? (missionScan && !missionSlice
-                            ? "Travel to " + missionSectorName(mission.sectorId) + " and scan the mission site"
-                            : orbitalLaserHint(context))
-                        : "Scan depth " + std::to_string(surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray)))
-                    << "</p>";
-                if (marsTutorial && missionSlice && canLand)
-                    out << button("Land at mission site", ui::actions::landFromOrbit, teachDrill ? "ghost" : "ok", !teachDrill);
-                if (canLand && !(missionScan && missionSlice)) out << button(missionScan ? "Land here instead" : "LAND", ui::actions::landFromOrbit, missionScan ? "ghost" : "ok", !missionScan && !workDefault);
-                if (w.active() && (!missionScan || missionSlice))
-                    out << button("RESUME FLIGHT", ui::actions::resumeOrbitalFlight, "ghost", !missionScan && !workDefault && !canLand);
+                out << "</div>";
+                if (w.surveyComplete)
+                    out << "<p id=\"rr-orbital-status\" class=\"orbit-drill-status\""
+                        << (context.orbitalInsideZone && (!missionScan || missionSlice) ? "" : " style=\"display:none\"")
+                        << ">" << htmlEscape(orbitalLaserHint(context)) << "</p>";
+                else if (!w.surveyComplete)
+                    out << "<p class=\"orbit-drill-status\">Survey reach +"
+                        << surfaceDepthRating(state, SurfaceDepthUpgradeKind::SurveyArray) << "</p>";
+                if (w.surveyComplete && context.orbitalInsideZone && context.orbitalSurveyLayers) {
+                    out << "<div class=\"orbit-survey-readout\" aria-label=\"Sector survey\">";
+                    for (const auto& layer : *context.orbitalSurveyLayers) {
+                        std::string findings;
+                        const auto add = [&](std::string_view name) {
+                            if (!findings.empty()) findings += ", ";
+                            findings += name;
+                        };
+                        if (layer.common) add("Common ore");
+                        if (layer.rare) add("Rare ore");
+                        if (layer.exotic) add("Exotic ore");
+                        if (layer.artifact) add("Artifact signal");
+                        if (layer.thermal) add("Thermal hazard");
+                        if (layer.cryo) add("Cryo hazard");
+                        if (layer.radiation) add("Radiation");
+                        if (layer.toxic) add("Toxic gas");
+                        if (findings.empty()) continue;
+                        out << "<div class=\"orbit-survey-row\"><span>"
+                            << (layer.depth == 0 ? "Surface" : "Depth +" + std::to_string(layer.depth))
+                            << "</span><strong>" << htmlEscape(findings) << "</strong></div>";
+                    }
+                    out << "</div>";
+                }
+                if (missionScan && !missionSlice && canLand)
+                    out << button("Land here instead", ui::actions::landFromOrbit, "ghost", false);
+                if (w.active() && !(missionScan && !missionSlice))
+                    out << button("Resume flight", ui::actions::resumeOrbitalFlight, "ghost", !canLand && !canScan && !showDrill);
             }
             out << "</section>";
         }
@@ -3127,7 +3244,7 @@ std::string buildGamePanelMarkup(
                 : (!context.droneTransferEnabled ? "Launch corridor clear" : (context.preflightReady ? "Launch corridor clear" : "Securing Mining Rig"))) << "</strong></div>";
         if (!context.flightArmed) {
             const std::string_view preflightCopy = earthLaunchReady(state.run.expedition)
-                ? "Select Launch beside the ship to leave Earth. Thrust toward the Moon above-right, then establish orbit."
+                ? "Select Launch beside the ship. Thrust toward the Moon above-right, then establish orbit."
                 : context.launchQueued
                 ? "Launch queued. The burn will begin automatically when the bay seals."
                 : (!context.droneTransferEnabled
@@ -3140,6 +3257,12 @@ std::string buildGamePanelMarkup(
             out << "<p class=\"cockpit-hold-copy physical-flight-controls\">"
                 << htmlEscape("Steer the ship continuously. The line predicts your current path; it never moves the ship for you.")
                 << "</p>";
+            if (state.run.expedition.travelInitialized) {
+                const auto& cruise = state.run.expedition.cruise;
+                out << "<p class=\"flight-cruise-state\">"
+                    << (cruise.active ? (cruise.cooling ? "CRUISE COOLING" : "CRUISE ACTIVE") : "CRUISE OFF")
+                    << " · C / L3</p>";
+            }
         } else {
             out << "<div class=\"actions action-row primary-actions\">";
             for (std::size_t index = 0; index < launchPanel.primaryActions.size() && index < 2; ++index) {
@@ -3283,7 +3406,6 @@ std::string buildGamePanelMarkup(
 
     if (state.screen == Screen::Mining) {
         const MiningHudPresentation miningHud = miningHudPresentation(state, catalog);
-        const MiningRunPresentation miningRun = miningRunPresentation(state, catalog);
         const MiningRunState& mining = state.run.mining;
         const bool evaActive = miningOperatorIsEva(mining);
         const ScenarioObjectivePresentation miningScenario = scenarioObjectiveForMining(state, catalog);
@@ -3357,6 +3479,8 @@ std::string buildGamePanelMarkup(
             out << "</article>";
         }
         out << "</section></header>";
+        if (!context.miningExtractionActive && miningSafetyCueNeeded(mining))
+            out << "<div class=\"mining-emergency-cue\">ESC / HOLD EAST · EMERGENCY RECALL</div>";
         const MiningCocoonHudLayout cocoonHudLayout = miningCocoonHudLayout(mining.gate);
         if (cocoonMining) {
             out << "<section class=\"mining-cocoon-progress\" aria-label=\"Protected objective layer progress\""
@@ -3402,57 +3526,7 @@ std::string buildGamePanelMarkup(
             << "</strong></header><small id=\"rr-hud-mining-payload-contract\">"
             << htmlEscape(miningPayloadContractText(state,catalog))
             << "</small></article>";
-        out << "</section><section class=\"mining-command-dock" << (miningHud.atShip ? " at-ship" : " away")
-            << "\"><div class=\"actions action-row system-actions\">";
-        bool miningDefaultAssigned = false;
-        for (const PanelButtonPresentation& action : miningHud.actions) {
-            out << miningPanelButton(action, !miningDefaultAssigned && action.enabled);
-            miningDefaultAssigned = miningDefaultAssigned || action.enabled;
-        }
-        const std::string hazardMission = hazardDroneMissionMarkup(context, false);
-        std::ostringstream supportActions;
-        if (!hazardMission.empty() || (miningHud.atShip && droneBayUnlocked(state))) {
-            supportActions << panelButton(panelActionButton("Drone Ops", ui::actions::droneOps, "ghost"), !miningDefaultAssigned);
-            miningDefaultAssigned = true;
-        }
-        if (miningHud.atShip) {
-            const auto waitForDrones = std::find_if(miningRun.actions.begin(), miningRun.actions.end(), [](const auto& action) {
-                return action.actionId == ui::actions::miningWaitForDrones;
-            });
-            if (waitForDrones != miningRun.actions.end()) supportActions << panelButton(*waitForDrones, !miningDefaultAssigned);
-        }
-        out << "</div></section></footer>";
-        if (!hazardMission.empty() || !supportActions.str().empty()) {
-            out << "<div class=\"mining-hazard-mission\">" << hazardMission
-                << "<div class=\"actions action-row hazard-mission-actions\">" << supportActions.str() << "</div></div>";
-        }
-        const auto drillRepair = std::find_if(miningRun.actions.begin(), miningRun.actions.end(), [](const PanelButtonPresentation& action) {
-            return action.actionId == ui::actions::miningRepairDrill;
-        });
-        const auto droneRepair = std::find_if(miningRun.actions.begin(), miningRun.actions.end(), [](const PanelButtonPresentation& action) {
-            return action.actionId == ui::actions::miningRepairDrone;
-        });
-        if (miningHud.atShip && drillRepair != miningRun.actions.end() && droneRepair != miningRun.actions.end()) {
-            const bool drillVisible = miningDrillRepairCost(mining) > 0;
-            const bool disabledRigAtShip =
-                mining.rigDisabled && miningRigAtReturnZone(mining);
-            const bool droneVisible = disabledRigAtShip
-                ? miningDroneRepairCost(mining) > 0
-                : (evaActive
-                        ? mining.operatorIntegrity < 1.0
-                        : miningDroneRepairCost(mining) > 0);
-            out << "<div class=\"mining-ship-service-marker\" data-mining-ship-service=\"1\""
-                << " data-mining-width=\"" << mining.terrain.width << "\""
-                << " data-mining-height=\"" << mining.terrain.height << "\""
-                << " data-mining-return-x=\"" << mining.returnZoneX << "\""
-                << " data-mining-return-y=\"" << mining.returnZoneY << "\""
-                << " data-drill-visible=\"" << (drillVisible ? 1 : 0) << "\""
-                << " data-drill-enabled=\"" << (drillRepair->enabled ? 1 : 0) << "\""
-                << " data-drill-label=\"" << htmlEscape(drillRepair->label) << "\""
-                << " data-drone-visible=\"" << (droneVisible ? 1 : 0) << "\""
-                << " data-drone-enabled=\"" << (droneRepair->enabled ? 1 : 0) << "\""
-                << " data-drone-label=\"" << htmlEscape(droneRepair->label) << "\"></div>";
-        }
+        out << "</section></footer>";
         out << "</section>";
         if (miningHud.failurePending && context.miningFailureModalReady) {
             std::ostringstream failureBody;
@@ -4270,10 +4344,6 @@ std::optional<ModalPresentation> buildIncomingMessageCard(
     const auto* speaker = message ? messageSpeaker(context.catalog, message->speakerId) : nullptr;
     const auto* variant = message ? messageVariant(*message, variantId) : nullptr;
     if (!speaker || !variant) return std::nullopt;
-    const auto recoveryObjective = messageId == "artifact_wreck_recovery"
-        ? recommendedCampaignObjective(context.state, context.catalog) : CampaignObjective{};
-    const std::string recoveryCopy = recoveryObjective.title + ". " + recoveryObjective.detail;
-    if (messageId == "artifact_wreck_recovery") bodyOverride = recoveryCopy;
             std::ostringstream body;
             body << "<section class=\"incoming-message modal-body"
                  << (messageId.starts_with("drone_arrival_") ? " drone-arrival-introduction" : "")
@@ -4476,6 +4546,7 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
     }
     appendExpeditionPresentation(context, result);
     appendMissionPresentation(context, result);
+    result.interactionMarkup = contextualInteractionMarkup(context);
     return result;
 }
 
@@ -4797,6 +4868,9 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
         }
         for (const auto& w : e.wrecks) key << w.id << ':' << canSalvageWreck(e, liveFlight, solarSystemDefinition(), w.id)
             << ':' << canSalvageWreck(e, liveFlight, solarSystemDefinition(), w.id, false) << '|';
+        const auto nearby = flightWreckInteraction(e, liveFlight,
+            solarPresentationSystem(state), mission.targetId);
+        key << nearby.wreckId << ':' << nearby.enabled() << '|';
     }
     // A scene handoff deliberately unmounts the panel while the renderer owns
     key << context.incomingMessageDeliveryAllowed << ':' << context.controllerFlightControls << ':'
@@ -4845,6 +4919,7 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
         const MiningRunPresentation panel = miningRunPresentation(state, context.catalog);
         key << context.miningExtractionActive << '|' << panel.failurePending << '|'
             << context.miningFailureModalReady << '|'
+            << miningSafetyCueNeeded(state.run.mining) << '|'
             << miningAtReturnZone(state.run.mining) << '|'
             << state.run.mining.progressionCreditEligible << '|' << state.run.mining.artifact.present << '|'
             << static_cast<int>(state.run.mining.artifact.state) << '|' << state.run.mining.miniDrones.size() << '|'
@@ -4864,6 +4939,8 @@ std::uint64_t realtimePanelStructureKey(const PanelRenderContext& context)
             key << layer.id << ':' << layer.total << ':' << layer.revealed << ':' << layer.completed << ';';
         }
     }
+    if (state.screen == Screen::Mining || state.screen == Screen::Flight)
+        key << "|interaction:" << contextualInteractionMarkup(context);
     return static_cast<std::uint64_t>(std::hash<std::string>{}(key.str()));
 }
 

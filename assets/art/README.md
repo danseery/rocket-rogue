@@ -4,7 +4,7 @@ The committed PNGs are 90s arcade-style proof-of-concept sprites derived from pr
 
 ## Registered runtime textures
 
-`scene-textures.json` declares all 78 runtime textures in this section. A missing or corrupt declared texture fails atlas verification before packaging.
+`scene-textures.json` declares all 86 runtime textures in this section. A missing or corrupt declared texture fails atlas verification before packaging.
 
 | Files | Dimensions | Runtime use |
 |---|---:|---|
@@ -17,6 +17,7 @@ The committed PNGs are 90s arcade-style proof-of-concept sprites derived from pr
 | `local-solar-bg-sheet.png` | 4096x576 | Four horizontal 1024x576 local-solar backgrounds. |
 | `mining-drone.png` | 512x512 | Player mining rig. |
 | `mining-artifact.png` | 256x256 | Transparent generated obsidian relic sprite for protected mining objectives. |
+| `mining-rig-fuel-cell.png` | 256x256 | Transparent orange canister for loose, tetherable rig fuel cells; replace this named file with final human art. |
 | `drill-bit-sheet.png` | 672x112 | Six horizontal 112x112 drill frames. |
 | `mini-drone-mining.png`, `mini-drone-resource.png`, `mini-drone-survey.png`, `mini-drone-hazard.png`, `mini-drone-attack.png`, `mini-drone-defense.png` | 512x512 each | Mining, logistics, survey, remediation, and passive-combat support drones. |
 | `heroic-capybara.png` | 1024x1024 | Campaign-introduction hero art. |
@@ -65,7 +66,7 @@ prompt contract and the fixed nineteen-frame order.
 
 ## Generated scene atlas
 
-`scene-textures.json` is the canonical offline atlas manifest for the 78 registered
+`scene-textures.json` is the canonical offline atlas manifest for the 86 registered
 scene textures. `tools/build-scene-atlas.py` splits the registered sprite sheets on their
 declared frame grids, preserves every source pixel, extrudes each frame edge by two
 pixels, and packs the frames into WebGL2-safe pages no larger than 4096 pixels on

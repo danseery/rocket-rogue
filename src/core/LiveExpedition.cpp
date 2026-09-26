@@ -72,6 +72,11 @@ bool reconcileCampaignGuidance(GameState& state,const ContentCatalog& catalog,bo
         e.course={}; e.cruise={}; e.coursePlayerSelected=false; changed=true;
     }
     const auto objective=recommendedCampaignObjective(state,catalog);
+    changed |= std::erase_if(state.incomingMessages.pending,[&](const auto& message) {
+        if (message.messageId != "artifact_wreck_recovery") return false;
+        return objective.kind != CampaignObjectiveKind::RecoverArtifact ||
+            message.id != "recovery.wreck."+std::to_string(objective.wreckId);
+    }) > 0;
     if (!e.coursePlayerSelected && e.course.targetBodyId!=objective.targetId) {
         if (objective.targetId.empty()) e.course={};
         else if (plotSystemCourse(e,f,system,objective.targetId)!=ExpeditionResult::Applied) return changed;

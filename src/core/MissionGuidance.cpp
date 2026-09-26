@@ -155,10 +155,13 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
     v.title = "Ore and artifact recovery"; v.optional = m->optional;
     v.complete = solarMissionClaimed(s, catalog, *m); v.artifactId = m->artifactId;
     v.sectorId = artifactSectorForBody(s, e.location.systemId.empty() ? "solar" : e.location.systemId, m->bodyId);
+    if (m->bodyId != "moon" && m->bodyId != "mars")
+        v.location += " / " + missionSectorName(v.sectorId);
     const std::string dockId = custody && !custody->requiredDockId.empty() ? custody->requiredDockId : "earth";
     const std::string dock = servicingDockName(dockId);
     v.purpose = m->bodyId == "moon" ? firstMoonMissionInstructions(s, catalog) : "Collect the artifact, then complete the mission at the " + dock + ". Artifacts aboard are at risk until then.";
     if (m->bodyId == "mars") v.purpose = "Mars's artifact is underground. Scan the mission sector, hold Drill to prepare a shaft, then land and use the surface scanner to locate it. Return the ore and artifact to your ship, then complete the mission at Earth dock.";
+    if (m->bodyId == "io") v.purpose = "Let Hazard Drone cool the thermal seal before excavating its four segments.";
     if (m->bodyId == "titan") v.purpose = "Titan's artifact is at Depth +2. Scan the mission sector, hold Drill to open the descent shaft, then land and follow the route underground with the surface scanner.";
     int delivered = 0, required = 0;
     bool prerequisites = true;
@@ -242,7 +245,7 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
         banked || aboard ? "Aboard ship" : tethered ? "Return to ship" :
         exposed || revealed ? "Collect Artifact" :
         !prerequisites ? (required && delivered < required ? "After Common Ore collection" : "After mission requirements") :
-        m->bodyId == "titan" && artifactTargetDepth >= 0 ? "Reach Depth +" + std::to_string(artifactTargetDepth) + " · use the surface scanner" : "Use the surface scanner"});
+        artifactTargetDepth > 0 ? "Reach Depth +" + std::to_string(artifactTargetDepth) + " · use the surface scanner" : "Use the surface scanner"});
     v.trackerGoals.push_back({"Return to " + dock, banked || v.complete,
         v.complete ? "Mission complete" : banked ? "Ready to complete" : aboard ? "Complete the mission at the dock" : "Bring the artifact aboard first"});
     v.recoveryGoals = v.trackerGoals;
@@ -286,6 +289,16 @@ MissionView missionView(const GameState& s, const ContentCatalog& catalog, std::
         v.targetId = dockId; set("handin", "Complete Mission at the " + dock); return v;
     }
     if (v.complete) { set("complete", "Mission complete"); return v; }
+    // Later assignments use the checklist for explicit acceptance instead of
+    // interrupting every orbit with the same recovery briefing.
+    if (m->bodyId != "moon" && m->bodyId != "mars" && m->bodyId != "io") {
+        if (const auto acceptance = solarMissionAcceptanceForBody(s,catalog,m->bodyId); acceptance.available) {
+            v.action = ui::actions::scenarioAction(acceptance.scenarioId,acceptance.stepId,
+                static_cast<int>(acceptance.action));
+            set("accept", acceptance.actionLabel.empty() ? "Accept mission" : acceptance.actionLabel);
+            return v;
+        }
+    }
     if (v.arrivalStage && e.arrivalTutorials[tutorial].landed) {
         set("arrival_briefing", "Arrival complete - Continue to the recovery briefing"); return v;
     }

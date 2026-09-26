@@ -15,6 +15,7 @@
 #include "core/PostSolarSystem.h"
 #include "core/MissionGuidance.h"
 #include "core/MiningPresentation.h"
+#include "game/ContextualInteraction.h"
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
@@ -1006,6 +1007,9 @@ void campaignGuidanceTests()
         acknowledgeIncomingMessage(state->incomingMessages,"recovery.wreck.7");
         reconcileCampaignGuidance(*state,catalog);
         check(state->incomingMessages.pending.empty(),"acknowledged wreck notice must not replay");
+        state->incomingMessages.pending.push_back({"recovery.wreck.6","artifact_wreck_recovery","default"});
+        reconcileCampaignGuidance(*state,catalog);
+        check(state->incomingMessages.pending.empty(),"a superseded wreck warning cannot interrupt later recovery");
         const auto saved=deserializeSaveData(serializeSaveData(captureSaveData(*state)));
         check(saved && saved->expedition.course.targetBodyId=="wreck:7","wreck target must survive save serialization");
         auto restored=std::make_unique<GameState>(createNewGame(catalog,1));
@@ -1366,6 +1370,40 @@ void campaignBudgetTests()
 
 void persistentExpeditionTests()
 {
+    {
+        using namespace rocket;
+        PersistentExpeditionState expedition;
+        expedition.location = {"solar", "", CoordinateFrame::System, {12, 9}, {}, 0, {}};
+        FlightRunState flight;
+        restoreSystemLocation(expedition.location, flight);
+        flight.active = flight.physicalFlight = true;
+        flight.mode = FlightMode::Travel;
+        for (std::uint64_t id : {1ULL, 2ULL, 3ULL}) {
+            WreckState wreck;
+            wreck.id = id;
+            wreck.location = {"solar", "", CoordinateFrame::System,
+                {12.0 + 0.2 * static_cast<double>(id), 9}, {}, 0, {}};
+            expedition.wrecks.push_back(wreck);
+        }
+        expedition.batteries[0].owner = BatteryOwner::Wreck;
+        expedition.batteries[0].wreckId = 2;
+        expedition.batteries[1].owner = BatteryOwner::Wreck;
+        expedition.batteries[1].wreckId = 3;
+        const auto& system = solarSystemDefinition();
+        auto prompt = flightWreckInteraction(expedition, flight, system, "wreck:3");
+        check(prompt.wreckId == 3 && prompt.enabled(),
+            "the tracked artifact wreck wins over closer eligible wrecks");
+        prompt = flightWreckInteraction(expedition, flight, system, "");
+        check(prompt.wreckId == 1, "without a tracked artifact, the nearest eligible wreck wins");
+        expedition.wrecks[1].location.velocity.x = expeditionSalvageSpeed + 0.1;
+        prompt = flightWreckInteraction(expedition, flight, system, "wreck:2");
+        check(prompt.wreckId == 2 && !prompt.enabled() && prompt.requirement == "Match speed",
+            "a nearby fast wreck shows a short prerequisite instead of a dead action");
+        expedition.location.position.x = 20;
+        restoreSystemLocation(expedition.location, flight);
+        check(!flightWreckInteraction(expedition, flight, system, "wreck:2").visible(),
+            "wreck prompt disappears immediately outside salvage range");
+    }
     campaignBudgetTests();
     artifactBankingAndPayloadTests();
     straylightSequenceTests();

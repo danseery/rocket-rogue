@@ -1,6 +1,7 @@
 #include "core/LunarDiscoveryMessages.h"
 #include "core/Content.h"
 #include "core/ContentIds.h"
+#include "core/ScenarioSystem.h"
 #include <algorithm>
 namespace rocket {
 bool reconcileLunarMessages(GameState &state, const ContentCatalog &catalog) {
@@ -11,15 +12,27 @@ bool reconcileLunarMessages(GameState &state, const ContentCatalog &catalog) {
     auto &messages = state.incomingMessages;
     const bool delivered = mining.artifact.state == MiningArtifactState::Delivered;
     const bool revealed = mining.artifact.revealed || mining.artifact.state == MiningArtifactState::Loose;
+    const ScenarioInstance* scenario = findScenarioInstance(state.meta, content::scenario::lunarProspector);
+    const ScenarioStepProgress* oreDelivery = scenario == nullptr
+        ? nullptr : findScenarioStepProgress(*scenario, "delivery");
+    const bool oreAboard = oreDelivery != nullptr && oreDelivery->completed;
     bool changed = false;
     // Superseded instructions are retired without granting mission acknowledgement/rewards.
     const auto oldSize = messages.pending.size();
     std::erase_if(messages.pending, [&](const auto &item) {
-        return (item.messageId == "lunar_scan" && (revealed || delivered)) ||
+        return (item.messageId == "lunar_scan" && (!oreAboard || revealed || delivered)) ||
                (item.messageId == "lunar_recovery" && delivered);
     });
     changed = oldSize != messages.pending.size();
+    // Earlier builds could acknowledge this card at 0/20. Re-arm only that
+    // premature acknowledgement so the scanner lesson arrives after delivery.
+    if (!oreAboard && !revealed && !delivered) {
+        changed |= std::erase(messages.acknowledgedMessages, "lunar_scan") > 0;
+        changed |= std::erase(messages.acknowledgedOccurrences, "lunar_scan") > 0;
+    }
     if (delivered)
+        return changed;
+    if (!oreAboard && !revealed)
         return changed;
     const std::string id = revealed ? "lunar_recovery" : "lunar_scan";
     const std::string variant =

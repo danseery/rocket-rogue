@@ -678,7 +678,8 @@ void routerMapsEveryGameplayContext()
     frame.pressed.set(index(ControllerButton::LeftStick));
     input = router.route(InputContext::Launch, frame, preferences);
     require(input.has(GameInputAction::ToggleCruise), "Left-stick click should toggle cruise during flight");
-    require(input.actions.count() == 1,
+    require(input.has(GameInputAction::SalvageNearbyWreck), "North should salvage an eligible nearby wreck");
+    require(input.actions.count() == 2,
         "flight must not route the retired engine toggle or pressure control");
 
     router.reset();
@@ -1026,7 +1027,7 @@ void boundariesSuppressAllSimultaneousGameplay()
                 && !input.firing && !input.drilling && !input.orbitalHeld && !input.navigation && input.scroll == 0.0,
             "opening Menu must suppress all movement, held actions, and navigation on that frame");
     }
-    for (const InputContext context : {InputContext::Launch, InputContext::MiningActive, InputContext::MiningService}) {
+    for (const InputContext context : {InputContext::Launch, InputContext::MiningActive}) {
         GameInputRouter router;
         ControllerFrame frame = routedFrame();
         frame.down.set(index(ControllerButton::RightTrigger));
@@ -1051,6 +1052,18 @@ void boundariesSuppressAllSimultaneousGameplay()
         input = router.route(InputContext::Paused, frame, {}, 0.0, "focused-pause-action", true);
         require(!input.orbitalHeld && !input.has(GameInputAction::ActivateFocused),
             "Confirm held during focus entry cannot trigger the newly focused action");
+    }
+    {
+        GameInputRouter router;
+        ControllerFrame frame = routedFrame();
+        router.route(InputContext::MiningService, frame, {});
+        frame.down.set(index(ControllerButton::RightTrigger));
+        frame.pressed.set(index(ControllerButton::DpadLeft));
+        frame.navigation = UiDirection::Left;
+        const auto input = router.route(InputContext::MiningService, frame, {});
+        require(input.has(GameInputAction::EnterUiFocus) && input.actions.count() == 1
+                && input.navigation == UiDirection::Left && !input.firing,
+            "ship-zone D-pad Left enters focus before simultaneous mining input");
     }
     for (const InputContext context : {InputContext::Launch, InputContext::OrbitalWork}) {
         GameInputRouter router;
@@ -1278,6 +1291,47 @@ void disconnectedStartupDoesNotConsumeTheFirstFreshConfirm()
     }
 }
 
+void shipServiceShortcutsRequireFreshInput()
+{
+    using namespace rocket;
+    GameInputRouter router;
+    ControllerFrame frame = routedFrame();
+    router.route(InputContext::MiningActive, frame, {});
+
+    frame = routedFrame();
+    frame.down.set(index(ControllerButton::DpadUp));
+    frame.pressed.set(index(ControllerButton::DpadUp));
+    require(!router.route(InputContext::MiningService, frame, {}).has(GameInputAction::MiningDroneOps),
+        "entering ship range must not consume the arrival-frame D-pad press");
+    router.route(InputContext::MiningService, routedFrame(), {});
+    require(router.route(InputContext::MiningService, frame, {}).has(GameInputAction::MiningDroneOps),
+        "a fresh D-pad Up press should open Drone Ops at the ship");
+
+    frame = routedFrame();
+    frame.pressed.set(index(ControllerButton::DpadRight));
+    require(router.route(InputContext::MiningService, frame, {}).has(GameInputAction::MiningWaitForDrones),
+        "D-pad Right should request drone recovery at the ship");
+
+    frame = routedFrame();
+    frame.down.set(index(ControllerButton::DpadDown));
+    frame.pressed.set(index(ControllerButton::DpadDown));
+    require(!router.route(InputContext::MiningService, frame, {}).has(GameInputAction::MiningDepart),
+        "D-pad Down must not depart on a tap");
+    frame.pressed.reset();
+    frame.heldSeconds[index(ControllerButton::DpadDown)] = 0.61;
+    require(router.route(InputContext::MiningService, frame, {}).has(GameInputAction::MiningDepart),
+        "holding D-pad Down should depart once");
+    require(!router.route(InputContext::MiningService, frame, {}).has(GameInputAction::MiningDepart),
+        "a continued departure hold must not repeat");
+
+    frame = routedFrame();
+    frame.pressed.set(index(ControllerButton::DpadLeft));
+    frame.navigation = UiDirection::Left;
+    const auto focus = router.route(InputContext::MiningService, frame, {});
+    require(focus.has(GameInputAction::EnterUiFocus) && focus.actions.count() == 1,
+        "D-pad Left should retain panel focus instead of a service shortcut");
+}
+
 } // namespace
 
 int main()
@@ -1314,6 +1368,7 @@ int main()
     connectionAndFocusLossReleaseContinuousActions();
     inactiveSourceObservesReleaseWithoutConsumingFreshConfirm();
     disconnectedStartupDoesNotConsumeTheFirstFreshConfirm();
+    shipServiceShortcutsRequireFreshInput();
     std::cout << "Controller input tests passed.\n";
     return 0;
 }
