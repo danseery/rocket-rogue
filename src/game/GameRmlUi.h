@@ -143,6 +143,7 @@ private:
     bool controllerConfirmCancelSwapped_ = false;
     bool controllerResumeBlocked_ = false;
     bool controllerResumeConnected_ = false;
+    bool missionTrackerExpanded_ = true;
     bool performanceStatsVisible_ = false;
     bool deferModalOpen_ = false;
     ControllerFamily controllerFamily_ = ControllerFamily::Generic;

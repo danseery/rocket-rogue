@@ -15,6 +15,7 @@ enum class GameInputAction : std::size_t {
     OpenSystemMenu,
     OpenMap,
     OpenInventory,
+    ToggleMissionTracker,
     StartOrContinue,
     ReturnHome,
     ToggleEngines,
@@ -187,6 +188,10 @@ public:
             fenceHeldInput();
             add(GameInputAction::OpenInventory);
             return result;
+        }
+        if (context != InputContext::Stamp && context != InputContext::MiningFailure
+            && frame.wasPressed(ControllerButton::RightStick)) {
+            add(GameInputAction::ToggleMissionTracker);
         }
         if (context == InputContext::MiningService) {
             if (enteringShipService) return result;

@@ -11,8 +11,7 @@
 namespace rocket
 {
 double service_dock::captureHeading(std::string_view id, double dockHeading, double shipHeading) {
-    if (!profile(id).parallel) return dockHeading + 3.14159265358979323846;
-    const double a = dockHeading - 1.5707963267948966;
+    const double a = dockHeading + (profile(id).parallel ? -1.5707963267948966 : 0.0);
     const double b = a + 3.14159265358979323846;
     return std::abs(flightWrappedAngleDelta(shipHeading, a)) <= std::abs(flightWrappedAngleDelta(shipHeading, b)) ? a : b;
 }
@@ -267,13 +266,13 @@ LaunchFlightStep advanceServiceDocking(PersistentExpeditionState& e, FlightRunSt
     for (int index = 0; index < steps; ++index) {
         pose = dockLocalPose(docking);
         const DockHullBasis hull = dockHullBasis(flight.heading, docking.dockHeading);
-        const double previousNoseY = pose.y + hull.forwardY * service_dock::hullHalfLength;
+        const double hullExtentY = std::abs(hull.forwardY) * service_dock::hullHalfLength + service_dock::hullRadius;
+        const double previousLeadingY = pose.y - hullExtentY;
         pose.x += pose.vx * substep;
         pose.y += pose.vy * substep;
-        const double noseX = pose.x + hull.forwardX * service_dock::hullHalfLength;
-        const double noseY = pose.y + hull.forwardY * service_dock::hullHalfLength;
-        if (previousNoseY > profile.mouth && noseY <= profile.mouth &&
-            std::abs(noseX) <= profile.halfWidth - service_dock::hullRadius)
+        const double hullExtentX = std::abs(hull.forwardX) * service_dock::hullHalfLength + service_dock::hullRadius;
+        if (previousLeadingY > profile.mouth && pose.y - hullExtentY <= profile.mouth &&
+            std::abs(pose.x) + hullExtentX <= profile.halfWidth)
             docking.enteredMouth = true;
         double normalX = 0.0, normalY = 0.0, contactX = 0.0, contactY = 0.0;
         const bool hit = dockHullContact(pose, hull, profile, normalX, normalY, contactX, contactY);
@@ -339,7 +338,7 @@ LaunchFlightStep advanceServiceDocking(PersistentExpeditionState& e, FlightRunSt
     const bool fullyInside = std::abs(pose.x) + hullExtentX <= profile.halfWidth &&
         pose.y - hullExtentY >= profile.backstop &&
         pose.y + hullExtentY <= profile.mouth;
-    if (profile.parallel) docking.enteredMouth = fullyInside;
+    if (fullyInside) docking.enteredMouth = true;
     const bool insideBerth = (profile.parallel || docking.enteredMouth) && fullyInside &&
         std::abs(pose.x) <= profile.targetHalfWidth * service_dock::captureGraceScale &&
         std::abs(pose.y - profile.centerY) <= profile.targetHalfDepth * service_dock::captureGraceScale;
@@ -1047,13 +1046,13 @@ std::string earthDockingGuidance(const FlightRunState& flight)
         ? "SECURING SHIP" : "DOCKING COMPLETE";
     const auto pose = dockLocalPose(flight.docking);
     const auto profile = service_dock::profile(flight.docking.dockId);
-    if (!profile.parallel && !flight.docking.enteredMouth) return "NOSE FIRST";
+    if (!profile.parallel && !flight.docking.enteredMouth) return "ENTER BERTH";
     if (std::abs(flightWrappedAngleDelta(flight.heading, service_dock::captureHeading(flight.docking.dockId, flight.docking.dockHeading, flight.heading))) >
         service_dock::captureHeadingRadians) return profile.parallel ? "ALIGN PARALLEL" : "ALIGN WITH BERTH";
     if (std::abs(profile.parallel ? pose.vy : pose.vx) * flight_geometry::velocityToMetersPerSecond > service_dock::captureLateralSpeed ||
         std::abs(profile.parallel ? pose.vx : pose.vy) * flight_geometry::velocityToMetersPerSecond > service_dock::captureForwardSpeed) return "SLOW DOWN";
     if (profile.parallel) return flight.docking.captureSeconds > 0.0 ? "HOLD POSITION" : "STRAFE INTO BERTH";
-    return flight.docking.captureSeconds > 0.0 ? "DOCKING..." : "HOLD ALIGNMENT";
+    return flight.docking.captureSeconds > 0.0 ? "HOLD POSITION" : "CENTER IN BERTH";
 }
 bool canSalvageWreck(const PersistentExpeditionState& e, const FlightRunState& f, const SystemDefinition& s, std::uint64_t id, bool requireMatchedSpeed) {
     if (!f.active || f.mode == FlightMode::Landing) return false;

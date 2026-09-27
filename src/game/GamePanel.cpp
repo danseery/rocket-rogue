@@ -353,13 +353,16 @@ std::string interactionKey(std::string_view keyboard, std::string_view controlle
 }
 
 std::string interactionAction(std::string_view label, std::string_view action,
-    std::string_view keyboard, std::string_view controller, bool enabled = true)
+    std::string_view keyboard, std::string_view controller, bool enabled = true,
+    std::string_view extraClass = {})
 {
     const std::string content = interactionKey(keyboard, controller)
         + "<span class=\"interaction-label\">" + htmlEscape(label) + "</span>";
     if (!enabled) return "<div class=\"interaction-action is-unavailable\"><span class=\"interaction-label\">"
         + htmlEscape(label) + "</span></div>";
-    return "<button class=\"interaction-action rr-text-button\" data-rr-action=\""
+    return "<button class=\"interaction-action rr-text-button"
+        + (extraClass.empty() ? std::string{} : " " + std::string(extraClass))
+        + "\" data-rr-action=\""
         + htmlEscape(action) + "\" data-ui-focus-id=\"interaction:" + htmlEscape(action)
         + "\">" + content + "</button>";
 }
@@ -386,8 +389,9 @@ std::string contextualInteractionMarkup(const PanelRenderContext& context)
             const ContextualInteraction target = miningContextualInteraction(mining);
             if (target.visible()) {
                 const std::string text = target.enabled() ? target.label : target.requirement;
-                return "<div id=\"rr-context-interaction\" class=\"context-interaction"
-                    + std::string(target.enabled() ? " is-ready" : " is-blocked") + "\">"
+                return "<div id=\"rr-context-interaction\" class=\"context-interaction is-mining"
+                    + std::string(target.enabled() ? " is-ready" : " is-blocked")
+                    + (target.label.starts_with("Release ") ? " is-tethered" : "") + "\">"
                     + (target.enabled()
                         ? interactionAction(text, target.action, "T", "{{controller_north}}")
                         : "<span class=\"interaction-requirement\">" + htmlEscape(text) + "</span>")
@@ -452,15 +456,14 @@ std::string contextualInteractionMarkup(const PanelRenderContext& context)
                 departLabel += std::to_string(cargoLeft) + " cargo";
             }
         }
-        rows += interactionAction(departLabel, ui::actions::miningDepart, "Click", "Hold D-pad ↓");
+        rows += interactionAction(departLabel, ui::actions::miningDepart, "G", "Hold D-pad ↓", true,
+            "is-depart");
         return "<section id=\"rr-ship-services\" class=\"context-ship-services\" aria-label=\"Ship services\">"
             "<strong>SHIP SERVICES</strong><div class=\"context-ship-actions\">" + rows + "</div></section>";
     }
     if (state.screen == Screen::Flight && context.launchFlight &&
         !context.surfaceArrivalActive && !(context.orbitalWork && context.orbitalWork->active())) {
-        if (serviceDockingActive(*context.launchFlight))
-            return "<div id=\"rr-dock-cue\" class=\"expedition-dock-cue\">"
-                + htmlEscape(earthDockingGuidance(*context.launchFlight)) + "</div>";
+        if (serviceDockingActive(*context.launchFlight)) return {};
         const auto mission = trackedMissionView(state, context.catalog, context.launchFlight,
             context.orbitalWork && context.orbitalWork->surveyComplete);
         const ContextualInteraction target = flightWreckInteraction(state.run.expedition,
@@ -653,7 +656,7 @@ void collectSharedUtilityModals()
     const std::string controlsBody = std::string(R"(<div class="controller-controls">
         <div class="controls-callout"><strong>ACTIONS APPEAR WHERE THEY MATTER</strong>
         <p>Use the prompt beside an artifact or wreck. At the landed ship, the Ship Services list shows available work. D-pad Left opens panel focus when you need it.</p>
-        <p>Mission waypoints follow artifacts to the delivery dock or named wreck. A manually selected destination stays selected until Return to mission.</p><p>Powered ascent is governed to 8 m/s from deep shafts; held thrust continues into orbit. Brake manually to stay near the planet. After the Moon, orbital drilling opens an entrance: excavate the remaining artifact approach with the rig.</p>
+        <p>Mission waypoints follow artifacts to the delivery dock or named wreck. A manually selected destination stays selected until Return to mission.</p><p>Powered ascent holds near 8 m/s through deep shafts. The launch burn tapers into orbit, and outward thrust gets a short near-planet assist. Release thrust or brake to stay nearby. After the Moon, orbital drilling opens an entrance: excavate the remaining artifact approach with the rig.</p>
         <div class="controls-flow"><span>SELECT</span><span> / </span><span>CONFIRM</span><span> / </span><span>RESUME PLAY</span></div>
         <p>Actions resume play automatically; interfaces stay open. Back cancels. Release buttons and center sticks to pilot again.</p></div>
         <div class="controls-pad-card"><div class="controls-pad" aria-label="Xbox-style controller reference: left stick upper left, D-pad lower left, right stick lower right, face buttons upper right">
@@ -706,7 +709,7 @@ void collectSharedUtilityModals()
             binding("Hold D-pad Down", "Depart from ship · 0.6 seconds") +
             binding("D-pad Left", "Open panel focus") +
             binding("Hold East / B", "Abort · 0.45 seconds", "controls-red") +
-            "<p>Ship Services appears only in the ship zone. Click its entries or use their shown controller shortcuts.</p>") +
+            "<p>Ship Services appears only in the ship zone. Click its entries or use their shown shortcuts.</p>") +
         card("Keyboard / Ship",
             binding("A / D", "Rotate · Left / Right arrows also work") +
             binding("Shift + A / D", "Ship-relative strafe") +
@@ -719,7 +722,8 @@ void collectSharedUtilityModals()
             binding("Space", "Drill · rig also uses left click") +
             binding("Left click", "Fire EVA weapon") +
             binding("E / T", "Scan / tether") +
-            binding("R / F", "Stow payload / enter or exit rig")) +
+            binding("R / F", "Stow payload / enter or exit rig") +
+            binding("G", "Depart from ship")) +
         "</div><div class=\"controls-footer\"><p>Menu opens Pause. View opens Map in menus, orbit, and flight. North opens Inventory in menus.</p>" +
         modalButton("Controller settings", ui::modals::settings, "ghost") + "</div></div>";
     const std::string systemMenuBody =
@@ -2297,7 +2301,7 @@ std::pair<std::string, std::string> launchLessonHangarObjective(
             : std::pair<std::string, std::string>{"Install Flight Controls I", "Install the taught control upgrade in Refit."};
     case LaunchTrainingStage::ThermalManagement:
         if (!hasUnlock(state.meta, content::unlock::routeMars)) {
-            return {"Complete Lunar Prospector", "Finish the Moon contract to reveal the Mars route."};
+            return {"Complete Moon mission", "Finish the Moon contract to reveal the Mars route."};
         }
         if (launchUpgradeRank(state, LaunchUpgradeKind::FuelTanks) < 2) {
             return {"Mars transfer requires 20 transfer fuel", "Current capacity is 15. Mission credits fund permanent Refit upgrades."};
@@ -2722,7 +2726,7 @@ std::string buildGamePanelMarkup(
         "Controller",
         std::string_view("Left stick or D-pad navigates menus; Confirm selects; Back returns; Menu pauses. Confirm and Back follow controller settings. At the landed ship, D-pad Up opens Drone Ops, Right waits for drones, and held Down departs; Left opens panel focus.")));
     settingsBody << detailStack(settingsDetails);
-    settingsBody << "<h3>Missions</h3><p>The tracker shows your next step. Open Missions on the tracker or beside Map for ordered requirements and rewards. After Mars, accept routine assignments with Accept mission there. Track mission changes guidance without engaging cruise. A manual waypoint stays selected until you choose Return to mission.</p>";
+    settingsBody << "<h3>Missions</h3><p>Click the mission heading or press right-stick click to fold or open the tracker. It starts folded on management screens. Open Missions for ordered requirements and rewards. After Mars, accept routine assignments there. Track mission changes guidance without engaging cruise. A manual waypoint stays selected until Return to mission.</p>";
     settingsBody << "<section class=\"settings-control\" data-resolution-settings>"
         << "<div><h3>" << htmlEscape("Display resolution") << "</h3>"
         << "<p>" << htmlEscape("Choose the render target. Auto follows the current display and pixel density.") << "</p></div>"
@@ -3147,7 +3151,9 @@ std::string buildGamePanelMarkup(
 
         if (!orbitalWorkVisible(context))
         out << "<p id=\"rr-hud-launch-status\" class=\"" << launchStatusSeverity(context) << "\">"
-            << htmlEscape(state.run.expedition.travelInitialized ? expeditionGuidance(state,context.orbitalWork && context.orbitalWork->surveyComplete,context.orbitalLaserComplete).nextAction : launchPanel.telemetryMessage) << "</p>";
+            << htmlEscape(context.launchFlight && serviceDockingActive(*context.launchFlight) ? std::string{}
+                : state.run.expedition.travelInitialized ? expeditionGuidance(state,context.orbitalWork && context.orbitalWork->surveyComplete,context.orbitalLaserComplete).nextAction
+                : launchPanel.telemetryMessage) << "</p>";
         const bool hasAdvancedFlightControls = !launchPanel.systemActions.empty();
         if (orbitalWorkVisible(context)) {
             out << "<section class=\"orbit-action-panel\">";
@@ -3789,7 +3795,7 @@ std::string buildGamePanelMarkup(
                     "MINE THE DEPOSIT",
                     "Mine is where all the action is. Take direct control of the Mining Rig to drill ore and Collect Artifact from the tunnel you prepared. Bring back " +
                         std::to_string(tuning::research::prospectorCommonOreGoal) +
-                        " Common Ore to build Prospector Mk I.",
+                        " Common Ore to unlock the Mining Drone.",
                     "Mining starts at your selected start depth. Watch oxygen and drill heat, stow cargo at the ship, and leave before the rig can no longer make it home.",
                     "Deploy Mining Rig",
                     ui::actions::mineSurface,
@@ -4338,7 +4344,7 @@ std::optional<ModalPresentation> buildIncomingMessageCard(
     const PanelRenderContext& context, std::string_view messageId,
     std::string_view variantId, const std::string& action,
     std::string_view titleOverride, std::string_view bodyOverride,
-    std::string_view buttonOverride)
+    std::string_view buttonOverride, bool highlightReward)
 {
     const auto* message = incomingMessage(context.catalog, messageId);
     const auto* speaker = message ? messageSpeaker(context.catalog, message->speakerId) : nullptr;
@@ -4356,7 +4362,8 @@ std::optional<ModalPresentation> buildIncomingMessageCard(
             }
             body << "<div class=\"incoming-message-copy\"><div class=\"incoming-message-channel\">" << htmlEscape(speaker->channel)
                  << "</div><h2>" << htmlEscape(speaker->name) << "</h2><h3>" << htmlEscape(titleOverride.empty() ? message->title : titleOverride)
-                 << "</h3><p>" << htmlEscape(bodyOverride.empty() ? variant->body : bodyOverride) << "</p><div class=\"incoming-message-hints\">";
+                 << "</h3><p" << (highlightReward ? " class=\"incoming-message-reward\"" : "") << ">"
+                 << htmlEscape(bodyOverride.empty() ? variant->body : bodyOverride) << "</p><div class=\"incoming-message-hints\">";
             for (const auto hint : variant->hints) {
                 if (!bodyOverride.empty()) break;
                 const bool pad = context.controllerFlightControls;
@@ -4687,9 +4694,10 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
                 appendHudText(result, "rr-orbital-status", orbitalLaserHint(context));
             appendHudText(result, "rr-titan-shaft-depth", "Depth +" + std::to_string(context.orbitalBoreDepth));
         } else {
-            appendHudText(result, "rr-hud-launch-status", state.run.expedition.travelInitialized
-                ? expeditionGuidance(state,context.orbitalWork && context.orbitalWork->surveyComplete,context.orbitalLaserComplete).nextAction
-                : launchPanel.telemetryMessage);
+            appendHudText(result, "rr-hud-launch-status", context.launchFlight && serviceDockingActive(*context.launchFlight)
+                ? std::string{} : state.run.expedition.travelInitialized
+                    ? expeditionGuidance(state,context.orbitalWork && context.orbitalWork->surveyComplete,context.orbitalLaserComplete).nextAction
+                    : launchPanel.telemetryMessage);
             appendHudClass(result, "rr-hud-launch-status", launchStatusSeverity(context));
         }
         return;

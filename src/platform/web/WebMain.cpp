@@ -749,6 +749,16 @@ void rr_mining_wait_for_drones()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_mining_depart()
+{
+    if (g_app) {
+        g_app->miningDepart();
+    }
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_mining_abort()
 {
     if (g_app) {

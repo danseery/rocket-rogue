@@ -1365,7 +1365,7 @@ void RocketGameApp::beginManualSurfaceAscent()
     session_.throttleInput=1.0;
     flight.selectedThrottle=1.0;
     refreshLandingSiteView(true);
-    state_.statusLine="ASCENDING - W / S takes over thrust; release to coast.";
+    state_.statusLine="ASCENDING - W / S takes over thrust; launch burn fades into orbit.";
     save();
     panelDirty_=realtimeHudDirty_=true;
 }
@@ -1955,6 +1955,7 @@ std::string_view controllerActionName(GameInputAction action)
     case GameInputAction::OpenSystemMenu: return "open_system_menu";
     case GameInputAction::OpenMap: return "open_map";
     case GameInputAction::OpenInventory: return "open_inventory";
+    case GameInputAction::ToggleMissionTracker: return "toggle_mission_tracker";
     case GameInputAction::StartOrContinue: return "start_or_continue";
     case GameInputAction::ResumeOrbitalFlight: return "resume_orbital_flight";
     case GameInputAction::ReturnHome: return "return_home";
@@ -2293,6 +2294,10 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
         if (!titleScreenActive_) {
             services_.ui.openModal(std::string(ui::modals::inventory));
         }
+        break;
+    case GameInputAction::ToggleMissionTracker:
+        if (pauseReason_ == PauseReason::None || pauseReason_ == PauseReason::ControllerUiFocus)
+            services_.ui.dispatchAction("ui:toggle_mission_tracker");
         break;
     case GameInputAction::StartOrContinue:
         if (context == InputContext::Preflight) {
@@ -3019,19 +3024,29 @@ void RocketGameApp::tick(double deltaSeconds)
             storeVisitedSite(state_, departingSiteId);
         const bool liveExpedition = state_.run.expedition.travelInitialized;
         if (liveExpedition) session_.preparedLaunch = expeditionFlightModel(state_, catalog_);
-        // Departure assistance only lifts the ship out of the local surface.
-        // Regulate ascent speed instead of carrying a full-throttle latch into travel.
-        if (departureThrustHeld_ && session_.flight.mode != FlightMode::Landing) {
+        // The untouched launch burn crosses the camera/physics handoff for a
+        // short grace period, then fades away. Deliberate W/S input still takes
+        // ownership immediately in applyRealtimeInputs().
+        const bool departureHandoff = session_.flight.mode == FlightMode::Orbit &&
+            session_.flight.handoff.from == FlightMode::Landing &&
+            session_.flight.handoff.to == FlightMode::Orbit;
+        if (departureThrustHeld_ && session_.flight.mode != FlightMode::Landing &&
+            (!departureHandoff || session_.flight.handoff.elapsed >=
+                flight_landing::departureCoyoteHoldSeconds + flight_landing::departureCoyoteFadeSeconds)) {
             departureThrustHeld_ = false;
             session_.throttleInput = 0.0;
         }
         applyRealtimeInputs();
         double pilotingThrottle = session_.throttleInput;
-        if (departureThrustHeld_) {
+        if (departureThrustHeld_ && session_.flight.mode == FlightMode::Landing) {
             constexpr double assistedClimbSpeed = flight_landing::ascentSpeed;
             const double desiredAcceleration = flight_landing::gravityAcceleration +
                 (assistedClimbSpeed-session_.flight.landing.verticalVelocity)*1.5;
             pilotingThrottle = std::clamp(desiredAcceleration/flight_landing::forwardAcceleration,0.0,1.0);
+        } else if (departureThrustHeld_ && departureHandoff) {
+            const double fade = std::clamp((session_.flight.handoff.elapsed -
+                flight_landing::departureCoyoteHoldSeconds) / flight_landing::departureCoyoteFadeSeconds, 0.0, 1.0);
+            pilotingThrottle = 0.85 * (1.0 - fade*fade*(3.0 - 2.0*fade));
         }
         const FlightInput flightInput {
             session_.steerInput, pilotingThrottle, session_.controls.actions.cutEnginesActive,
@@ -3957,7 +3972,7 @@ void RocketGameApp::openDroneOps()
     if (!ioMissionAccess && ((!miningService && !legacySurface && !homeService)
         || (!homeService && !state_.run.planetaryExpedition.active)
         || !droneBayUnlocked(state_))) {
-        state_.statusLine = "Complete the Prospector contract before assigning Support Drones.";
+        state_.statusLine = "Complete the Moon mission before assigning Support Drones.";
         panelDirty_ = true;
         return;
     }
@@ -4358,7 +4373,8 @@ void RocketGameApp::salvageNearbyWreck()
 
 void RocketGameApp::miningDepart()
 {
-    if (state_.screen != Screen::Mining || surfaceBaySequence_.active() ||
+    if (state_.screen != Screen::Mining || !miningAtReturnZone(state_.run.mining) ||
+        surfaceBaySequence_.active() ||
         miningSceneHandoff_ != MiningSceneHandoff::None) {
         return;
     }

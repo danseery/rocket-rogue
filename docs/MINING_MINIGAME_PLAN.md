@@ -178,7 +178,7 @@ Research and contract content supplies these progression hooks. Economy and unlo
 - Regolith Drill Rig: stronger mining yield and rare-material odds.
 - Cargo Return Rig: lower extraction penalty from heavy payloads.
 - Mission Analysis Lab: extra Research Data from recovered field notes in the deferred debug Research board.
-- Moon mining contract: 20 safely delivered lunar Common Ore enters a saved ready-to-claim state; `Install Prospector Mk I` consumes the reserve, owns/equips the first Prospector Support Drone, and opens Slot 1.
+- Moon mining contract: 20 safely delivered lunar Common Ore advances the mission; claiming the recovered artifact owns/equips the first Mining Drone and opens Slot 1.
 - Mars bay contract: 8 safely delivered Mars Common Ore enters a saved ready-to-claim state; `Fabricate Slot 2` consumes the reserve and opens an empty specialist slot.
 - Drone Support Program: adds the Resource and Survey Support Drones. Io separately commissions the first Hazard Support Drone Mk I into the open Mars slot. Open slots may also fabricate paid duplicate Support Drone frames.
 - Current Io volcanic site: ordinary Regolith pays nothing, Thermal lava is the only ore source, treatment always exposes gray Common Ore, and a 60-second authored arena stages one four-segment thermal seal around a protected Artifact. The same `MiningCocoonDefinition` can protect a different objective with any number of authored layers.

@@ -1137,6 +1137,7 @@
       miningOperatorToggle: () => rrCall("rr_mining_operator_toggle"),
       miningStow: () => rrCall("rr_mining_stow"),
       miningWaitForDrones: () => rrCall("rr_mining_wait_for_drones"),
+      miningDepart: () => rrCall("rr_mining_depart"),
       miningAbort: () => rrCall("rr_mining_abort"),
       debugMiningArena: (act, difficulty, seed, loadoutMode, gateOverride, destinationTierOverride, systemOverride, bodyIndex) => rrCall(
         "rr_debug_mining_arena",
@@ -1566,6 +1567,8 @@
         rr.miningOperatorToggle();
       } else if (!event.repeat && key === "r") {
         rr.miningStow();
+      } else if (!event.repeat && key === "g") {
+        rr.miningDepart();
       } else if (!event.repeat && key === "escape") {
         rr.miningAbort();
       } else {

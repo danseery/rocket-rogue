@@ -667,6 +667,21 @@ void routerMapsEveryGameplayContext()
 
     router.reset();
     frame = routedFrame();
+    frame.pressed.set(index(ControllerButton::RightStick));
+    input = router.route(InputContext::Ui, frame, preferences);
+    require(input.has(GameInputAction::ToggleMissionTracker), "right-stick click should toggle the mission flyout in menus");
+    router.reset();
+    input = router.route(InputContext::Launch, frame, preferences);
+    require(input.has(GameInputAction::ToggleMissionTracker), "right-stick click should toggle the mission flyout in flight");
+    router.reset();
+    input = router.route(InputContext::MiningActive, frame, preferences);
+    require(input.has(GameInputAction::ToggleMissionTracker), "right-stick click should toggle the mission flyout during mining");
+    router.reset();
+    input = router.route(InputContext::Paused, frame, preferences);
+    require(input.has(GameInputAction::ToggleMissionTracker), "right-stick click should remain available in controller UI focus");
+
+    router.reset();
+    frame = routedFrame();
     frame.pressed.set(index(ControllerButton::South));
     input = router.route(InputContext::Preflight, frame, preferences);
     require(input.has(GameInputAction::StartOrContinue), "South should launch from preflight");

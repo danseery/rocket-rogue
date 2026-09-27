@@ -614,6 +614,7 @@ void SdlPlatform::handleKeyDown(RocketGameApp& app, const SDL_KeyboardEvent& eve
         else if (event.key == SDLK_T) app.miningTether();
         else if (event.key == SDLK_F) app.miningOperatorToggle();
         else if (event.key == SDLK_R) app.miningStow();
+        else if (event.key == SDLK_G && context == InputContext::MiningService) app.miningDepart();
         else if (event.key == SDLK_ESCAPE) app.miningAbort();
         break;
     case InputContext::MiningFailure:

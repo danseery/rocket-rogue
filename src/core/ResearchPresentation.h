@@ -1956,7 +1956,7 @@ inline SurfaceExpeditionPresentation planetaryExpeditionPresentation(const GameS
     }
     presentation.droneOpsAction = droneBayUnlocked(state)
         ? panelActionButton("Drone Ops", ui::actions::droneOps, "warn")
-        : disabledPanelButton("Build Prospector");
+        : disabledPanelButton("Unlock Mining Drone");
     const std::string surveyHazardRisk = surfaceHazardRisk(
         expedition.hazard,
         tuning::research::surveyHazardChanceScale,

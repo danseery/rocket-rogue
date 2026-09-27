@@ -12,7 +12,6 @@ struct SceneInteractionAnchor {
 struct SceneInteractionAnchors {
     SceneInteractionAnchor target;
     SceneInteractionAnchor ship;
-    SceneInteractionAnchor dock;
 };
 
 } // namespace rocket

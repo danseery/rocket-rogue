@@ -10,7 +10,7 @@ This system follows [AGENT_DESIGN_CONTEXT.md](AGENT_DESIGN_CONTEXT.md). Followin
 
 ## Role In The Loop
 
-Drone Bay opens after explicit recovery of the first lunar artifact. Delivering 20 Moon Common Ore activates the anomaly but grants no drone. Confirm Recovery owns and equips Prospector MK I in Slot 1 and queues the Meet your Prospector transmission. Base Common Ore mining takes five seconds; ranks improve that rate. Existing earned drones remain owned and repeated claims cannot duplicate them. Mars retains its explicit Slot 2 reward and Io its Hazard Drone sequence.
+Drone Bay opens after the first lunar artifact is claimed at the required dock. Delivering 20 Moon Common Ore activates the anomaly but grants no drone. Claiming the Moon mission owns and equips the Mining Drone in Slot 1; the claim card names only that primary reward. Base Common Ore mining takes five seconds; ranks improve that rate. Existing earned drones remain owned and repeated claims cannot duplicate them. Mars retains its explicit Slot 2 reward and Io its Hazard Drone sequence.
 
 Support Drone choices should be readable and chunky:
 
@@ -49,7 +49,7 @@ Artifact tether ownership is separate from swarm anchoring. Anchor transfer neve
 
 ## Slot Progression
 
-Claiming Prospector Mk I opens Drone Bay Slot 1; the bay can then grow to 6 slots. Slot upgrades are material-driven, so mining success feeds back into more mining build variety.
+Claiming the Mining Drone opens Drone Bay Slot 1; the bay can then grow to 6 slots. Slot upgrades are material-driven, so mining success feeds back into more mining build variety.
 
 - Slot 2: common materials.
 - Slot 3: common + rare materials.
@@ -67,7 +67,7 @@ Drone Ops should present this as a build table, not a hidden ruleset: the active
 
 The current implementation supports persistent Support Drone loadouts, transferable active-actor support, and hostile-mining swarm combat:
 
-- The first artifact recovery unlocks Drone Ops and grants the first Prospector Support Drone.
+- The first artifact claim unlocks Drone Ops and grants the first Mining Drone.
 - Drone Support Program research adds the Resource and Survey Support Drones; Io separately commissions the first Hazard Support Drone Mk I.
 - Arkfall grants Mk I Attack and Defense Support Drones and raises undersized bays to three slots without erasing stronger equipment.
 - Perimeter Drone Network research grants Perimeter Coordination, which makes advanced combat grafts and named synergies eligible for Level Up drafts.

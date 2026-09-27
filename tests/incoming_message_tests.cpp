@@ -142,14 +142,18 @@ void incomingMessageTests() {
     const auto moonReturnMessage = incomingMessage(catalog, "moon_mission_complete");
     check(moonReturnMessage != nullptr && moonReturnMessage->campaignOnce &&
               moonReturnMessage->context == MessageDeliveryContext::Any &&
-              moonReturnMessage->variants.front().body.find("Prospector") != std::string::npos &&
+              moonReturnMessage->variants.front().body.find("Mining Drone") != std::string::npos &&
               moonReturnMessage->variants.front().body.find("Drone Ops") != std::string::npos,
           "Moon completion guidance must report its new drone without routine travel instructions");
-    for (const auto* id : {"moon_mission_complete", "mars_mission_complete"}) {
-        const auto* message = incomingMessage(catalog, id);
-        check(message && message->variants.front().body.find("bay") != std::string::npos,
-              "Retained completion messages announce a new drone bay");
-    }
+    const auto* miningDrone = catalog.findMiniDrone(content::drone::miningDrone);
+    check(miningDrone && miningDrone->name == "Mining Drone",
+          "The earned mining support craft has one clear player-facing name");
+    const auto* moonScenario = catalog.findScenario(content::scenario::lunarProspector);
+    const auto* moonClaim = moonScenario ? findScenarioStepDefinition(*moonScenario, "anomaly") : nullptr;
+    check(moonClaim && moonClaim->rewardPreview == "REWARD // MINING DRONE",
+          "Moon mission reward preview names only the primary drone reward");
+    check(incomingMessage(catalog, "mars_mission_complete")->variants.front().body.find("bay") != std::string::npos,
+          "Mars completion still announces its new drone bay");
     auto invalid = catalog;
     invalid.incomingMessages.back().speakerId = "missing";
     check(!validateIncomingMessages(invalid), "Missing speaker references must fail validation");
@@ -239,6 +243,10 @@ void incomingMessageTests() {
             card->bodyMarkup.find("Unknown") != std::string::npos &&
             card->bodyMarkup.find("<img") == std::string::npos,
             "Ship AI uses the outlined Unknown signal without a fox portrait");
+        const auto rewardCard = buildIncomingMessageCard(context, "moon_mission_complete", "default",
+            "claim", "Moon mission ready", "Claim Mining Drone", "Complete Mission", true);
+        check(rewardCard && rewardCard->bodyMarkup.find("class=\"incoming-message-reward\">Claim Mining Drone") != std::string::npos,
+            "Mission claim renders a distinct compact reward line");
     }
     context.firstTimeIntroductionsEnabled = false;
     auto panel = buildGamePanelPresentation(context);

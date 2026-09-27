@@ -503,7 +503,25 @@ void generatedPanelPass(int width, int height)
             auto* panelButton = document()->GetElementById("rr-panel")->QuerySelector("button[data-rr-action]");
             assert(panelButton);
             const auto withMission = panelButton->GetAbsoluteOffset();
-            assert(document()->GetElementById("rr-scene-overlay-host")->GetElementById("rr-mission-tracker"));
+            auto* overlay = document()->GetElementById("rr-scene-overlay-host");
+            if (overlay->GetElementById("rr-mission-tracker-toggle")) {
+                assert(!overlay->GetElementById("rr-mission-tracker"));
+                if (screen == rocket::Screen::SurfaceUpgrade) {
+                    auto* tab = overlay->GetElementById("rr-mission-tracker-toggle");
+                    auto* hero = document()->GetElementById("rr-panel")->QuerySelector(".level-up-stamp");
+                    assert(hero);
+                    const auto tabLeft = tab->GetAbsoluteOffset(Rml::BoxArea::Border).x;
+                    const auto tabWidth = tab->GetBox().GetSize(Rml::BoxArea::Border).x;
+                    const auto heroLeft = hero->GetAbsoluteOffset(Rml::BoxArea::Border).x;
+                    assert(tabLeft + tabWidth + 8 <= heroLeft);
+                }
+                ui.dispatchAction("ui:toggle_mission_tracker");
+                assert(overlay->GetElementById("rr-mission-tracker"));
+                ui.dispatchAction("ui:toggle_mission_tracker");
+                assert(overlay->GetElementById("rr-mission-tracker-toggle"));
+            } else {
+                assert(overlay->GetElementById("rr-mission-tracker"));
+            }
             presentation.missionTrackerMarkup.clear();
             ui.setPanelPresentation(presentation);
             ui.render();
@@ -906,7 +924,7 @@ void contextualOverlayPass(int width, int height)
     presentation.metadata.screen = rocket::Screen::Mining;
     presentation.metadata.surface = rocket::PanelSurfaceKind::Mining;
     presentation.interactionMarkup =
-        "<div id=\"rr-context-interaction\" class=\"context-interaction is-ready\">"
+        "<div id=\"rr-context-interaction\" class=\"context-interaction is-mining is-ready\">"
         "<button class=\"interaction-action\" data-rr-action=\"mining_tether\" "
         "data-ui-focus-id=\"interaction:mining_tether\"><span class=\"interaction-key controller-key\">"
         "{{controller_north}} {{controller_lb}}</span><span class=\"interaction-label\">Tether artifact</span></button></div>";
@@ -920,6 +938,8 @@ void contextualOverlayPass(int width, int height)
     const auto position = prompt->GetAbsoluteOffset(Rml::BoxArea::Border);
     const auto size = prompt->GetBox().GetSize(Rml::BoxArea::Border);
     assert(position.x >= 0 && position.y >= 0 && position.x + size.x <= width && position.y + size.y <= height);
+    assert(size.x <= 184 && size.y <= 38);
+    assert(position.x + size.x < anchors.target.x);
     assert(prompt->GetInnerRML().find("Y") != std::string::npos);
     ui.setControllerPresentation(true, rocket::ControllerFamily::PlayStation);
     prompt = document()->GetElementById("rr-context-interaction");
@@ -934,9 +954,15 @@ void contextualOverlayPass(int width, int height)
     ui.mouseUp(static_cast<int>(click.x + 12), static_cast<int>(click.y + 12), 0);
     ui.render();
     assert(action == "mining_tether");
+    anchors.target = {true, static_cast<float>(width / 2), static_cast<float>(height / 2)};
+    ui.setInteractionAnchors(anchors);
+    ui.render();
+    prompt = document()->GetElementById("rr-context-interaction");
+    const auto centerPosition = prompt->GetAbsoluteOffset(Rml::BoxArea::Border);
+    assert(centerPosition.x >= anchors.target.x + 30);
     presentation.interactionMarkup =
         "<section id=\"rr-ship-services\" class=\"context-ship-services\">"
-        "<strong>SHIP SERVICES</strong><button class=\"interaction-action\" "
+        "<strong>SHIP SERVICES</strong><button class=\"interaction-action is-depart\" "
         "data-rr-action=\"mining_depart\" data-ui-focus-id=\"interaction:mining_depart\">"
         "Depart planet</button></section>";
     ui.setPanelPresentation(presentation);
@@ -950,6 +976,13 @@ void contextualOverlayPass(int width, int height)
     const auto shipSize = services->GetBox().GetSize(Rml::BoxArea::Border);
     assert(shipPosition.x >= 0 && shipPosition.y >= 0
         && shipPosition.x + shipSize.x <= width && shipPosition.y + shipSize.y <= height);
+    action.clear();
+    const auto departClick = services->QuerySelector("button")->GetAbsoluteOffset(Rml::BoxArea::Border);
+    ui.mouseMove(static_cast<int>(departClick.x + 12), static_cast<int>(departClick.y + 12));
+    ui.mouseDown(static_cast<int>(departClick.x + 12), static_cast<int>(departClick.y + 12), 0);
+    ui.mouseUp(static_cast<int>(departClick.x + 12), static_cast<int>(departClick.y + 12), 0);
+    ui.render();
+    assert(action == "mining_depart");
     ui.setInteractionAnchors({});
     ui.render();
     assert(!document()->GetElementById("rr-ship-services")->IsVisible(true));

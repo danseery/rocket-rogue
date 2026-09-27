@@ -1893,24 +1893,48 @@ void persistentExpeditionTests()
               flight.predictedTrajectory.size() < 100,
             "Global trajectory must stop at the dock approach boundary instead of forecasting through the local berth");
 
+        for (const double headingOffset : {0.0, 3.14159265358979323846}) {
+            flight.mode = FlightMode::Docking;
+            flight.active = true;
+            flight.docking = {};
+            flight.docking.active = true;
+            flight.docking.dockId = "earth";
+            flight.docking.dockHeading = 1.5707963267948966;
+            flight.docking.positionY = service_dock::captureCenterY;
+            flight.heading = flight.docking.dockHeading + headingOffset;
+            flight.docking.velocityX = flight.docking.velocityY = 0.0;
+            check(earthDockingGuidance(flight) == "ENTER BERTH",
+                "Earth dock guidance must invite either aligned ship end into the berth");
+            bool captured = false;
+            for (int frame = 0; frame < 65 && !captured; ++frame) {
+                const auto step = advanceExpeditionFlight(expedition, flight, model,
+                    expeditionEnvironment(state, catalog), system, {}, .05);
+                captured = step.dockCaptured;
+            }
+            check(captured && flight.docking.settlementReady && flight.mode == FlightMode::Orbit,
+                "Either aligned Earth berth heading must capture before dock settlement");
+            check(std::abs(flightWrappedAngleDelta(flight.docking.securingStartHeading,
+                flight.docking.dockHeading + headingOffset)) < 1e-8,
+                "Earth dock clamps must preserve the accepted arrival heading");
+        }
+
         flight.mode = FlightMode::Docking;
         flight.active = true;
         flight.docking = {};
         flight.docking.active = true;
         flight.docking.dockId = "earth";
         flight.docking.dockHeading = 1.5707963267948966;
-        flight.docking.positionY = service_dock::captureCenterY;
-        flight.docking.enteredMouth = true;
-        flight.heading = flight.docking.dockHeading + 3.14159265358979323846;
-        flight.docking.velocityX = flight.docking.velocityY = 0.0;
-        bool captured = false;
-        for (int frame = 0; frame < 65 && !captured; ++frame) {
+        flight.docking.positionY = 1.05;
+        flight.docking.velocityY = -.3;
+        flight.heading = flight.docking.dockHeading;
+        bool backedIn = false;
+        for (int frame = 0; frame < 90 && !backedIn; ++frame) {
             const auto step = advanceExpeditionFlight(expedition, flight, model,
                 expeditionEnvironment(state, catalog), system, {}, .05);
-            captured = step.dockCaptured;
+            backedIn = step.dockSecuringStarted;
         }
-        check(captured && flight.docking.settlementReady && flight.mode == FlightMode::Orbit,
-            "A slow, aligned nose-first berth must capture before dock settlement");
+        check(backedIn && flight.docking.enteredMouth,
+            "Backing through the mouth must arm capture and secure at the berth");
 
         flight.mode = FlightMode::Docking;
         flight.docking = {};
@@ -2196,6 +2220,55 @@ void persistentExpeditionTests()
                     "Continuous manual thrust cannot accumulate excess speed in deep shafts");
             }
             check(launch.mode!=FlightMode::Landing,"Governed ascent must still exit the surface");
+        }
+        for (const auto& [bodyId, environment] : {
+                 std::pair{"moon", "moon"}, std::pair{"titan", "saturn"},
+                 std::pair{"titania", "uranus"}}) {
+            auto ascentModel = landingModel;
+            ascentModel.heatEnabled = ascentModel.asteroidsEnabled = false;
+            const auto& ascentDestination = *catalog.findDestination(environment);
+            auto makeDeparture = [&] {
+                auto ship = beginLaunchFlight(ascentModel, ascentDestination);
+                ship.mode = FlightMode::Landing;
+                ship.landing.departureActive = true;
+                ship.landing.altitude = flight_landing::departureAltitude;
+                ship.landing.verticalVelocity = flight_landing::ascentSpeed;
+                ship.landing.heading = 1.5707963267948966;
+                ship.landing.basisAngle = 0.0;
+                leaveLocalLanding(ship);
+                return ship;
+            };
+            auto expedition = state.run.expedition;
+            expedition.location = {"solar", bodyId, CoordinateFrame::Body, {}, {}, 0, ""};
+            expedition.cruise.active = false;
+            auto powered = makeDeparture();
+            double minimumPoweredSpeed = 100.0;
+            double maximumNearSpeed = 0.0;
+            for (int frame = 0; frame < 20; ++frame) {
+                const auto step = advanceExpeditionFlight(expedition, powered, ascentModel,
+                    ascentDestination, solarSystemDefinition(), {0,1,false,true}, .05);
+                check(!step.failed, "Powered departure must not impact during the near-body handoff");
+                const double speed = std::hypot(powered.velocityX, powered.velocityY) *
+                    flight_geometry::velocityToMetersPerSecond;
+                minimumPoweredSpeed = std::min(minimumPoweredSpeed, speed);
+                if (std::hypot(powered.positionX, powered.positionY) <=
+                    flight_landing::departureAssistOuterRadius)
+                    maximumNearSpeed = std::max(maximumNearSpeed, speed);
+            }
+            check(minimumPoweredSpeed >= 7.5,
+                "Held outward thrust must preserve the local climb through orbit handoff");
+            check(maximumNearSpeed <= 10.5,
+                "Near-body departure assist must not recreate an overspeed launch");
+            auto coasting = makeDeparture();
+            auto coastExpedition = state.run.expedition;
+            coastExpedition.location = {"solar", bodyId, CoordinateFrame::Body, {}, {}, 0, ""};
+            coastExpedition.cruise.active = false;
+            for (int frame = 0; frame < 8; ++frame)
+                advanceExpeditionFlight(coastExpedition, coasting, ascentModel,
+                    ascentDestination, solarSystemDefinition(), {}, .05);
+            check(std::hypot(coasting.velocityX, coasting.velocityY) *
+                flight_geometry::velocityToMetersPerSecond < flight_landing::ascentSpeed,
+                "Coasting departure must retain gravity and receive no powered assist");
         }
         for (double throttle : {-1.0,0.0,1.0}) {
             auto departing=beginLaunchFlight(landingModel,moon);

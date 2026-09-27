@@ -741,12 +741,37 @@ LaunchFlightStep updateSpaceFlight(
     const double strafe = input.enginesCut || flight.fuelRemaining <= 0.000001 ? 0.0 : std::clamp(input.strafe,-1.0,1.0);
     const double power = std::abs(signedThrust) + std::abs(strafe)*0.5;
     if (power > 0.001) {
-        const double handoffBlend = flight.handoff.from == FlightMode::Landing && flight.handoff.to == FlightMode::Orbit
+        const bool departingSurface = flight.handoff.from == FlightMode::Landing && flight.handoff.to == FlightMode::Orbit;
+        const double handoffBlend = departingSurface
             ? std::clamp(flight.handoff.elapsed / flight_landing::handoffSeconds, 0.0, 1.0) : 1.0;
-        const double thrustAssist = (system ? 1.0 + launch.flightControlRank * tuning::physicalFlight::flightControlsThrustAssistPerRank : 1.0) *
+        const double baselineAssist = (system ? 1.0 + launch.flightControlRank * tuning::physicalFlight::flightControlsThrustAssistPerRank : 1.0) *
             std::lerp(.5, 1.0, handoffBlend * handoffBlend * (3.0 - 2.0 * handoffBlend));
-        flight.velocityX += (std::cos(flight.heading)*signedThrust + std::sin(flight.heading)*strafe*0.5) * thrustAcceleration * controlDt * thrustAssist;
-        flight.velocityY += (std::sin(flight.heading)*signedThrust - std::cos(flight.heading)*strafe*0.5) * thrustAcceleration * controlDt * thrustAssist;
+        double forwardAssist = baselineAssist;
+        if (departingSurface && std::abs(signedThrust) > 0.001) {
+            const double radius = std::max(0.0001, std::hypot(flight.positionX, flight.positionY));
+            const double t = std::clamp((radius - flight_geometry::landingBoundary) /
+                (flight_landing::departureAssistOuterRadius - flight_geometry::landingBoundary), 0.0, 1.0);
+            const double nearby = 1.0 - t*t*t*(t*(t*6.0-15.0)+10.0);
+            const double handoffTail = std::clamp((flight.handoff.elapsed - .9) /
+                (flight_landing::handoffSeconds - .9), 0.0, 1.0);
+            const double timeFade = 1.0 - handoffTail*handoffTail*handoffTail*
+                (handoffTail*(handoffTail*6.0-15.0)+10.0);
+            const double outward = std::max(0.0, std::copysign(1.0, signedThrust) *
+                (std::cos(flight.heading)*flight.positionX + std::sin(flight.heading)*flight.positionY) / radius);
+            const double assistedShare = nearby * timeFade * outward;
+            const double speed = std::hypot(flight.velocityX, flight.velocityY) * velocityToMetersPerSecond;
+            const double softening = std::clamp((flight_landing::departureAssistCutoffSpeed-speed) /
+                (flight_landing::departureAssistCutoffSpeed-flight_landing::departureAssistSoftSpeed), 0.0, 1.0);
+            // Hold the local 8 m/s climb through the first orbital frames, then
+            // give control back smoothly. This changes acceleration only while
+            // powered outward; coasting and inward flight keep ordinary gravity.
+            forwardAssist *= (1.0 + flight_landing::departureAssistBoost * assistedShare) *
+                std::lerp(1.0, softening, assistedShare);
+        }
+        flight.velocityX += (std::cos(flight.heading)*signedThrust*forwardAssist +
+            std::sin(flight.heading)*strafe*0.5*baselineAssist) * thrustAcceleration * controlDt;
+        flight.velocityY += (std::sin(flight.heading)*signedThrust*forwardAssist -
+            std::cos(flight.heading)*strafe*0.5*baselineAssist) * thrustAcceleration * controlDt;
         flight.fuelRemaining = std::max(
             0.0,
             flight.fuelRemaining - power * 0.13 * controlDt);

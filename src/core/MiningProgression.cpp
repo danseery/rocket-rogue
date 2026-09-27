@@ -592,7 +592,7 @@ MiningGateDefinition resolveMiningGateDefinition(
     case MiningGateType::FragileExcavation:
         gate.fragileArtifact = true;
         gate.requiredCapability = "Controlled surrounding excavation";
-        gate.alternatives = "Prospector Support Drone, scanner information, low rebound, or careful manual excavation.";
+        gate.alternatives = "Mining Drone, scanner information, low rebound, or careful manual excavation.";
         break;
     case MiningGateType::HeavyTow:
         gate.heavyTow = true;

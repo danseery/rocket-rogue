@@ -117,6 +117,7 @@ struct PanelDocumentPresentation {
     PanelRuntimeHints runtime;
     std::string contentMarkup;
     std::string missionTrackerMarkup;
+    std::string missionTrackerCollapsedMarkup;
     // Action affordances live over their world target instead of occupying
     // the persistent side/bottom gameplay rails.
     std::string interactionMarkup;

@@ -109,13 +109,13 @@ void replaceModal(PanelDocumentPresentation& panel, ModalPresentation value) {
     panel.modals.push_back(std::move(value));
 }
 std::string benefit(const ShipModule& m) {
-    if (m.surfaceDepthUpgradeKind == SurfaceDepthUpgradeKind::SurveyArray) return "Survey one additional terrain layer.";
-    if (m.surfaceDepthUpgradeKind == SurfaceDepthUpgradeKind::BoreSystem) return "Drill one additional surveyed layer.";
+    if (m.surfaceDepthUpgradeKind == SurfaceDepthUpgradeKind::SurveyArray) return "Survey depth +1 layer";
+    if (m.surfaceDepthUpgradeKind == SurfaceDepthUpgradeKind::BoreSystem) return "Orbital bore reach +1 layer";
     switch (m.launchUpgradeKind) {
-    case LaunchUpgradeKind::FuelTanks: return num(launchFuelCapacityForRank(m.launchUpgradeRank)) + " ship fuel capacity.";
-    case LaunchUpgradeKind::FlightControls: return "+10% thrust and +15% turning per rank. Same fuel burn rate.";
-    case LaunchUpgradeKind::Cooling: return "Reduce powered heat and improve coast cooling.";
-    case LaunchUpgradeKind::Hull: return num(tuning::launch::hullBaseIntegrity + m.launchUpgradeRank*tuning::launch::hullIntegrityPerRank) + " maximum hull integrity.";
+    case LaunchUpgradeKind::FuelTanks: return "Fuel capacity " + num(launchFuelCapacityForRank(m.launchUpgradeRank));
+    case LaunchUpgradeKind::FlightControls: return "Thrust +10%  /  Turning +15%";
+    case LaunchUpgradeKind::Cooling: return "Less engine heat  /  Faster coast cooling";
+    case LaunchUpgradeKind::Hull: return "Hull capacity " + num(tuning::launch::hullBaseIntegrity + m.launchUpgradeRank*tuning::launch::hullIntegrityPerRank);
     default: return "";
     }
 }
@@ -467,23 +467,28 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     }
     if (atOperationalDock) {
         std::ostringstream home;
-        const std::string waypointName = selectedName;
-        const SolarMissionDefinition* lastCompleted = nullptr;
-        for (const auto& mission : c.catalog.solarMissions)
-            if (!mission.optional && solarMissionClaimed(state, c.catalog, mission)) lastCompleted = &mission;
         const std::string departLabel = !e.course.targetBodyId.empty() && e.course.targetBodyId != e.location.bodyId
             ? "DEPART FOR " + selectedName : "DEPART DOCK";
-        home << "<section class=\"expedition-home\"><h2>" << esc(region ? region->name : "Home") << " / ORBITAL DOCK</h2><p>" << esc(state.statusLine)
-            << "</p>" << bankedArtifactMarkup(e) << "<p>Upgrades survive docking. Recover your wreck to reclaim lost upgrades.</p>"
+        home << "<section class=\"expedition-home\"><header class=\"dock-heading\"><span>ORBITAL DOCK</span><h2>"
+            << esc(region ? region->name : "Home") << "</h2></header>";
+        if (recommendation.wreckId != 0) {
+            const auto wreck = std::find_if(e.wrecks.begin(), e.wrecks.end(), [&](const auto& w) { return w.id == recommendation.wreckId; });
+            home << "<div class=\"dock-recovery\"><strong>RECOVERY</strong><span>"
+                << (state.meta.straylightStage == StraylightStage::RetrieveBeacons ? "Beacon" : "Artifact") << " in Wreck "
+                << recommendation.wreckId << (wreck != e.wrecks.end() && wreck->buildRecoverable ? " / upgrades recoverable" : "")
+                << "</span></div>";
+        } else if (state.statusLine.starts_with("Replacement ready at Earth. Upgrades survive docking.")) {
+            home << "<p class=\"dock-notice\">Replacement ship ready. Recover lost upgrades at the wreck.</p>";
+        } else if (!state.statusLine.empty() && state.statusLine.find("waypoint set. Depart dock when ready.") == std::string::npos &&
+                   !state.statusLine.starts_with("Save data restored from local mission control.")) {
+            home << "<p class=\"dock-notice\">" << esc(state.statusLine) << "</p>";
+        }
+        home << bankedArtifactMarkup(e)
             << "<section class=\"expedition-dock-status\">"
             << "<div class=\"dock-status-segment\"><span>SHIP FUEL</span><strong>" << num(flight.fuelRemaining) << " / " << num(flight.fuelCapacity) << "</strong></div>"
             << "<div class=\"dock-status-segment\"><span>HULL</span><strong>" << num(flight.hullRemaining) << "</strong></div>"
-            << "<div class=\"dock-status-segment dock-status-credits\"><span>CREDITS</span><strong>" << num(state.run.credits) << "</strong></div>"
-            << "</section><section class=\"expedition-dock-departure\">";
-        if (lastCompleted) {
-            const auto* completedBody = systemBody(system, lastCompleted->bodyId);
-            home << "<p>MISSION COMPLETE: " << esc(completedBody ? completedBody->name : lastCompleted->bodyId) << "</p>";
-        }
+            << "</section><section class=\"expedition-dock-departure\"><p>"
+            << (e.coursePlayerSelected ? "CUSTOM ROUTE" : "MISSION ROUTE") << "</p>";
         bool handInDefault = false;
         const auto handIn = [&](const MissionArtifact& a) {
             if (!artifactHandInAvailable(state,a)) return;
@@ -499,8 +504,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         for (const auto& mission : c.catalog.solarMissions)
             if (const auto* a = missionArtifact(state,mission.scenarioId,mission.claimStepId)) handIn(*a);
         for (const auto& a : e.artifacts) if (!a.key.starts_with("solar:")) handIn(a);
-        home << "<p>SELECTED WAYPOINT: " << esc(waypointName) << (e.coursePlayerSelected ? " / MANUAL OVERRIDE" : " / FOLLOWING MISSION")
-            << "</p><div class=\"expedition-dock-route-actions\">"
+        home << "<div class=\"expedition-dock-route-actions\">"
             << button(departLabel, "expedition:depart", true, "dock-depart", !handInDefault)
             << button("Change waypoint", "expedition:map", true, "dock-waypoint")
             << "</div></section><div class=\"action-row\">";
@@ -508,7 +512,9 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
             home << button("Drone Ops", ui::actions::droneOps);
         home << "</div>";
         if (operationalHomeDocked(e)) {
-            home << "<h3>SHIPYARD</h3><div class=\"expedition-shipyard\">";
+            home << "<div class=\"shipyard-heading\"><h3>SHIPYARD</h3>"
+                << "<div class=\"dock-status-credits\"><span>CREDITS AVAILABLE</span><strong>"
+                << num(state.run.credits) << "</strong></div></div><div class=\"expedition-shipyard\">";
             for (const auto& m : c.catalog.modules) {
                 const bool launch = m.launchUpgradeKind != LaunchUpgradeKind::None;
                 if (!launch && m.surfaceDepthUpgradeKind == SurfaceDepthUpgradeKind::None) continue;
@@ -516,8 +522,20 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
                 const int installed = launch ? launchUpgradeRank(state, m.launchUpgradeKind) : surfaceDepthUpgradeRank(state, m.surfaceDepthUpgradeKind);
                 if (rank != installed + 1) continue;
                 const bool available = launch ? canInstallLaunchUpgrade(state, c.catalog, m.launchUpgradeKind) : canInstallSurfaceDepthUpgrade(state, c.catalog, m.surfaceDepthUpgradeKind);
-                home << "<div class=\"shipyard-track\"><h4>" << esc(m.name) << "</h4><p>" << benefit(m) << "</p><p>" << moduleOfferCost(m) << " credits"
-                    << (rank > batteryResearchRank(e) ? (rank == 2 ? " / research: 2 distinct batteries" : " / research: 4 distinct batteries") : "") << "</p>" << action("Install", "install:" + m.id, available) << "</div>";
+                const int cost = moduleOfferCost(m);
+                const bool researchLocked = rank > batteryResearchRank(e);
+                const int shortfall = std::max(0, static_cast<int>(std::ceil(cost - state.run.credits)));
+                home << "<div class=\"shipyard-track" << (available ? " shipyard-ready" : " shipyard-locked")
+                    << "\"><div class=\"shipyard-card-heading\"><h4>" << esc(m.name)
+                    << "</h4><strong>" << cost << " CR</strong></div><p>" << benefit(m) << "</p>";
+                if (researchLocked || shortfall > 0) {
+                    home << "<span class=\"shipyard-lock\">";
+                    if (researchLocked) home << "Research: " << (rank == 2 ? 2 : 4) << " batteries";
+                    if (researchLocked && shortfall > 0) home << " / ";
+                    if (shortfall > 0) home << shortfall << " CR short";
+                    home << "</span>";
+                }
+                home << action("Install", "install:" + m.id, available) << "</div>";
             }
             home << "</div>";
         }
@@ -553,12 +571,9 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
             const std::string title = (body ? body->name : mission.bodyId) + " mission ready";
             const std::string claimAction = ui::actions::scenarioAction(claim.scenarioId, claim.stepId, static_cast<int>(claim.action));
             const bool autoOpen = std::none_of(panel.modals.begin(), panel.modals.end(), [](const auto& item) { return item.autoOpen; });
-            std::string copy = "Artifact secured at the servicing dock. Complete the mission to claim: " + claim.rewardPreview;
-            if (mission.bodyId == "moon") {
-                copy += " The Prospector mines revealed ore pockets while you explore. Manage it in Drone Ops.";
-            }
+            const std::string copy = mission.bodyId == "moon" ? "Claim Mining Drone" : "Claim Drone Bay slot";
             if (auto card = buildIncomingMessageCard(c, mission.briefingMessageId, "default", claimAction,
-                    title, copy, "Complete Mission")) {
+                    title, copy, "Complete Mission", true)) {
                 card->id = "solar_mission_claim";
                 card->autoOpen = autoOpen;
                 replaceModal(panel, std::move(*card));
@@ -652,8 +667,10 @@ void appendMissionPresentation(const PanelRenderContext& c, PanelDocumentPresent
     const auto* approachBody = approachingMission ? systemBody(solarSystemDefinition(), v.id) : nullptr;
     const std::string trackerHeading = approachBody ? approachBody->name + " / " + v.title : v.location + " / " + v.title;
     std::string tracker = "<section id=\"rr-mission-tracker\" class=\"mission-tracker" +
-        std::string(c.missionChanged ? " mission-changed" : "") + "\"><strong>" + esc(trackerHeading) +
-        "</strong>";
+        std::string(c.missionChanged ? " mission-changed" : "") +
+        "\"><button type=\"button\" class=\"mission-tracker-toggle\" data-rr-action=\"ui:toggle_mission_tracker\" "
+        "data-ui-focus-id=\"action:ui:toggle_mission_tracker\" aria-label=\"Collapse mission\" "
+        "aria-expanded=\"true\">" + esc(trackerHeading) + " <span>&#9650;</span></button>";
     if (!visibleGoals.empty()) {
         tracker += "<div class=\"mission-goals\" role=\"list\">";
         bool currentGoalShown = false;
@@ -694,5 +711,10 @@ void appendMissionPresentation(const PanelRenderContext& c, PanelDocumentPresent
     // out of the page layout prevents mission changes from moving dock, map,
     // and upgrade controls, especially when the viewport is narrow.
     panel.missionTrackerMarkup = tracker;
+    panel.missionTrackerCollapsedMarkup =
+        "<button id=\"rr-mission-tracker-toggle\" type=\"button\" class=\"mission-tracker-tab\" "
+        "data-rr-action=\"ui:toggle_mission_tracker\" data-ui-focus-id=\"action:ui:toggle_mission_tracker\" "
+        "aria-label=\"Expand mission\" aria-expanded=\"false\"><small>MISSION</small>" +
+        esc(trackerHeading) + " <span>&#9660;</span><small class=\"mission-controller-hint\">RS click</small></button>";
 }
 } // namespace rocket

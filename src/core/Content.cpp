@@ -319,7 +319,7 @@ ContentCatalog createDefaultContent()
     }
     addMissionMessages("moon_mission", "Moon",
         "Match the orbit bands' direction. Use short burns until your projected path loops clear of the Moon, then coast for two seconds. Scan the marked mission sector.",
-        "Prospector and your first drone bay are online. If the bay is occupied, assign Prospector in Drone Ops.");
+        "Mining Drone unlocked. Assign it in Drone Ops if your bays are full.");
     catalog.incomingMessages[catalog.incomingMessages.size() - 2].variants.front().hints =
         {MessageHint::FlightSteer, MessageHint::FlightThrust};
     addMissionMessages("mars_mission", "Mars", "Mars's artifact is underground. Scan the marked sector and hold Drill to prepare an entrance before landing.", "Your second drone bay is online.");
@@ -463,7 +463,7 @@ ContentCatalog createDefaultContent()
     };
 
     catalog.miniDrones = {
-        miniDrone(content::drone::miningDrone, "Prospector Support Drone", "Peels revealed ore pockets while the Mining Rig keeps tunneling under pressure.", Rarity::Common, MiniDroneRole::Mining, {.passiveMiningRate = tuning::mining::miningDroneBaseHarvestRatePerSecond}, content::unlock::droneBay, {"excavation", "resource"}),
+        miniDrone(content::drone::miningDrone, "Mining Drone", "Peels revealed ore pockets while the Mining Rig keeps tunneling under pressure.", Rarity::Common, MiniDroneRole::Mining, {.passiveMiningRate = tuning::mining::miningDroneBaseHarvestRatePerSecond}, content::unlock::droneBay, {"excavation", "resource"}),
         miniDrone(content::drone::resourceDrone, "Resource Drone", "Carries backup oxygen and return consumables so the rig can stay longer before the swarm wins.", Rarity::Common, MiniDroneRole::Resource, {.oxygenSeconds = 28.0}, content::unlock::droneSupportSuite, {"logistics", "endurance"}),
         miniDrone(content::drone::surveyDrone, "Survey Drone", "Widens scanner pulses and outlines ore, artifacts, and hostile silhouettes through fog.", Rarity::Uncommon, MiniDroneRole::Survey, {.scannerRadius = 2.0}, content::unlock::droneSupportSuite, {"exploration", "navigation"}),
         miniDrone(content::drone::hazardDrone, "Hazard Drone", "Treats revealed thermal, cryo, toxic, and radiation pockets before the rig gets too close.", Rarity::Uncommon, MiniDroneRole::Hazard, {}, content::unlock::ioHazardDrone, {"engineering", "remediation"}),
@@ -528,7 +528,7 @@ ContentCatalog createDefaultContent()
         researchProject(content::research::appliedMaterialsLab, "Applied Materials Lab", "Convert field samples into sturdier research procedures.", Rarity::Uncommon, 2, 3, {.common = 2}, content::unlock::starter, content::unlock::recovery, {"materials", "facility"}),
         researchProject(content::research::missionAnalysisLab, "Mission Analysis Lab", "Build a debrief room that turns samples and flight notes into cleaner Research Data.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::starter, content::unlock::analysisLab, {"blueprint", "facility"}),
         researchProject(content::research::regolithDrillRig, "Regolith Drill Rig", "Build compact drills that pull more useful ore from short surface sorties.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::surfaceProbes, content::unlock::surfaceDrills, {"surface", "mining"}),
-        researchProject(content::research::droneBayProgram, "Drone Support Program", "Expand the Prospector cradle for support drones that handle scouting and logistics.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::surfaceDrills, content::unlock::droneSupportSuite, {"surface", "drone", "logistics"}),
+        researchProject(content::research::droneBayProgram, "Drone Support Program", "Expand the Drone Bay for support drones that handle scouting and logistics.", Rarity::Uncommon, 2, 3, {.common = 2, .rare = 1}, content::unlock::surfaceDrills, content::unlock::droneSupportSuite, {"surface", "drone", "logistics"}),
         researchProject(content::research::cargoReturnRig, "Cargo Return Rig", "Prototype restraint frames that make heavier payloads less terrifying to extract.", Rarity::Uncommon, 2, 3, {.common = 3}, content::unlock::recovery, content::unlock::cargoRigs, {"surface", "extraction"}),
         researchProject(content::research::prototypeSchematic, "Prototype Schematic", "Use rare samples to unlock experimental ship components.", Rarity::Rare, 2, 4, {.common = 1, .rare = 1}, content::unlock::starter, content::unlock::thermal, {"prototype", "ship"}),
         researchProject(content::research::xenogeologyProgram, "Xenogeology Program", "Study outer-system deposits for deep-space unlocks.", Rarity::Rare, 3, 5, {.rare = 2}, content::unlock::deepSpace, content::unlock::ai, {"materials", "deep_space"}),
@@ -741,12 +741,12 @@ ContentCatalog createDefaultContent()
             content::unlock::starter,
             content::destination::moon,
             {
-                {"briefing", {}, "MOON", "Lunar Prospector Contract",
+                {"briefing", {}, "MOON", "Moon Ore and Artifact Recovery",
                     "Establish Moon orbit, scan the mission landing sector, and land there. Mission Control will brief you on recovery after touchdown.",
                     "ARRIVAL // ORBIT, SCAN, LAND", "Accept Contract", {},
                     ScenarioEventKind::None, {}, {}, 1, 0, true, false, false,
                     ScenarioActionKind::AcknowledgeBriefing, {}, {}},
-                {"delivery", {"briefing"}, "MOON", "Lunar Prospector Contract",
+                {"delivery", {"briefing"}, "MOON", "Moon Ore and Artifact Recovery",
                     "Collect 20 Common Ore at the ship. The contract allocation does not use permanent hold space.",
                     "COMMON ORE COLLECTED // INVESTIGATE THE ANOMALY", "Pulse Scanner", {},
                     ScenarioEventKind::SafeMaterialDelivered, content::destination::moon, "common",
@@ -755,7 +755,7 @@ ContentCatalog createDefaultContent()
                     {{ScenarioRewardKind::FrontierReadiness, {}, 0, false}}},
                 {"anomaly", {"delivery"}, "MOON", "Anomalous Return",
                     "Mission Control is picking up a second signal. Pulse the scanner and Collect Artifact.",
-                    "REWARD // PROSPECTOR MK I + SLOT 1 + MARS ROUTE", "Confirm Recovery", {},
+                    "REWARD // MINING DRONE", "Confirm Recovery", {},
                     ScenarioEventKind::ProtectedObjectiveExtracted, {}, content::miningSite::lunarAnomalyCrevice,
                     1, 0, false, true, false,
                     ScenarioActionKind::ClaimReward, content::miningSite::lunarAnomalyCrevice,

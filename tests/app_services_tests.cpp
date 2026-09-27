@@ -267,6 +267,23 @@ struct OrbitalLandingTestAccess {
             assert(app.state_.run.mining.geologySeed == seed);
         }
     }
+    static void departureIgnitionTapers(RocketGameApp& app) {
+        app.debugStartSurfaceArrival(0, 3);
+        app.beginManualSurfaceAscent();
+        auto& flight = app.session_.flight;
+        flight.landing.altitude = flight_landing::departureAltitude - 0.1;
+        flight.landing.verticalVelocity = flight_landing::ascentSpeed;
+        app.tick(.05);
+        assert(flight.mode == FlightMode::Orbit && app.departureThrustHeld_);
+        for (int frame = 0; frame < 5; ++frame) app.tick(.05);
+        const double heldThrottle = flight.selectedThrottle;
+        assert(app.departureThrustHeld_ && heldThrottle > 0.7);
+        for (int frame = 0; frame < 7; ++frame) app.tick(.05);
+        assert(app.departureThrustHeld_ && flight.selectedThrottle < heldThrottle &&
+            flight.selectedThrottle > 0.0);
+        for (int frame = 0; frame < 8; ++frame) app.tick(.05);
+        assert(!app.departureThrustHeld_ && std::abs(flight.selectedThrottle) < 0.001);
+    }
     static void restoredTouchdownOffersDeployment(RocketGameApp& app) {
         app.debugStartMining();
         auto& mining = app.state_.run.mining;
@@ -2876,6 +2893,8 @@ void recoveryGuidanceUsesRealDockActions()
     fixture->ui.dispatchAction("ack_incoming_message:recovery.wreck.1");
     assert(fixture->ui.html.find("Collect Mars Artifact from Wreck 1")!=std::string::npos);
     assert(fixture->ui.html.find("DEPART FOR Artifact / Wreck 1")!=std::string::npos);
+    assert(fixture->ui.html.find("dock-recovery")!=std::string::npos);
+    assert(fixture->ui.html.find("Salvage it, then follow") == std::string::npos);
     fixture->ui.dispatchAction("expedition:plot:venus");
     auto saved=rocket::deserializeSaveData(fixture->saves.value);
     assert(saved && saved->expedition.coursePlayerSelected && saved->expedition.course.targetBodyId=="venus");
@@ -3116,6 +3135,12 @@ int main(int argc, char** argv)
         rocket::OrbitalLandingTestAccess::fallenShipDepartsFromCurrentPosition(fixture.runner.app());
         fixture.runner.shutdown();
     }
+    {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        rocket::OrbitalLandingTestAccess::departureIgnitionTapers(fixture.runner.app());
+        fixture.runner.shutdown();
+    }
     if (argc > 1 && std::string_view(argv[1]) == "--ship-support-only") return 0;
     if (argc > 1 && std::string_view(argv[1]) == "--missions-only") { missionScanPresentationAndNavigation(); orbitalControllerSelectionOwnsInput(); return 0; }
     if (argc > 1 && std::string_view(argv[1]) == "--flight-impact") { uncalibratedLunarImpactCinematic(); return 0; }
@@ -3283,10 +3308,18 @@ int main(int argc, char** argv)
         assert(fixture.ui.html.find("expedition-dock-departure") != std::string::npos);
         assert(fixture.ui.html.find("expedition-dock-status") != std::string::npos);
         assert(fixture.ui.html.find("dock-status-credits") != std::string::npos);
+        const auto shipyard = fixture.ui.html.find("shipyard-heading");
+        const auto credits = fixture.ui.html.find("dock-status-credits");
+        const auto firstOffer = fixture.ui.html.find("shipyard-track");
+        assert(shipyard != std::string::npos && shipyard < credits && credits < firstOffer);
+        assert(fixture.ui.html.find("CREDITS AVAILABLE") != std::string::npos);
+        assert(fixture.ui.html.find("Upgrades survive docking.") == std::string::npos);
         assert(fixture.ui.html.find("DEPART FOR Moon") != std::string::npos);
         assert(fixture.ui.html.find("Change waypoint") != std::string::npos);
         const auto routeRow = fixture.ui.html.find("expedition-dock-route-actions");
         assert(routeRow != std::string::npos);
+        const auto routeHeading = fixture.ui.html.find("expedition-dock-departure");
+        assert(routeHeading < routeRow && fixture.ui.html.substr(routeHeading, routeRow-routeHeading).find("SELECTED WAYPOINT:") == std::string::npos);
         const auto routeEnd = fixture.ui.html.find("</div>", routeRow);
         assert(fixture.ui.html.find("dock-depart", routeRow) < routeEnd);
         assert(fixture.ui.html.find("dock-waypoint", routeRow) < routeEnd);
@@ -3323,7 +3356,12 @@ int main(int argc, char** argv)
         fixture.ui.dispatchAction("expedition:plot:moon");
         assert(!fixture.ui.modalOpenValue);
         assert(fixture.runner.app().currentScreen()==static_cast<int>(rocket::Screen::Hangar));
+        (void)fixture.runner.app().consumePendingAudioEvents();
         fixture.ui.dispatchAction("expedition:depart");
+        const auto departureAudio = fixture.runner.app().consumePendingAudioEvents();
+        assert(std::any_of(departureAudio.begin(), departureAudio.end(), [](const auto& event) {
+            return event.cue == rocket::GameAudioCue::UiActivate;
+        }));
         assert(fixture.runner.app().currentScreen()==static_cast<int>(rocket::Screen::Flight));
         fixture.runner.app().launchMove(0,0);
         fixture.runner.app().launchMove(0,1);
@@ -3406,7 +3444,8 @@ int main(int argc, char** argv)
         assert(fixture.ui.html.find("Set waypoint: Moon") != std::string::npos);
         fixture.ui.dispatchAction("expedition:plot:moon");
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Hangar));
-        assert(fixture.ui.html.find("Moon waypoint set. Depart dock when ready.") != std::string::npos);
+        assert(fixture.ui.html.find("CUSTOM ROUTE") != std::string::npos);
+        assert(fixture.ui.html.find("Moon waypoint set. Depart dock when ready.") == std::string::npos);
         assert(fixture.ui.html.find("DEPART FOR Moon") != std::string::npos);
         fixture.runner.shutdown();
     }
@@ -3437,7 +3476,7 @@ int main(int argc, char** argv)
         assert(fixture.runner.initialize());
         fixture.ui.dispatchAction("continue_game");
         completeTitleLaunch(fixture);
-        assert(fixture.ui.presentation.interactionMarkup.find("expedition-dock-cue") != std::string::npos);
+        assert(fixture.ui.presentation.interactionMarkup.empty());
         assert(fixture.ui.html.find("expedition-flight-bar") == std::string::npos);
         assert(fixture.ui.html.find("data-rr-action=\"expedition:dock\"") == std::string::npos);
         assert(fixture.ui.html.find("In range —") == std::string::npos);
@@ -4682,6 +4721,8 @@ int main(int argc, char** argv)
         completeTitleLaunch(fixture);
         assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
         assert(fixture.ui.presentation.interactionMarkup.find("data-rr-action=\"mining_depart\"") != std::string::npos);
+        assert(fixture.ui.presentation.interactionMarkup.find("interaction-action rr-text-button is-depart") != std::string::npos);
+        assert(fixture.ui.presentation.interactionMarkup.find("keyboard-key\">G</span>") != std::string::npos);
         const int storesBeforeDeparture = fixture.saves.storeCount;
         // Ship-side deliveries can save during resumed gameplay; compare the
         // ritual against the latest committed state immediately before departure.

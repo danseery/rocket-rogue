@@ -162,11 +162,15 @@ bool RocketGameApp::runExpeditionAction(const std::string& action) {
             state_.screen = Screen::Flight;
             session_.flightArmed = true;
             if (departDock(e, session_.flight) == ExpeditionResult::Applied) {
+                queueAudioCue(GameAudioCue::UiActivate);
                 close(); save(); refreshPanel();
             }
             return true;
         }
         if (departHome(state_, catalog_) == ExpeditionResult::Applied) {
+            // Confirm the dock selection immediately; the longer ignition cue
+            // follows as the ship leaves the berth.
+            queueAudioCue(GameAudioCue::UiActivate);
             queueAudioCue(GameAudioCue::TakeoffIgnition);
             session_.preparedLaunch = expeditionFlightModel(state_, catalog_);
             session_.flightArmed = true;

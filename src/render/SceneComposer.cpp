@@ -6586,7 +6586,7 @@ void SceneComposer::drawRoute(const RenderSnapshot& snapshot)
             drawLine(pocketBackLeft.x, pocketBackLeft.y, pocketFrontLeft.x, pocketFrontLeft.y, guide, 2.0F);
             if (handoff > .28F && !snapshot.launchDockSecuring && !snapshot.launchDockGuidance.empty())
                 drawPoiLabel(center.x + outward.x * (mouth + .12F), center.y + outward.y * (mouth + .12F),
-                    .0042F, snapshot.launchDockGuidance, PoiGuidanceKind::Ship);
+                    .0033F, snapshot.launchDockGuidance, PoiGuidanceKind::Ship);
             return;
         }
         const auto orbitPosition = snapshot.systemTravel ? snapshot.flightGuidance.orbitPosition : SystemVector{};
@@ -7676,13 +7676,6 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
     if (snapshot.launchDockingActive) {
         const FlightCameraView view = physicalFlightCamera(snapshot, flightCameraPresentation_.approachBlend);
         const Vec2 center = view.camera.point(0.0, 0.0);
-        const float anchorX = packet_.transform.pixelCenterX + center.x * packet_.transform.worldUnitX;
-        const float anchorY = packet_.transform.pixelCenterY - center.y * packet_.transform.worldUnitY;
-        const UiRect dockClip = packet_.logicalSceneClip;
-        packet_.interactionAnchors.dock = {
-            anchorX >= dockClip.x && anchorX <= dockClip.x + dockClip.width &&
-                anchorY >= dockClip.y && anchorY <= dockClip.y + dockClip.height,
-            anchorX, anchorY};
         const Vec2 outward = view.camera.vector(std::cos(snapshot.launchDockHeading), std::sin(snapshot.launchDockHeading));
         const float handoff = smootherstep(static_cast<float>(snapshot.launchDockHandoffProgress));
         if (const auto* earth = systemBody(snapshot.system, snapshot.launchDockId)) {

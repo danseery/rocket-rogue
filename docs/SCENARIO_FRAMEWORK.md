@@ -94,7 +94,7 @@ The following belongs in content and presentation, not in reusable mechanics:
 
 | Scenario content | Steps and explicit reward | Progression effect |
 | --- | --- | --- |
-| Moon: Lunar Prospector Contract | Deliver 20 Moon Common Ore, pulse the anomaly, recover the artifact, and explicitly claim the mission. | Grants Prospector Mk I and Slot 1; reveals Mars and optional Mercury/Venus. |
+| Moon: Ore and artifact recovery | Deliver 20 Moon Common Ore, pulse the anomaly, recover the artifact, and explicitly claim the mission. | Grants Mining Drone and Slot 1; reveals Mars and optional Mercury/Venus. |
 | Mars: Bay Expansion | Deliver 8 Mars Common Ore, recover the artifact, and explicitly claim the mission. | Opens Slot 2; reveals Jupiter and the next mission on Io. |
 | Io: Volcanic Descent | Commission Hazard support, cool and excavate the thermal cocoon, recover its artifact, and claim. | Reveals Saturn and Titan. |
 | Titan, Titania | Survey, recover each world's artifact, and explicitly claim its mission. | Respectively reveal Uranus/Titania and Neptune/Triton. |
