@@ -37,6 +37,15 @@ const requiredUiFiles = [
   "templates/rr-modal-shell.rml"
 ];
 
+const requiredDroneArtFiles = [
+  "mini-drone-attack.png",
+  "mini-drone-defense.png",
+  "mini-drone-hazard.png",
+  "mini-drone-mining.png",
+  "mini-drone-resource.png",
+  "mini-drone-survey.png"
+];
+
 function copyDirectory(source, target) {
   mkdirSync(target, { recursive: true });
   for (const entry of readdirSync(source)) {
@@ -126,9 +135,22 @@ for (const file of requiredUiFiles) {
   }
 }
 requireValidUiGraph(join(buildDir, "assets", "ui"), "Web build");
-if (existsSync(join(buildDir, "assets", "art"))) {
-  console.error("Web build still contains source art in addition to the generated scene atlas.");
-  console.error("Rebuild the web target so only runtime atlas assets are deployed.");
+const droneArtDirectory = join(buildDir, "assets", "art");
+if (!existsSync(droneArtDirectory)) {
+  console.error(`Missing Drone Picker UI art directory: ${droneArtDirectory}`);
+  process.exit(1);
+}
+const droneArtEntries = readdirSync(droneArtDirectory);
+const unexpectedDroneArt = droneArtEntries.filter((entry) =>
+  !requiredDroneArtFiles.includes(entry) || !statSync(join(droneArtDirectory, entry)).isFile()
+);
+const missingDroneArt = requiredDroneArtFiles.filter((file) =>
+  !existsSync(join(droneArtDirectory, file))
+);
+if (unexpectedDroneArt.length > 0 || missingDroneArt.length > 0) {
+  console.error("Web build must contain exactly the six runtime Drone Picker icons outside the scene atlas.");
+  for (const file of unexpectedDroneArt) console.error(`- Unexpected art asset: ${file}`);
+  for (const file of missingDroneArt) console.error(`- Missing art asset: ${file}`);
   process.exit(1);
 }
 
