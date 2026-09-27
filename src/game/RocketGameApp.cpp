@@ -20,6 +20,7 @@
 #include "core/PayloadTransfer.h"
 #include "core/PostSolarSystem.h"
 #include "core/ResearchSystem.h"
+#include "core/DronePickerPresentation.h"
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
 #include "core/RefitPresentation.h"
@@ -30,6 +31,7 @@
 #include "input/MiningInputTransform.h"
 
 #include <algorithm>
+#include <charconv>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -1966,12 +1968,10 @@ std::string_view controllerActionName(GameInputAction action)
     case GameInputAction::Abort: return "abort";
     case GameInputAction::MiningScan: return "mining_scan";
     case GameInputAction::MiningTether: return "mining_tether";
-    case GameInputAction::MiningStow: return "mining_stow";
     case GameInputAction::MiningOperatorToggle: return "mining_operator_toggle";
     case GameInputAction::MiningRepairDrill: return "mining_repair_drill";
     case GameInputAction::MiningRepairRig: return "mining_repair_rig";
     case GameInputAction::MiningDroneOps: return "mining_drone_ops";
-    case GameInputAction::MiningWaitForDrones: return "mining_wait_for_drones";
     case GameInputAction::MiningDepart: return "mining_depart";
     case GameInputAction::SalvageNearbyWreck: return "salvage_nearby_wreck";
     case GameInputAction::MiningFailureAcknowledge: return "mining_failure_acknowledge";
@@ -2337,9 +2337,6 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
     case GameInputAction::MiningTether:
         miningTether();
         break;
-    case GameInputAction::MiningStow:
-        miningStow();
-        break;
     case GameInputAction::MiningOperatorToggle:
         miningOperatorToggle();
         break;
@@ -2351,10 +2348,6 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
         break;
     case GameInputAction::MiningDroneOps:
         if (context == InputContext::MiningService && droneBayUnlocked(state_)) openDroneOps();
-        break;
-    case GameInputAction::MiningWaitForDrones:
-        if (context == InputContext::MiningService &&
-            miningDroneRecoveryStatus(state_.run.mining).outstandingDrones > 0) miningWaitForDrones();
         break;
     case GameInputAction::MiningDepart:
         if (context == InputContext::MiningService) miningDepart();
@@ -3892,6 +3885,7 @@ void RocketGameApp::startMiningRunAfterFade()
             });
         if (!hazardEquipped) {
             state_.screen = Screen::DroneOps;
+            droneSelection_ = {};
             state_.statusLine = "Equip a Hazard Drone before beginning this recovery site.";
             panelDirty_ = true;
             return;
@@ -3983,8 +3977,9 @@ void RocketGameApp::openDroneOps()
     services_.ui.closeModal();
     clearControllerPause();
     state_.screen = Screen::DroneOps;
+    droneSelection_ = {};
     clearMiningDroneLoadoutRecall(state_);
-    state_.statusLine = "Assign or unequip Support Drones. Changes save immediately.";
+    state_.statusLine = "Choose a slot, then a drone.";
     save();
     panelDirty_ = true;
 }
@@ -4035,6 +4030,19 @@ void RocketGameApp::equipDrone(int index)
     clearMiningDroneLoadoutRecall(state_);
     if (equipMiniDrone(state_, catalog_, index)) {
         clearMiningDroneLoadoutRecall(state_);
+        queueAudioCue(GameAudioCue::UiToggle);
+        captureDebugDroneLoadout();
+        save();
+    }
+    panelDirty_ = true;
+}
+
+void RocketGameApp::assignDroneSlot(int slot, int index)
+{
+    if (state_.screen != Screen::DroneOps) return;
+    if (assignMiniDroneSlot(state_, catalog_, slot, index)) {
+        droneSelection_.slot = slot;
+        droneSelection_.drone = index;
         queueAudioCue(GameAudioCue::UiToggle);
         captureDebugDroneLoadout();
         save();
@@ -4314,52 +4322,6 @@ void RocketGameApp::miningRepairDrone()
     panelDirty_ = true;
 }
 
-void RocketGameApp::miningStow()
-{
-    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
-        return;
-    }
-    if (!miningAtReturnZone(state_.run.mining)) {
-        state_.statusLine = std::string(text::status::miningReturnToShip);
-        panelDirty_ = true;
-        return;
-    }
-
-    const bool banked = bankMiningPayloadAtShip(state_, catalog_);
-    queueAudioCue(banked ? GameAudioCue::Deposit : GameAudioCue::UiError);
-    state_.statusLine = banked
-        ? "Payload secured at ship service. Surface control remains active."
-        : "No rig payload can transfer. Drone cargo must physically return before unloading.";
-    save(banked);
-    panelDirty_ = true;
-    finishGameplayAction(banked ? GameplayActionOutcome::Applied : GameplayActionOutcome::Rejected);
-}
-
-void RocketGameApp::miningWaitForDrones()
-{
-    const bool loadoutRecall = state_.screen == Screen::DroneOps;
-    if (loadoutRecall && state_.run.mining.active &&
-        miningAtReturnZone(state_.run.mining)) backToSurfaceOps();
-    if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
-        return;
-    }
-    if (!miningAtReturnZone(state_.run.mining)) {
-        state_.statusLine = "Return to the shuttle before recalling Support Drones.";
-        panelDirty_ = true;
-        return;
-    }
-
-    if (requestMiningDroneRecall(state_, loadoutRecall)) {
-        queueAudioCue(GameAudioCue::DroneTask);
-        state_.statusLine = "Support Drones recalled. Their payload counts only after they reach the shuttle.";
-        save();
-    } else {
-        state_.statusLine = loadoutRecall ? "Support Drones and cargo are ready for ship service."
-            : "All Support Drone payload is already aboard.";
-    }
-    panelDirty_ = true;
-}
-
 void RocketGameApp::salvageNearbyWreck()
 {
     if (state_.screen != Screen::Flight || !state_.run.expedition.travelInitialized ||
@@ -4412,6 +4374,10 @@ void RocketGameApp::miningDepart()
     extractionVisual.stowedCargo = 0;
     extractionVisual.stowedMaterials = {};
     extractionVisual.stowedArtifacts.clear();
+    for (auto& drone : extractionVisual.miniDrones) {
+        drone.haulMaterials = drone.uncreditedHaulMaterials = {};
+        drone.carriedLooseObjectId = 0;
+    }
     extractionVisual.combatProjectiles.clear();
     extractionVisual.damageNumbers.clear();
     if (!session_.flight.landing.siteCommitted) state_.run.mining = std::move(extractionVisual);
@@ -4900,14 +4866,27 @@ void RocketGameApp::debugShowSurfaceUpgrade()
     panelDirty_ = true;
 }
 
-void RocketGameApp::debugShowDroneOps()
+void RocketGameApp::debugShowDroneOps(int fixture)
 {
     beginDebugSandbox("Debug Drone Ops board. No save data will be written.");
     seedDebugResearchAccess(state_);
     seedDebugSurfaceExpedition(state_, catalog_, rng_, content::destination::nearbyStar);
     applyDebugDroneLoadout();
     state_.screen = Screen::DroneOps;
-    state_.statusLine = "Debug Drone Ops. All 6 slots and Support Drone types are available; this loadout carries into Mining and Combat Mining.";
+    droneSelection_ = {};
+    if (fixture == 1) {
+        state_ = createNewGame(catalog_, 0xD20E0F5ULL);
+        state_.meta.unlockKeys.push_back(content::unlock::droneBay);
+        state_.meta.droneBaySlots = 1;
+        state_.meta.ownedDroneIds = {content::drone::miningDrone};
+        state_.meta.equippedDroneIds = state_.meta.ownedDroneIds;
+        state_.meta.campaignIntroductionAcknowledged = true;
+        state_.run.expedition.travelInitialized = true;
+        state_.run.expedition.location.bodyId = "mars";
+        state_.screen = Screen::DroneOps;
+    }
+    if (fixture == 2) state_.meta.materials = {100, 50, 20}; // Funded purchase QA, sandbox only.
+    state_.statusLine = "Choose a slot, then a drone. Debug session / saves disabled.";
     syncLaunchConfig(state_, catalog_);
     panelDirty_ = true;
 }
@@ -6062,6 +6041,11 @@ bool RocketGameApp::uiCancel()
         resumeOrbitalFlight();
         return true;
     }
+    if (state_.screen == Screen::DroneOps && pauseReason_ == PauseReason::None &&
+        !services_.ui.modalOpen()) {
+        backToSurfaceOps();
+        return true;
+    }
     return services_.ui.cancel();
 }
 
@@ -6295,6 +6279,7 @@ PanelRenderContext RocketGameApp::panelRenderContext(const PreparedLaunch& fligh
         surfaceArrival_.prepared ? surfaceArrival_.prepared->laserDepth : 0,
         surfaceArrival_.prepared && session_.orbitalWork.surveyComplete
             ? &surfaceArrival_.prepared->surveyLayers : nullptr,
+        droneSelection_,
     };
 }
 
@@ -6470,7 +6455,8 @@ bool RocketGameApp::runScenarioUiAction(std::string_view action)
         // explicit, reusable swap decision instead of silently replacing a
         // loadout entry.
         state_.screen = Screen::DroneOps;
-        state_.statusLine = "New Support Drone ready. Free a bay slot or swap an active Support Drone, then assign it.";
+        droneSelection_ = {};
+        state_.statusLine = "New Support Drone ready. Choose a slot, then select the new drone to equip or replace.";
     } else if (!outcome.message.empty()) {
         state_.statusLine = outcome.message;
     }
@@ -6575,6 +6561,11 @@ void RocketGameApp::runUiAction(const std::string& action)
 
     int index = 0;
     if (runScenarioUiAction(action)) {
+        if (state_.screen == Screen::DroneOps && droneSelection_.drone >= 0 &&
+            droneSelection_.drone < static_cast<int>(catalog_.miniDrones.size())) {
+            droneSelection_.locked = !isMiniDroneUnlocked(state_.meta, catalog_.miniDrones[droneSelection_.drone]);
+            panelDirty_ = true;
+        }
         return;
     } else if (action.starts_with(ui::actions::acknowledgeResearchBreakthroughPrefix)) {
         const std::string key = action.substr(ui::actions::acknowledgeResearchBreakthroughPrefix.size());
@@ -6601,6 +6592,38 @@ void RocketGameApp::runUiAction(const std::string& action)
         selectResearchProject(index);
     } else if (consumeIndexedAction(action, ui::actions::surfaceUpgradePrefix, index)) {
         selectSurfaceUpgrade(index);
+    } else if (state_.screen == Screen::DroneOps && action.starts_with(ui::actions::assignDroneSlotPrefix)) {
+        const auto payload = std::string_view(action).substr(ui::actions::assignDroneSlotPrefix.size());
+        const auto split = payload.find(':');
+        int slot = -1, drone = -1;
+        if (split != std::string_view::npos) {
+            const auto a = std::from_chars(payload.data(), payload.data() + split, slot);
+            const auto b = std::from_chars(payload.data() + split + 1, payload.data() + payload.size(), drone);
+            if (a.ec == std::errc{} && a.ptr == payload.data() + split && b.ec == std::errc{} && b.ptr == payload.data() + payload.size())
+                assignDroneSlot(slot, drone);
+        }
+    } else if (state_.screen == Screen::DroneOps && consumeIndexedAction(action, ui::actions::selectDronePrefix, index)) {
+        if (index >= 0 && index < static_cast<int>(catalog_.miniDrones.size())) {
+            auto next = dronePickerPresentation(state_, catalog_, droneSelection_).selection;
+            if (next.drone != index || next.expansion) {
+                next.drone = index;
+                next.expansion = false;
+                next.locked = !isMiniDroneUnlocked(state_.meta, catalog_.miniDrones[index]);
+                droneSelection_ = next;
+                panelDirty_ = true;
+            }
+        }
+    } else if (state_.screen == Screen::DroneOps && consumeIndexedAction(action, ui::actions::selectDroneSlotPrefix, index)) {
+        if (index >= 0 && index < state_.meta.droneBaySlots) {
+            droneSelection_ = {std::min(index, static_cast<int>(state_.meta.equippedDroneIds.size())), -1, false, false};
+            panelDirty_ = true;
+        }
+    } else if (state_.screen == Screen::DroneOps && (action == "drone_view:available" || action == "drone_view:locked" || action == "drone_view:expand")) {
+        droneSelection_ = dronePickerPresentation(state_, catalog_, droneSelection_).selection;
+        droneSelection_.locked = action == "drone_view:locked";
+        droneSelection_.expansion = action == "drone_view:expand";
+        droneSelection_.drone = -1;
+        panelDirty_ = true;
     } else if (consumeIndexedAction(action, ui::actions::equipDronePrefix, index)) {
         equipDrone(index);
     } else if (consumeIndexedAction(action, ui::actions::unequipDroneSlotPrefix, index)) {
@@ -6675,10 +6698,7 @@ void RocketGameApp::runUiAction(const std::string& action)
         miningRepairDrill();
     } else if (action == ui::actions::miningRepairDrone) {
         miningRepairDrone();
-    } else if (action == ui::actions::miningStow) {
-        miningStow();
-    } else if (action == ui::actions::miningWaitForDrones) {
-        miningWaitForDrones();
+
     } else if (action == ui::actions::miningDepart) {
         miningDepart();
     } else if (action == ui::actions::miningAbort) {
@@ -6986,7 +7006,9 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningOperatorToggleProgress = mining.operatorToggleProgress;
         result.miningOperatorFirePulse =
             std::clamp(mining.operatorFirePulseSeconds / 0.12, 0.0, 1.0);
-        result.miningRigPresent = mining.rigDepthZone == mining.depthZone;
+        result.miningRigPresent = result.miningExtractionActive || mining.rigDepthZone == mining.depthZone;
+        if (result.miningExtractionActive && state_.screen == Screen::Mining)
+            result.miningDroneY += depthTop(mining.rigDepthZone) - depthTop(mining.depthZone);
         result.miningRigDisabled = mining.rigDisabled;
         // Disabled rigs remain valid EVA recovery targets. Do not hide the
         // tow line merely because the object being recovered is a wreck.

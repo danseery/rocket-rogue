@@ -596,9 +596,112 @@ void supportDroneXpWaitsForAuthoritativeShipDelivery()
         departure.applied,
         "the astronaut should be able to depart without recalling a missing Support Drone");
     require(
-        std::abs(expeditionExperienceEarnedSince(beforeSafeRecall, state)) < 0.000001 &&
-            departure.materialLost.rare == 1,
-        "departure must not teleport or credit Support Drone ore that did not physically unload");
+        std::abs(expeditionExperienceEarnedSince(beforeSafeRecall, state) - 3.0) < 0.000001 &&
+            departure.materialLost.rare == 0 && departure.materialDelta.rare == 2,
+        "departure must recover the remaining drone ore and credit its unearned XP exactly once");
+}
+
+void departurePacksEveryCarriedResourceExactlyOnce()
+{
+    const ContentCatalog catalog = createDefaultContent();
+    for (bool disabled : {false, true}) {
+        GameState state = createNewGame(catalog, 0xD3A472);
+        state.meta.unlockKeys.push_back(content::unlock::droneBay);
+        state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
+        ensureDroneBayState(state, catalog);
+        state.meta.droneBaySlots = 2;
+        state.meta.equippedDroneIds = {content::drone::miningDrone, content::drone::resourceDrone};
+        prepareSurface(state, content::destination::mars);
+        require(startMiningRun(state, catalog, {MiningAct::ActOne, 3, 0xD311ULL}, false).applied,
+            "departure fixture should start");
+        state.run.expedition.travelInitialized = true;
+        state.run.expedition.active = true;
+        state.run.expedition.location.bodyId = "mars";
+        state.run.expedition.cargo.materials = {60, 0, 0};
+        state.run.flight.landing.siteCommitted = true;
+        auto& mining = state.run.mining;
+        mining.operatorMode = MiningOperatorMode::Jetpack;
+        mining.operatorPresent = true;
+        mining.operatorX = mining.returnZoneX + 20;
+        mining.operatorY = mining.returnZoneY;
+        mining.rigDepthZone = mining.shipDepthZone + 1;
+        mining.droneX += 20;
+        mining.rigDisabled = disabled;
+        mining.temporaryMaterials = {2, 1, 0};
+        mining.cargo = 4;
+        mining.rigFuel = {4, 4};
+        mining.droneLoadoutRecallActive = true;
+        require(mining.miniDrones.size() == 2, "fixture must have two independent carriers");
+        mining.miniDrones[0].haulMaterials = {1, 0, 1};
+        mining.miniDrones[0].uncreditedHaulMaterials = {1, 0, 1};
+        mining.miniDrones[0].transitDepthZone = mining.shipDepthZone + 2;
+        mining.miniDrones[1].haulMaterials = {0, 2, 0}; // Previously credited rig ore.
+        mining.miniDrones[1].carriedLooseObjectId = 700;
+        mining.miniDrones[1].transitDepthZone = mining.shipDepthZone + 1;
+        MiningDepthLayerState layer;
+        layer.depthZone = mining.shipDepthZone + 1;
+        layer.terrain = mining.terrain;
+        layer.terrain.depthZone = layer.depthZone;
+        MiningLooseObject carried;
+        carried.persistentId = 700;
+        carried.kind = MiningLooseObjectKind::FuelCell;
+        carried.fuelValue = 1;
+        carried.carrierFrame = 1;
+        layer.looseObjects.push_back(carried);
+        carried.persistentId = 701;
+        carried.kind = MiningLooseObjectKind::Material;
+        carried.carrierFrame = -1; // An uncollected neighboring resource stays here.
+        layer.looseObjects.push_back(carried);
+        mining.depthLayers = {layer};
+        const auto beforeXp = snapshotExpeditionExperience(state);
+        const std::string before = serializeSaveData(captureSaveData(state));
+        require(!finishMiningRun(state, catalog, false).applied &&
+                serializeSaveData(captureSaveData(state)) == before,
+            "Depart away from the ship must leave cargo, fuel, and equipment untouched");
+        mining.operatorX = mining.returnZoneX;
+        const auto outcome = finishMiningRun(state, catalog, false);
+        require(outcome.applied && outcome.materialLost.common == 0 && outcome.materialLost.rare == 0 &&
+                outcome.materialLost.exotic == 0 && outcome.materialDelta.common == 3 &&
+                outcome.materialDelta.rare == 3 && outcome.materialDelta.exotic == 1,
+            "Depart must pack the remote rig and every drone, including beyond hold capacity");
+        require(state.run.expedition.cargo.materials.common == 63 &&
+                state.run.expedition.cargo.materials.rare == 3 && state.run.expedition.cargo.materials.exotic == 1 &&
+                state.run.expedition.packedRigFuel == 1 && state.run.expedition.cargo.shipPropellant == 0 && state.run.expedition.rigFuel.current == 4,
+            "all ore and carried fuel must remain aboard even when their normal tanks are full");
+        require(std::abs(expeditionExperienceEarnedSince(beforeXp, state) - 10.0) < 0.000001,
+            "departure credits unearned drone XP without crediting rig ore twice");
+        require(mining.depthLayers[0].looseObjects.size() == 1 &&
+                mining.depthLayers[0].looseObjects[0].persistentId == 701 &&
+                !mining.droneLoadoutRecallActive,
+            "recovered physical cargo must disappear from its cached layer while uncollected ore remains");
+        require(state.meta.equippedDroneIds.size() == 2 &&
+                std::all_of(mining.miniDrones.begin(), mining.miniDrones.end(), [](const auto& drone) {
+                    return drone.carriedLooseObjectId == 0 && drone.haulMaterials.common == 0 &&
+                        drone.haulMaterials.rare == 0 && drone.haulMaterials.exotic == 0;
+                }), "packing preserves equipment and clears settled manifests");
+        const auto packed = serializeSaveData(captureSaveData(state));
+        require(!finishMiningRun(state, catalog, false).applied &&
+                serializeSaveData(captureSaveData(state)) == packed,
+            "repeated departure cannot duplicate any resource or progression");
+        const auto parsed = deserializeSaveData(packed);
+        require(parsed.has_value(), "packed state must be loadable");
+        GameState restored = createNewGame(catalog, 1);
+        restoreSaveData(restored, catalog, *parsed);
+        require(restored.run.expedition.cargo.materials.common == 63 &&
+                restored.run.expedition.cargo.materials.exotic == 1 &&
+                restored.run.expedition.packedRigFuel == 1 &&
+                restored.run.mining.depthLayers.size() == 1 &&
+                restored.run.mining.depthLayers[0].looseObjects.size() == 1,
+            "save/load must preserve over-capacity recovery and consumed-object state");
+        restored.run.mining.active = true;
+        restored.run.mining.rigDisabled = false;
+        restored.run.mining.rigFuel.current = 3;
+        restored.run.mining.enemies.clear();
+        updateMiningRun(restored, catalog, 0.001);
+        require(restored.run.expedition.packedRigFuel == 0 &&
+                restored.run.mining.rigFuel.current == 4 && restored.run.expedition.cargo.shipPropellant == 0,
+            "packed fuel automatically refills the Rig without becoming ship propellant");
+    }
 }
 
 void supportDroneRecallIsPhysicalAndExplicit()
@@ -658,7 +761,7 @@ void supportDroneRecallIsPhysicalAndExplicit()
     resource.transitDepthZone=-1;
     require(miningDroneRecoveryStatus(mining).outstandingDrones==0 &&
         miningDroneRecoveryStatus(mining,true).outstandingDrones==1 && !requestMiningDroneRecall(state),
-        "Loadout safety must count empty deployed workers without changing normal cargo-only departure policy");
+        "Loadout safety must count empty deployed workers separately from cargo transfer status");
     require(requestMiningDroneRecall(state,true) && mining.droneLoadoutRecallActive &&
         resource.behavior==MiningMiniDroneBehavior::Returning && resource.targetCellX==-1 &&
         miningDroneRecoveryStatus(mining,true).recallInProgress,
@@ -740,6 +843,47 @@ void droneOpsStowsWithoutRecallOrCargoLoss()
         const auto restored=deserializeSaveData(serializeSaveData(snapshot));
         require(restored && restored->mining.miniDrones[0].haulMaterials.rare==2 &&
             restored->mining.stowedMaterials.common==mining.stowedMaterials.common,"Edited loadout and cargo survive save/load");
+    }
+}
+
+void droneReplacementPreservesNeighborCargoAndGrafts()
+{
+    const auto catalog = createDefaultContent();
+    for (bool fullHold : {false, true}) {
+        auto state = createNewGame(catalog, 254);
+        state.meta.unlockKeys.push_back(content::unlock::droneBay);
+        state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
+        state.meta.droneBaySlots = 2;
+        state.meta.ownedDroneIds = {content::drone::miningDrone, content::drone::miningDrone, content::drone::resourceDrone};
+        state.meta.equippedDroneIds = {content::drone::miningDrone, content::drone::miningDrone};
+        prepareSurface(state, content::destination::mars);
+        require(startMiningRun(state,catalog,{MiningAct::ActOne,3,0xD313ULL},false).applied,"Replacement fixture starts");
+        auto& mining = state.run.mining;
+        mining.droneX = mining.returnZoneX; mining.droneY = mining.returnZoneY;
+        state.meta.materials.common = fullHold ? 1000 : 0;
+        mining.miniDrones[0].haulMaterials.common = 3;
+        mining.miniDrones[0].uncreditedHaulMaterials.common = 3;
+        mining.miniDrones[1].haulMaterials.rare = 2;
+        mining.miniDrones[1].x += 12;
+        const auto retainedX = mining.miniDrones[1].x;
+        const auto module = catalog.droneModules.front().kind;
+        state.run.expedition.progression.droneModuleAssignments = {{0, content::drone::miningDrone, module}, {1, content::drone::miningDrone, module}};
+        MiningLooseObject supply;
+        supply.persistentId = 9001; supply.kind = MiningLooseObjectKind::FuelCell; supply.carrierFrame = 1;
+        mining.looseObjects.push_back(supply);
+        const int resource = static_cast<int>(std::find_if(catalog.miniDrones.begin(),catalog.miniDrones.end(),
+            [](const auto& d) { return d.id == content::drone::resourceDrone; }) - catalog.miniDrones.begin());
+        require(assignMiniDroneSlot(state,catalog,0,resource),"Loaded drone can be replaced using an owned spare");
+        const auto peer = std::find_if(mining.miniDrones.begin(),mining.miniDrones.end(),[](const auto& d){return d.equippedFrame==1;});
+        require(peer != mining.miniDrones.end() && peer->haulMaterials.rare==2 && peer->x==retainedX,
+            "Replacement leaves neighboring slot, physical location and payload unchanged");
+        require(mining.stowedMaterials.common == (fullHold ? 0 : 3),"Replacement settles outgoing cargo once within ship capacity");
+        const auto& grafts = state.run.expedition.progression.droneModuleAssignments;
+        require(grafts.size()==1 && grafts[0].equippedFrame==1,"Replacement removes only outgoing graft, with no index compaction");
+        const auto retainedSupply = std::find_if(mining.looseObjects.begin(),mining.looseObjects.end(),[](const auto& o){return o.persistentId==9001;});
+        require(retainedSupply != mining.looseObjects.end() && retainedSupply->carrierFrame==1,"Other carried objects keep their slot binding");
+        const auto restored = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+        require(restored && restored->equippedDroneIds==state.meta.equippedDroneIds,"Replacement loadout survives save round trip");
     }
 }
 
@@ -1151,6 +1295,20 @@ void ioTerrainAndArtifactSealAreDeterministic()
     // carry that same protected objective into the authored recovery step.
     GameState recovered = makeIoState(1010);
     MiningRunState& recoveredMining = recovered.run.mining;
+    {
+        GameState packedArtifact = recovered;
+        auto& carried = packedArtifact.run.mining;
+        carried.gate.state = MiningGateState::Open;
+        carried.artifact.state = MiningArtifactState::Loose;
+        carried.artifact.tethered = true;
+        carried.artifact.x = carried.returnZoneX + 10;
+        carried.shipDepthZone = carried.rigDepthZone = carried.depthZone;
+        carried.droneX = carried.returnZoneX;
+        carried.droneY = carried.returnZoneY;
+        require(finishMiningRun(packedArtifact, catalog, false).applied &&
+                packedArtifact.run.planetaryExpedition.temporaryArtifacts.size() == 1,
+            "Depart must secure a carried loose artifact without a separate tow-to-bay step");
+    }
     recoveredMining.gate.state = MiningGateState::Open;
     recoveredMining.artifact.revealed = true;
     recoveredMining.artifact.state = MiningArtifactState::Loose;
@@ -1332,8 +1490,10 @@ int main()
         lunarContractActivatesScannerLedEvaArtifactInSameRun();
         rigLoadBandsAndHardCapacityAreImmediate();
         supportDroneXpWaitsForAuthoritativeShipDelivery();
+        departurePacksEveryCarriedResourceExactlyOnce();
         supportDroneRecallIsPhysicalAndExplicit();
         droneOpsStowsWithoutRecallOrCargoLoss();
+        droneReplacementPreservesNeighborCargoAndGrafts();
         looseEvaOreAwardsXpWhenTheRigCollectsIt();
         firstClearCreditsOnlyExtractedMiningMaterials();
         rewardLedgerAndPendingCreditRoundTrip();

@@ -2433,6 +2433,7 @@ struct PersistentExpeditionState {
     bool openingInitialized = false;
     bool departureHistoryKnown = false;
     unsigned departureCount = 0;
+    double packedRigFuel = 0.0; // Recovered cells; automatically fed into the Rig tank.
     bool undockReady = false;
     ResourceTankState rigFuel;
     std::vector<std::string> discoveredBodies;

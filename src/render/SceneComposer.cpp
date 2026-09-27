@@ -5423,7 +5423,7 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
             }
         }
 
-        if (snapshot.miningRigPresent && !snapshot.miningRigDisabled) {
+        if (snapshot.miningRigPresent) {
             const float rigEntry = smoothExtraction((extractionProgress - 0.20F) / 0.36F);
             const Vec2 rigPosition {
                 drone.x + (extractionBay.x - drone.x) * rigEntry,

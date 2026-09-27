@@ -98,7 +98,12 @@ list(SORT ROCKET_SHADER_ASSET_FILES)
 string(JOIN "\n" ROCKET_UI_ASSET_MANIFEST_CONTENT ${ROCKET_UI_ASSET_FILES})
 set(ROCKET_UI_ASSET_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/rocket-ui-assets.manifest")
 file(GENERATE OUTPUT "${ROCKET_UI_ASSET_MANIFEST}" CONTENT "${ROCKET_UI_ASSET_MANIFEST_CONTENT}\n")
+set(ROCKET_DRONE_UI_ART_FILES)
+foreach(ROCKET_DRONE_ROLE mining resource survey hazard attack defense)
+    list(APPEND ROCKET_DRONE_UI_ART_FILES "${CMAKE_SOURCE_DIR}/assets/art/mini-drone-${ROCKET_DRONE_ROLE}.png")
+endforeach()
 set(ROCKET_RUNTIME_ASSET_FILES
+    ${ROCKET_DRONE_UI_ART_FILES}
     ${ROCKET_UI_ASSET_FILES}
     ${ROCKET_FONT_ASSET_FILES}
     ${ROCKET_SCENE_ATLAS_ASSET_FILES}
@@ -385,6 +390,9 @@ if(EMSCRIPTEN)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ROCKET_UI_ASSET_DIRECTORY}"
             "${CMAKE_CURRENT_BINARY_DIR}/assets/ui"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/assets/art"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${ROCKET_DRONE_UI_ART_FILES} "${CMAKE_CURRENT_BINARY_DIR}/assets/art"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ROCKET_AUDIO_ASSET_DIRECTORY}"
             "${CMAKE_CURRENT_BINARY_DIR}/assets/audio"
@@ -399,7 +407,7 @@ if(EMSCRIPTEN)
     add_dependencies(rocket_rogue copy_rocket_assets)
 
     set(ROCKET_EXPORTED_FUNCTIONS
-        "['_main','_rr_new_game','_rr_continue_game','_rr_prepare_launch','_rr_current_screen','_rr_start_launch','_rr_launch_move','_rr_salvage_nearby','_rr_deploy_surface_team','_rr_depart_surface_undeployed','_rr_surface_arrival_active','_rr_return_home','_rr_cut_engines','_rr_next','_rr_attempt_frontier','_rr_open_navigation','_rr_ark_jump','_rr_select_navigation','_rr_buy_offer','_rr_select_refit_offer','_rr_reroll_offers','_rr_research_project','_rr_skip_research','_rr_mine_surface','_rr_extract_surface','_rr_surface_upgrade','_rr_drone_ops','_rr_equip_drone','_rr_unequip_drone_slot','_rr_upgrade_drone_slot','_rr_mining_move','_rr_mining_aim','_rr_mining_pointer_aim','_rr_mining_fire','_rr_mining_drill','_rr_mining_scanner','_rr_mining_tether','_rr_mining_operator_toggle','_rr_mining_operator_toggle_progress','_rr_mining_stow','_rr_mining_wait_for_drones','_rr_mining_depart','_rr_mining_abort','_rr_mining_failure_ack','_rr_debug_mining','_rr_debug_combat_mining','_rr_debug_mining_arena','_rr_debug_post_solar_body_preview','_rr_debug_mining_preview','_rr_debug_hangar','_rr_debug_results','_rr_debug_research','_rr_debug_refit','_rr_debug_surface_upgrade','_rr_debug_drone_ops','_rr_debug_navigation','_rr_debug_act_one_start','_rr_debug_act_one_previous','_rr_debug_act_one_next','_rr_debug_act_one_checkpoint','_rr_debug_launch_lesson','_rr_debug_surface_arrival','_rr_debug_exit','_rr_repair_ship','_rr_reset_save','_rr_rml_mouse_move','_rr_rml_mouse_down','_rr_rml_mouse_up','_rr_rml_wheel','_rr_rml_hit_test','_rr_ui_navigate','_rr_ui_activate_focused','_rr_ui_cancel','_rr_controller_debug_status','_rr_controller_app_debug_status','_rr_debug_controller_set','_rr_debug_controller_clear','_rr_controller_haptic']")
+        "['_main','_rr_new_game','_rr_continue_game','_rr_prepare_launch','_rr_current_screen','_rr_start_launch','_rr_launch_move','_rr_salvage_nearby','_rr_deploy_surface_team','_rr_depart_surface_undeployed','_rr_surface_arrival_active','_rr_return_home','_rr_cut_engines','_rr_next','_rr_attempt_frontier','_rr_open_navigation','_rr_ark_jump','_rr_select_navigation','_rr_buy_offer','_rr_select_refit_offer','_rr_reroll_offers','_rr_research_project','_rr_skip_research','_rr_mine_surface','_rr_extract_surface','_rr_surface_upgrade','_rr_drone_ops','_rr_equip_drone','_rr_unequip_drone_slot','_rr_upgrade_drone_slot','_rr_mining_move','_rr_mining_aim','_rr_mining_pointer_aim','_rr_mining_fire','_rr_mining_drill','_rr_mining_scanner','_rr_mining_repair_drill','_rr_mining_repair_drone','_rr_mining_tether','_rr_mining_operator_toggle','_rr_mining_operator_toggle_progress','_rr_mining_depart','_rr_mining_abort','_rr_mining_failure_ack','_rr_debug_mining','_rr_debug_combat_mining','_rr_debug_mining_arena','_rr_debug_post_solar_body_preview','_rr_debug_mining_preview','_rr_debug_hangar','_rr_debug_results','_rr_debug_research','_rr_debug_refit','_rr_debug_surface_upgrade','_rr_debug_drone_ops','_rr_debug_navigation','_rr_debug_act_one_start','_rr_debug_act_one_previous','_rr_debug_act_one_next','_rr_debug_act_one_checkpoint','_rr_debug_launch_lesson','_rr_debug_surface_arrival','_rr_debug_exit','_rr_repair_ship','_rr_reset_save','_rr_rml_mouse_move','_rr_rml_mouse_down','_rr_rml_mouse_up','_rr_rml_wheel','_rr_rml_hit_test','_rr_ui_navigate','_rr_ui_activate_focused','_rr_ui_cancel','_rr_controller_debug_status','_rr_controller_app_debug_status','_rr_debug_controller_set','_rr_debug_controller_clear','_rr_controller_haptic']")
     set_target_properties(rocket_rogue PROPERTIES
         OUTPUT_NAME "rocket_rogue"
         SUFFIX ".html"
@@ -408,6 +416,7 @@ if(EMSCRIPTEN)
         "SHELL:--shell-file \"${CMAKE_SOURCE_DIR}/web/shell.html\""
         "SHELL:--preload-file \"${CMAKE_CURRENT_BINARY_DIR}/assets/fonts@/assets/fonts\""
         "SHELL:--preload-file \"${CMAKE_CURRENT_BINARY_DIR}/assets/ui@/assets/ui\""
+        "SHELL:--preload-file \"${CMAKE_CURRENT_BINARY_DIR}/assets/art@/assets/art\""
         -sUSE_WEBGL2=1
         -sMIN_WEBGL_VERSION=2
         -sMAX_WEBGL_VERSION=2
@@ -568,6 +577,9 @@ else()
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ROCKET_UI_ASSET_DIRECTORY}"
             "$<TARGET_FILE_DIR:RocketRogue>/assets/ui"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:RocketRogue>/assets/art"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${ROCKET_DRONE_UI_ART_FILES} "$<TARGET_FILE_DIR:RocketRogue>/assets/art"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ROCKET_AUDIO_ASSET_DIRECTORY}"
             "$<TARGET_FILE_DIR:RocketRogue>/assets/audio"

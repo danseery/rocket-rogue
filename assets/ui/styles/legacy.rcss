@@ -10356,7 +10356,7 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 #rr-modal.modal-incoming_message .modal-actions button, #rr-modal.modal-solar_mission_claim .modal-actions button { min-width: 140dp; width: auto; }
 .incoming-message-layout { display: flex; align-items: center; }
 .drone-arrival-introduction {
-    border: 2dp solid #68f0ce;
+    border: 2dp #68f0ce;
     padding: 12dp;
     animation: 0.8s cubic-out drone-arrival-fanfare;
 }
@@ -10368,7 +10368,7 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 .incoming-message-portrait img { width: 100%; height: auto; }
 .incoming-unknown-signal {
     height: 168dp;
-    border: 2dp solid #64e4ef;
+    border: 2dp #64e4ef;
     border-radius: 22dp;
     background-color: #091820;
     color: #b7f8ff;
@@ -10829,3 +10829,185 @@ body.controller-connected .keyboard-key { display: none; }
 .orbit-survey-row strong { color: #d1e8e8; text-align: right; font-weight: normal; }
 .orbit-drill-status { color: #9eb9c5; font-size: 12dp; line-height: 1.3; margin: 6dp 0; }
 #rr-modal.modal-missions { width: 704dp; max-width: 94%; }
+
+/* Pause and Settings share the OREBIT modal shell, but each gets its own content scale. */
+#rr-modal-scrim.pause-menu-scrim { background-color: #050b11c9; }
+#rr-modal.modal-system_menu {
+    left: var(--rr-pause-left, 0px);
+    top: var(--rr-pause-top, 0px);
+    width: var(--rr-pause-width, 420px);
+    height: var(--rr-pause-height, 250px);
+    padding: 20px;
+    border-color: #42758a;
+    background-color: #0b1620;
+}
+#rr-modal.modal-system_menu .modal-head { margin-bottom: 18px; }
+#rr-modal.modal-system_menu .modal-head h2 { color: #d8f5fa; font-size: 22px; }
+#rr-modal.modal-system_menu .modal-scroll-body { padding-right: 0px; overflow: hidden; }
+.system-menu-actions { display: flex; flex-direction: column; width: 100%; gap: 9px; }
+.system-menu-row { display: flex; flex-direction: row; width: 100%; gap: 9px; }
+#rr-modal.modal-system_menu .system-menu-actions button {
+    box-sizing: border-box;
+    margin: 0px;
+    min-width: 0px;
+    width: 100%;
+    height: 44px;
+    min-height: 44px;
+    font-size: 15px;
+}
+#rr-modal.modal-system_menu .system-resume { border-color: #76dca6; background-color: #1c563e; }
+
+#rr-modal.modal-settings {
+    top: var(--rr-settings-top, 0px);
+    height: var(--rr-settings-height, 550px);
+}
+#rr-modal.modal-developer_options {
+    top: var(--rr-developer-top, 0px);
+    height: var(--rr-developer-height, 480px);
+}
+#rr-modal.modal-settings .modal-scroll-body { display: flex; overflow: hidden; padding-right: 0px; }
+.settings-shell { display: flex; flex: auto; flex-direction: column; width: 100%; min-height: 0px; }
+.settings-tabs { display: flex; flex: none; flex-direction: row; width: 100%; gap: 8px; padding-bottom: 12px; }
+#rr-modal.modal-settings .settings-tab {
+    box-sizing: border-box;
+    flex: 1;
+    width: auto;
+    min-width: 0px;
+    height: 40px;
+    min-height: 40px;
+    margin: 0px;
+    color: #a7bbc5;
+    border-color: #315064;
+    background-color: #12212c;
+}
+#rr-modal.modal-settings .settings-tab.is-active {
+    color: #e2fbff;
+    border-color: #65d5e5;
+    background-color: #173541;
+}
+body.controller-focus-visible #rr-modal.modal-settings button.settings-tab.rr-controller-focus {
+    color: #041019;
+    border-color: #ffd166;
+    background-color: #a5ecf5;
+}
+.settings-page-scroll { box-sizing: border-box; flex: auto; min-height: 0px; width: 100%; overflow-y: auto; overflow-x: hidden; padding-right: 7px; }
+.settings-page { width: 100%; }
+#rr-modal.modal-settings .settings-control,
+#rr-modal.modal-developer_options .settings-control {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 70px;
+    margin-top: 0px;
+    padding: 10px 2px;
+    border-bottom-width: 1px;
+    border-bottom-color: #263e4c;
+}
+#rr-modal.modal-settings .settings-control > div,
+#rr-modal.modal-developer_options .settings-control > div { width: 310px; max-width: 100%; }
+#rr-modal.modal-settings .settings-control .settings-control-field,
+#rr-modal.modal-developer_options .settings-control .settings-control-field { width: 220px; min-width: 0px; }
+#rr-modal.modal-settings .settings-control h3,
+#rr-modal.modal-developer_options .settings-control h3 { margin: 0px 0px 3px; color: #e2f0f4; font-size: 15px; }
+#rr-modal.modal-settings .settings-control p,
+#rr-modal.modal-developer_options .settings-control p { width: auto; margin: 0px; color: #91aab8; font-size: 12px; line-height: 1.3; }
+#rr-modal.modal-settings .settings-control select,
+#rr-modal.modal-developer_options .settings-control select { width: 220px; margin-top: 3px; }
+#rr-modal.modal-settings .settings-control button.settings-toggle,
+#rr-modal.modal-developer_options .settings-control button.settings-toggle { width: 220px; margin: 0px; }
+.settings-footer {
+    display: flex;
+    flex: none;
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    padding-top: 12px;
+    border-top-width: 1px;
+    border-top-color: #315064;
+}
+#rr-modal.modal-settings .settings-footer button { min-width: 0px; width: 210px; margin: 0px; }
+#rr-modal.modal-settings .settings-footer button.danger { color: #e7a89f; background-color: #271b1d; border-color: #754342; }
+body.controller-focus-visible #rr-modal.modal-settings .settings-footer button.danger.rr-controller-focus {
+    color: #041019;
+    border-color: #ffd166;
+    background-color: #a5ecf5;
+}
+#rr-modal.modal-developer_options .settings-technical { margin-top: 14px; }
+
+/* Drone Ops: one loadout strip, one candidate list, one contextual preview. */
+#rr-panel.drone-workspace-panel .game-mark { display: none; }
+#rr-panel.drone-workspace-panel .drone-picker-workspace { color: #dfedf2; }
+#rr-panel.drone-workspace-panel .drone-picker-workspace h2 { color: #eef8fa; font-size: 22px; margin: 0px; }
+#rr-panel.drone-workspace-panel .drone-picker-workspace p { color: #b5cbd4; font-size: 15px; line-height: 1.5; margin: 0px; }
+#rr-panel.drone-workspace-panel .drone-picker-workspace button { margin: 0px; min-height: 44px; height: auto; max-height: none; width: auto; min-width: 0px; line-height: 1.3; font-size: 15px; }
+#rr-panel.drone-workspace-panel .drone-equipped { flex: 0 0 auto; padding: 12px 0px 16px; border-bottom: 1px #294350; }
+#rr-panel.drone-workspace-panel .drone-equipped-heading { display: flex; flex-direction: row; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+#rr-panel.drone-workspace-panel .drone-equipped-heading h2 { font-size: 17px; }
+#rr-panel.drone-workspace-panel .drone-equipped-heading h2 span { display: inline; font-size: 14px; color: #a8c1cb; margin-left: 12px; }
+#rr-panel.drone-workspace-panel .drone-equipped-heading p { font-size: 13px; margin-left: 20px; }
+#rr-panel.drone-workspace-panel .drone-equipped-heading button { padding: 8px 18px; }
+#rr-panel.drone-workspace-panel .drone-slot-strip { display: flex; flex-direction: row; flex-wrap: wrap; }
+#rr-panel.drone-workspace-panel .drone-slot-strip .drone-slot-choice { flex: 0 0 auto; display: flex; flex-direction: row; align-items: center; min-width: 164px; padding: 10px 16px; margin: 0px 8px 6px 0px; background: #0c1e28; border: 1px #314c5a; border-radius: 5px; color: #dfedf2; }
+#rr-panel.drone-workspace-panel .drone-slot-number { margin-right: 12px; color: #88b4c7; }
+#rr-panel.drone-workspace-panel .drone-picker-workspace .is-selected { background: #123441; border-color: #70dbe6; color: #f0fcff; }
+#rr-panel.drone-workspace-panel .drone-picker-workspace .drone-requirement { flex: 0 0 auto; color: #ead391; padding: 10px 0px 0px; }
+#rr-panel.drone-workspace-panel .drone-picker-tabs { flex: 0 0 auto; display: flex; padding: 14px 0px; }
+#rr-panel.drone-workspace-panel .drone-picker-tabs button { min-width: 155px; padding: 9px 20px; margin-right: 8px; }
+#rr-panel.drone-workspace-panel .drone-picker-body { flex: 1 1 auto; min-height: 0px; display: flex; flex-direction: row; overflow: hidden; }
+#rr-panel.drone-workspace-panel .drone-picker-list { flex: 0 0 34%; width: 34%; min-height: 0px; overflow-y: auto; padding-right: 20px; box-sizing: border-box; }
+#rr-panel.drone-workspace-panel .drone-picker-list .drone-picker-choice { display: flex; align-items: center; width: 100%; min-height: 110px; height: 110px; max-height: none; line-height: 1.3; justify-content: flex-start; padding: 12px; margin: 0px 0px 8px; text-align: left; background: #091923; border: 1px #263f4b; border-radius: 5px; color: #e1edf2; }
+#rr-panel.drone-workspace-panel .drone-picker-list .drone-picker-choice.is-selected { background: #123441; border-color: #70dbe6; }
+#rr-panel.drone-workspace-panel .drone-picker-choice img { width: 52px; height: 52px; margin-right: 14px; }
+#rr-panel.drone-workspace-panel .drone-choice-copy { flex: 1 1 auto; min-width: 0px; display: block; }
+#rr-panel.drone-workspace-panel .drone-choice-copy strong { display: block; font-size: 17px; color: #edf7fa; }
+#rr-panel.drone-workspace-panel .drone-choice-copy small { display: block; font-size: 13px; color: #b8cdd6; margin: 5px 0px; }
+#rr-panel.drone-workspace-panel .drone-choice-copy em { display: block; font-size: 12px; font-style: normal; color: #8dd2df; }
+#rr-panel.drone-workspace-panel .drone-preview { flex: 1 1 auto; min-width: 0px; min-height: 0px; display: flex; flex-direction: column; padding: 16px 24px; box-sizing: border-box; background: #091720; border-radius: 6px; }
+#rr-panel.drone-workspace-panel .drone-preview-scroll { flex: 1 1 auto; min-height: 0px; overflow-y: auto; padding-right: 8px; }
+#rr-panel.drone-workspace-panel .drone-preview-identity { display: flex; align-items: center; margin-bottom: 16px; }
+#rr-panel.drone-workspace-panel .drone-preview-identity img { width: 112px; height: 112px; margin-right: 24px; }
+#rr-panel.drone-workspace-panel .drone-preview-target { font-size: 12px; letter-spacing: 1px; color: #8eb7c7; }
+#rr-panel.drone-workspace-panel .drone-preview-identity h2 { margin: 7px 0px; font-size: 25px; }
+#rr-panel.drone-workspace-panel .drone-preview .drone-preview-purpose { color: #dfedf2; font-size: 17px; margin-bottom: 20px; }
+#rr-panel.drone-workspace-panel .drone-capabilities { display: flex; flex-direction: row; flex-wrap: wrap; margin: 8px 0px 18px; }
+#rr-panel.drone-workspace-panel .drone-capabilities > div { flex: 1 1 120px; padding: 8px 16px 8px 0px; }
+#rr-panel.drone-workspace-panel .drone-capabilities span { display: block; font-size: 13px; color: #9fbdca; margin-bottom: 7px; }
+#rr-panel.drone-workspace-panel .drone-capabilities strong { display: block; font-size: 19px; color: #e4f4f7; }
+#rr-panel.drone-workspace-panel .drone-preview .drone-unlock-requirement { color: #ead391; margin-bottom: 14px; }
+#rr-panel.drone-workspace-panel .drone-preview .drone-spare-copy, #rr-panel.drone-workspace-panel .drone-preview .drone-rank-note { font-size: 13px; margin: 12px 0px; }
+#rr-panel.drone-workspace-panel .drone-effect { margin: 12px 0px; }
+#rr-panel.drone-workspace-panel .drone-effect strong { display: block; font-size: 14px; color: #c9e4ed; margin-bottom: 4px; }
+#rr-panel.drone-workspace-panel .drone-effect p { font-size: 13px; }
+#rr-panel.drone-workspace-panel .drone-preview-actions { flex: 0 0 auto; padding-top: 16px; border-top: 1px #294350; }
+#rr-panel.drone-workspace-panel .drone-preview-actions button { width: 280px; min-width: 240px; padding: 10px 22px; margin-right: 12px; min-height: 46px; }
+#rr-panel.drone-workspace-panel .drone-preview-actions .ok { background: #165162; border-color: #68d5e0; color: #effdff; }
+#rr-panel.drone-workspace-panel .drone-preview-actions .drone-cost-label { font-size: 12px; margin-bottom: 8px; }
+#rr-panel.drone-workspace-panel .drone-costs { display: flex; flex-wrap: wrap; margin-bottom: 12px; }
+#rr-panel.drone-workspace-panel .drone-costs span { color: #a9c5d2; margin-right: 24px; font-size: 14px; }
+#rr-panel.drone-workspace-panel .drone-costs strong { color: #ecf5f9; margin-left: 8px; }
+#rr-panel.drone-workspace-panel .drone-preview-actions .drone-shortfall { color: #efd396; margin-bottom: 10px; font-size: 14px; }
+#rr-panel.drone-workspace-panel .drone-equipped-label { color: #8fd7bb; font-size: 16px; margin-right: 24px; }
+#rr-panel.drone-workspace-panel .drone-picker-footer { flex: 0 0 auto; display: flex; justify-content: space-between; align-items: center; padding: 14px 0px 0px; }
+#rr-panel.drone-workspace-panel .drone-picker-footer p { flex: 1 1 auto; font-size: 13px; margin-right: 18px; }
+#rr-panel.drone-workspace-panel .drone-picker-footer button { flex: 0 0 190px; width: 190px; padding: 10px 22px; }
+/* Preserve the shared controller focus treatment over selection styling. */
+body.controller-focus-visible #rr-panel.drone-workspace-panel .drone-picker-workspace button.rr-controller-focus {
+    background-color: #a5ecf5;
+    color: #041019;
+    border-color: #ffd166;
+}
+body.controller-focus-visible #rr-panel.drone-workspace-panel .drone-picker-workspace button.rr-controller-focus span,
+body.controller-focus-visible #rr-panel.drone-workspace-panel .drone-picker-workspace button.rr-controller-focus strong,
+body.controller-focus-visible #rr-panel.drone-workspace-panel .drone-picker-workspace button.rr-controller-focus small,
+body.controller-focus-visible #rr-panel.drone-workspace-panel .drone-picker-workspace button.rr-controller-focus em { color: #041019; }
+#rr-panel.drone-workspace-panel .drone-picker-choice,
+#rr-panel.drone-workspace-panel .drone-choice-copy,
+#rr-panel.drone-workspace-panel .drone-choice-copy small { white-space: normal; }
+#rr-panel.drone-workspace-panel .drone-slot-choice.is-selected,
+#rr-panel.drone-workspace-panel .drone-picker-choice.is-selected { border-left-width: 4px; }
+body.controller-focus-visible #rr-panel.drone-workspace-panel .drone-preview-scroll.rr-controller-focus { background-color: #a5ecf5; border: 2px #ffd166; }
+body.controller-focus-visible #rr-panel.drone-workspace-panel .drone-preview-scroll.rr-controller-focus * { color: #041019; }

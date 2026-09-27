@@ -552,26 +552,7 @@ inline MiningRunPresentation miningRunPresentation(const GameState& state, const
                     panelActionButton("Drone loadout", ui::actions::droneOps, "ghost"));
             }
             presentation.actions.push_back(
-                panelActionButton("Bank payload", ui::actions::miningStow, "ok"));
-            const MiningDroneRecoveryStatus droneRecovery =
-                miningDroneRecoveryStatus(mining);
-            if (droneRecovery.outstandingDrones > 0) {
-                presentation.actions.push_back(panelActionButton(
-                    (droneRecovery.recallInProgress ? "Drones returning (" : "Wait for drones (") +
-                        std::to_string(droneRecovery.outstandingDrones) + ")",
-                    ui::actions::miningWaitForDrones,
-                    "ghost"));
-                presentation.actions.push_back(panelActionButton(
-                    "Leave now - lose " +
-                        std::to_string(droneRecovery.outstandingDrones) +
-                        (droneRecovery.outstandingDrones == 1 ? " drone / " : " drones / ") +
-                        std::to_string(droneRecovery.outstandingCargoMass) + " mass",
-                    ui::actions::miningDepart,
-                    "warn"));
-            } else {
-                presentation.actions.push_back(
-                    panelActionButton("Depart planet", ui::actions::miningDepart, "warn"));
-            }
+                panelActionButton("Depart", ui::actions::miningDepart, "warn"));
         } else {
             const MiningArtifactObject& artifact = mining.artifact;
             const MiningTetherTargetResolution tetherTarget = resolveMiningTetherTarget(mining);
@@ -836,11 +817,8 @@ inline MiningHudPresentation miningHudPresentation(const GameState& state, const
         if (const PanelButtonPresentation* scanner = findAction(ui::actions::miningScanner)) {
             presentation.actions.push_back(copyAction(*scanner, "PULSE SCANNER", "mining-scan-action"));
         }
-        if (const PanelButtonPresentation* stow = findAction(ui::actions::miningStow)) {
-            presentation.actions.push_back(copyAction(*stow, "BANK PAYLOAD", "mining-bank-action"));
-        }
         if (const PanelButtonPresentation* depart = findAction(ui::actions::miningDepart)) {
-            presentation.actions.push_back(copyAction(*depart, "DEPART PLANET", "mining-depart-action"));
+            presentation.actions.push_back(copyAction(*depart, "DEPART", "mining-depart-action"));
         }
         return presentation;
     }

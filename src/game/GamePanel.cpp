@@ -21,6 +21,7 @@
 #include "core/ProgramPresentation.h"
 #include "core/RefitPresentation.h"
 #include "core/ResearchPresentation.h"
+#include "core/DronePickerPresentation.h"
 #include "core/ResearchSystem.h"
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
@@ -406,11 +407,6 @@ std::string contextualInteractionMarkup(const PanelRenderContext& context)
             return it == run.actions.end() ? nullptr : &*it;
         };
         std::string rows;
-        const bool carriesPayload = mining.cargo > 0 || mining.temporaryMaterials.common > 0 ||
-            mining.temporaryMaterials.rare > 0 || mining.temporaryMaterials.exotic > 0 ||
-            !mining.temporaryArtifacts.empty();
-        if (carriesPayload) rows += interactionAction("Bank payload", ui::actions::miningStow, "R", "{{controller_south}}",
-            action(ui::actions::miningStow) != nullptr);
         if (const auto* scan = action(ui::actions::miningScanner); scan && scan->enabled)
             rows += interactionAction("Pulse scanner", scan->actionId, "E", "{{controller_west}}");
         if (miningDrillRepairCost(mining) > 0) {
@@ -418,7 +414,7 @@ std::string contextualInteractionMarkup(const PanelRenderContext& context)
             const std::string repairLabel = "Repair drill · " + std::to_string(miningDrillRepairCost(mining)) + " common";
             rows += interactionAction(repair && repair->enabled ? repairLabel
                 : "Need " + std::to_string(miningDrillRepairCost(mining)) + " common for repair", ui::actions::miningRepairDrill,
-                "Click", "{{controller_lb}}", repair && repair->enabled);
+                "Q", "{{controller_lb}}", repair && repair->enabled);
         }
         const bool eva = mining.operatorMode == MiningOperatorMode::Jetpack && mining.operatorPresent;
         const bool rigNeedsRepair = mining.rigDisabled && miningRigAtReturnZone(mining)
@@ -433,30 +429,11 @@ std::string contextualInteractionMarkup(const PanelRenderContext& context)
                     + std::to_string(cost) + " common";
             rows += interactionAction(repair && repair->enabled ? repairLabel
                 : "Need " + std::to_string(cost) + " common for repair", ui::actions::miningRepairDrone,
-                "Click", "{{controller_rb}}", repair && repair->enabled);
+                "R", "{{controller_rb}}", repair && repair->enabled);
         }
         if (droneBayUnlocked(state))
-            rows += interactionAction("Drone Ops", ui::actions::droneOps, "Click", "D-pad ↑");
-        const MiningDroneRecoveryStatus recovery = miningDroneRecoveryStatus(mining);
-        if (recovery.outstandingDrones > 0)
-            rows += interactionAction("Wait for drones (" + std::to_string(recovery.outstandingDrones) + ")",
-                ui::actions::miningWaitForDrones, "Click", "D-pad →");
-        const PayloadTransferPlan transfer = planPayloadTransfer(mining.temporaryMaterials,
-            activeContractMaterialNeed(state, context.catalog, mining.destinationId),
-            shipHoldMaterials(state), shipHoldCapacity(state, context.catalog));
-        const int unbankedCargo = materialCargoMass(transfer.remainingAtSource);
-        std::string departLabel = "Depart planet";
-        const int cargoLeft = recovery.outstandingCargoMass + unbankedCargo;
-        if (recovery.outstandingDrones > 0 || cargoLeft > 0) {
-            departLabel = "Depart · leave ";
-            if (recovery.outstandingDrones > 0)
-                departLabel += std::to_string(recovery.outstandingDrones) + " drones";
-            if (cargoLeft > 0) {
-                if (recovery.outstandingDrones > 0) departLabel += " / ";
-                departLabel += std::to_string(cargoLeft) + " cargo";
-            }
-        }
-        rows += interactionAction(departLabel, ui::actions::miningDepart, "G", "Hold D-pad ↓", true,
+            rows += interactionAction("Drone Ops", ui::actions::droneOps, "O", "D-pad ↑");
+        rows += interactionAction("Depart", ui::actions::miningDepart, "G", "Hold D-pad ↓", true,
             "is-depart");
         return "<section id=\"rr-ship-services\" class=\"context-ship-services\" aria-label=\"Ship services\">"
             "<strong>SHIP SERVICES</strong><div class=\"context-ship-actions\">" + rows + "</div></section>";
@@ -573,11 +550,6 @@ std::string modalButton(
     const std::string defaultAttr = defaultFocus ? " data-ui-default-focus=\"1\"" : "";
     return "<button type=\"button\"" + classAttr + " data-ui-modal=\"" + htmlEscape(modalId) +
         "\" data-ui-focus-id=\"modal:" + htmlEscape(modalId) + "\"" + defaultAttr + "><span class=\"rr-button-label\">" + htmlEscape(label) + "</span></button>";
-}
-
-std::string droneDetailsModalId(int index)
-{
-    return "drone_details_" + std::to_string(index);
 }
 
 thread_local std::vector<ModalPresentation>* activeModalCollector = nullptr;
@@ -704,8 +676,8 @@ void collectSharedUtilityModals()
         card("06 / Surface shortcuts",
             binding("West / X", "Pulse scanner", "controls-cyan") +
             binding("North / Y", "Tether / release", "controls-amber") +
-            binding("Tap South / A", "Unload payload at the ship", "controls-green") +
-            binding("D-pad Up / Right", "Drone Ops / wait for drones at ship") +
+            binding("D-pad Up", "Drone Ops at ship") +
+            binding("LB / RB", "Repair drill / Rig or suit at ship") +
             binding("Hold D-pad Down", "Depart from ship · 0.6 seconds") +
             binding("D-pad Left", "Open panel focus") +
             binding("Hold East / B", "Abort · 0.45 seconds", "controls-red") +
@@ -722,19 +694,23 @@ void collectSharedUtilityModals()
             binding("Space", "Drill · rig also uses left click") +
             binding("Left click", "Fire EVA weapon") +
             binding("E / T", "Scan / tether") +
-            binding("R / F", "Stow payload / enter or exit rig") +
+            binding("F", "Enter or exit rig") +
+            binding("O", "Drone Ops at ship") +
+            binding("Q / R", "Repair drill / Rig or suit at ship") +
             binding("G", "Depart from ship")) +
         "</div><div class=\"controls-footer\"><p>Menu opens Pause. View opens Map in menus, orbit, and flight. North opens Inventory in menus.</p>" +
         modalButton("Controller settings", ui::modals::settings, "ghost") + "</div></div>";
     const std::string systemMenuBody =
-        "<div class=\"modal-actions action-row system-menu-actions\">"
-        "<button type=\"button\" class=\"ok rr-text-button\" data-ui-close-modal=\"1\" data-controller-resume=\"1\" "
-        "data-ui-focus-id=\"system:resume\" data-ui-default-focus=\"1\"><span class=\"rr-button-label\">Resume</span></button>" +
+        "<div class=\"system-menu-actions\">"
+        "<button type=\"button\" class=\"ok rr-text-button system-resume\" data-ui-close-modal=\"1\" data-controller-resume=\"1\" "
+        "data-ui-focus-id=\"system:resume\" data-ui-default-focus=\"1\"><span class=\"rr-button-label\">Resume</span></button>"
+        "<div class=\"system-menu-row\">" +
         modalButton("Controls", "controls", "ghost") +
         modalButton("Settings", ui::modals::settings, "ghost") +
+        "</div><div class=\"system-menu-row\">" +
         modalButton("Map", ui::modals::map, "ghost") +
         modalButton("Inventory", ui::modals::inventory, "ghost") +
-        "</div>";
+        "</div></div>";
     const std::string resetBody =
         "<p class=\"modal-intro\">This permanently clears campaign progress and starts a new save.</p>"
         "<div class=\"modal-actions action-row\">"
@@ -1413,40 +1389,6 @@ std::string scenarioObjectiveMarkup(
     return out.str();
 }
 
-std::string droneMissionStripMarkup(
-    const ScenarioObjectivePresentation& objective,
-    std::string_view instruction)
-{
-    if (!objective.available) {
-        return {};
-    }
-
-    std::ostringstream out;
-    const std::string displayState = scenarioObjectiveDisplayStateLabel(objective);
-    const int displayCurrent = scenarioObjectiveDisplayCurrent(objective);
-    out << "<section class=\"drone-mission-strip scenario-objective "
-        << scenarioObjectiveStateClass(objective.state)
-        << "\" data-scenario-id=\"" << htmlEscape(objective.scenarioId)
-        << "\" data-scenario-step-id=\"" << htmlEscape(objective.stepId)
-        << "\" data-objective-state=\"" << htmlEscape(displayState) << "\">"
-        << "<div class=\"drone-mission-identity\"><span>" << htmlEscape(objective.location)
-        << "</span><em>" << htmlEscape(displayState) << "</em></div>"
-        << "<strong class=\"drone-mission-title\">" << htmlEscape(objective.title) << "</strong>";
-    if (objective.required > 0) {
-        out << "<div class=\"drone-mission-progress\" aria-label=\""
-            << htmlEscape(std::to_string(displayCurrent) + " of " + std::to_string(objective.required) +
-                (objective.returnPending ? ", pending return" : ""))
-            << "\"><b>" << std::clamp(displayCurrent, 0, objective.required) << "/"
-            << objective.required
-            << (objective.returnPending ? " // PENDING RETURN" : "")
-            << "</b></div>";
-    }
-    out << "<p class=\"drone-mission-instruction\">" << htmlEscape(instruction)
-        << "</p><small class=\"drone-mission-reward\">" << htmlEscape(objective.rewardPreview)
-        << "</small></section>";
-    return out.str();
-}
-
 std::string scenarioObjectiveModal(const ScenarioObjectivePresentation& objective)
 {
     if (!objective.available || objective.state == ScenarioStepState::Complete) {
@@ -1848,86 +1790,6 @@ std::string surfaceUpgradeCard(const SurfaceUpgradeCardPresentation& upgrade, bo
     out << "</div>";
     out << "<div class=\"draft-card-footer action-row\"><span>TRANSPORT EXPEDITION</span>"
         << panelButton(upgrade.action, defaultFocus) << "</div></article>";
-    return out.str();
-}
-
-std::string miniDroneControlCard(const MiniDroneCardPresentation& drone, bool defaultFocus = false)
-{
-    std::ostringstream out;
-    out << "<article class=\"drone-control-card " << rarityCardClass(drone.rarity) << "\">";
-    out << "<div class=\"drone-card-head\"><span class=\"drone-role-mark\">"
-        << htmlEscape(drone.role.empty() ? "D" : std::string(1, drone.role.front())) << "</span>"
-        << "<div class=\"drone-card-id\"><div class=\"card-topline\"><span>" << htmlEscape(drone.role)
-        << "</span><span>" << htmlEscape(drone.rarity) << "</span></div>"
-        << "<h3 class=\"card-title\">" << htmlEscape(drone.title) << "</h3></div></div>";
-    out << "<p class=\"card-copy drone-control-status\">" << htmlEscape(drone.status) << "</p>";
-    out << "<p class=\"card-copy drone-card-summary\">" << htmlEscape(drone.detail) << "</p>";
-    out << "<div class=\"card-footer action-row\">"
-        << modalButton("Details", droneDetailsModalId(drone.index), "ghost", defaultFocus && !drone.action.enabled)
-        << panelButton(drone.action, defaultFocus) << "</div></article>";
-    return out.str();
-}
-
-std::string droneDetailsModalBody(const MiniDroneCardPresentation& drone)
-{
-    std::ostringstream out;
-    out << "<section class=\"drone-details-modal modal-body\">"
-        << "<header class=\"drone-details-summary\"><span class=\"ui-kicker\">"
-        << htmlEscape(drone.role) << " // " << htmlEscape(drone.rarity) << " FRAME</span>"
-        << "<h3>" << htmlEscape(drone.title) << "</h3><p class=\"drone-details-status\">"
-        << htmlEscape(drone.status) << "</p></header>"
-        << "<section class=\"drone-detail-section\"><h3>Operational profile</h3><p>"
-        << htmlEscape(drone.detail) << "</p></section>"
-        << "<section class=\"drone-detail-section\"><h3>Capabilities</h3>"
-        << "<div class=\"stat-grid chip-strip\">" << resourceChipGrid(drone.effectChips) << "</div></section>"
-        << "<section class=\"drone-detail-section\"><h3>Expedition progression</h3><p class=\"drone-details-upgrade\">"
-        << htmlEscape(drone.upgradeSummary) << "</p></section>"
-        << "<section class=\"drone-detail-section\"><h3>Build contribution</h3><p>"
-        << htmlEscape(drone.buildHook) << "</p></section>"
-        << "<div class=\"modal-actions action-row drone-details-actions\">"
-        << panelButton(drone.action, true);
-    out << "</div></section>";
-    return out.str();
-}
-
-std::string droneSynergyModalBody(const DroneOpsPresentation& presentation)
-{
-    std::ostringstream out;
-    out << "<section class=\"drone-synergy-modal modal-body\">"
-        << "<header class=\"drone-synergy-summary\"><span class=\"ui-kicker\">CURRENT BUILD</span>"
-        << "<h3>" << htmlEscape(presentation.buildTitle) << "</h3>"
-        << "<p>" << htmlEscape(presentation.buildDetail) << "</p>"
-        << "<div class=\"stat-grid chip-strip\">" << resourceChipGrid(presentation.buildChips) << "</div></header>"
-        << "<div class=\"drone-synergy-list\">";
-    for (const DroneBuildRecipePresentation& recipe : presentation.buildRecipes) {
-        out << "<article class=\"drone-synergy-row" << (recipe.active ? " active" : "")
-            << (recipe.signature ? " signature" : "") << "\"><div class=\"recipe-topline\"><strong>"
-            << htmlEscape(recipe.title) << "</strong><span>" << htmlEscape(recipe.active ? "ACTIVE" : recipe.status)
-            << "</span></div><p class=\"drone-synergy-requirements\">"
-            << htmlEscape(recipe.requirements) << "</p><p>" << htmlEscape(recipe.detail) << "</p></article>";
-    }
-    out << "</div></section>";
-    return out.str();
-}
-
-std::string droneLoadoutSlotCard(const DroneLoadoutSlotPresentation& slot)
-{
-    std::ostringstream out;
-    out << "<article class=\"drone-loadout-slot " << htmlEscape(slot.cssClass)
-        << "\" data-drone-slot-index=\"" << std::max(0, slot.slot - 1) << "\">";
-    out << "<div class=\"slot-card-head\"><span class=\"slot-number\">" << htmlEscape(std::to_string(slot.slot))
-        << "</span>";
-    if (!slot.action.label.empty()) {
-        out << panelButton(slot.action);
-    } else {
-        out << "<strong class=\"slot-state\">" << htmlEscape(slot.status) << "</strong>";
-    }
-    out << "</div>";
-    out << "<div class=\"slot-card-content\"><div class=\"slot-card-body\"><h3 class=\"card-title\">"
-        << htmlEscape(slot.title) << "</h3>";
-    out << "<p class=\"card-copy slot-role\">" << htmlEscape(slot.role) << "</p></div>";
-    out << "<div class=\"stat-grid chip-strip\">" << resourceChipGrid(slot.chips) << "</div></div>";
-    out << "</article>";
     return out.str();
 }
 
@@ -2716,38 +2578,31 @@ std::string buildGamePanelMarkup(
     const PanelLayoutMode layoutMode = panelLayoutMode(state.screen);
 
     std::ostringstream out;
-    std::ostringstream settingsBody;
-    std::vector<DetailPresentationRow> settingsDetails {
-        detailPresentationRow(text::panel::details::keyboard, text::panel::details::keyboardValue),
-        detailPresentationRow(text::panel::details::save, context.saveDescription),
-        detailPresentationRow(text::panel::details::build, context.renderDescription),
-    };
-    settingsDetails.push_back(detailPresentationRow(
-        "Controller",
-        std::string_view("Left stick or D-pad navigates menus; Confirm selects; Back returns; Menu pauses. Confirm and Back follow controller settings. At the landed ship, D-pad Up opens Drone Ops, Right waits for drones, and held Down departs; Left opens panel focus.")));
-    settingsBody << detailStack(settingsDetails);
-    settingsBody << "<h3>Missions</h3><p>Click the mission heading or press right-stick click to fold or open the tracker. It starts folded on management screens. Open Missions for ordered requirements and rewards. After Mars, accept routine assignments there. Track mission changes guidance without engaging cruise. A manual waypoint stays selected until Return to mission.</p>";
-    settingsBody << "<section class=\"settings-control\" data-resolution-settings>"
-        << "<div><h3>" << htmlEscape("Display resolution") << "</h3>"
-        << "<p>" << htmlEscape("Choose the render target. Auto follows the current display and pixel density.") << "</p></div>"
-        << "<label><span>" << htmlEscape("Resolution") << "</span>"
-        << "<select data-resolution-select data-ui-focus-id=\"setting:resolution\" data-ui-default-focus=\"1\" aria-label=\"Display resolution\">"
+    std::ostringstream displaySettingsBody;
+    std::ostringstream controlsSettingsBody;
+    std::ostringstream gameplaySettingsBody;
+    std::ostringstream developerSettingsBody;
+    displaySettingsBody << "<section class=\"settings-control\" data-resolution-settings>"
+        << "<div><h3>" << htmlEscape("Resolution") << "</h3>"
+        << "<p>" << htmlEscape("Auto follows your display.") << "</p></div>"
+        << "<label class=\"settings-control-field\">"
+        << "<select data-resolution-select data-ui-focus-id=\"setting:resolution\" aria-label=\"Display resolution\">"
         << "<option value=\"auto\">Auto (display)</option>"
         << "<option value=\"1280x800\">1280 x 800 (Steam Deck)</option>"
         << "<option value=\"1920x1080\">1920 x 1080</option>"
         << "<option value=\"2560x1440\">2560 x 1440</option>"
         << "<option value=\"3840x2160\">3840 x 2160</option>"
         << "</select></label></section>";
-    settingsBody << "<section class=\"settings-control\" data-desktop-fullscreen-settings>"
+    displaySettingsBody << "<section class=\"settings-control\" data-desktop-fullscreen-settings>"
         << "<div><h3>" << htmlEscape("Fullscreen") << "</h3>"
-        << "<p>" << htmlEscape("Use the entire display. Native builds also support F11 and Alt+Enter.") << "</p></div>"
+        << "<p>" << htmlEscape("Use the entire display.") << "</p></div>"
         << "<button class=\"settings-toggle rr-text-button\" data-desktop-fullscreen-toggle=\"1\" data-ui-focus-id=\"setting:fullscreen\">"
         << "<span class=\"rr-button-label\">" << htmlEscape("Enter fullscreen") << "</span></button></section>";
-    settingsBody << "<section class=\"settings-control\" data-frame-limit-settings>"
+    displaySettingsBody << "<section class=\"settings-control\" data-frame-limit-settings>"
         << "<div><h3>" << htmlEscape("Frame rate") << "</h3>"
-        << "<p>" << htmlEscape("Choose stable, refresh-compatible pacing. Auto Power uses full refresh on external power and half refresh on battery.") << "</p>"
+        << "<p>" << htmlEscape("Auto Power adapts to battery or external power.") << "</p>"
         << "<p id=\"frame-limit-status\" data-frame-limit-status>" << htmlEscape("Auto Power status is loading.") << "</p></div>"
-        << "<label><span>" << htmlEscape("Frame limit") << "</span>"
+        << "<label class=\"settings-control-field\">"
         << "<select data-frame-limit-select data-ui-focus-id=\"setting:frame_limit\" aria-label=\"Frame rate limit\">"
         << "<option value=\"platform_default\">Platform default</option>"
         << "<option value=\"smooth60\">Smooth (60 FPS)</option>"
@@ -2756,10 +2611,10 @@ std::string buildGamePanelMarkup(
         << "<option value=\"display\">Display refresh</option>"
         << "<option value=\"auto_power\">Auto Power</option>"
         << "</select></label></section>";
-    settingsBody << "<section class=\"settings-control\" data-game-speed-settings>"
+    developerSettingsBody << "<section class=\"settings-control\" data-game-speed-settings>"
         << "<div><h3>" << htmlEscape("Game speed") << "</h3>"
         << "<p>" << htmlEscape("Local testing multiplier. Shared builds start at 1x.") << "</p></div>"
-        << "<label><span>" << htmlEscape("Multiplier") << "</span>"
+        << "<label class=\"settings-control-field\">"
         << "<select data-game-speed-select data-ui-focus-id=\"setting:game_speed\" aria-label=\"Game speed multiplier\">"
         << "<option value=\"0.5\">0.5x</option>"
         << "<option value=\"1\">1x</option>"
@@ -2769,59 +2624,77 @@ std::string buildGamePanelMarkup(
         << "<option value=\"5\">5x</option>"
         << "<option value=\"8\">8x</option>"
         << "</select></label></section>";
-    settingsBody << "<section class=\"settings-control\" data-help-settings>"
+    gameplaySettingsBody << "<section class=\"settings-control\" data-help-settings>"
         << "<div><h3>" << htmlEscape("First-time introductions") << "</h3>"
-        << "<p>" << htmlEscape("Show a short briefing the first time a new mission activity becomes available.") << "</p></div>"
+        << "<p>" << htmlEscape("Briefings when an activity first unlocks.") << "</p></div>"
         << "<button class=\"settings-toggle rr-text-button\" data-help-toggle=\"1\" data-ui-focus-id=\"setting:mission_help\">"
         << "<span class=\"rr-button-label\">" << htmlEscape(context.firstTimeIntroductionsEnabled ? "Hide introductions" : "Show introductions") << "</span></button></section>";
-    settingsBody << "<section class=\"settings-control\" data-camera-shake-settings>"
+    gameplaySettingsBody << "<section class=\"settings-control\" data-camera-shake-settings>"
         << "<div><h3>" << htmlEscape("Camera shake") << "</h3>"
-        << "<p>" << htmlEscape("Keep impact and drilling screen shake enabled, or disable it for comfort.") << "</p></div>"
+        << "<p>" << htmlEscape("Impact and drilling motion.") << "</p></div>"
         << "<button class=\"settings-toggle rr-text-button\" data-camera-shake-toggle=\"1\" data-ui-focus-id=\"setting:camera_shake\">"
         << "<span class=\"rr-button-label\">" << htmlEscape("Disable camera shake") << "</span></button></section>";
-    settingsBody << "<section class=\"settings-control\" data-keyboard-drill-mode-settings>"
+    controlsSettingsBody << "<section class=\"settings-control\" data-keyboard-drill-mode-settings>"
         << "<div><h3>" << htmlEscape("Keyboard drill mode") << "</h3>"
-        << "<p>" << htmlEscape("Toggle avoids holding Space. Hold drills only while Space remains pressed. Mouse and controller always use hold.") << "</p></div>"
-        << "<label><span>" << htmlEscape("Space key") << "</span>"
+        << "<p>" << htmlEscape("How Space operates the Rig drill.") << "</p></div>"
+        << "<label class=\"settings-control-field\">"
         << "<select data-keyboard-drill-mode-select data-ui-focus-id=\"setting:keyboard_drill_mode\" aria-label=\"Keyboard drill mode\">"
         << "<option value=\"toggle\">Toggle (default)</option><option value=\"hold\">Hold</option>"
         << "</select></label></section>";
-    settingsBody << "<section class=\"settings-control\" data-controller-prompt-settings>"
+    controlsSettingsBody << "<section class=\"settings-control\" data-controller-prompt-settings>"
         << "<div><h3>" << htmlEscape("Controller prompts") << "</h3>"
-        << "<p>" << htmlEscape("Auto follows the active controller. Override labels if the detected family is wrong.") << "</p></div>"
-        << "<label><span>" << htmlEscape("Button labels") << "</span>"
+        << "<p>" << htmlEscape("Override labels if auto detection is wrong.") << "</p></div>"
+        << "<label class=\"settings-control-field\">"
         << "<select data-controller-prompt-select data-ui-focus-id=\"setting:controller_prompt\" aria-label=\"Controller prompt family\">"
         << "<option value=\"auto\">Auto detect</option><option value=\"xbox\">Xbox</option>"
         << "<option value=\"playstation\">PlayStation</option><option value=\"steamdeck\">Steam Deck</option>"
         << "<option value=\"generic\">Generic</option></select></label></section>";
-    settingsBody << "<section class=\"settings-control\" data-controller-deadzone-settings>"
+    controlsSettingsBody << "<section class=\"settings-control\" data-controller-deadzone-settings>"
         << "<div><h3>" << htmlEscape("Stick deadzone") << "</h3>"
-        << "<p>" << htmlEscape("Raise this if a resting stick drifts. Lower it for faster response.") << "</p></div>"
-        << "<label><span>" << htmlEscape("Deadzone") << "</span>"
+        << "<p>" << htmlEscape("Raise this if a resting stick drifts.") << "</p></div>"
+        << "<label class=\"settings-control-field\">"
         << "<select data-controller-deadzone-select data-ui-focus-id=\"setting:controller_deadzone\" aria-label=\"Controller stick deadzone\">"
         << "<option value=\"0.10\">10%</option><option value=\"0.15\">15%</option><option value=\"0.20\">20% (default)</option>"
         << "<option value=\"0.25\">25%</option><option value=\"0.30\">30%</option><option value=\"0.35\">35%</option>"
         << "</select></label></section>";
-    settingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Invert flight Y") << "</h3>"
+    controlsSettingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Invert flight Y") << "</h3>"
         << "<p>" << htmlEscape("Reverse vertical stick input during flight.") << "</p></div>"
         << "<button class=\"settings-toggle rr-text-button\" data-controller-invert-toggle=\"1\" data-ui-focus-id=\"setting:controller_invert\"><span class=\"rr-button-label\">Enable inverted Y</span></button></section>";
-    settingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Confirm / cancel") << "</h3>"
-        << "<p>" << htmlEscape("Swap the positional South and East buttons for menu confirm and cancel.") << "</p></div>"
+    controlsSettingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Confirm / cancel") << "</h3>"
+        << "<p>" << htmlEscape("Swap South and East in menus.") << "</p></div>"
         << "<button class=\"settings-toggle rr-text-button\" data-controller-swap-toggle=\"1\" data-ui-focus-id=\"setting:controller_swap\"><span class=\"rr-button-label\">Swap confirm and cancel</span></button></section>";
-    settingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Controller vibration") << "</h3>"
-        << "<p>" << htmlEscape("Use supported controller haptics for impacts, drilling contact, and alerts.") << "</p></div>"
+    controlsSettingsBody << "<section class=\"settings-control\"><div><h3>" << htmlEscape("Controller vibration") << "</h3>"
+        << "<p>" << htmlEscape("Haptics for impacts, drilling, and alerts.") << "</p></div>"
         << "<button class=\"settings-toggle rr-text-button\" data-controller-vibration-toggle=\"1\" data-ui-focus-id=\"setting:controller_vibration\"><span class=\"rr-button-label\">Disable vibration</span></button></section>";
-    settingsBody << "<section class=\"settings-control\" data-debug-tools-settings>"
+    developerSettingsBody << "<section class=\"settings-control\" data-debug-tools-settings>"
         << "<div><h3>" << htmlEscape("Debug screens") << "</h3>"
         << "<p>" << htmlEscape("Show isolated board, flight, and Mining checks. Debug sessions do not write campaign saves.") << "</p></div>"
         << "<button class=\"settings-toggle rr-text-button\" data-debug-tools-toggle=\"1\" data-ui-focus-id=\"setting:debug_tools\">"
         << "<span class=\"rr-button-label\">" << htmlEscape("Show debug tools") << "</span></button></section>";
-    settingsBody << "<section class=\"settings-control\" data-performance-stats-settings>"
+    developerSettingsBody << "<section class=\"settings-control\" data-performance-stats-settings>"
         << "<div><h3>" << htmlEscape("Performance diagnostics") << "</h3>"
         << "<p>" << htmlEscape("Show FPS, frame pacing, CPU stage timings, drawable size, and scene rendering counters.") << "</p></div>"
         << "<button class=\"settings-toggle rr-text-button\" data-performance-stats-toggle=\"1\" data-ui-focus-id=\"setting:performance_stats\">"
         << "<span class=\"rr-button-label\">" << htmlEscape("Show performance stats") << "</span></button></section>";
-    settingsBody << "<div class=\"modal-actions action-row\">";
+    developerSettingsBody << "<div class=\"settings-technical\">"
+        << detailStack({
+            detailPresentationRow(text::panel::details::save, context.saveDescription),
+            detailPresentationRow(text::panel::details::build, context.renderDescription),
+        }) << "</div>";
+    collectModal({"developer_options", "Developer options", developerSettingsBody.str()});
+
+    std::ostringstream settingsBody;
+    settingsBody << "<div class=\"settings-shell\">"
+        << "<div class=\"settings-tabs\" role=\"tablist\" aria-label=\"Settings categories\">"
+        << "<button class=\"settings-tab rr-text-button\" data-settings-tab=\"display\" data-rr-action=\"ui:settings_tab:display\" data-ui-focus-id=\"settings-tab:display\" data-ui-default-focus=\"1\" role=\"tab\"><span class=\"rr-button-label\">Display</span></button>"
+        << "<button class=\"settings-tab rr-text-button\" data-settings-tab=\"controls\" data-rr-action=\"ui:settings_tab:controls\" data-ui-focus-id=\"settings-tab:controls\" role=\"tab\"><span class=\"rr-button-label\">Controls</span></button>"
+        << "<button class=\"settings-tab rr-text-button\" data-settings-tab=\"gameplay\" data-rr-action=\"ui:settings_tab:gameplay\" data-ui-focus-id=\"settings-tab:gameplay\" role=\"tab\"><span class=\"rr-button-label\">Gameplay</span></button>"
+        << "</div><div class=\"settings-page-scroll\">"
+        << "<div class=\"settings-page\" data-settings-page=\"display\">" << displaySettingsBody.str() << "</div>"
+        << "<div class=\"settings-page\" data-settings-page=\"controls\">" << controlsSettingsBody.str() << "</div>"
+        << "<div class=\"settings-page\" data-settings-page=\"gameplay\">" << gameplaySettingsBody.str() << "</div>"
+        << "</div><div class=\"settings-footer\">"
+        << modalButton("Developer options", "developer_options", "ghost");
     for (const PanelButtonPresentation& action : settingsActionPresentation()) {
         if (action.actionId == ui::actions::resetSave) {
             if (context.titleScreenActive && !context.hasSavedGame) {
@@ -2832,7 +2705,7 @@ std::string buildGamePanelMarkup(
             settingsBody << panelButton(action);
         }
     }
-    settingsBody << "</div>";
+    settingsBody << "</div></div>";
 
     if (context.titleScreenActive) {
         out << "<section class=\"title-screen"
@@ -2959,6 +2832,8 @@ std::string buildGamePanelMarkup(
         << "<div class=\"panel-head-actions\">";
     if (state.screen != Screen::Mining &&
         !context.surfaceArrivalActive && !surfaceDescentForContext(context)) {
+        if (state.screen == Screen::DroneOps && state.run.expedition.travelInitialized)
+            out << button("Missions", "expedition:missions", "ghost");
         out << modalButton("Map", ui::modals::map, "ghost")
             << modalButton("Inventory", ui::modals::inventory, "ghost");
         out << modalButton("Menu", "system_menu", "ghost");
@@ -3550,147 +3425,118 @@ std::string buildGamePanelMarkup(
     }
 
     if (state.screen == Screen::DroneOps) {
-        DroneOpsPresentation dronePanel = droneOpsPresentation(state, catalog);
-        const auto acceptance = solarMissionAcceptanceForBody(state, catalog, state.run.expedition.location.bodyId);
-        const std::string hazardMission = hazardDroneMissionMarkup(context, false, true);
-        const bool commissionDefault = !hazardMission.empty() && acceptance.available;
-        const auto& mining = state.run.mining;
-        if (state.run.expedition.travelInitialized) {
-            dronePanel.backAction.label = mining.active ? "Return to Mining"
+        const auto picker = dronePickerPresentation(state, catalog, context.droneSelection);
+        const auto& selection = picker.selection;
+        auto dronePanel = droneOpsPresentation(state, catalog);
+        if (state.run.expedition.travelInitialized)
+            dronePanel.backAction.label = state.run.mining.active ? "Return to Mining"
                 : operationalHomeDocked(state.run.expedition) ? "Return to Dock" : "Resume Flight";
-        }
-        const Destination& droneDestination = currentDestination(state, catalog);
-        const ScenarioObjectivePresentation physicalMission = state.run.expedition.travelInitialized
-            ? solarMissionObjectiveForBody(state, catalog, state.run.expedition.location.bodyId)
-            : ScenarioObjectivePresentation{};
-        ScenarioObjectivePresentation droneScenario = physicalMission.available ? physicalMission
-            : scenarioObjectiveForDestination(state, catalog, droneDestination.id);
-        if (!physicalMission.available && droneDestination.id == content::destination::mars) {
-            const ScenarioObjectivePresentation bayExpansion = scenarioObjectivePresentation(
-                state,
-                catalog,
-                content::scenario::marsBayExpansion,
-                "delivery");
-            if (bayExpansion.available) {
-                droneScenario = bayExpansion;
-            }
-        }
-        const ScenarioDefinition* droneScenarioDefinition = droneScenario.available
-            ? findScenarioDefinition(catalog, droneScenario.scenarioId)
-            : nullptr;
-        const ScenarioStepDefinition* droneScenarioStep = droneScenarioDefinition == nullptr
-            ? nullptr
-            : findScenarioStepDefinition(*droneScenarioDefinition, droneScenario.stepId);
-        const MiningSiteDefinition* requiredSite = droneScenarioStep == nullptr ||
-                droneScenarioStep->miningSiteDefinitionId.empty()
-            ? nullptr
-            : findMiningSiteDefinition(catalog, droneScenarioStep->miningSiteDefinitionId);
-        const bool recoveryNeedsHazard = requiredSite != nullptr && std::any_of(
-            requiredSite->cocoon.layers.begin(),
-            requiredSite->cocoon.layers.end(),
-            [](const MiningCocoonLayerDefinition& layer) { return layer.requiredHazardMark > 0; });
-        const bool hazardEquipped = std::any_of(
-            state.meta.equippedDroneIds.begin(),
-            state.meta.equippedDroneIds.end(),
-            [&](const std::string& equippedId) {
-                const auto found = std::find_if(
-                    catalog.miniDrones.begin(),
-                    catalog.miniDrones.end(),
-                    [&](const MiniDrone& drone) { return drone.id == equippedId; });
-                return found != catalog.miniDrones.end() && found->role == MiniDroneRole::Hazard;
-            });
-        const bool hazardSwapRequired = recoveryNeedsHazard && !hazardEquipped;
-        out << "<section class=\"phase-board phase-board-drone-ops drone-workspace\" data-panel-mode=\"drone-workspace\">";
-        out << "<div class=\"drone-workspace-toolbar\"><div class=\"drone-workspace-heading\">"
-            << "<span class=\"ui-kicker\">" << htmlEscape("MINING SUPPORT WORKSPACE") << "</span>"
-            << "<h2>" << htmlEscape("Configure your loadout") << "</h2>"
-            << "<p>" << htmlEscape("Assign owned Support Drone frames or build paid copies into open slots. Every change saves immediately.") << "</p></div>"
-            << "<div class=\"utility-row utility-actions drone-workspace-actions\">" << modalButton(text::buttons::details, ui::modals::surface, "ghost")
-            << modalButton("Synergies", ui::modals::droneSynergies, "ghost")
-            << panelButton(dronePanel.backAction, !commissionDefault && dronePanel.drones.empty()) << "</div></div>";
-        std::string droneMissionInstruction = droneScenario.detail;
-        if (droneScenarioStep != nullptr &&
-            droneScenarioStep->completionEvent == ScenarioEventKind::SafeMaterialDelivered) {
-            constexpr std::string_view noSecondDroneRequired = "No second Support Drone is required.";
-            const std::string missionQualifier =
-                droneScenario.detail.find(noSecondDroneRequired) != std::string::npos
-                ? "No second Support Drone is required. // "
-                : "";
-            const int commonAboard = scenarioCommonAboard(state, droneDestination.id);
-            if (droneScenario.state == ScenarioStepState::Complete) {
-                droneMissionInstruction = missionQualifier
-                    + "OBJECTIVE COMPLETE // The configured reward is claimed. Open slots remain your choice.";
-            } else if (commonAboard > 0) {
-                droneMissionInstruction = missionQualifier + std::to_string(commonAboard)
-                    + " COMMON ABOARD // RETURN TO SURFACE OPS, THEN EXTRACT SAFELY.";
-            } else {
-                droneMissionInstruction = missionQualifier + "SAFE COLLECTION REQUIRED // Mine "
-                    + std::to_string(droneScenario.required)
-                    + " Common Ore, then return to ship.";
-            }
-        }
-        if (!hazardMission.empty()) {
-            out << hazardMission;
-        }
-        if (droneScenario.available && !commissionDefault) {
-            out << droneMissionStripMarkup(droneScenario, droneMissionInstruction);
-        }
-        if (hazardSwapRequired && hazardMission.empty()) {
-            out << "<section class=\"phase-advisory warn scenario-hazard-swap-objective\">"
-                << "<strong>RECOVERY LOADOUT // EQUIP HAZARD SUPPORT</strong>"
-                << "<span>The active site needs a Hazard Drone. Free a slot, then assign a qualified frame before returning.</span>"
-                << "</section>";
-        }
-        const std::vector<PanelMetricPresentation> droneBayChips {
-            dronePanel.metrics.size() > 0 ? dronePanel.metrics[0] : panelMetric("Slots", "0/0"),
-            panelMetric("Owned types", dronePanel.metrics.size() > 1 ? dronePanel.metrics[1].value : "0"),
-            panelMetric("Common", dronePanel.metrics.size() > 2 ? dronePanel.metrics[2].value : "0"),
-            panelMetric("Rare", dronePanel.metrics.size() > 3 ? dronePanel.metrics[3].value : "0"),
-            panelMetric("Exotic", dronePanel.metrics.size() > 4 ? dronePanel.metrics[4].value : "0"),
-            panelMetric("Next slot", dronePanel.nextSlotCost)
-        };
-        out << "<div class=\"drone-top-row\">";
-        out << "<section class=\"resource-bank drone-bay-strip\"><div class=\"drone-bay-copy\"><span class=\"ui-kicker\">"
-            << htmlEscape("BAY STATUS") << "</span><h2>" << htmlEscape("Drone Bay")
-            << "</h2><p>" << htmlEscape("Capacity, owned frames, and material reserves.") << "</p></div>"
-            << "<div class=\"stat-grid chip-strip drone-bay-stats\">" << resourceChipGrid(droneBayChips) << "</div>"
-            << panelButton(dronePanel.upgradeSlotAction) << "</section>";
-        out << "</div>";
-        out << "<div class=\"drone-workspace-main\">";
-        out << "<section class=\"board-primary drone-roster\"><div class=\"section-heading\"><div><span class=\"ui-kicker\">"
-            << htmlEscape("AVAILABLE FRAMES") << "</span><h2>" << htmlEscape("Drone controls")
-            << "</h2></div><p>" << htmlEscape("Assign owned frames and inspect expedition grafts or synergies.") << "</p></div><div class=\"drone-control-grid drone-controller-choice-row\">";
-        for (std::size_t index = 0; index < dronePanel.drones.size(); ++index) {
-            out << miniDroneControlCard(dronePanel.drones[index], !commissionDefault && index == 0);
+        dronePanel.backAction.cssClass = "ghost";
+        const auto acceptance = solarMissionAcceptanceForBody(state, catalog, state.run.expedition.location.bodyId);
+        out << "<section class=\"phase-board phase-board-drone-ops drone-workspace drone-picker-workspace\" data-panel-mode=\"drone-workspace\">";
+        out << "<section class=\"drone-equipped\"><div class=\"drone-equipped-heading\"><h2>Loadout <span>"
+            << state.meta.equippedDroneIds.size() << " / " << state.meta.droneBaySlots << " equipped</span></h2>";
+        if (state.meta.droneBaySlots >= 2 && state.meta.droneBaySlots < 6)
+            out << button("Expand bay", "drone_view:expand", "ghost");
+        else if (!picker.expansionRequirement.empty())
+            out << "<p>" << htmlEscape(picker.expansionRequirement) << "</p>";
+        out << "</div><div class=\"drone-slot-strip\">";
+        for (int slot = 0; slot < state.meta.droneBaySlots; ++slot) {
+            const MiniDrone* drone = slot < static_cast<int>(state.meta.equippedDroneIds.size())
+                ? catalog.findMiniDrone(state.meta.equippedDroneIds[slot]) : nullptr;
+            const std::string action = std::string(ui::actions::selectDroneSlotPrefix) + std::to_string(slot);
+            out << "<button type=\"button\" class=\"drone-slot-choice " << (slot == selection.slot ? "is-selected" : "")
+                << "\" data-rr-action=\"" << action << "\" data-ui-focus-id=\"action:" << action
+                << "\" aria-pressed=\"" << (slot == selection.slot ? "true" : "false") << "\">"
+                << "<span class=\"drone-slot-number\">" << slot + 1 << "</span><span>"
+                << htmlEscape(drone ? std::string(toString(drone->role)) + " / Mk " + runUpgradeRankLabel(expeditionDroneRank(state, drone->id)) : "Empty +")
+                << "</span></button>";
         }
         out << "</div></section>";
-        out << "<section class=\"board-primary drone-loadout-bench\"><div class=\"section-heading\"><div><span class=\"ui-kicker\">"
-            << htmlEscape("NEXT DEPLOYMENT") << "</span><h2>" << htmlEscape("Active loadout")
-            << "</h2></div><p>" << htmlEscape("These Support Drones deploy with the Mining Rig.") << "</p></div><div class=\"drone-loadout-grid drone-controller-loadout-row\">";
-        for (std::size_t slotIndex = 0; slotIndex < dronePanel.loadoutSlots.size(); ++slotIndex) {
-            if (slotIndex % 2 == 0) {
-                out << "<div class=\"drone-loadout-row\">";
+        // Only capability requirements belong here; mission progress lives in Missions.
+        const auto objective = state.run.expedition.travelInitialized
+            ? solarMissionObjectiveForBody(state, catalog, state.run.expedition.location.bodyId)
+            : scenarioObjectiveForDestination(state, catalog, currentDestination(state, catalog).id);
+        const auto* definition = objective.available ? findScenarioDefinition(catalog, objective.scenarioId) : nullptr;
+        const auto* step = definition ? findScenarioStepDefinition(*definition, objective.stepId) : nullptr;
+        const auto* site = step && !step->miningSiteDefinitionId.empty() ? findMiningSiteDefinition(catalog, step->miningSiteDefinitionId) : nullptr;
+        int requiredRank = 0;
+        if (site) for (const auto& layer : site->cocoon.layers) requiredRank = std::max(requiredRank, layer.requiredHazardMark);
+        if (requiredRank > 0) {
+            int equippedRank = 0;
+            for (const auto& id : state.meta.equippedDroneIds) {
+                const auto* drone = catalog.findMiniDrone(id);
+                if (drone && drone->role == MiniDroneRole::Hazard) equippedRank = std::max(equippedRank, expeditionDroneRank(state, id));
             }
-            out << droneLoadoutSlotCard(dronePanel.loadoutSlots[slotIndex]);
-            if (slotIndex % 2 == 1 || slotIndex + 1 == dronePanel.loadoutSlots.size()) {
-                out << "</div>";
-            }
+            out << "<p class=\"drone-requirement\">Hazard Mk " << runUpgradeRankLabel(requiredRank) << " required / "
+                << (equippedRank >= requiredRank ? "Ready" : equippedRank > 0 ? "Higher Mk needed" : "Not equipped") << "</p>";
         }
-        out << "</div></section></div>";
-        out << phaseBoardClose();
-        out << modalTemplate(ui::modals::surface, "Drone Ops Details", detailStack(dronePanel.details));
-        out << modalTemplate(ui::modals::droneSynergies, "Drone Synergies", droneSynergyModalBody(dronePanel));
-        for (const MiniDroneCardPresentation& drone : dronePanel.drones) {
-            out << modalTemplate(
-                droneDetailsModalId(drone.index),
-                drone.title + " Details",
-                droneDetailsModalBody(drone));
+        out << "<div class=\"drone-picker-tabs\" role=\"group\" aria-label=\"Drone availability\">"
+            << button("Available (" + std::to_string(picker.availableCount) + ")", "drone_view:available", !selection.locked ? "is-selected" : "ghost")
+            << button("Locked (" + std::to_string(picker.lockedCount) + ")", "drone_view:locked", selection.locked ? "is-selected" : "ghost") << "</div>";
+        out << "<div class=\"drone-picker-body\"><div class=\"drone-picker-list\" aria-label=\"Choose drone\">";
+        bool any = false;
+        for (const auto& entry : picker.entries) {
+            if (entry.available == selection.locked) continue;
+            any = true;
+            const std::string action = std::string(ui::actions::selectDronePrefix) + std::to_string(entry.index);
+            const bool selected = entry.index == selection.drone && !selection.expansion;
+            const std::string status = !entry.available ? "Locked" : entry.equipped > 0 ? "Equipped " + std::to_string(entry.equipped)
+                : entry.owned > 0 ? "Ready" : "Build";
+            out << "<button type=\"button\" class=\"drone-picker-choice " << (selected ? "is-selected" : "")
+                << "\" data-rr-action=\"" << action << "\" data-drone-preview-action=\"" << action
+                << "\" data-ui-focus-id=\"action:" << action << "\" aria-pressed=\"" << (selected ? "true" : "false") << "\""
+                << (selected ? " data-ui-default-focus=\"1\"" : "") << ">"
+                << "<img src=\"" << entry.art << "\" alt=\"\"/><span class=\"drone-choice-copy\"><strong>"
+                << htmlEscape(entry.name) << "</strong><small>" << htmlEscape(entry.purpose) << "</small><em>"
+                << htmlEscape(status) << "</em></span></button>";
         }
+        if (!any) out << "<p class=\"drone-picker-empty\">" << (selection.locked ? "All drone types unlocked." : "No drones available yet. View Locked to see how to unlock them.") << "</p>";
+        out << "</div><section class=\"drone-preview\" aria-label=\"Selected drone\"><div class=\"drone-preview-scroll\" tabindex=\"0\" data-ui-scroll-region=\"1\" data-ui-focus-id=\"drone-preview-content\" aria-label=\"Drone capabilities and effects\">";
+        if (selection.expansion) {
+            out << "<h2>Unlock slot " << state.meta.droneBaySlots + 1 << "</h2><p>Add one empty slot to your permanent loadout.</p>";
+        } else if (selection.drone >= 0) {
+            const auto& entry = picker.entries[selection.drone];
+            out << "<div class=\"drone-preview-identity\"><img src=\"" << entry.art << "\" alt=\"" << htmlEscape(entry.name)
+                << "\"/><div><span class=\"drone-preview-target\">SLOT " << selection.slot + 1 << "</span><h2>" << htmlEscape(entry.name)
+                << "</h2><p>Mk " << runUpgradeRankLabel(entry.rank) << "</p></div></div><p class=\"drone-preview-purpose\">" << htmlEscape(entry.purpose) << "</p>";
+            if (!entry.available) out << "<p class=\"drone-unlock-requirement\">" << htmlEscape(entry.unlockRequirement) << "</p>";
+            out << "<div class=\"drone-capabilities\">";
+            for (const auto& capability : entry.capabilities)
+                out << "<div><span>" << htmlEscape(capability.label) << "</span><strong>" << htmlEscape(capability.value) << "</strong></div>";
+            out << "</div>";
+            if (entry.available && !picker.alreadyEquipped && entry.owned > entry.equipped)
+                out << "<p class=\"drone-spare-copy\">Owned frame / no material cost</p>";
+            for (const auto& effect : picker.effects)
+                out << "<div class=\"drone-effect\"><strong>" << htmlEscape(effect.label) << "</strong><p>" << htmlEscape(effect.value) << "</p></div>";
+            if (entry.available && entry.rank > 1) out << "<p class=\"drone-rank-note\">Expedition rank applies to every copy of this type.</p>";
+        } else out << "<h2>Choose a drone</h2><p>Select a drone to see its capabilities.</p>";
+        out << "</div><div class=\"drone-preview-actions\">";
+        if (picker.paid) {
+            out << "<p class=\"drone-cost-label\">Materials / owned vs required</p><div class=\"drone-costs\">";
+            for (const auto& balance : picker.balances)
+                out << "<span>" << htmlEscape(balance.label) << " <strong>" << htmlEscape(balance.value) << "</strong></span>";
+            out << "</div>";
+            if (!picker.shortfall.empty()) out << "<p class=\"drone-shortfall\">" << htmlEscape(picker.shortfall) << "</p>";
+        }
+        bool commissioning = false;
+        if (acceptance.available && selection.drone >= 0 && !selection.expansion) {
+            const auto* scenario = findScenarioDefinition(catalog, acceptance.scenarioId);
+            const auto* acceptStep = scenario ? findScenarioStepDefinition(*scenario, acceptance.stepId) : nullptr;
+            if (acceptStep) for (const auto& reward : acceptStep->rewards)
+                if (reward.kind == ScenarioRewardKind::SupportDrone && reward.id == catalog.miniDrones[selection.drone].id) commissioning = true;
+        }
+        if (commissioning) out << button(acceptance.actionLabel,
+            ui::actions::scenarioAction(acceptance.scenarioId, acceptance.stepId, static_cast<int>(acceptance.action)), "ok");
+        else if (picker.alreadyEquipped && !selection.expansion) {
+            out << "<span class=\"drone-equipped-label\">Equipped</span>" << button("Remove", ui::actions::unequipDroneSlot(selection.slot), "ghost");
+        } else out << panelButton(picker.action);
+        out << "</div></section></div><footer class=\"drone-picker-footer\"><p aria-live=\"polite\">"
+            << htmlEscape(state.statusLine) << "</p>" << panelButton(dronePanel.backAction) << "</footer></section>";
         out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
         out << inventoryTemplate(state, catalog);
         return out.str();
     }
-
 
     if (state.screen == Screen::SurfaceExpedition) {
         const SurfaceExpeditionPresentation surfacePanel = planetaryExpeditionPresentation(state, catalog);
@@ -4441,7 +4287,6 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
                 });
         };
         result.runtime.miningTetherAvailable = hasAction(ui::actions::miningTether);
-        result.runtime.miningStowAvailable = hasAction(ui::actions::miningStow);
         result.runtime.miningAbortAvailable = hasAction(ui::actions::miningAbort);
     }
     if (result.metadata.overlay == PanelOverlayKind::FlightInstruments) {
@@ -4524,6 +4369,9 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
     if (stableMessageContext && !messages.pending.empty()
         && std::none_of(result.modals.begin(), result.modals.end(), [](const auto& modal) { return modal.autoOpen; })) {
         const auto eligible = std::find_if(messages.pending.begin(), messages.pending.end(), [&](const auto& occurrence) {
+            // Keep first-time arrival acknowledgements queued while the player
+            // adjusts equipment. Returning delivers them through the usual surface.
+            if (context.state.screen == Screen::DroneOps && occurrence.messageId.starts_with("drone_arrival_")) return false;
             const auto* message = incomingMessage(context.catalog, occurrence.messageId);
             if (!message || (message->context == MessageDeliveryContext::Mining && context.state.screen != Screen::Mining)) return false;
             if (!message->informational) return true;

@@ -9,6 +9,8 @@ namespace {
 Screen expectedScreen(NativeBenchmarkScenario scenario)
 {
     switch (scenario) {
+    case NativeBenchmarkScenario::DroneOps:
+    case NativeBenchmarkScenario::DroneOpsStarter: return Screen::DroneOps;
     case NativeBenchmarkScenario::Title:
     case NativeBenchmarkScenario::Hangar:
     case NativeBenchmarkScenario::ExpeditionDock:
@@ -47,6 +49,10 @@ BenchmarkScenarioSetupResult BenchmarkScenarioDriver::setup(
     }
 
     switch (options.scenario) {
+    case NativeBenchmarkScenario::DroneOps:
+    case NativeBenchmarkScenario::DroneOpsStarter:
+        app.debugShowDroneOps(options.scenario == NativeBenchmarkScenario::DroneOpsStarter ? 1 : 0);
+        break;
     case NativeBenchmarkScenario::MissionScan:
     case NativeBenchmarkScenario::MissionWrongSector:
         app.debugStartSurfaceArrival(0, options.scenario == NativeBenchmarkScenario::MissionScan ? 29 : 30);

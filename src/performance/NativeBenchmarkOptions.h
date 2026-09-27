@@ -24,6 +24,7 @@ enum class NativeBenchmarkScenario {
     ExpeditionMap,
     ExpeditionFlight,
     MissionScan, MissionWrongSector,
+    DroneOps, DroneOpsStarter,
     StraylightReveal, StraylightDocking, StraylightAwakening, StraylightBoarding, StraylightDeparture, StraylightApproach,
 };
 

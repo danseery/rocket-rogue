@@ -473,10 +473,11 @@ inline MiniDroneStats scaledMiniDroneStats(MiniDroneStats stats, int upgradeLeve
 inline std::vector<PanelMetricPresentation> miniDroneChips(
     const MiniDroneStats& stats,
     int upgradeLevel,
-    MiniDroneRole role)
+    MiniDroneRole role,
+    bool includeRank = true)
 {
     std::vector<PanelMetricPresentation> chips;
-    if (upgradeLevel > 1) {
+    if (includeRank && upgradeLevel > 1) {
         chips.push_back(panelMetric("Upgrade", "Mk " + runUpgradeRankLabel(upgradeLevel)));
     }
     if (role == MiniDroneRole::Defense) {

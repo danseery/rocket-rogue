@@ -296,7 +296,7 @@ bool miningExtractionReady(const MiningRunState& mining)
 {
     if (operatorControlled(mining)) {
         // The astronaut can always leave from the mothership service zone.
-        // Cargo and drones that did not physically return are not teleported.
+        // Departure recovers the rig, Support Drones, and all carried cargo.
         return operatorAtReturnZone(mining);
     }
     return rigAtReturnZone(mining);
@@ -2246,35 +2246,47 @@ void ensureMiningMiniDroneAgents(GameState& state, const ContentCatalog& catalog
         return;
     }
 
-    bool appendOnly = mining.miniDrones.size() <= expected.size();
-    for (std::size_t i=0; appendOnly && i<mining.miniDrones.size(); ++i)
-        appendOnly = mining.miniDrones[i].role == expected[i].first &&
-            mining.miniDrones[i].upgradeLevel == expected[i].second;
-    if (!appendOnly) mining.miniDrones.clear();
-    const std::size_t retained = mining.miniDrones.size();
+    // Reconcile by persistent equipment slot, not vector position. A replacement
+    // leaves a hole in the runtime list; rebuilding all agents would erase the
+    // neighboring workers' physical cargo, targets and shield state.
+    auto previous = std::move(mining.miniDrones);
+    // Older in-memory agents may predate explicit slot indices. Their packed
+    // order is still authoritative when commissioning appends a new frame.
+    for (std::size_t i = 0; i < previous.size(); ++i)
+        if (previous[i].equippedFrame < 0) previous[i].equippedFrame = static_cast<int>(i);
+    mining.miniDrones.clear();
+    mining.miniDrones.reserve(expected.size());
+    std::vector<std::size_t> newAgents;
     int roleIndices[6] = {};
-    for (const auto& agent : mining.miniDrones) ++roleIndices[static_cast<int>(agent.role)];
-    for (std::size_t frame = retained; frame < expected.size(); ++frame) {
-        const auto& [role, upgradeLevel] = expected[frame];
-        MiningMiniDroneAgent agent;
+    for (std::size_t frame = 0; frame < expected.size(); ++frame) {
+        const auto [role, upgradeLevel] = expected[frame];
+        const auto retained = std::find_if(previous.begin(), previous.end(), [&](const auto& agent) {
+            return agent.equippedFrame == static_cast<int>(frame) && agent.role == role;
+        });
+        const bool existing = retained != previous.end();
+        MiningMiniDroneAgent agent = existing ? std::move(*retained) : MiningMiniDroneAgent{};
         agent.equippedFrame = static_cast<int>(frame);
         agent.role = role;
         agent.roleIndex = roleIndices[static_cast<int>(role)]++;
-        agent.anchorTarget = MiningAnchorTarget::ControlledActor;
         agent.stableFormationSlot = agent.roleIndex;
-        agent.orbitPhaseRadians =
-            static_cast<double>(static_cast<int>(role)) * (kPi / 9.0);
         agent.upgradeLevel = std::clamp(upgradeLevel, 1, 3);
-        agent.behavior = MiningMiniDroneBehavior::Following;
-        mining.miniDrones.push_back(agent);
+        if (!existing) {
+            agent.anchorTarget = MiningAnchorTarget::ControlledActor;
+            agent.orbitPhaseRadians = static_cast<double>(static_cast<int>(role)) * (kPi / 9.0);
+            agent.behavior = MiningMiniDroneBehavior::Following;
+            newAgents.push_back(frame);
+        }
+        mining.miniDrones.push_back(std::move(agent));
     }
-    for (std::size_t i=retained; i<mining.miniDrones.size(); ++i) {
-        auto& agent = mining.miniDrones[i];
+    // Formation geometry depends on the complete role population. Position only
+    // new workers after reconciliation; retained workers must not teleport.
+    for (const auto frame : newAgents) {
+        auto& agent = mining.miniDrones[frame];
         const MiniDroneHomePoint home = miniDroneHomePoint(mining, agent);
         agent.x = home.x;
         agent.y = home.y;
         if (agent.role == MiniDroneRole::Defense) {
-            const MiniDroneAnchorFrame anchor = resolveMiniDroneAnchor(mining, agent.anchorTarget);
+            const auto anchor = resolveMiniDroneAnchor(mining, agent.anchorTarget);
             agent.defenseAngleRadians = std::atan2(home.y - anchor.y, home.x - anchor.x);
             agent.defenseAngleInitialized = true;
         }
@@ -7840,7 +7852,7 @@ void clearMiningDroneLoadoutRecall(GameState& state)
         if (agent.behavior==MiningMiniDroneBehavior::Docked) agent.behavior=MiningMiniDroneBehavior::Following;
 }
 
-void stowMiningSupportDrone(GameState& state, const ContentCatalog& catalog, int slotIndex)
+void stowMiningSupportDrone(GameState& state, const ContentCatalog& catalog, int slotIndex, bool compactSlots)
 {
     auto& mining = state.run.mining;
     clearMiningDroneLoadoutRecall(state);
@@ -7876,7 +7888,7 @@ void stowMiningSupportDrone(GameState& state, const ContentCatalog& catalog, int
             if (drone.carriedLooseObjectId != 0 && object.active &&
                 object.persistentId == drone.carriedLooseObjectId) {
                 carried = object;
-            } else if (object.carrierFrame > slotIndex) --object.carrierFrame;
+            } else if (compactSlots && object.carrierFrame > slotIndex) --object.carrierFrame;
         }
         if (drone.carriedLooseObjectId != 0)
             std::erase_if(objects, [&](const auto& object) {
@@ -7894,7 +7906,7 @@ void stowMiningSupportDrone(GameState& state, const ContentCatalog& catalog, int
     mining.miniDrones.erase(found);
     int roleIndices[6] = {};
     for (auto& agent : mining.miniDrones) {
-        if (agent.equippedFrame > slotIndex) --agent.equippedFrame;
+        if (compactSlots && agent.equippedFrame > slotIndex) --agent.equippedFrame;
         agent.roleIndex = roleIndices[static_cast<int>(agent.role)]++;
         agent.stableFormationSlot = agent.roleIndex;
     }
@@ -8039,26 +8051,6 @@ bool bankMiningPayloadAtShip(GameState& state, const ContentCatalog& catalog)
         state.statusLine = "Ship hold full. Overflow remains with the Mining Rig.";
     }
     return movedCargo > 0 || movedArtifacts;
-}
-
-bool bankPhysicallyDeliveredArtifactsAtShip(MiningRunState& mining)
-{
-    if (mining.temporaryArtifacts.empty()) {
-        return false;
-    }
-    const int artifactCount =
-        static_cast<int>(mining.temporaryArtifacts.size());
-    mining.stowedArtifacts.insert(
-        mining.stowedArtifacts.end(),
-        mining.temporaryArtifacts.begin(),
-        mining.temporaryArtifacts.end());
-    mining.temporaryArtifacts.clear();
-    const int deliveredCargo = std::min(
-        std::max(0, mining.cargo),
-        artifactCount * tuning::mining::artifactCargo);
-    mining.stowedCargo += deliveredCargo;
-    mining.cargo = std::max(0, mining.cargo - deliveredCargo);
-    return true;
 }
 
 void applyMiningTerrainToughnessScale(MiningTerrain& terrain, double scale)
@@ -10831,6 +10823,61 @@ MiningScannerResult pulseMiningScanner(GameState& state, const ContentCatalog& c
     return {true, signalsRevealed > 0 ? mining.gate.protectedObjective.id : std::string {}};
 }
 
+void secureMiningArtifactAtShip(GameState& state, const ContentCatalog& catalog, MiningArtifactObject& artifact)
+{
+    auto& mining = state.run.mining;
+    artifact.state = MiningArtifactState::Delivered;
+    artifact.tethered = false;
+    artifact.velocityX = 0.0;
+    artifact.velocityY = 0.0;
+    // The capture field is the ship bay itself. Once the relic crosses it,
+    // commit it to the Ship manifest immediately instead of leaving it in
+    // the rig's temporary ledger until the rig also reaches the pad.
+    const std::string& artifactOrigin = mining.bodyId.empty() ? mining.destinationId : mining.bodyId;
+    mining.stowedArtifacts.push_back(artifactRecordForObject(artifact, artifactOrigin));
+    reconcileArtifactCustody(state,catalog);
+    registerArtifactAboard(state,catalog,mining.stowedArtifacts.back(),
+        state.run.expedition.location.siteId,mining.scenarioId,mining.scenarioStepId);
+    if (state.run.expedition.travelInitialized) {
+        if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, artifactOrigin);
+            mission != nullptr && !mission->batteryId.empty()) {
+            (void)recoverSiteBattery(state.run.expedition, mission->batteryId);
+        }
+    }
+    if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, artifactOrigin)) {
+        const ScenarioDefinition* scenario = catalog.findScenario(mission->scenarioId);
+        const ScenarioStepDefinition* step = scenario
+            ? findScenarioStepDefinition(*scenario, mission->claimStepId) : nullptr;
+        if (step && step->completionEvent != ScenarioEventKind::None) {
+            recordScenarioEvent(state, catalog,
+                {step->completionEvent, mission->scenarioId, mission->claimStepId,
+                 step->eventOriginId.empty() ? artifactOrigin : step->eventOriginId,
+                 step->eventTargetId.empty() ? mission->artifactId : step->eventTargetId, 1, 0});
+        }
+    }
+    mining.stowedCargo += tuning::mining::artifactCargo;
+    mining.artifactSecuredCelebrationSeconds = 2.0;
+    if (mining.gate.completeOnShipCapture) {
+        recordScenarioEvent(
+            state,
+            catalog,
+            {
+                ScenarioEventKind::ProtectedObjectiveExtracted,
+                mining.scenarioId,
+                mining.scenarioStepId,
+                mining.destinationId,
+                mining.miningSiteDefinitionId,
+                1,
+                0
+            });
+        state.statusLine = mining.gate.securedMessage.empty()
+            ? "ARTIFACT SECURED — return to the servicing dock to complete the mission."
+            : mining.gate.securedMessage;
+    } else {
+        state.statusLine = "ARTIFACT SECURED — Ship manifest updated. Return to the servicing dock to complete the mission.";
+    }
+}
+
 void updateMiningArtifact(GameState& state, const ContentCatalog& catalog, double dt)
 {
     MiningRunState& mining = state.run.mining;
@@ -10870,56 +10917,7 @@ void updateMiningArtifact(GameState& state, const ContentCatalog& catalog, doubl
             !withinShipReturnRadius(mining, artifact.x, artifact.y)) {
             return false;
         }
-        artifact.state = MiningArtifactState::Delivered;
-        artifact.tethered = false;
-        artifact.velocityX = 0.0;
-        artifact.velocityY = 0.0;
-        // The capture field is the ship bay itself. Once the relic crosses it,
-        // commit it to the Ship manifest immediately instead of leaving it in
-        // the rig's temporary ledger until the rig also reaches the pad.
-        const std::string& artifactOrigin = mining.bodyId.empty() ? mining.destinationId : mining.bodyId;
-        mining.stowedArtifacts.push_back(artifactRecordForObject(artifact, artifactOrigin));
-        reconcileArtifactCustody(state,catalog);
-        registerArtifactAboard(state,catalog,mining.stowedArtifacts.back(),
-            state.run.expedition.location.siteId,mining.scenarioId,mining.scenarioStepId);
-        if (state.run.expedition.travelInitialized) {
-            if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, artifactOrigin);
-                mission != nullptr && !mission->batteryId.empty()) {
-                (void)recoverSiteBattery(state.run.expedition, mission->batteryId);
-            }
-        }
-        if (const SolarMissionDefinition* mission = solarMissionForBody(catalog, artifactOrigin)) {
-            const ScenarioDefinition* scenario = catalog.findScenario(mission->scenarioId);
-            const ScenarioStepDefinition* step = scenario
-                ? findScenarioStepDefinition(*scenario, mission->claimStepId) : nullptr;
-            if (step && step->completionEvent != ScenarioEventKind::None) {
-                recordScenarioEvent(state, catalog,
-                    {step->completionEvent, mission->scenarioId, mission->claimStepId,
-                     step->eventOriginId.empty() ? artifactOrigin : step->eventOriginId,
-                     step->eventTargetId.empty() ? mission->artifactId : step->eventTargetId, 1, 0});
-            }
-        }
-        mining.stowedCargo += tuning::mining::artifactCargo;
-        mining.artifactSecuredCelebrationSeconds = 2.0;
-        if (mining.gate.completeOnShipCapture) {
-            recordScenarioEvent(
-                state,
-                catalog,
-                {
-                    ScenarioEventKind::ProtectedObjectiveExtracted,
-                    mining.scenarioId,
-                    mining.scenarioStepId,
-                    mining.destinationId,
-                    mining.miningSiteDefinitionId,
-                    1,
-                    0
-                });
-            state.statusLine = mining.gate.securedMessage.empty()
-                ? "ARTIFACT SECURED — return to the servicing dock to complete the mission."
-                : mining.gate.securedMessage;
-        } else {
-            state.statusLine = "ARTIFACT SECURED — Ship manifest updated. Return to the servicing dock to complete the mission.";
-        }
+        secureMiningArtifactAtShip(state, catalog, artifact);
         return true;
     };
     // The loading pad is a capture field, not another collision challenge.
@@ -11132,6 +11130,9 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     }
     loadStats = miningLoadStats(state, catalog);
     if (arenaRules.mechanics.oxygenAndFuel && !mining.rigDisabled) {
+        auto& packedFuel = state.run.expedition.packedRigFuel;
+        if (packedFuel > 0)
+            packedFuel -= transferFuelCell(mining.rigFuel, packedFuel).transferred;
         const bool rigControlled = !operatorControlled(mining);
         const RigFuelEvent fuel = consumeRigFuel(
             mining.rigFuel,
@@ -11350,6 +11351,83 @@ void updateMiningRun(GameState& state, const ContentCatalog& catalog, double del
     }
 }
 
+// Depart is one recovery transaction. Normal mining deliveries still respect
+// hold capacity, but packing the equipment never discards its carried payload.
+void recoverMiningDeparturePayload(GameState& state, const ContentCatalog& catalog)
+{
+    auto& mining = state.run.mining;
+    MaterialInventory cargo = mining.temporaryMaterials;
+    MaterialInventory newlyOwned;
+    for (auto& drone : mining.miniDrones) {
+        addMiningMaterials(cargo, drone.haulMaterials);
+        addMiningMaterials(newlyOwned, {
+            std::min(drone.haulMaterials.common, drone.uncreditedHaulMaterials.common),
+            std::min(drone.haulMaterials.rare, drone.uncreditedHaulMaterials.rare),
+            std::min(drone.haulMaterials.exotic, drone.uncreditedHaulMaterials.exotic)});
+    }
+    const auto recoverObjects = [&](auto& objects) {
+        std::erase_if(objects, [&](const MiningLooseObject& object) {
+            const bool carried = object.tethered || std::any_of(
+                mining.miniDrones.begin(), mining.miniDrones.end(), [&](const auto& drone) {
+                    return (object.persistentId != 0 && drone.carriedLooseObjectId == object.persistentId) ||
+                        (object.carrierFrame >= 0 && object.carrierFrame == drone.equippedFrame);
+                });
+            if (!object.active || !carried) return false;
+            if (object.kind == MiningLooseObjectKind::FuelCell) {
+                const auto fuel = transferFuelCell(mining.rigFuel, object.fuelValue);
+                // Packed fuel that cannot fit the rig remains aboard as fuel cargo.
+                state.run.expedition.packedRigFuel += std::max(0.0, object.fuelValue - fuel.transferred);
+            } else {
+                MaterialInventory material;
+                if (object.material == MiningCellMaterial::ExoticVein) material.exotic = 1;
+                else if (object.material == MiningCellMaterial::RareOre) material.rare = 1;
+                else material.common = 1;
+                addMiningMaterials(cargo, material);
+                addMiningMaterials(newlyOwned, material);
+            }
+            return true;
+        });
+    };
+    const auto recoverArtifact = [&](auto& artifact) {
+        if (artifact.present && artifact.tethered && artifact.state == MiningArtifactState::Loose)
+            secureMiningArtifactAtShip(state, catalog, artifact);
+    };
+    recoverObjects(mining.looseObjects);
+    recoverArtifact(mining.artifact);
+    for (auto& layer : mining.depthLayers) {
+        recoverObjects(layer.looseObjects);
+        recoverArtifact(layer.artifact);
+    }
+    const auto transfer = planPayloadTransfer(cargo,
+        activeContractMaterialNeed(state, catalog, mining.destinationId), shipHoldMaterials(state),
+        shipHoldUsed(state) + materialCargoMass(cargo));
+    applyPayloadTransferPlan(state, catalog, mining.destinationId, transfer);
+    addMiningMaterials(mining.stowedMaterials, cargo);
+    mining.stowedCargo += materialCargoMass(cargo);
+    if (mining.deliveredOreUnits >= 0) mining.deliveredOreUnits += cargo.common + cargo.rare + cargo.exotic;
+    if (mining.missionOreUnits >= 0) mining.missionOreUnits +=
+        transfer.toContract.common + transfer.toContract.rare + transfer.toContract.exotic;
+    awardExpeditionExperience(state, miningMaterialExperience(newlyOwned), Screen::Mining);
+    for (const auto& artifact : mining.temporaryArtifacts)
+        registerArtifactAboard(state, catalog, artifact, state.run.expedition.location.siteId,
+            mining.scenarioId, mining.scenarioStepId);
+    mining.stowedArtifacts.insert(mining.stowedArtifacts.end(),
+        mining.temporaryArtifacts.begin(), mining.temporaryArtifacts.end());
+    mining.stowedCargo += static_cast<int>(mining.temporaryArtifacts.size()) * tuning::mining::artifactCargo;
+    mining.temporaryArtifacts.clear();
+    mining.temporaryMaterials = {};
+    mining.cargo = 0;
+    mining.droneLoadoutRecallActive = false;
+    mining.operatorRigTethered = mining.rigTethered = false;
+    for (auto& drone : mining.miniDrones) {
+        drone.haulMaterials = drone.uncreditedHaulMaterials = {};
+        drone.carriedLooseObjectId = 0;
+        drone.velocityX = drone.velocityY = 0;
+        drone.behavior = MiningMiniDroneBehavior::Docked;
+    }
+    if (state.run.expedition.travelInitialized) state.run.expedition.rigFuel = mining.rigFuel;
+}
+
 SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& catalog, bool abort)
 {
     SurfaceActionOutcome outcome;
@@ -11436,38 +11514,25 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
     }
 
     if (!abort && !miningExtractionReady(mining)) {
-        outcome.message = mining.rigDisabled
-            ? "Reach the shuttle in the EVA suit to complete emergency recovery."
-            : (operatorControlled(mining)
-                    ? "Return both the operator and functioning rig to the shuttle."
-                    : std::string(text::status::miningReturnToShip));
+        outcome.message = std::string(text::status::miningReturnToShip);
         return outcome;
     }
-    const bool recoveryLoss = abort || mining.rigDisabled;
-    const MaterialInventory droneManifest = miniDroneCargoManifest(mining);
-    if (!recoveryLoss) {
-        // Only payload that physically reached the service zone is banked.
-        // Missing Support Drones retain their manifests and are lost if the
-        // player chooses to depart without waiting.
-        bankMiningPayloadAtShip(state, catalog);
-        bankPhysicallyDeliveredArtifactsAtShip(mining);
+    const bool recoveryLoss = abort;
+    if (!abort) {
+        recoverMiningDeparturePayload(state, catalog);
         if (mining.swarm.cacheClaimed && !mining.swarm.cacheBanked) {
             state.meta.blueprintProgress += std::max(0, mining.swarm.blueprintInsight);
             mining.swarm.cacheBanked = true;
         }
-        outcome.materialLost = mining.temporaryMaterials;
-        addMiningMaterials(outcome.materialLost, droneManifest);
     } else {
         outcome.materialLost = mining.temporaryMaterials;
-        addMiningMaterials(outcome.materialLost, droneManifest);
+        addMiningMaterials(outcome.materialLost, miniDroneCargoManifest(mining));
     }
 
     outcome.applied = true;
     outcome.message = abort
         ? (mining.failureMessage.empty() ? std::string(text::status::miningAborted) : mining.failureMessage)
-        : (mining.rigDisabled
-                ? std::string("Disabled-rig recovery keeps Ship cargo; Rig and Support Drone ore were lost.")
-                : std::string("Departure complete. Only physically returned payload was secured."));
+        : "Departure complete. Rig, drones, and carried cargo secured.";
     outcome.materialDelta = mining.stowedMaterials;
     outcome.artifactFound = !mining.stowedArtifacts.empty();
     outcome.cargoDelta = mining.stowedCargo;
@@ -11499,10 +11564,6 @@ SurfaceActionOutcome finishMiningRun(GameState& state, const ContentCatalog& cat
         mining.active=false;
         mining.drilling=false;
         mining.moveX=mining.moveY=0.0;
-        // Rejected payload stays at the visited site, never in a departing Rig.
-        spawnLooseMaterialChunks(mining, mining.temporaryMaterials, mining.droneX, mining.droneY);
-        for (const auto& drone : mining.miniDrones)
-            spawnLooseMaterialChunks(mining, drone.haulMaterials, drone.x, drone.y);
         mining.cargo=mining.stowedCargo=0;
         mining.temporaryMaterials=mining.stowedMaterials={};
         mining.temporaryArtifacts.clear();

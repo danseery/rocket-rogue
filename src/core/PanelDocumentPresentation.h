@@ -82,7 +82,6 @@ struct PanelRuntimeHints {
     bool launchQueued = false;
     bool miningEvaActive = false;
     bool miningTetherAvailable = false;
-    bool miningStowAvailable = false;
     bool miningAbortAvailable = false;
     int expeditionLevel = 1;
     int expeditionExperienceCurrent = 0;

@@ -737,8 +737,8 @@ void routerTableCoversEveryInputContext()
         {InputContext::Launch, GameInputAction::ReturnHome, false},
         {InputContext::OrbitalWork, GameInputAction::ActivateFocused, true},
         {InputContext::SurfaceArrival, GameInputAction::DeploySurfaceTeam, true},
-        {InputContext::MiningActive, GameInputAction::MiningStow, false},
-        {InputContext::MiningService, GameInputAction::MiningStow, false},
+        {InputContext::MiningActive, GameInputAction::MiningOperatorToggle, false},
+        {InputContext::MiningService, GameInputAction::MiningOperatorToggle, false},
         {InputContext::MiningFailure, GameInputAction::MiningFailureAcknowledge, true},
         {InputContext::Stamp, GameInputAction::StartOrContinue, true},
         {InputContext::Paused, GameInputAction::ActivateFocused, true},
@@ -772,9 +772,8 @@ void miningSouthTapAndHoldRemainDistinct()
     frame.down.set(index(ControllerButton::South));
     frame.pressed.set(index(ControllerButton::South));
     RoutedGameInput input = router.route(InputContext::MiningActive, frame, preferences);
-    require(!input.has(GameInputAction::MiningStow)
-            && !input.has(GameInputAction::MiningOperatorToggle),
-        "South press should wait until tap release or the EVA hold threshold");
+    require(!input.has(GameInputAction::MiningOperatorToggle),
+        "South press should wait until the EVA hold threshold");
     require(input.operatorToggleProgress == 0.0,
         "a new South hold should begin with an empty operator-toggle progress ring");
 
@@ -790,9 +789,8 @@ void miningSouthTapAndHoldRemainDistinct()
     frame.released.set(index(ControllerButton::South));
     frame.heldSeconds[index(ControllerButton::South)] = 0.30;
     input = router.route(InputContext::MiningActive, frame, preferences);
-    require(input.has(GameInputAction::MiningStow)
-            && !input.has(GameInputAction::MiningOperatorToggle),
-        "a short South release should preserve the existing bank/leave action");
+    require(!input.has(GameInputAction::MiningOperatorToggle),
+        "a short South release should not trigger an action");
 
     router.reset();
     frame = routedFrame();
@@ -803,7 +801,6 @@ void miningSouthTapAndHoldRemainDistinct()
     frame.heldSeconds[index(ControllerButton::South)] = 0.60;
     input = router.route(InputContext::MiningActive, frame, preferences);
     require(input.has(GameInputAction::MiningOperatorToggle)
-            && !input.has(GameInputAction::MiningStow)
             && input.operatorToggleProgress == 1.0,
         "a 600ms South hold should toggle the operator exactly once");
     frame.heldSeconds[index(ControllerButton::South)] = 1.20;
@@ -814,9 +811,8 @@ void miningSouthTapAndHoldRemainDistinct()
     frame.released.set(index(ControllerButton::South));
     frame.heldSeconds[index(ControllerButton::South)] = 1.20;
     input = router.route(InputContext::MiningActive, frame, preferences);
-    require(!input.has(GameInputAction::MiningStow)
-            && !input.has(GameInputAction::MiningOperatorToggle),
-        "releasing after a completed hold must not also bank or leave");
+    require(!input.has(GameInputAction::MiningOperatorToggle),
+        "releasing after a completed hold must not toggle the operator again");
 
     router.reset();
     frame = routedFrame();
@@ -827,8 +823,7 @@ void miningSouthTapAndHoldRemainDistinct()
     frame.released.set(index(ControllerButton::South));
     frame.heldSeconds[index(ControllerButton::South)] = 0.70;
     input = router.route(InputContext::MiningActive, frame, preferences);
-    require(input.has(GameInputAction::MiningOperatorToggle)
-            && !input.has(GameInputAction::MiningStow),
+    require(input.has(GameInputAction::MiningOperatorToggle),
         "a low-cadence release that crosses 600ms should still perform the hold action");
 
     router.reset();
@@ -846,8 +841,8 @@ void miningSouthTapAndHoldRemainDistinct()
     frame.down.reset(index(ControllerButton::South));
     frame.released.set(index(ControllerButton::South));
     input = router.route(InputContext::MiningActive, frame, preferences);
-    require(!input.has(GameInputAction::MiningStow),
-        "releasing the A hold fenced by a pause must not perform its short-tap action");
+    require(!input.has(GameInputAction::MiningOperatorToggle),
+        "releasing the A hold fenced by a pause must not toggle the operator");
 }
 
 void miningPointerAimUsesTheSharedSceneViewport()
@@ -1324,8 +1319,8 @@ void shipServiceShortcutsRequireFreshInput()
 
     frame = routedFrame();
     frame.pressed.set(index(ControllerButton::DpadRight));
-    require(router.route(InputContext::MiningService, frame, {}).has(GameInputAction::MiningWaitForDrones),
-        "D-pad Right should request drone recovery at the ship");
+    require(!router.route(InputContext::MiningService, frame, {}).has(GameInputAction::MiningDepart),
+        "the retired wait shortcut must not trigger departure");
 
     frame = routedFrame();
     frame.down.set(index(ControllerButton::DpadDown));

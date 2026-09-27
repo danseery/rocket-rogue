@@ -983,6 +983,7 @@ ExpeditionResult dockExpedition(PersistentExpeditionState &e, FlightRunState &f,
         return ExpeditionResult::Applied;
     e.active = false;
     e.rigFuel.current = e.rigFuel.capacity;
+    e.packedRigFuel = 0.0; // Home service replenishes the complete Rig fuel supply.
     f.fuelRemaining = f.fuelCapacity;
     f.hullRemaining = f.hullMaximum;
     f.heat = 0;
@@ -1253,6 +1254,7 @@ ExpeditionResult loseExpedition(PersistentExpeditionState &e, FlightRunState &f,
     e.course.estimateValid = false;
     e.course.approachFuel = e.course.returnMargin = 0;
     e.rigFuel.current = e.rigFuel.capacity;
+    e.packedRigFuel = 0.0; // Home service replenishes the complete Rig fuel supply.
     e.location = {s.id, home->id, CoordinateFrame::Body, {e.travelInitialized ? systemDockPosition(*home).x-home->position.x : dockRange * .8, e.travelInitialized ? systemDockPosition(*home).y-home->position.y : 0}, {}, 0, home->siteId};
     const double fuelCapacity = std::max(10.0, f.fuelCapacity);
     const double hullMaximum = std::max(100.0, f.hullMaximum);

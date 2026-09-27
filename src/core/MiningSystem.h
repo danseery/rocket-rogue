@@ -272,7 +272,7 @@ struct MiningDroneRecoveryStatus {
 MiningDroneRecoveryStatus miningDroneRecoveryStatus(const MiningRunState& mining, bool includeDeployedDrones = false);
 bool requestMiningDroneRecall(GameState& state, bool includeDeployedDrones = false);
 void clearMiningDroneLoadoutRecall(GameState& state);
-void stowMiningSupportDrone(GameState& state, const ContentCatalog& catalog, int slotIndex);
+void stowMiningSupportDrone(GameState& state, const ContentCatalog& catalog, int slotIndex, bool compactSlots = true);
 void synchronizeMiningSupportDrones(GameState& state, const ContentCatalog& catalog);
 // Safe-load/site-entry compatibility; never call during live simulation.
 void migrateAdjacentCocoonTiles(MiningRunState& mining);

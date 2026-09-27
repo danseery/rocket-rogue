@@ -45,6 +45,8 @@ enum class RmlPanelMode {
     MiningFullscreen
 };
 
+enum class SettingsTab { Display, Controls, Gameplay };
+
 class GameRmlUi final : public IGameUi {
 public:
     GameRmlUi(
@@ -102,6 +104,7 @@ private:
     bool applyDocumentPresentationState();
     bool rebuildPanelHost(bool rebuildShell);
     bool rebuildModalHost();
+    void applySettingsTabSelection();
     bool rebuildOverlayHost();
     bool rebuildPromptHost();
     bool rebuildPerformanceHost();
@@ -121,6 +124,7 @@ private:
     PanelDocumentPresentation presentation_;
     std::string externalRcss_;
     std::string openModalId_;
+    SettingsTab settingsTab_ = SettingsTab::Display;
     std::string pendingModalOpenId_;
     std::vector<RmlButtonBinding> pendingPointerActivations_;
     std::string renderedModalId_;

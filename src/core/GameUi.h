@@ -6,6 +6,13 @@
 
 namespace rocket::ui {
 
+struct DroneOpsSelection {
+    int slot = -1;
+    int drone = -1;
+    bool locked = false;
+    bool expansion = false;
+};
+
 namespace actions {
 inline constexpr std::string_view newGame = "new_game";
 inline constexpr std::string_view continueGame = "continue_game";
@@ -42,6 +49,9 @@ inline constexpr std::string_view surfaceUpgradePrefix = "surface_upgrade:";
 inline constexpr std::string_view droneOps = "drone_ops";
 inline constexpr std::string_view backToSurfaceOps = "back_to_surface_ops";
 inline constexpr std::string_view equipDronePrefix = "equip_drone:";
+inline constexpr std::string_view selectDronePrefix = "select_drone:";
+inline constexpr std::string_view selectDroneSlotPrefix = "select_drone_slot:";
+inline constexpr std::string_view assignDroneSlotPrefix = "assign_drone_slot:";
 inline constexpr std::string_view unequipDroneSlotPrefix = "unequip_drone_slot:";
 inline constexpr std::string_view upgradeDroneSlot = "upgrade_drone_slot";
 inline constexpr std::string_view skipResearch = "skip_research";
@@ -51,8 +61,6 @@ inline constexpr std::string_view miningScanner = "mining_scanner";
 inline constexpr std::string_view miningTether = "mining_tether";
 inline constexpr std::string_view miningRepairDrill = "mining_repair_drill";
 inline constexpr std::string_view miningRepairDrone = "mining_repair_drone";
-inline constexpr std::string_view miningStow = "mining_stow";
-inline constexpr std::string_view miningWaitForDrones = "mining_wait_for_drones";
 inline constexpr std::string_view miningDepart = "mining_depart";
 inline constexpr std::string_view miningAbort = "mining_abort";
 inline constexpr std::string_view miningFailureAck = "mining_failure_ack";

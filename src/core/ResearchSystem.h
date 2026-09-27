@@ -268,6 +268,8 @@ void ensureDroneBayState(GameState& state, const ContentCatalog& catalog);
 bool canUpgradeDroneSlot(const GameState& state);
 bool upgradeDroneSlot(GameState& state, const ContentCatalog& catalog);
 bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index);
+// Assign into the packed end, or replace an occupied slot without shifting peers.
+bool assignMiniDroneSlot(GameState& state, const ContentCatalog& catalog, int slotIndex, int index);
 bool unequipMiniDroneSlot(GameState& state, const ContentCatalog& catalog, int slotIndex);
 MiniDroneLoadoutEffects miniDroneLoadoutEffects(const GameState& state, const ContentCatalog& catalog);
 int expeditionDroneRank(const GameState& state, std::string_view droneId);

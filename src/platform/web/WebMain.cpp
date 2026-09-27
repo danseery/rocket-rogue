@@ -729,26 +729,6 @@ void rr_mining_repair_drone()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void rr_mining_stow()
-{
-    if (g_app) {
-        g_app->miningStow();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
-void rr_mining_wait_for_drones()
-{
-    if (g_app) {
-        g_app->miningWaitForDrones();
-    }
-}
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-#endif
 void rr_mining_depart()
 {
     if (g_app) {
@@ -928,10 +908,10 @@ void rr_debug_surface_upgrade()
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void rr_debug_drone_ops()
+void rr_debug_drone_ops(int fixture)
 {
     if (g_app) {
-        g_app->debugShowDroneOps();
+        g_app->debugShowDroneOps(fixture);
     }
 }
 

@@ -26,12 +26,10 @@ enum class GameInputAction : std::size_t {
     Abort,
     MiningScan,
     MiningTether,
-    MiningStow,
     MiningOperatorToggle,
     MiningRepairDrill,
     MiningRepairRig,
     MiningDroneOps,
-    MiningWaitForDrones,
     MiningDepart,
     SalvageNearbyWreck,
     MiningFailureAcknowledge,
@@ -201,7 +199,6 @@ public:
                 return result;
             }
             if (frame.wasPressed(ControllerButton::DpadUp)) add(GameInputAction::MiningDroneOps);
-            if (frame.wasPressed(ControllerButton::DpadRight)) add(GameInputAction::MiningWaitForDrones);
             if (holdCrossed(frame, ControllerButton::DpadDown, 0.6)) add(GameInputAction::MiningDepart);
         }
         if ((context == InputContext::Launch || context == InputContext::MiningActive)
@@ -304,9 +301,6 @@ public:
                     && !holdTriggeredBeforeUpdate.test(static_cast<std::size_t>(ControllerButton::South))
                     && frame.heldFor(ControllerButton::South) >= operatorToggleHoldSeconds)) {
                 add(GameInputAction::MiningOperatorToggle);
-            } else if (frame.wasReleased(ControllerButton::South)
-                && !holdTriggeredBeforeUpdate.test(static_cast<std::size_t>(ControllerButton::South))) {
-                add(GameInputAction::MiningStow);
             }
             if (frame.wasPressed(ControllerButton::LeftBumper)) {
                 add(GameInputAction::MiningRepairDrill);

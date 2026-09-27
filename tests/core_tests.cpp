@@ -23,6 +23,7 @@
 #include "core/ProgramPresentation.h"
 #include "core/RefitPresentation.h"
 #include "core/ResearchPresentation.h"
+#include "core/DronePickerPresentation.h"
 #include "core/ResearchSystem.h"
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
@@ -1461,6 +1462,74 @@ void miningShipServiceRestoresOxygenWithoutEndingRun()
         "zero fuel should leave the continuous surface session active");
     require(!fuel.run.mining.failurePending,
         "zero fuel should not fail the astronaut or force a screen transition");
+}
+
+void dronePickerReplacementsAreAtomicAndExplicit()
+{
+    const auto catalog = createDefaultContent();
+    auto state = createNewGame(catalog, 649);
+    state.meta.unlockKeys.push_back(content::unlock::droneBay);
+    state.meta.droneBaySlots = 1;
+    state.meta.ownedDroneIds = {content::drone::miningDrone};
+    state.meta.equippedDroneIds = state.meta.ownedDroneIds;
+    auto picker = dronePickerPresentation(state, catalog);
+    require(picker.availableCount == 1 && picker.lockedCount == 5 && picker.alreadyEquipped,
+        "Starter picker separates one equipped type from five locked types");
+    require(!picker.expansionRequirement.empty() && picker.entries[0].capabilities.size() <= 3,
+        "Starter capacity explains the mission gate and capabilities stay concise");
+    picker = dronePickerPresentation(state, catalog, {0, -1, true, false});
+    require(picker.selection.drone >= 0 && !picker.entries[picker.selection.drone].available && !picker.action.enabled,
+        "Locked tab selects a locked preview without exposing an equip action");
+    state.meta.unlockKeys.push_back(content::unlock::droneSupportSuite);
+    const int resource = static_cast<int>(std::find_if(catalog.miniDrones.begin(), catalog.miniDrones.end(),
+        [](const auto& d) { return d.id == content::drone::resourceDrone; }) - catalog.miniDrones.begin());
+    const auto equipment = state.meta.equippedDroneIds;
+    const auto ownership = state.meta.ownedDroneIds;
+    require(!assignMiniDroneSlot(state, catalog, 0, resource), "Unaffordable replacement fails");
+    require(state.meta.equippedDroneIds == equipment && state.meta.ownedDroneIds == ownership && state.meta.materials.common == 0,
+        "Failed replacement does not remove equipment or alter ownership or materials");
+    picker = dronePickerPresentation(state, catalog, {0, resource});
+    require(picker.paid && !picker.action.enabled && !picker.shortfall.empty() && picker.action.label.starts_with("Build & replace"),
+        "Paid replacement has explicit cost, shortfall and build label");
+    state.meta.ownedDroneIds.push_back(content::drone::resourceDrone);
+    picker = dronePickerPresentation(state, catalog, {0, resource});
+    require(!picker.paid && picker.action.enabled && picker.action.label == "Replace Mining", "An owned spare replaces for free");
+    require(assignMiniDroneSlot(state, catalog, 0, resource), "Full bay permits direct replacement");
+    require(state.meta.equippedDroneIds[0] == content::drone::resourceDrone && ownedMiniDroneCount(state, content::drone::miningDrone) == 1,
+        "Outgoing frame remains owned");
+    require(!assignMiniDroneSlot(state, catalog, 0, resource) && !assignMiniDroneSlot(state, catalog, 5, resource),
+        "Same-drone and invalid-slot actions cannot fabricate copies");
+    state.meta.droneBaySlots = 2;
+    picker = dronePickerPresentation(state, catalog);
+    require(picker.selection.slot == 1, "Default target uses the first empty packed slot");
+    state.meta.materials.common = 100;
+    const auto cost = miniDroneAdditionalUnitCost(catalog.miniDrones[resource]);
+    require(assignMiniDroneSlot(state, catalog, 1, resource), "Open capacity can fabricate a duplicate");
+    require(ownedMiniDroneCount(state, content::drone::resourceDrone) == 2 && state.meta.materials.common == 100 - cost.common,
+        "Duplicate charges exactly once");
+    state.meta.droneBaySlots = 6;
+    require(!dronePickerPresentation(state, catalog, {0, resource, false, true}).selection.expansion,
+        "Maximum bay cannot enter paid expansion");
+
+    state.meta.equippedDroneIds = {content::drone::miningDrone, content::drone::miningDrone};
+    const auto effectContains = [](const DronePickerPresentation& value, const std::string& text) {
+        return std::any_of(value.effects.begin(), value.effects.end(), [&](const auto& row) {
+            return row.value.find(text) != std::string::npos;
+        });
+    };
+    require(dronePickerPresentation(state, catalog, {1, resource}).effects.empty(),
+        "Matching roles never preview an unearned synergy");
+    state.run.expedition.progression.selectedSynergyIds = {"long_haul_rig"};
+    const auto original = serializeSaveData(captureSaveData(state));
+    picker = dronePickerPresentation(state, catalog, {1, resource});
+    require(effectContains(picker, "Activates."), "Replacement previews activation of an earned dormant synergy");
+    require(serializeSaveData(captureSaveData(state)) == original,
+        "Browsing a proposed loadout never changes equipment, ownership, materials or saved progression");
+    state.meta.equippedDroneIds[1] = content::drone::resourceDrone;
+    require(effectContains(dronePickerPresentation(state, catalog, {0, resource}), "Becomes dormant."),
+        "Replacement discloses loss of an active selected synergy");
+    require(picker.entries[resource].capabilities.front().label == "Haul",
+        "Resource preview leads with its authoritative carrying capability");
 }
 
 void droneBayUnlocksSlotsLoadoutsAndMiningEffects()
@@ -5687,8 +5756,11 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
 
     MiningRunPresentation atShip = miningRunPresentation(state, catalog);
     require(std::any_of(atShip.actions.begin(), atShip.actions.end(), [](const PanelButtonPresentation& action) {
-        return action.actionId == ui::actions::miningStow;
-    }), "Leave should appear inside the ship radius");
+        return action.actionId == ui::actions::miningDepart;
+    }), "Depart should appear inside the ship radius");
+    require(std::none_of(atShip.actions.begin(), atShip.actions.end(), [](const PanelButtonPresentation& action) {
+        return action.actionId == "mining_stow";
+    }), "payload banking should be automatic instead of a redundant ship action");
     require(std::none_of(atShip.actions.begin(), atShip.actions.end(), [](const PanelButtonPresentation& action) {
         return action.actionId == ui::actions::miningAbort;
     }), "Emergency recall should not appear inside the ship radius");
@@ -5706,8 +5778,8 @@ void miningShipBankingLeaveAndEmergencyRecallRules()
         return action.actionId == ui::actions::miningAbort;
     }), "Emergency recall should appear away from the ship radius");
     require(std::none_of(away.actions.begin(), away.actions.end(), [](const PanelButtonPresentation& action) {
-        return action.actionId == ui::actions::miningStow;
-    }), "Leave should not appear away from the ship radius");
+        return action.actionId == "mining_stow";
+    }), "payload banking should not appear as a manual action away from the ship");
 
     const SurfaceActionOutcome recalled = finishMiningRun(state, catalog, true);
     require(recalled.applied, "emergency recall should finish the mining run");
@@ -8882,7 +8954,20 @@ void controllerPanelDefaultsAndOrbitalActions()
             require(modal.bodyMarkup.find("data-ui-activation=\"hold\" data-ui-hold-seconds=\"0.75\"") != std::string::npos,
                 "destructive reset must declare its hold threshold explicitly");
         }
-        if (modal.id == "settings") defaultIs(modal.bodyMarkup, "setting:resolution");
+        if (modal.id == "settings") {
+            defaultIs(modal.bodyMarkup, "settings-tab:display");
+            require(modal.bodyMarkup.find("data-settings-page=\"controls\"") != std::string::npos
+                && modal.bodyMarkup.find("data-settings-page=\"gameplay\"") != std::string::npos,
+                "player settings must expose the three focused categories");
+            require(modal.bodyMarkup.find("data-game-speed-select") == std::string::npos
+                && modal.bodyMarkup.find("data-ui-modal=\"developer_options\"") != std::string::npos,
+                "testing options must live behind the separate developer page");
+        }
+        if (modal.id == "developer_options") {
+            require(modal.bodyMarkup.find("data-game-speed-select") != std::string::npos
+                && modal.bodyMarkup.find("data-debug-tools-toggle") != std::string::npos,
+                "developer page must retain testing controls");
+        }
     }
     context.titleScreenActive = false;
     for (const auto screen : {Screen::Hangar, Screen::Research, Screen::DroneOps, Screen::Upgrade,
@@ -9852,6 +9937,7 @@ int main(int argc, char** argv)
     runUpgradesSurviveEmergencyRecall();
     runUpgradeLifetimeFollowsTheTransport();
     miningShipServiceRestoresOxygenWithoutEndingRun();
+    dronePickerReplacementsAreAtomicAndExplicit();
     droneBayUnlocksSlotsLoadoutsAndMiningEffects();
     scenarioUiActionsDoNotAwardExpeditionExperience();
     solarMissionAcceptanceUsesAuthoredActionsAndPreservesLiveLoadouts();

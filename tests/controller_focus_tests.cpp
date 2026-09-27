@@ -718,21 +718,54 @@ void generatedPanelPass(int width, int height)
     audit("Io mining commission in mission tracker");
     assertActionLabelFits(document()->GetElementById("rr-mission-tracker"), commissionAction, "Commission Hazard Drone");
     state->screen = rocket::Screen::DroneOps;
+    const int hazardIndex = static_cast<int>(std::find_if(catalog.miniDrones.begin(), catalog.miniDrones.end(),
+        [](const auto& drone) { return drone.id == rocket::content::drone::hazardDrone; }) - catalog.miniDrones.begin());
+    context.droneSelection = {0, hazardIndex, true, false};
     ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
     ui.requestFocus("action:" + commissionAction);
     assert(ui.focusedId() == "action:" + commissionAction);
     auditRenderedGraph(ui, "Io Drone Ops commission @" + std::to_string(width));
+    auto* previewScroll = document()->QuerySelector(".drone-preview-scroll");
+    std::string longEffects;
+    for (int row = 0; row < 30; ++row) longEffects += "<p>Selected graft and synergy consequence.</p>";
+    previewScroll->SetInnerRML(longEffects);
+    Rml::GetContext("rocket-ui")->Update();
+    ui.requestFocus("action:" + commissionAction);
+    assert(ui.scroll(1.0F));
+    assert(previewScroll->GetScrollTop() > 0);
+    ui.requestFocus("drone-preview-content");
+    assert(!ui.activateFocused());
+    assert(ui.navigate(rocket::UiDirection::Left));
+    assert(ui.focusedId() == "action:select_drone:" + std::to_string(hazardIndex));
     assert(rocket::acceptSolarMission(*state, catalog, *io).accepted);
     assert(rocket::equippedMiniDroneCount(*state, rocket::content::drone::hazardDrone) == 1);
     assert(!state->run.mining.miniDrones.empty());
+    {
+        // Read the required rank from authored mission data, not the body or
+        // merely the presence of a Hazard drone in the loadout.
+        auto rankCatalog = catalog;
+        for (auto& site : rankCatalog.miningSites)
+            for (auto& layer : site.cocoon.layers) layer.requiredHazardMark = 2;
+        auto rankState = std::make_unique<rocket::GameState>(*state);
+        rocket::PanelRenderContext rankContext {*rankState, rankCatalog, launch, launch};
+        auto requirement = rocket::buildGamePanelPresentation(rankContext).contentMarkup;
+        assert(requirement.find("Hazard Mk II required / Higher Mk needed") != std::string::npos);
+        rankState->run.expedition.progression.runDroneRanks = {{rocket::content::drone::hazardDrone, 2}};
+        requirement = rocket::buildGamePanelPresentation(rankContext).contentMarkup;
+        assert(requirement.find("Hazard Mk II required / Ready") != std::string::npos);
+        rankState->meta.equippedDroneIds.clear();
+        requirement = rocket::buildGamePanelPresentation(rankContext).contentMarkup;
+        assert(requirement.find("Hazard Mk II required / Not equipped") != std::string::npos);
+    }
     while (!state->incomingMessages.pending.empty())
         assert(rocket::acknowledgeIncomingMessage(state->incomingMessages, state->incomingMessages.pending.front().id));
     // Old recall state, remote workers and cargo must not disable Drone Ops.
+    context.droneSelection = {0, hazardIndex, false, false};
     state->meta.equippedDroneIds.clear();
     state->run.mining.miniDrones.clear();
     state->run.mining.droneLoadoutRecallActive = true;
     ioPanel = rocket::buildGamePanelPresentation(context);
-    assert(ioPanel.contentMarkup.find("data-hazard-support=\"unassigned\"") != std::string::npos);
+    assert(ioPanel.contentMarkup.find("drone-preview") != std::string::npos);
     assert(ioPanel.contentMarkup.find("Commission Hazard Drone") == std::string::npos);
     audit("Io owned unassigned away from service");
     const auto assertAssignmentReady = [&] {
@@ -740,7 +773,7 @@ void generatedPanelPass(int width, int height)
         document()->GetElementById("rr-panel")->QuerySelectorAll(actions, "button[data-rr-action]");
         const auto owned = std::find_if(catalog.miniDrones.begin(), catalog.miniDrones.end(),
             [](const auto& drone) { return drone.id == rocket::content::drone::hazardDrone; });
-        const auto ownedAction = rocket::ui::actions::equipDrone(static_cast<int>(owned-catalog.miniDrones.begin()));
+        const auto ownedAction = std::string("assign_drone_slot:0:") + std::to_string(owned-catalog.miniDrones.begin());
         bool found = false;
         for (auto* action : actions) {
             const auto id = action->GetAttribute<Rml::String>("data-rr-action", "");
@@ -756,11 +789,11 @@ void generatedPanelPass(int width, int height)
     state->run.mining.miniDrones.push_back(hauling);
     audit("Io service outstanding drones");
     assertAssignmentReady();
-    ui.requestFocus("modal:surface");
-    assert(ui.navigate(rocket::UiDirection::Down));
-    assert(soleFocus(ui)->Closest(".drone-controller-choice-row"));
-    assert(ui.navigate(rocket::UiDirection::Up));
-    assert(soleFocus(ui)->Closest(".drone-workspace-actions"));
+    ui.requestFocus("action:select_drone:" + std::to_string(hazardIndex));
+    assert(ui.navigate(rocket::UiDirection::Right));
+    assert(soleFocus(ui)->Closest(".drone-preview-actions"));
+    assert(ui.navigate(rocket::UiDirection::Left));
+    assert(soleFocus(ui)->Closest(".drone-picker-list"));
     auto& deployedWorker = state->run.mining.miniDrones.back();
     deployedWorker.haulMaterials = {};
     deployedWorker.x = state->run.mining.returnZoneX + 8;
@@ -781,7 +814,7 @@ void generatedPanelPass(int width, int height)
         return drone.id == rocket::content::drone::hazardDrone;
     });
     assert(hazard != catalog.miniDrones.end());
-    const auto hazardAction = rocket::ui::actions::equipDrone(static_cast<int>(hazard - catalog.miniDrones.begin()));
+    const auto hazardAction = std::string("assign_drone_slot:0:") + std::to_string(hazard-catalog.miniDrones.begin());
     auto* assign = document()->GetElementById("rr-panel")->QuerySelector("button[data-rr-action=\"" + hazardAction + "\"]");
     assert(assign && !assign->HasAttribute("disabled"));
     state->meta.equippedDroneIds.push_back(rocket::content::drone::hazardDrone);
@@ -991,6 +1024,82 @@ void contextualOverlayPass(int width, int height)
 
 } // namespace
 
+void pauseSettingsPass(int width, int height)
+{
+    Preferences preferences;
+    Host host;
+    host.viewport = {width, height, width, height, 1.0F};
+    Bridge bridge;
+    RenderHost renderer;
+    rocket::GameRmlUi ui(preferences, host, bridge, renderer, assetRoot());
+    assert(ui.initialize([](const std::string&) {}));
+    ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
+    ui.setControllerFocusVisible(true);
+    const auto catalog = rocket::createDefaultContent();
+    auto state = std::make_unique<rocket::GameState>(rocket::createNewGame(catalog, 0xA117ULL));
+    state->screen = rocket::Screen::Hangar;
+    rocket::Random rng(0xA117ULL);
+    const auto launch = rocket::prepareLaunch(*state, catalog, rng);
+    rocket::PanelRenderContext context {*state, catalog, launch, launch};
+    ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+    ui.openModal("system_menu");
+    ui.render();
+    auto* modal = document()->GetElementById("rr-modal");
+    assert(modal && modal->IsClassSet("modal-system_menu"));
+    const auto pauseSize = modal->GetBox().GetSize(Rml::BoxArea::Border);
+    const auto pausePosition = modal->GetAbsoluteOffset(Rml::BoxArea::Border);
+    assert(pauseSize.x <= 420 && pauseSize.y <= 250);
+    assert(pausePosition.x >= 0 && pausePosition.y >= 0);
+    assert(pausePosition.x + pauseSize.x <= width && pausePosition.y + pauseSize.y <= height);
+    assert(ui.focusedId() == "system:resume");
+    assert(reachable(ui, "system:resume") == std::set<std::string>({
+        "system:resume", "modal:controls", "modal:settings", "modal:map", "modal:inventory"}));
+
+    ui.requestFocus("modal:settings");
+    assert(ui.activateFocused());
+    ui.render();
+    assert(ui.focusedId() == "settings-tab:display");
+    auto* display = document()->QuerySelector("[data-settings-page=display]");
+    auto* controls = document()->QuerySelector("[data-settings-page=controls]");
+    assert(display && controls && display->IsVisible(true) && !controls->IsVisible(true));
+    auto* footer = document()->QuerySelector(".settings-footer");
+    modal = document()->GetElementById("rr-modal");
+    assert(footer && modal);
+    const auto footerPosition = footer->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto footerSize = footer->GetBox().GetSize(Rml::BoxArea::Border);
+    const auto modalPosition = modal->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto modalSize = modal->GetBox().GetSize(Rml::BoxArea::Border);
+    assert(footerPosition.y + footerSize.y <= modalPosition.y + modalSize.y);
+    const auto displayReachable = reachable(ui, "settings-tab:display");
+    for (const std::string_view id : {"setting:resolution", "setting:fullscreen", "setting:frame_limit",
+             "modal:developer_options", "modal:reset_save_confirm"})
+        assert(displayReachable.contains(std::string(id)));
+
+    ui.requestFocus("settings-tab:controls");
+    assert(ui.activateFocused());
+    ui.render();
+    assert(ui.focusedId() == "settings-tab:controls");
+    display = document()->QuerySelector("[data-settings-page=display]");
+    controls = document()->QuerySelector("[data-settings-page=controls]");
+    assert(controls->IsVisible(true) && !display->IsVisible(true));
+    const auto controlsReachable = reachable(ui, "settings-tab:controls");
+    for (const std::string_view id : {"setting:keyboard_drill_mode", "setting:controller_prompt",
+             "setting:controller_deadzone", "setting:controller_invert", "setting:controller_swap",
+             "setting:controller_vibration", "modal:developer_options"})
+        assert(controlsReachable.contains(std::string(id)));
+    ui.requestFocus("setting:controller_deadzone");
+    assert(ui.focusedId() == "setting:controller_deadzone");
+    ui.requestFocus("modal:developer_options");
+    assert(ui.activateFocused());
+    ui.render();
+    assert(document()->GetElementById("rr-modal")->IsClassSet("modal-developer_options"));
+    assert(ui.cancel() && ui.focusedId() == "modal:developer_options");
+    assert(ui.cancel() && ui.focusedId() == "modal:settings");
+    ui.requestFocus("modal:map");
+    assert(ui.activateFocused());
+    assert(ui.cancel() && ui.focusedId() == "modal:map");
+}
+
 int main()
 {
 #if defined(_MSC_VER)
@@ -1010,5 +1119,8 @@ int main()
     generatedPanelPass(800, 600);
     generatedPanelPass(1280, 800);
     generatedPanelPass(1600, 900);
+    pauseSettingsPass(1280, 720);
+    pauseSettingsPass(1280, 800);
+    pauseSettingsPass(1920, 1080);
     std::cout << "Controller rendered focus tests passed\n";
 }

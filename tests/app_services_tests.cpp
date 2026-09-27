@@ -4418,105 +4418,57 @@ int main(int argc, char** argv)
         }));
         ui.setPanelPresentation(rocket::buildGamePanelPresentation(panelContext));
 
-        // Details is part of every drone card's controller path, and must
-        // promote its full profile into the matching modal rather than
-        // forcing a mouse-only route to the bundled capability chips.
-        ui.requestFocus("modal:drone_details_0");
+        // Browsing previews must never invoke equipment or spending commands.
+        ui.requestFocus("action:select_drone:0");
         ui.refresh();
-        assert(ui.focusedId() == "modal:drone_details_0");
+        assert(ui.focusedId() == "action:select_drone:0");
         assert(ui.activateFocused());
-        assert(ui.modalOpen());
-        ui.closeModal();
-
-        // An empty bay still has to connect the shared titlebar, Drone Ops
-        // workspace controls, and the roster. Otherwise controller focus can
-        // become stranded in Map / Inventory / Menu after the last unequip.
-        ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
-        ui.requestFocus("modal:map");
-        ui.refresh();
-        assert(ui.navigate(rocket::UiDirection::Down));
-        assert(ui.focusedId() == "modal:surface");
-        assert(ui.navigate(rocket::UiDirection::Down));
-        assert(ui.focusedId().starts_with("modal:drone_details_")
-            || ui.focusedId().starts_with("action:equip_drone:"));
-        assert(ui.navigate(rocket::UiDirection::Up));
-        assert(ui.focusedId() == "modal:surface");
-        assert(ui.navigate(rocket::UiDirection::Up));
-        assert(ui.focusedId() == "modal:map");
-
-        // Active Drone Controls actions must be able to leave the roster for
-        // Active Loadout, then return through the same horizontal seam.
-        rocket::GameState loadedState = state;
-        loadedState.meta.equippedDroneIds.push_back(rocket::content::drone::miningDrone);
-        rocket::Random loadedRng(0xD20E0F6ULL);
-        const rocket::PreparedLaunch loadedLaunch = rocket::prepareLaunch(loadedState, catalog, loadedRng);
-        rocket::PanelRenderContext loadedPanelContext {loadedState, catalog, loadedLaunch, loadedLaunch};
-        loadedPanelContext.firstTimeIntroductionsEnabled = false;
-        ui.setPanelPresentation(rocket::buildGamePanelPresentation(loadedPanelContext));
-        ui.requestFocus("action:equip_drone:1");
-        ui.refresh();
-        assert(ui.navigate(rocket::UiDirection::Right));
-        // The purchased/unowned frame may expose no adjacent action until its
-        // fabrication affordance is focused; navigation itself is the stable
-        // contract here.
-        assert(ui.navigate(rocket::UiDirection::Left));
-
-        // The loadout is a visual 2 x 3 grid at every workspace height.
-        // Directional navigation must follow those rows and columns instead
-        // of treating the six slots as the former single vertical rail.
-        rocket::GameState gridState = state;
-        gridState.meta.droneBaySlots = 6;
-        gridState.meta.ownedDroneIds.assign(6, rocket::content::drone::miningDrone);
-        gridState.meta.equippedDroneIds.assign(6, rocket::content::drone::miningDrone);
-        rocket::ensureDroneBayState(gridState, catalog);
-        rocket::Random gridRng(0xD20E0F7ULL);
-        const rocket::PreparedLaunch gridLaunch = rocket::prepareLaunch(gridState, catalog, gridRng);
-        rocket::PanelRenderContext gridPanelContext {gridState, catalog, gridLaunch, gridLaunch};
-        gridPanelContext.firstTimeIntroductionsEnabled = false;
-        ui.setPanelPresentation(rocket::buildGamePanelPresentation(gridPanelContext));
-        ui.requestFocus("action:unequip_drone_slot:0");
-        ui.refresh();
-        assert(ui.navigate(rocket::UiDirection::Right));
-        assert(ui.focusedId() == "action:unequip_drone_slot:1");
-        assert(ui.navigate(rocket::UiDirection::Down));
-        assert(ui.focusedId() == "action:unequip_drone_slot:3");
-        assert(ui.navigate(rocket::UiDirection::Left));
-        assert(ui.focusedId() == "action:unequip_drone_slot:2");
-        assert(ui.navigate(rocket::UiDirection::Down));
-        assert(ui.focusedId() == "action:unequip_drone_slot:4");
-        assert(ui.navigate(rocket::UiDirection::Right));
-        assert(ui.focusedId() == "action:unequip_drone_slot:5");
-
-        const auto click = [&ui](int x, int y) {
-            ui.mouseDown(x, y, 0);
-            ui.mouseUp(x, y, 0);
-        };
-
-        click(1272, 35);
         assert(!ui.modalOpen());
-        click(1220, 35);
-        ui.render();
-        assert(ui.modalOpen());
-        ui.closeModal();
-
-        pointerAction.clear();
-        click(1272, 112);
-        assert(pointerAction.empty());
-        click(1150, 112);
-        assert(pointerAction.empty());
-        ui.render();
-        assert(pointerAction == rocket::ui::actions::backToSurfaceOps);
-
-        // A tall desktop viewport used to reinstate the vertical rail. Keep
-        // the same grid and its controller mapping after the layout relaxes.
-        host.metrics = {1920, 1200, 1920, 1200, 1.0F};
-        ui.setPanelPresentation(rocket::buildGamePanelPresentation(gridPanelContext));
-        ui.requestFocus("action:unequip_drone_slot:0");
-        ui.refresh();
-        assert(ui.navigate(rocket::UiDirection::Right));
-        assert(ui.focusedId() == "action:unequip_drone_slot:1");
+        assert(pointerAction == "select_drone:0");
+        ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
         assert(ui.navigate(rocket::UiDirection::Down));
-        assert(ui.focusedId() == "action:unequip_drone_slot:3");
+        assert(ui.focusedId() == "action:select_drone:1");
+        assert(pointerAction == "select_drone:1");
+        // Clicking the selected first row resets the directional origin even
+        // if the selection itself does not cause a presentation rebuild.
+        ui.mouseDown(200, 300, 0);
+        ui.mouseUp(200, 300, 0);
+        assert(ui.focusedId() == "action:select_drone:0");
+        assert(ui.navigate(rocket::UiDirection::Down));
+        assert(ui.focusedId() == "action:select_drone:1");
+        assert(ui.navigate(rocket::UiDirection::Up));
+        assert(ui.focusedId() == "action:select_drone:0");
+
+        // A six-slot loadout is a horizontal strip, using its real geometry.
+        state.meta.droneBaySlots = 6;
+        state.meta.ownedDroneIds.assign(6, rocket::content::drone::miningDrone);
+        state.meta.equippedDroneIds = state.meta.ownedDroneIds;
+        for (const auto size : {std::pair{1280,720}, std::pair{1280,800}, std::pair{1920,1080}}) {
+            host.metrics = {size.first,size.second,size.first,size.second,1.0F};
+            ui.setPanelPresentation(rocket::buildGamePanelPresentation(panelContext));
+            ui.requestFocus("action:select_drone_slot:0");
+            ui.refresh();
+            assert(ui.navigate(rocket::UiDirection::Right));
+            assert(ui.focusedId() == "action:select_drone_slot:1");
+            assert(ui.navigate(rocket::UiDirection::Left));
+            assert(ui.focusedId() == "action:select_drone_slot:0");
+            ui.requestFocus("action:select_drone:0");
+            ui.refresh();
+            assert(ui.navigate(rocket::UiDirection::Right));
+            assert(ui.focusedId() == "action:unequip_drone_slot:0");
+        }
+        const auto markup = rocket::buildGamePanelPresentation(panelContext);
+        assert(markup.contentMarkup.find("drone_details_") == std::string::npos);
+        assert(markup.contentMarkup.find("drone-loadout-slot") == std::string::npos);
+        assert(markup.contentMarkup.find("drone-preview") != std::string::npos);
+        assert(markup.missionTrackerMarkup.empty());
+        rocket::enqueueIncomingMessage(state.incomingMessages, catalog,
+            {"drone_arrival_resource_drone", "drone_arrival_resource_drone", "default"});
+        const auto pendingArrival = rocket::buildGamePanelPresentation(panelContext);
+        assert(!state.incomingMessages.pending.empty());
+        assert(std::none_of(pendingArrival.modals.begin(), pendingArrival.modals.end(), [](const auto& modal) {
+            return modal.id == "incoming_message" && modal.autoOpen;
+        }));
         ui.shutdown();
     }
 #endif
@@ -4710,6 +4662,32 @@ int main(int argc, char** argv)
         fixture.runner.shutdown();
     }
 
+    // Every available Ship Services action advertises its keyboard shortcut.
+    // Repairs only appear when damaged, so exercise that state explicitly.
+    {
+        AppFixture fixture;
+        auto save = rocket::deserializeSaveData(readyMiningDepartureSave());
+        assert(save.has_value());
+        save->unlockKeys.push_back(rocket::content::unlock::droneBay);
+        save->droneBaySlots = 1;
+        save->mining.drillIntegrity = 0.5;
+        save->mining.droneHealth = 0.5;
+        save->mining.stowedMaterials.common = 100;
+        fixture.saves.value = rocket::serializeSaveData(*save);
+        assert(fixture.runner.initialize());
+        fixture.ui.dispatchAction("continue_game");
+        completeTitleLaunch(fixture);
+        const auto& actions = fixture.ui.presentation.interactionMarkup;
+        for (const std::string_view key : {"E", "Q", "R", "O", "G"})
+            assert(actions.find("keyboard-key\">" + std::string(key) + "</span>") != std::string::npos);
+        assert(actions.find("data-rr-action=\"drone_ops\"") != std::string::npos);
+        fixture.ui.dispatchAction("drone_ops");
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::DroneOps));
+        assert(fixture.runner.app().uiCancel());
+        assert(fixture.runner.app().currentScreen() == static_cast<int>(rocket::Screen::Mining));
+        fixture.runner.shutdown();
+    }
+
     // Depart Planet keeps the landed scene alive for the complete bay-close,
     // ignition, and ascent ritual. Settlement happens once in memory, but the
     // save is not replaced until the cinematic hands off to the next screen.
@@ -4723,6 +4701,10 @@ int main(int argc, char** argv)
         assert(fixture.ui.presentation.interactionMarkup.find("data-rr-action=\"mining_depart\"") != std::string::npos);
         assert(fixture.ui.presentation.interactionMarkup.find("interaction-action rr-text-button is-depart") != std::string::npos);
         assert(fixture.ui.presentation.interactionMarkup.find("keyboard-key\">G</span>") != std::string::npos);
+        assert(fixture.ui.presentation.interactionMarkup.find("Wait for drones") == std::string::npos);
+        assert(fixture.ui.presentation.interactionMarkup.find("mining_wait_for_drones") == std::string::npos);
+        assert(fixture.ui.presentation.interactionMarkup.find("Depart ·") == std::string::npos);
+        assert(fixture.ui.presentation.interactionMarkup.find("Depart</") != std::string::npos);
         const int storesBeforeDeparture = fixture.saves.storeCount;
         // Ship-side deliveries can save during resumed gameplay; compare the
         // ritual against the latest committed state immediately before departure.

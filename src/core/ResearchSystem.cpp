@@ -1847,6 +1847,45 @@ bool equipMiniDrone(GameState& state, const ContentCatalog& catalog, int index)
     return true;
 }
 
+bool assignMiniDroneSlot(GameState& state, const ContentCatalog& catalog, int slotIndex, int index)
+{
+    // Validate before normalization, cargo settlement or spending: stale UI
+    // actions must not partially mutate the loadout or its live workers.
+    if (!droneBayUnlocked(state) || index < 0 || index >= static_cast<int>(catalog.miniDrones.size()) ||
+        slotIndex < 0 || slotIndex >= state.meta.droneBaySlots ||
+        slotIndex > static_cast<int>(state.meta.equippedDroneIds.size())) return false;
+    const auto& drone = catalog.miniDrones[static_cast<std::size_t>(index)];
+    if (!isMiniDroneUnlocked(state.meta, drone)) return false;
+    const bool replacing = slotIndex < static_cast<int>(state.meta.equippedDroneIds.size());
+    if (replacing && state.meta.equippedDroneIds[slotIndex] == drone.id) return false;
+    const bool build = equippedMiniDroneCount(state, drone.id) >= ownedMiniDroneCount(state, drone.id);
+    const auto cost = miniDroneAdditionalUnitCost(drone);
+    if (build && !canAffordMaterials(state.meta.materials, cost)) {
+        state.statusLine = "Not enough materials to build " + drone.name + ".";
+        return false;
+    }
+    if (replacing) {
+        stowMiningSupportDrone(state, catalog, slotIndex, false);
+        std::erase_if(state.run.expedition.progression.droneModuleAssignments,
+            [&](const auto& assignment) { return assignment.equippedFrame == slotIndex; });
+        std::erase_if(state.run.expedition.progression.droneModuleRuntime,
+            [&](const auto& runtime) { return runtime.equippedFrame == slotIndex; });
+    }
+    if (build) {
+        spendMaterials(state.meta.materials, cost);
+        state.meta.ownedDroneIds.push_back(drone.id);
+    }
+    if (replacing) state.meta.equippedDroneIds[slotIndex] = drone.id;
+    else state.meta.equippedDroneIds.push_back(drone.id);
+    synchronizeMiningSupportDrones(state, catalog);
+    const std::string arrivalId = "drone_arrival_" + drone.id;
+    enqueueIncomingMessage(state.incomingMessages, catalog, {arrivalId, arrivalId, "default"});
+    (void)recordScenarioEvent(state, catalog,
+        {ScenarioEventKind::EquipmentAssigned, {}, {}, drone.id, {}, 1, 0});
+    state.statusLine = drone.name + " equipped to slot " + std::to_string(slotIndex + 1) + ". Saved.";
+    return true;
+}
+
 bool unequipMiniDroneSlot(GameState& state, const ContentCatalog& catalog, int slotIndex)
 {
     ensureDroneBayState(state, catalog);

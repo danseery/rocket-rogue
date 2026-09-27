@@ -27,6 +27,8 @@ Mining, EVA, scanning, drilling, towing, Support Drones, cargo and ship services
 
 Rig fuel uses an independent home-supplied tank retained across visits and gains fuel from physical cells. Thrust and drilling consume independently; idle/coast consume neither. Rig oxygen and Suit oxygen are separate; ship oxygen service does not create fuel. A disabled Rig remains recoverable. The Rig holds at most 24 mass, and excess ore remains loose. Contract allocation precedes ordinary ship storage; drone manifests are credited only after physical delivery.
 
+Depart immediately packs the Rig, all Support Drones and their carried resources into the ship, without waiting for return paths. Settlement clears recovered manifests and physical cargo once, including cached layers; uncollected terrain resources remain at the site. The button is always labeled Depart, with no separate wait action.
+
 Packing does not teleport the ship to orbit. Pilot the ascent through the same terrain. Departure thrust spends no fuel until the Orbit exit, while gravity and collision remain active. Local ascent causes no heat damage.
 
 ## Campaign connection

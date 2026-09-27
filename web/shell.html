@@ -1133,10 +1133,11 @@
       miningDrill: (active) => rrCall("rr_mining_drill", [active ? 1 : 0], ["number"]),
       miningKeyboardDrill: (active) => rrCall("rr_mining_keyboard_drill", [active ? 1 : 0], ["number"]),
       miningScanner: () => rrCall("rr_mining_scanner"),
+      miningRepairDrill: () => rrCall("rr_mining_repair_drill"),
+      miningRepairDrone: () => rrCall("rr_mining_repair_drone"),
+      droneOps: () => rrCall("rr_drone_ops"),
       miningTether: () => rrCall("rr_mining_tether"),
       miningOperatorToggle: () => rrCall("rr_mining_operator_toggle"),
-      miningStow: () => rrCall("rr_mining_stow"),
-      miningWaitForDrones: () => rrCall("rr_mining_wait_for_drones"),
       miningDepart: () => rrCall("rr_mining_depart"),
       miningAbort: () => rrCall("rr_mining_abort"),
       debugMiningArena: (act, difficulty, seed, loadoutMode, gateOverride, destinationTierOverride, systemOverride, bodyIndex) => rrCall(
@@ -1161,7 +1162,7 @@
       debugResearch: () => rrCall("rr_debug_research"),
       debugRefit: () => rrCall("rr_debug_refit"),
       debugSurfaceUpgrade: () => rrCall("rr_debug_surface_upgrade"),
-      debugDroneOps: () => rrCall("rr_debug_drone_ops"),
+      debugDroneOps: (fixture = 0) => rrCall("rr_debug_drone_ops", [fixture], ["number"]),
       debugNavigation: () => rrCall("rr_debug_navigation"),
       debugActOneStart: () => rrCall("rr_debug_act_one_start"),
       debugActOnePrevious: () => rrCall("rr_debug_act_one_previous"),
@@ -1565,8 +1566,12 @@
         rr.miningTether();
       } else if (!event.repeat && key === "f") {
         rr.miningOperatorToggle();
+      } else if (!event.repeat && key === "o") {
+        rr.droneOps();
+      } else if (!event.repeat && key === "q") {
+        rr.miningRepairDrill();
       } else if (!event.repeat && key === "r") {
-        rr.miningStow();
+        rr.miningRepairDrone();
       } else if (!event.repeat && key === "g") {
         rr.miningDepart();
       } else if (!event.repeat && key === "escape") {

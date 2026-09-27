@@ -183,6 +183,7 @@ std::string serializeExpedition(const PersistentExpeditionState &e)
     out << " arrivals1";
     for (const auto& t : e.arrivalTutorials)
         out << ' ' << t.orbit << ' ' << t.scanned << ' ' << t.drilled << ' ' << t.drillBypassed << ' ' << t.landed << ' ' << t.acknowledged;
+    out << " packedRigFuel1 " << e.packedRigFuel;
     return out.str();
 }
 std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view input)
@@ -354,6 +355,12 @@ std::optional<PersistentExpeditionState> deserializeExpedition(std::string_view 
             if (!(in >> t.orbit >> t.scanned >> t.drilled >> t.drillBypassed >> t.landed >> t.acknowledged) ||
                 (t.acknowledged && !t.landed) || (t.drilled && t.drillBypassed)) return std::nullopt;
         e.arrivalTutorialsLoaded = true;
+        in >> std::ws;
+    }
+    if (!in.eof()) {
+        std::string extension;
+        if (!(in >> extension >> e.packedRigFuel) || extension != "packedRigFuel1" ||
+            !std::isfinite(e.packedRigFuel) || e.packedRigFuel < 0) return std::nullopt;
         in >> std::ws;
     }
     if (e.undockReady && (e.active || !e.location.siteId.ends_with(".dock"))) return std::nullopt;

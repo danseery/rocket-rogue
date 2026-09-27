@@ -2,6 +2,7 @@
 
 #include "core/Content.h"
 #include "core/GameState.h"
+#include "core/GameUi.h"
 #include "core/LaunchSimulation.h"
 #include "core/MiningSystem.h"
 #include "core/Random.h"
@@ -98,6 +99,7 @@ public:
     void openDroneOps();
     void backToSurfaceOps();
     void equipDrone(int index);
+    void assignDroneSlot(int slot, int index);
     void unequipDroneSlot(int slotIndex);
     void upgradeDroneSlot();
     void miningMove(double xAxis, double yAxis);
@@ -112,8 +114,6 @@ public:
     void miningTether();
     void miningRepairDrill();
     void miningRepairDrone();
-    void miningStow();
-    void miningWaitForDrones();
     void miningDepart();
     void salvageNearbyWreck();
     void deploySurfaceTeam();
@@ -146,7 +146,7 @@ public:
     void debugShowResearch();
     void debugShowRefit();
     void debugShowSurfaceUpgrade();
-    void debugShowDroneOps();
+    void debugShowDroneOps(int fixture = 0);
     void debugShowNavigation();
     void debugStartActOneFlow();
     void debugPreviousActOneCheckpoint();
@@ -515,6 +515,7 @@ private:
     bool panelDirty_ = true;
     bool realtimeHudDirty_ = true;
     int selectedRefitOfferIndex_ = 0;
+    ui::DroneOpsSelection droneSelection_;
     std::uint64_t panelStructureKey_ = 0;
     RealtimeHudState realtimeHudState_;
     bool debugSessionActive_ = false;

@@ -2,6 +2,7 @@
 
 #include "core/Content.h"
 #include "core/GameState.h"
+#include "core/GameUi.h"
 #include "core/LaunchSimulation.h"
 #include "core/PanelDocumentPresentation.h"
 #include "platform/AppServices.h"
@@ -63,6 +64,7 @@ struct PanelRenderContext {
     int orbitalArtifactDepth = -1;
     int orbitalBoreDepth = 0;
     const std::vector<OrbitalSurveyLayer>* orbitalSurveyLayers = nullptr;
+    ui::DroneOpsSelection droneSelection;
 };
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context);

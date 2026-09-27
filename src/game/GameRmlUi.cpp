@@ -2,6 +2,7 @@
 #include "game/IRmlRenderHost.h"
 
 #include "core/FlightInstrumentLayout.h"
+#include "core/GameUi.h"
 #include "core/UiViewportLayout.h"
 #include "input/UiFocusNavigation.h"
 
@@ -552,7 +553,7 @@ std::string syncDesktopFullscreenToggle(std::string html)
 std::string autoPowerStatusText()
 {
     if (currentPreferences().frameLimitMode != FrameLimitMode::AutoPower) {
-        return "Auto Power is opt-in; unsupported devices remain uncapped.";
+        return {};
     }
     if (!g_host) return "Auto Power status unavailable; no automatic cap.";
     const AutoPowerEnvironment environment = g_host->autoPowerEnvironment();
@@ -1135,7 +1136,7 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
         1,
         panelWidth - kDroneWorkspaceHorizontalPadding * 2);
     const int droneHeaderButtonWidth = std::clamp(droneWorkspaceInnerWidth / 12, 72, 104);
-    const int droneHeaderActionsWidth = droneHeaderButtonWidth * 3 + 24;
+    const int droneHeaderActionsWidth = droneHeaderButtonWidth * 4 + 32;
     const int droneSecondaryActionWidth = std::clamp(droneWorkspaceInnerWidth / 13, 76, 104);
     const int droneDoneActionWidth = std::clamp(droneWorkspaceInnerWidth / 5, 150, 188);
     const int droneWorkspaceActionsWidth = droneSecondaryActionWidth * 2 + droneDoneActionWidth + 24;
@@ -1232,6 +1233,14 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
     const int modalTallHeight = std::max(1, std::min(viewportHeight - modalGutter * 2, (viewportHeight * 88) / 100));
     const int modalTallTop = std::max(modalGutter, (viewportHeight - modalTallHeight) / 2);
     const int modalDefaultLeft = std::max(modalGutter, (viewportWidth - modalDefaultWidth) / 2);
+    const int pauseWidth = std::max(1, std::min(420, viewportWidth - modalGutter * 2));
+    const int pauseHeight = std::max(1, std::min(250, viewportHeight - modalGutter * 2));
+    const int pauseLeft = std::max(modalGutter, (viewportWidth - pauseWidth) / 2);
+    const int pauseTop = std::max(modalGutter, (viewportHeight - pauseHeight) / 2);
+    const int settingsHeight = std::max(1, std::min(550, viewportHeight - modalGutter * 2));
+    const int settingsTop = std::max(modalGutter, (viewportHeight - settingsHeight) / 2);
+    const int developerHeight = std::max(1, std::min(480, viewportHeight - modalGutter * 2));
+    const int developerTop = std::max(modalGutter, (viewportHeight - developerHeight) / 2);
     const int modalInventoryLeft = std::max(modalGutter, (viewportWidth - modalInventoryWidth) / 2);
     const int modalMapLeft = std::max(modalGutter, (viewportWidth - modalMapWidth) / 2);
     const int modalMissionHeight = std::max(1, std::min(300, viewportHeight - modalGutter * 2));
@@ -1575,6 +1584,14 @@ bool applyPanelRcssProperties(Rml::Element& element, RmlPanelMode mode)
     applied = element.SetProperty("--rr-legacy-layout-107", std::to_string(modalDefaultWidth) + "px") && applied;
     // --rr-legacy-layout-108: std::to_string(modalTallHeight)px
     applied = element.SetProperty("--rr-legacy-layout-108", std::to_string(modalTallHeight) + "px") && applied;
+    applied = element.SetProperty("--rr-pause-left", std::to_string(pauseLeft) + "px") && applied;
+    applied = element.SetProperty("--rr-pause-top", std::to_string(pauseTop) + "px") && applied;
+    applied = element.SetProperty("--rr-pause-width", std::to_string(pauseWidth) + "px") && applied;
+    applied = element.SetProperty("--rr-pause-height", std::to_string(pauseHeight) + "px") && applied;
+    applied = element.SetProperty("--rr-settings-top", std::to_string(settingsTop) + "px") && applied;
+    applied = element.SetProperty("--rr-settings-height", std::to_string(settingsHeight) + "px") && applied;
+    applied = element.SetProperty("--rr-developer-top", std::to_string(developerTop) + "px") && applied;
+    applied = element.SetProperty("--rr-developer-height", std::to_string(developerHeight) + "px") && applied;
     // --rr-legacy-layout-109: std::to_string(modalInventoryLeft)px
     applied = element.SetProperty("--rr-legacy-layout-109", std::to_string(modalInventoryLeft) + "px") && applied;
     // --rr-legacy-layout-110: std::to_string(modalInventoryWidth)px
@@ -1912,9 +1929,6 @@ std::string inputPromptBar(
                 prompt += describedItem("Tether", "T");
             }
             prompt += describedItem(presentation.runtime.miningEvaActive ? "Enter rig" : "Exit rig", "F");
-            if (presentation.runtime.miningStowAvailable) {
-                prompt += describedItem("Stow / Leave", "R");
-            }
             if (presentation.runtime.miningAbortAvailable) {
                 prompt += describedItem("Recall", "Esc");
             }
@@ -1952,9 +1966,6 @@ std::string inputPromptBar(
         prompt += describedItem(
             presentation.runtime.miningEvaActive ? "Enter rig" : "Exit rig",
             std::string("Hold ") + labels.south);
-        if (presentation.runtime.miningStowAvailable) {
-            prompt += describedItem("Stow / Leave", std::string("Tap ") + labels.south);
-        }
         if (presentation.runtime.miningAbortAvailable) {
             prompt += describedItem("Recall", labels.east);
         }
@@ -2449,7 +2460,8 @@ bool focusableElement(Rml::Element* element)
     // ElementFormControl. Its disabled attribute is still authoritative.
     if (element->HasAttribute("disabled")) return false;
     const Rml::String& tag = element->GetTagName();
-    if (tag != "button" && tag != "select" && !(tag == "input" && element->GetAttribute<Rml::String>("type", "") == "checkbox")) {
+    if (tag != "button" && tag != "select" && !element->HasAttribute("data-ui-scroll-region") &&
+        !(tag == "input" && element->GetAttribute<Rml::String>("type", "") == "checkbox")) {
         return false;
     }
     if (auto* control = dynamic_cast<Rml::ElementFormControl*>(element); control && control->IsDisabled()) {
@@ -2942,7 +2954,6 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
     };
     const bool presentationStateUnchanged = samePanelStructure(presentation_, presentation)
         && presentation_.runtime.launchQueued == presentation.runtime.launchQueued
-        && presentation_.runtime.miningStowAvailable == presentation.runtime.miningStowAvailable
         && presentation_.runtime.miningTetherAvailable == presentation.runtime.miningTetherAvailable
         && presentation_.runtime.miningAbortAvailable == presentation.runtime.miningAbortAvailable
         && presentation_.runtime.overlayValue == presentation.runtime.overlayValue
@@ -3279,6 +3290,11 @@ bool GameRmlUi::mouseUp(int x, int y, int button)
     if (holdSeconds > 0.0 && rr_rml_now_seconds() - pressedAt + 0.001 < holdSeconds) {
         return true;
     }
+    // Pointer selection establishes the same navigation origin as controller
+    // focus. Modal openers then restore focus to the button that was clicked.
+    if (!pressedBinding.focusId.empty() &&
+        (modalOpen() || !pressedBinding.modal.empty() || presentation_.metadata.screen == Screen::DroneOps))
+        requestFocus(pressedBinding.focusId);
     pendingPointerActivations_.push_back(std::move(pressedBinding));
     return true;
 }
@@ -3324,7 +3340,11 @@ bool GameRmlUi::navigate(UiDirection direction)
     const std::string previous = focusedId_;
     const bool moved = navigateImpl(direction);
     if (moved) controllerFocusExplicit_ = true;
-    if (moved && previous != focusedId_) emitUiSound("focus");
+    if (moved && previous != focusedId_) {
+        emitUiSound("focus");
+        if (openModalId_.empty() && focusedId_.starts_with("action:select_drone:"))
+            dispatchAction(focusedId_.substr(7));
+    }
     return moved;
 }
 
@@ -3347,6 +3367,33 @@ bool GameRmlUi::navigateImpl(UiDirection direction)
             ? nearestFocusTarget(lastFocusCenterX_, lastFocusCenterY_)
             : navigationEntryFocusTarget();
         return applyControllerFocus(fallback, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+    }
+
+    if (modalScope && openModalId_ == "system_menu") {
+        const auto moveTo = [&](std::string_view id) {
+            return applyControllerFocus(findFocusTarget(std::string(id)), focusedId_,
+                lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+        };
+        if (focusedId_ == "system:resume" && direction == UiDirection::Down)
+            return moveTo("modal:controls");
+        if (focusedId_ == "modal:controls") {
+            if (direction == UiDirection::Right) return moveTo("modal:settings");
+            if (direction == UiDirection::Down && findFocusTarget("modal:map")) return moveTo("modal:map");
+            if (direction == UiDirection::Up) return moveTo("system:resume");
+        }
+        if (focusedId_ == "modal:settings") {
+            if (direction == UiDirection::Left) return moveTo("modal:controls");
+            if (direction == UiDirection::Down && findFocusTarget("modal:inventory")) return moveTo("modal:inventory");
+            if (direction == UiDirection::Up) return moveTo("system:resume");
+        }
+        if (focusedId_ == "modal:map") {
+            if (direction == UiDirection::Right) return moveTo("modal:inventory");
+            if (direction == UiDirection::Up) return moveTo("modal:controls");
+        }
+        if (focusedId_ == "modal:inventory") {
+            if (direction == UiDirection::Left) return moveTo("modal:map");
+            if (direction == UiDirection::Up) return moveTo("modal:settings");
+        }
     }
 
     // The fixed modal Close button and scrolling settings/choice body are
@@ -3392,6 +3439,63 @@ bool GameRmlUi::navigateImpl(UiDirection direction)
             // use up/down to move to another control.
             return false;
         }
+    }
+
+    if (!modalScope && presentation_.metadata.screen == Screen::DroneOps &&
+        g_document->GetElementById("rr-panel")) {
+        const auto in = [&](const char* selector) { return current->element->Closest(selector) != nullptr; };
+        const auto firstIn = [&](const char* selector, bool selected = false) -> FocusTarget* {
+            FocusTarget* first = nullptr;
+            for (auto& target : g_focusTargets) if (target.element->Closest(selector)) {
+                if (!first) first = &target;
+                if (selected && target.element->IsClassSet("is-selected")) return &target;
+            }
+            return first;
+        };
+        const auto focus = [&](FocusTarget* target) {
+            return applyControllerFocus(target, focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+        };
+        // Explicit region handoffs keep a sparse starter screen connected even
+        // when geometric navigation's directional cone cannot span the gap.
+        if (in(".panel-head-actions") && direction == UiDirection::Down)
+            return focus(firstIn(".drone-slot-strip", true) ? firstIn(".drone-slot-strip", true) : firstIn(".drone-picker-tabs"));
+        if (in(".drone-slot-strip") && direction == UiDirection::Up) return focus(firstIn(".panel-head-actions"));
+        if (in(".drone-slot-strip") && direction == UiDirection::Down) return focus(firstIn(".drone-picker-tabs", true));
+        if (in(".drone-picker-tabs") && direction == UiDirection::Up)
+            return focus(firstIn(".drone-slot-strip", true) ? firstIn(".drone-slot-strip", true) : firstIn(".panel-head-actions"));
+        if (in(".drone-picker-tabs") && direction == UiDirection::Down)
+            return focus(firstIn(".drone-picker-list", true) ? firstIn(".drone-picker-list", true) : firstIn(".drone-picker-footer"));
+        if (in(".drone-picker-list") && direction == UiDirection::Up && current == firstIn(".drone-picker-list"))
+            return focus(firstIn(".drone-picker-tabs", true));
+        if (in(".drone-picker-footer") && direction == UiDirection::Up)
+            return focus(firstIn(".drone-preview-actions") ? firstIn(".drone-preview-actions") : firstIn(".drone-preview-scroll"));
+        if (in(".drone-preview-scroll") && direction == UiDirection::Down)
+            return focus(firstIn(".drone-preview-actions") ? firstIn(".drone-preview-actions") : firstIn(".drone-picker-footer"));
+        if (in(".drone-preview-scroll") && direction == UiDirection::Up)
+            return focus(firstIn(".drone-equipped-heading") ? firstIn(".drone-equipped-heading") : firstIn(".drone-picker-tabs", true));
+        if (in(".drone-preview-actions") && direction == UiDirection::Down) return focus(firstIn(".drone-picker-footer"));
+        if (in(".drone-preview-actions") && direction == UiDirection::Up)
+            return focus(firstIn(".drone-preview-scroll"));
+        if (direction == UiDirection::Right && current->element->Closest(".drone-picker-list")) {
+            const auto action = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [](const auto& target) {
+                return target.element->Closest(".drone-preview-actions") != nullptr;
+            });
+            return applyControllerFocus(action == g_focusTargets.end() ? firstIn(".drone-preview-scroll") : &*action,
+                focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+        }
+        if (direction == UiDirection::Left && current->element->Closest(".drone-preview")) {
+            const auto selected = std::find_if(g_focusTargets.begin(), g_focusTargets.end(), [](const auto& target) {
+                return target.element->Closest(".drone-picker-list") && target.element->IsClassSet("is-selected");
+            });
+            return applyControllerFocus(selected == g_focusTargets.end() ? nullptr : &*selected,
+                focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
+        }
+        std::vector<UiFocusRect> bounds;
+        for (const auto& target : g_focusTargets) bounds.push_back(target.bounds);
+        const auto next = directionalFocusTarget(bounds,
+            static_cast<std::size_t>(current - g_focusTargets.data()), direction);
+        return applyControllerFocus(next ? &g_focusTargets[*next] : nullptr,
+            focusedId_, lastFocusCenterX_, lastFocusCenterY_, hasLastFocusCenter_);
     }
 
     const ControllerFocusRow currentRow = controllerFocusRow(*current);
@@ -3631,6 +3735,15 @@ bool GameRmlUi::scroll(float amount)
     if (FocusTarget* target = findFocusTarget(focusedId_)) {
         element = target->element;
     }
+    // The action is pinned outside its scrollable preview. Right-stick input
+    // still scrolls that preview instead of the entire equipment workspace.
+    if (!modalScope && element && element->Closest(".drone-preview-actions")) {
+        if (auto* preview = g_document->QuerySelector(".drone-preview-scroll")) {
+            const float pixels = std::abs(amount) <= 1.0f ? amount * 100.0f : amount;
+            preview->SetScrollTop(preview->GetScrollTop() + pixels);
+            return true;
+        }
+    }
     while (element && element->GetScrollHeight() <= element->GetClientHeight() + 1.0f) {
         element = element->GetParentNode();
     }
@@ -3783,6 +3896,7 @@ void GameRmlUi::openModalImmediately(const std::string& id)
     if (!findModal(presentation_.modals, id)) {
         return;
     }
+    if (id == ui::modals::settings) settingsTab_ = SettingsTab::Display;
     emitUiSound("open");
     if (!openModalId_.empty()) {
         modalStack_.push_back(openModalId_);
@@ -3876,6 +3990,20 @@ void GameRmlUi::closeModal()
 
 void GameRmlUi::dispatchAction(const std::string& action)
 {
+    if (openModalId_ == ui::modals::settings && action.starts_with("ui:settings_tab:")) {
+        const std::string_view tab = std::string_view(action).substr(std::string_view("ui:settings_tab:").size());
+        if (tab == "display") settingsTab_ = SettingsTab::Display;
+        else if (tab == "controls") settingsTab_ = SettingsTab::Controls;
+        else if (tab == "gameplay") settingsTab_ = SettingsTab::Gameplay;
+        else return;
+        emitUiSound("toggle");
+        refreshPersistentHosts(false, false, true, false, true, false);
+        return;
+    }
+    if (action == "ui:toggle_mission_tracker" && presentation_.metadata.screen == Screen::DroneOps) {
+        if (openModalId_.empty() && actionHandler_) actionHandler_("expedition:missions");
+        return;
+    }
     if (action == "ui:toggle_mission_tracker") {
         if (!openModalId_.empty() || presentation_.missionTrackerMarkup.empty()) return;
         emitUiSound("activate");
@@ -4254,9 +4382,12 @@ bool GameRmlUi::rebuildModalHost()
             "<div class=\"modal-head\"><h2 id=\"rr-modal-title\">"
             + Rml::StringUtilities::EncodeRml(activeModal->title) + "</h2>";
         if (activeModal->dismissible && activeModal->showClose) {
+            const bool settingsNavigation = activeModal->id == ui::modals::settings
+                || activeModal->id == "developer_options";
             modalContent +=
                 "<button class=\"ghost rr-text-button\" data-ui-close-modal=\"1\" "
-                "data-ui-focus-id=\"modal:close\"><span class=\"rr-button-label\">Close</span></button>";
+                "data-ui-focus-id=\"modal:close\"><span class=\"rr-button-label\">"
+                + std::string(settingsNavigation ? "Back" : "Close") + "</span></button>";
         }
         modalContent += "</div><div class=\"modal-scroll-body\">"
             + withOpeningControllerLabels(
@@ -4270,6 +4401,7 @@ bool GameRmlUi::rebuildModalHost()
             "<template src=\"rr-modal-shell\">" + modalContent + "</template>");
         if (auto* scrim = g_document->GetElementById("rr-modal-scrim")) {
             scrim->SetClass("incoming-message-scrim", activeModal->id == "incoming_message" || activeModal->id == "solar_mission_claim");
+            scrim->SetClass("pause-menu-scrim", activeModal->id == "system_menu");
         }
         Rml::Element* modalElement = g_document->GetElementById("rr-modal");
         if (!modalElement) {
@@ -4289,6 +4421,7 @@ bool GameRmlUi::rebuildModalHost()
             modalClass += toneClass;
         }
         modalElement->SetAttribute("class", modalClass);
+        if (activeModal->id == ui::modals::settings) applySettingsTabSelection();
     } else {
         modalHost->SetInnerRML("");
     }
@@ -4307,6 +4440,28 @@ bool GameRmlUi::rebuildModalHost()
         }
     }
     return true;
+}
+
+void GameRmlUi::applySettingsTabSelection()
+{
+    if (!g_document) return;
+    const std::string_view selected = settingsTab_ == SettingsTab::Display ? "display"
+        : settingsTab_ == SettingsTab::Controls ? "controls" : "gameplay";
+    Rml::ElementList tabs;
+    g_document->QuerySelectorAll(tabs, "[data-settings-tab]");
+    for (Rml::Element* tab : tabs) {
+        const bool active = tab->GetAttribute<Rml::String>("data-settings-tab", "") == selected;
+        tab->SetClass("is-active", active);
+        tab->SetAttribute("aria-selected", active ? "true" : "false");
+    }
+    Rml::ElementList pages;
+    g_document->QuerySelectorAll(pages, "[data-settings-page]");
+    for (Rml::Element* page : pages) {
+        const bool active = page->GetAttribute<Rml::String>("data-settings-page", "") == selected;
+        page->SetClass("is-active", active);
+        page->SetAttribute("aria-hidden", active ? "false" : "true");
+        page->SetProperty("display", active ? "block" : "none");
+    }
 }
 
 bool GameRmlUi::rebuildPromptHost()

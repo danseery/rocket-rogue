@@ -189,13 +189,16 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     if (straylightOwnsPresentation(state)) {
         std::erase_if(panel.modals, [](const auto& modal) {
             return modal.id != "system_menu" && modal.id != "settings" &&
-                modal.id != "controls" && modal.id != "reset_save_confirm";
+                modal.id != "developer_options" && modal.id != "controls" &&
+                modal.id != "reset_save_confirm";
         });
         for (auto& modal : panel.modals) if (modal.id == "system_menu") {
-            modal.bodyMarkup = "<div class=\"modal-actions action-row system-menu-actions\">"
-                "<button class=\"ok\" data-ui-close-modal=\"1\" data-controller-resume=\"1\" data-ui-focus-id=\"system:resume\" data-ui-default-focus=\"1\">Resume</button>"
-                "<button class=\"ghost\" data-ui-modal=\"controls\" data-ui-focus-id=\"modal:controls\">Controls</button>"
-                "<button class=\"ghost\" data-ui-modal=\"settings\" data-ui-focus-id=\"modal:settings\">Settings</button></div>";
+            modal.bodyMarkup = "<div class=\"system-menu-actions\">"
+                "<button class=\"ok rr-text-button system-resume\" data-ui-close-modal=\"1\" data-controller-resume=\"1\" data-ui-focus-id=\"system:resume\" data-ui-default-focus=\"1\"><span class=\"rr-button-label\">Resume</span></button>"
+                "<div class=\"system-menu-row\">"
+                "<button class=\"ghost rr-text-button\" data-ui-modal=\"controls\" data-ui-focus-id=\"modal:controls\"><span class=\"rr-button-label\">Controls</span></button>"
+                "<button class=\"ghost rr-text-button\" data-ui-modal=\"settings\" data-ui-focus-id=\"modal:settings\"><span class=\"rr-button-label\">Settings</span></button>"
+                "</div></div>";
         }
         panel.contentMarkup = "<section class=\"straylight-sequence\">";
         panel.templateKind = PanelTemplateKind::Takeover;
@@ -286,7 +289,7 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         // The live dock has one departure surface. Legacy launch, crew intake,
         // route gates and refit modals must never compete with it.
         std::erase_if(panel.modals, [](const auto& item) {
-            return item.id != "settings" && item.id != "inventory" && item.id != "incoming_message" &&
+            return item.id != "settings" && item.id != "developer_options" && item.id != "inventory" && item.id != "incoming_message" &&
                 item.id != "system_menu" && item.id != "controls" && item.id != "reset_save_confirm";
         });
     }
@@ -631,6 +634,7 @@ void appendMissionPresentation(const PanelRenderContext& c, PanelDocumentPresent
     }
     log += button("Resume", "expedition:missions_close");
     replaceModal(panel, {"missions", "MISSIONS", log, "expedition:missions_close", false, true, true, ModalTone::Neutral});
+    if (s.screen == Screen::DroneOps) return;
     if (!v.available || straylightCinematicDuration(s.meta.straylightStage) > 0 ||
         std::any_of(panel.modals.begin(), panel.modals.end(), [](const auto& modal) { return modal.autoOpen; })) return;
     const bool approachingMission = s.screen == Screen::Flight && c.launchFlight && c.launchFlight->active &&
