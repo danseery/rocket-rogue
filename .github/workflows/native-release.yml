@@ -118,8 +118,20 @@ jobs:
           $archive = "build/packages/RocketRogue-windows-x64.zip"
           if (-not (Test-Path -LiteralPath $archive)) { throw "Missing $archive" }
           $listing = 7z l $archive | Out-String
-          if ($listing -match '(?i)electron|chromium|node\.exe|\.wasm(?:\s|$)|rocket_rogue\.html|vulkan-1\.dll|libvulkan|assets\\art') {
-            throw "A browser runtime, Vulkan loader, or duplicate source-art directory escaped into the native archive."
+          if ($listing -match '(?i)electron|chromium|node\.exe|\.wasm(?:\s|$)|rocket_rogue\.html|vulkan-1\.dll|libvulkan') {
+            throw "A browser runtime or Vulkan loader escaped into the native archive."
+          }
+          $archivePaths = @(7z l -slt $archive | ForEach-Object {
+            if ($_ -match '^Path = (.+)$') { $Matches[1].Replace('/', '\').TrimEnd('\') }
+          })
+          $droneArtPaths = @($archivePaths | Where-Object { $_ -match '(?i)(^|\\)assets\\art(\\|$)' })
+          $allowedDroneArtPaths = @('assets\art') + @(
+            'attack', 'defense', 'hazard', 'mining', 'resource', 'survey' |
+              ForEach-Object { "assets\art\mini-drone-$_.png" }
+          )
+          $unexpectedDroneArt = @($droneArtPaths | Where-Object { $allowedDroneArtPaths -notcontains $_ })
+          if ($unexpectedDroneArt.Count -gt 0) {
+            throw "Unexpected non-runtime art in native archive: $($unexpectedDroneArt -join ', ')"
           }
           if ($listing -notmatch 'RocketRogue\.exe' -or $listing -notmatch 'assets\\scene-atlas' -or $listing -notmatch 'assets\\fonts' -or $listing -notmatch 'assets\\ui' -or $listing -notmatch 'licenses') {
             throw "Native archive is missing the executable, scene atlas, fonts, RmlUi resources, or licenses."
@@ -141,6 +153,10 @@ jobs:
           )
           foreach ($entry in $required) {
             if ($listing -notmatch [regex]::Escape($entry)) { throw "Native archive is missing $entry" }
+          }
+          foreach ($role in @('attack', 'defense', 'hazard', 'mining', 'resource', 'survey')) {
+            $droneArt = "assets\art\mini-drone-$role.png"
+            if ($archivePaths -notcontains $droneArt) { throw "Native archive is missing $droneArt" }
           }
 
       - uses: actions/upload-artifact@v4
@@ -308,8 +324,14 @@ jobs:
           archive="build/packages/RocketRogue-linux-x64.tar.gz"
           test -f "$archive"
           listing="$(tar -tzf "$archive")"
-          if printf '%s\n' "$listing" | grep -Eiq 'electron|chromium|node(\.exe)?$|\.wasm$|rocket_rogue\.html$|vulkan-1\.dll$|libvulkan|assets/art/'; then
-            echo "A browser runtime, Vulkan loader, or duplicate source-art directory escaped into the native archive." >&2
+          if printf '%s\n' "$listing" | grep -Eiq 'electron|chromium|node(\.exe)?$|\.wasm$|rocket_rogue\.html$|vulkan-1\.dll$|libvulkan'; then
+            echo "A browser runtime or Vulkan loader escaped into the native archive." >&2
+            exit 1
+          fi
+          unexpected_art="$(printf '%s\n' "$listing" | grep -E '(^|/)assets/art/.*' | grep -Ev '(^|/)assets/art/(mini-drone-(attack|defense|hazard|mining|resource|survey)\.png)?$' || true)"
+          if [ -n "$unexpected_art" ]; then
+            echo "Unexpected non-runtime art in native archive:" >&2
+            printf '%s\n' "$unexpected_art" >&2
             exit 1
           fi
           printf '%s\n' "$listing" | grep -Eq '(^|/)RocketRogue$'
@@ -332,6 +354,9 @@ jobs:
             rml_ui.vert.spv rml_ui.frag.spv \
             Vulkan-Headers.txt Volk.txt VulkanMemoryAllocator.txt; do
             printf '%s\n' "$listing" | grep -Fq "$required"
+          done
+          for role in attack defense hazard mining resource survey; do
+            printf '%s\n' "$listing" | grep -Fq "assets/art/mini-drone-$role.png"
           done
 
       - uses: actions/upload-artifact@v4
