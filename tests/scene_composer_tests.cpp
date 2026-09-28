@@ -1610,6 +1610,81 @@ void testIoScanAndOrbitShareArtAndArtifactSignal()
     }
 }
 
+void testScannedArtifactHasOneLabelBesideItsDepthSlice()
+{
+    const auto labels = [](const ScenePacket& packet) {
+        std::vector<SceneInstance> result;
+        for (const auto& packed : packet.instances) {
+            const auto instance = rocket::unpackSceneInstance(packed);
+            // Purple label underlines distinguish readable captions from
+            // artifact glows, mineral icons, and the mission-sector outline.
+            if (instance.shape == SceneInstanceShape::Rectangle && instance.axisXx > 0.08F &&
+                instance.axisYy < 0.01F && std::abs(instance.color.r - .78F) < .01F &&
+                std::abs(instance.color.g - .52F) < .01F && instance.color.b > .99F)
+                result.push_back(instance);
+        }
+        return result;
+    };
+    for (int width : {1280, 1600}) for (const auto& [body, tier] :
+        std::array<std::pair<const char*, int>, 6>{{{"moon",1}, {"mars",2}, {"io",3},
+            {"titan",4}, {"titania",5}, {"triton",6}}}) {
+        SceneComposer composer;
+        composer.setViewport({width, 800, width, 800, 1.0F});
+        RenderSnapshot snapshot;
+        snapshot.screen = rocket::Screen::Flight;
+        snapshot.systemTravel = snapshot.launchPhysicalFlight = true;
+        snapshot.system = rocket::solarSystemDefinition();
+        std::erase_if(snapshot.system.bodies, [&](const auto& definition) { return definition.id != body; });
+        snapshot.systemLocation.bodyId = body;
+        snapshot.systemLocation.frame = rocket::CoordinateFrame::Body;
+        snapshot.destinationTier = tier;
+        snapshot.launchPositionX = .7;
+        snapshot.launchApproachBlend = 1.0;
+        snapshot.launchOrbitCaptured = true;
+        snapshot.orbitalOverlay = 1.0;
+        snapshot.orbitalSurveyProgress = 1.0;
+        snapshot.orbitalSurveyDepth = 2;
+        snapshot.landingZones = rocket::planetLandingZones();
+        snapshot.orbitalZone = snapshot.landingZones[4];
+        snapshot.orbitalArtifactHint = true;
+        snapshot.orbitalArtifactBearing = snapshot.orbitalZone.centerBearing;
+        snapshot.missionSectorVisible = true;
+        snapshot.missionSector = snapshot.orbitalZone;
+        snapshot.missionSectorLabel = "MISSION LANDING SITE - SECTOR 5";
+        snapshot.orbitalSurveyLayers.push_back({2, true, true, false, true});
+        const auto beforeScan = labels(composer.compose(snapshot));
+        assert(beforeScan.size() == 1); // Mission-sector caption only.
+        snapshot.orbitalZoneSurveyed = true;
+        // The orbital scan knows the band; the surface scanner has not yet
+        // revealed the object's exact position. It still needs its label.
+        assert(!snapshot.orbitalArtifactLocalized);
+        const ScenePacket scanned = composer.compose(snapshot);
+        const auto scannedLabels = labels(scanned);
+        assert(scannedLabels.size() == beforeScan.size() + 1);
+        const auto caption = std::min_element(scannedLabels.begin(), scannedLabels.end(),
+            [](const auto& a, const auto& b) { return a.axisXx < b.axisXx; });
+        const auto& transform = scanned.transform;
+        const auto& clip = scanned.logicalSceneClip;
+        assert(transform.pixelCenterX + (caption->centerX - caption->axisXx) * transform.worldUnitX >= clip.x);
+        assert(transform.pixelCenterX + (caption->centerX + caption->axisXx) * transform.worldUnitX <= clip.x + clip.width);
+        // Repeat scans and surface discovery retain a single artifact caption.
+        assert(labels(composer.compose(snapshot)).size() == scannedLabels.size());
+        snapshot.orbitalArtifactHint = snapshot.orbitalArtifactLocalized = true;
+        snapshot.orbitalArtifactBearing = snapshot.orbitalZone.centerBearing;
+        snapshot.orbitalArtifactDepth = 2.5;
+        assert(labels(composer.compose(snapshot)).size() == scannedLabels.size());
+        // Recovery retires the artifact signal even when the saved survey
+        // findings still contain its original depth band.
+        snapshot.orbitalArtifactHint = snapshot.orbitalArtifactLocalized = false;
+        assert(labels(composer.compose(snapshot)).size() == beforeScan.size());
+        // A scanned sector without an artifact must not advertise one.
+        snapshot.orbitalArtifactHint = true;
+        snapshot.orbitalZone = snapshot.landingZones[1];
+        snapshot.orbitalSurveyLayers[0].artifact = false;
+        assert(labels(composer.compose(snapshot)).size() == beforeScan.size());
+    }
+}
+
 void testUndiscoveredStraylightIsForeshadowedBehindNeptuneOnly()
 {
     SceneComposer composer;
@@ -2017,7 +2092,23 @@ void testContextualInteractionAnchorsFollowVisibleMiningTargets()
     assert(visible.target.visible && visible.ship.visible);
     assert(visible.target.x >= 0 && visible.target.x <= 1280);
     assert(visible.target.y >= 0 && visible.target.y <= 800);
+    assert(visible.shipRadiusX > 0 && visible.shipRadiusY > 0);
+    assert(visible.player.y > visible.ship.y);
+    snapshot.miningDroneX = snapshot.miningReturnZoneX - 1;
+    const auto rigLeft = composer.compose(snapshot).interactionAnchors;
+    assert(rigLeft.player.x < rigLeft.ship.x);
+    snapshot.miningOperatorActive = true;
+    snapshot.miningOperatorX = snapshot.miningReturnZoneX + 1;
+    snapshot.miningOperatorY = snapshot.miningReturnZoneY;
+    const auto evaRight = composer.compose(snapshot).interactionAnchors;
+    assert(evaRight.player.x > evaRight.ship.x);
     snapshot.miningAtReturnZone = false;
+    const auto awayFromShip = composer.compose(snapshot).interactionAnchors;
+    assert(awayFromShip.target.visible && awayFromShip.player.visible && !awayFromShip.ship.visible);
+    assert(awayFromShip.player.x > awayFromShip.target.x);
+    assert(awayFromShip.player.halfWidth > 0 && awayFromShip.player.halfHeight > 0);
+    assert(awayFromShip.target.halfWidth > awayFromShip.player.halfWidth);
+    assert(awayFromShip.target.halfHeight > awayFromShip.player.halfHeight);
     snapshot.miningInteractionVisible = false;
     const auto& hidden = composer.compose(snapshot).interactionAnchors;
     assert(!hidden.target.visible && !hidden.ship.visible);
@@ -2221,6 +2312,47 @@ SceneInstance spriteInstance(
     }
     assert(false && "Expected the requested textured scene instance.");
     return {};
+}
+
+void testLandedShipServiceAnchorUsesRenderedShipTransform()
+{
+    using namespace rocket;
+    std::vector<MiningCell> cells(64 * 40);
+    for (const auto viewport : {UiRect {0, 0, 1280, 800}, UiRect {0, 0, 1600, 900}}) {
+        SceneComposer composer;
+        composer.setViewport({viewport.width, viewport.height, viewport.width, viewport.height, 1.0F});
+        composer.setTextureReady(TextureId::RocketClosed, true);
+        RenderSnapshot snapshot;
+        snapshot.screen = Screen::Flight;
+        snapshot.launchPhysicalFlight = true;
+        snapshot.surfaceArrivalPrepared = snapshot.surfaceArrivalActive = true;
+        snapshot.surfaceArrivalLandingCommitted = true;
+        snapshot.surfaceArrivalPhase = 3;
+        snapshot.launchLandingLocalFrame = true;
+        snapshot.launchLandingBlend = snapshot.surfaceFramingProgress = 1.0;
+        snapshot.launchApproachBlend = 1.0;
+        snapshot.launchHeading = snapshot.launchLandingBasisAngle = 1.5707963267948966;
+        snapshot.launchPositionY = flight_geometry::bodyRadius;
+        snapshot.miningWidth = 64;
+        snapshot.miningHeight = 40;
+        snapshot.miningCells = cells;
+        snapshot.miningReturnZoneX = snapshot.launchLandingPadX = 32;
+        snapshot.miningReturnZoneY = snapshot.launchLandingPadY = 16;
+        for (double altitude : {0.0, -48.0}) {
+            snapshot.launchLandingAltitude = altitude;
+            const auto& packet = composer.compose(snapshot);
+            const auto ship = spriteInstance(packet, TextureId::RocketClosed, 0, 0, 1, 1);
+            const auto& anchors = packet.interactionAnchors;
+            assert(anchors.ship.visible && !anchors.player.visible && !anchors.target.visible);
+            assert(anchors.shipRadiusX > 0 && anchors.shipRadiusY > 0);
+            assert(std::abs(anchors.ship.x - (packet.transform.pixelCenterX + ship.centerX * packet.transform.worldUnitX)) < 1.0F);
+            assert(std::abs(anchors.ship.y - (viewport.height - packet.transform.pixelCenterY - ship.centerY * packet.transform.worldUnitY)) < 1.0F);
+        }
+        for (int phase : {0, 4, 5}) {
+            snapshot.surfaceArrivalPhase = phase;
+            assert(!composer.compose(snapshot).interactionAnchors.ship.visible);
+        }
+    }
 }
 
 SceneInstance miningRigInstance(const ScenePacket& packet)
@@ -3206,9 +3338,15 @@ void testMiningSurveyPulseRechargeRingPersistsWhenReady()
     snapshot.miningScannerRechargeProgress = 0.0;
     snapshot.miningScannerPulse = 0.64;
     const ScenePacket pulsing = composer.compose(snapshot);
-    assert(cyanTrackCount(pulsing) == 0 && cyanArcLength(pulsing) < 0.001F);
+    assert(cyanTrackCount(pulsing) > 0 && cyanArcLength(pulsing) < 0.001F);
+
+    snapshot.miningScannerPulse = 0.32;
+    snapshot.miningScannerRechargeProgress = 0.25;
+    const ScenePacket chargingDuringPulse = composer.compose(snapshot);
+    assert(cyanTrackCount(chargingDuringPulse) > 0 && cyanArcLength(chargingDuringPulse) > 0.0F);
 
     snapshot.miningScannerPulse = 0.0;
+    snapshot.miningScannerRechargeProgress = 0.0;
     const ScenePacket empty = composer.compose(snapshot);
     assert(cyanTrackCount(empty) > 0);
     assert(cyanArcLength(empty) < 0.001F);
@@ -4144,6 +4282,29 @@ void testFlightDestructionCinematicUsesExplosionFramesAndAccessibleShake()
     assert(explosionFrame(genericDestroyed) >= 0);
 }
 
+void testStraylightRemoteRevealDoesNotStagePlayerArrival()
+{
+    SceneComposer composer;
+    composer.setViewport({1280, 800, 1280, 800, 1});
+    composer.setTextureReady(TextureId::RocketClosed, true);
+    composer.setTextureReady(TextureId::ArkOperational, true);
+    RenderSnapshot snapshot;
+    snapshot.screen = rocket::Screen::StoryBriefing;
+    snapshot.straylightTableau = true;
+    for (const auto stage : {rocket::StraylightStage::Reveal, rocket::StraylightStage::Invitation}) {
+        snapshot.straylightStage = stage;
+        for (const double elapsed : {6.0, 12.0}) {
+            snapshot.straylightElapsed = elapsed;
+            const auto& packet = composer.compose(snapshot);
+            assert(packetHasTextureFrame(packet, TextureId::ArkOperational, 0, 1));
+            assert(!packetHasTextureFrame(packet, TextureId::RocketClosed, 0, 1));
+        }
+    }
+    snapshot.straylightStage = rocket::StraylightStage::Docking;
+    snapshot.straylightElapsed = 2;
+    assert(packetHasTextureFrame(composer.compose(snapshot), TextureId::RocketClosed, 0, 1));
+}
+
 void testSunUsesSharedTexture()
 {
     using namespace rocket;
@@ -4473,6 +4634,42 @@ void testServiceDockUsesBalancedScaleAndDeterministicHandoff()
     assert(std::hypot(running.centerX - reloaded.centerX, running.centerY - reloaded.centerY) < .002F);
 }
 
+void testStraylightDockHullConnectsBelowBerth()
+{
+    using namespace rocket;
+    const auto profile = service_dock::profile("straylight");
+    for (const int width : {1280, 1600}) {
+        SceneComposer composer;
+        composer.setViewport({width, width == 1280 ? 800 : 900, width, width == 1280 ? 800 : 900, 1.0F});
+        composer.setTextureReady(TextureId::StraylightDock, true);
+        composer.setTextureReady(TextureId::StraylightDockHull, true);
+        RenderSnapshot snapshot;
+        snapshot.screen = Screen::Flight;
+        snapshot.systemTravel = snapshot.launchPhysicalFlight = snapshot.launchDockingActive = true;
+        snapshot.system = solarSystemDefinition();
+        snapshot.launchDockId = "straylight";
+        snapshot.launchDockHeading = service_dock::arkHeading;
+        snapshot.launchDockHandoffProgress = 1;
+        snapshot.launchPositionY = .7;
+        const auto& packet = composer.compose(snapshot);
+        const auto dock = spriteInstance(packet, TextureId::StraylightDock, 0,0,1,1);
+        const auto hull = spriteInstance(packet, TextureId::StraylightDockHull, 0,0,1,1);
+        const float scale = 2 * std::hypot(dock.axisYx, dock.axisYy) / static_cast<float>(profile.artHeight);
+        const float dockCenterY = dock.centerY - static_cast<float>(profile.artOffsetY) * scale;
+        const float hullMaterialTop = hull.centerY + std::hypot(hull.axisYx, hull.axisYy) * (1 - 2 * 63.F / 1024.F);
+        const float expectedTop = dockCenterY + static_cast<float>(profile.hull.top) * scale;
+        assert(std::abs(hullMaterialTop - expectedTop) < .002F);
+        assert(hullMaterialTop > dockCenterY + static_cast<float>(profile.bottom) * scale);
+        assert(2 * std::hypot(hull.axisXx, hull.axisXy) > 2.5F * std::hypot(dock.axisXx, dock.axisXy) * 2);
+        assert(hull.color.a == 1 && hull.centerY < dock.centerY);
+        snapshot.launchDockId = "earth";
+        const auto& earth = composer.compose(snapshot);
+        assert(std::none_of(earth.draws.begin(), earth.draws.end(), [](const auto& draw) {
+            return draw.texture == TextureId::StraylightDockHull;
+        }));
+    }
+}
+
 } // namespace
 
 int main() try
@@ -4485,6 +4682,7 @@ int main() try
     testFlightPointerMatchesRenderedShip();
     testSolarBeltRendering();
     testSunUsesSharedTexture();
+    testStraylightRemoteRevealDoesNotStagePlayerArrival();
     testArtifactWreckMarkerUsesOwnership();
     testCommittedDepartureRendering();
     testMiningViewportReservesBothHudLanes();
@@ -4501,6 +4699,7 @@ int main() try
     testLaunchUsesAttachedAnimatedSideFlames();
     testServiceDockTracksShipBeforeApproach();
     testServiceDockUsesBalancedScaleAndDeterministicHandoff();
+    testStraylightDockHullConnectsBelowBerth();
     testMiningSkyAndTunnelBackdrop();
     testDistantEarthMarkerUsesViewportEdgeAndPixelSize();
     testPhysicalMoonFlightStartsOnScreenAtEarthDeparture();
@@ -4510,6 +4709,7 @@ int main() try
     testPhysicalLandingCameraDoesNotRetainTransferBodies();
     testExistingOrbitalShaftsRemainVisibleOutsideTheirActiveWedge();
     testIoScanAndOrbitShareArtAndArtifactSignal();
+    testScannedArtifactHasOneLabelBesideItsDepthSlice();
     testUndiscoveredStraylightIsForeshadowedBehindNeptuneOnly();
     testPolygonInstanceMatchesTriangleFan();
     testOrderedBatchingAndWideLineInstancing();
@@ -4525,6 +4725,7 @@ int main() try
     testCocoonHasNoConnectingArms();
     testSceneTransitionFadesEverySceneToBlack();
     testContextualInteractionAnchorsFollowVisibleMiningTargets();
+    testLandedShipServiceAnchorUsesRenderedShipTransform();
     testTetheredArtifactAuraHasNoRectangularOverlay();
     testTriangulationUsesOneThreeSliceAuraAndHidesArtifactGlow();
     testMiningPickupHistoryDoesNotReplayAfterLevelUp();

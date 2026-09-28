@@ -217,13 +217,14 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         const auto transmission = [&](std::string_view message, std::string_view id) {
             if (auto card = buildIncomingMessageCard(c, message, "default", "expedition:straylight:" + std::string(id))) {
                 card->autoOpen = true;
+                card->bannerEligible = false;
                 panel.modals.push_back(std::move(*card));
             }
         };
         if (straylightCinematicDuration(stage) > 0) {
             panel.contentMarkup += sequenceAction("Skip animation", "skip");
         } else if (stage == Stage::Invitation) {
-            transmission("triton_mission_complete", "invitation");
+            transmission("straylight_invitation", "invitation");
         } else if (stage == Stage::FirstContact) {
             transmission("straylight_beacons", "retrieve");
         } else if (stage == Stage::RetrieveBeacons) {
@@ -262,8 +263,10 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
         panel.contentMarkup.clear();
         // The saved retry decision owns this repeatable transmission. Its
         // explicit action retries the launch; the shared card only presents it.
-        if (auto card=buildIncomingMessageCard(c,"opening_retry",openingRetryMessageVariant(state),"expedition:retry_opening"))
+        if (auto card=buildIncomingMessageCard(c,"opening_retry",openingRetryMessageVariant(state),"expedition:retry_opening")) {
+            card->bannerEligible = false;
             panel.modals.push_back(std::move(*card));
+        }
         panel.templateKind=PanelTemplateKind::LegacyRaw;
         panel.metadata.legacyContentOwnsLaneGeometry=false;
         panel.runtime.responsiveViewport=true;
@@ -501,13 +504,13 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
                 ? ui::actions::scenarioAction(a.scenarioId,a.stepId,static_cast<int>(ScenarioActionKind::ClaimReward))
                 : "expedition:artifact_handin:" + a.key;
             const auto* body = systemBody(system,a.artifact.originDestinationId);
-            home << button("Complete Mission: " + (body ? body->name : a.artifact.originDestinationId),id,true,"ok",!handInDefault);
+            home << button("Complete Mission: " + (body ? body->name : a.artifact.originDestinationId),id,true,"ok dock-mission-claim",!handInDefault);
             handInDefault = true;
         };
         for (const auto& mission : c.catalog.solarMissions)
             if (const auto* a = missionArtifact(state,mission.scenarioId,mission.claimStepId)) handIn(*a);
         for (const auto& a : e.artifacts) if (!a.key.starts_with("solar:")) handIn(a);
-        home << "<div class=\"expedition-dock-route-actions\">"
+        home << "<div class=\"expedition-dock-route-actions" << (handInDefault ? " is-secondary" : "") << "\">"
             << button(departLabel, "expedition:depart", true, "dock-depart", !handInDefault)
             << button("Change waypoint", "expedition:map", true, "dock-waypoint")
             << "</div></section><div class=\"action-row\">";
@@ -553,7 +556,18 @@ void appendExpeditionPresentation(const PanelRenderContext& c, PanelDocumentPres
     }
     if (stage == Stage::RetrieveBeacons && atOperationalDock && e.location.bodyId == "earth") {
         const bool stored = std::any_of(e.batteries.begin(), e.batteries.end(), [](const auto& b) { return b.owner == BatteryOwner::EarthStorage; });
-        panel.contentMarkup += beaconChecklist() + button("Collect stored beacons", "expedition:straylight:collect", stored, "ok");
+        panel.missionSidebarMarkup = "<section id=\"rr-beacon-recovery\" class=\"mission-support\"><h3>BEACON RECOVERY</h3>";
+        for (const auto& b : e.batteries) {
+            const auto* origin = systemBody(solarSystemDefinition(), b.id);
+            const std::string location = b.owner == BatteryOwner::EarthStorage ? "Earth storage" :
+                b.owner == BatteryOwner::Ship ? "Aboard ship" : b.owner == BatteryOwner::ArkSlot ? "Installed" :
+                b.owner == BatteryOwner::Wreck ? "Wreck " + std::to_string(b.wreckId) : "Recovery site";
+            panel.missionSidebarMarkup += "<div class=\"beacon-row\"><span>" + esc(origin ? origin->name : b.id) +
+                "</span><span class=\"beacon-custody\">" + esc(location) + "</span></div>";
+        }
+        if (stored)
+            panel.missionSidebarMarkup += button("Collect beacons", "expedition:straylight:collect", true, "ok");
+        panel.missionSidebarMarkup += "</section>";
     }
     const bool stableMissionContext = c.incomingMessageDeliveryAllowed && !c.miningExtractionActive &&
         e.progression.pendingRunUpgradeChoices == 0 &&

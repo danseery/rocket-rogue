@@ -6,6 +6,7 @@
 #include "core/SolarProgression.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace rocket
@@ -96,6 +97,46 @@ bool dockRectContact(DockLocalPose& pose, double circleOffsetX, double circleOff
     return true;
 }
 
+bool dockConnectedHullContact(DockLocalPose& pose, double offsetX, double offsetY,
+    const service_dock::Profile& p, double& normalX, double& normalY, double& contactX, double& contactY)
+{
+    // One outside contour for the hull and berth. Internal rectangle seams
+    // must never eject the ship into another solid part of the same structure.
+    const std::array<SystemVector, 12> outline {{
+        {-p.hull.halfWidth,p.hull.bottom}, {p.hull.halfWidth,p.hull.bottom},
+        {p.hull.halfWidth,p.hull.top}, {p.outerWidth,p.hull.top},
+        {p.outerWidth,p.mouth}, {p.halfWidth,p.mouth}, {p.halfWidth,p.backstop},
+        {-p.halfWidth,p.backstop}, {-p.halfWidth,p.mouth}, {-p.outerWidth,p.mouth},
+        {-p.outerWidth,p.hull.top}, {-p.hull.halfWidth,p.hull.top}
+    }};
+    const double x = pose.x + offsetX, y = pose.y + offsetY;
+    bool inside = false;
+    double nearestDistance = std::numeric_limits<double>::max();
+    double nearestX = 0, nearestY = 0, edgeNormalX = 0, edgeNormalY = 0;
+    for (std::size_t i=0; i<outline.size(); ++i) {
+        const auto a = outline[i], b = outline[(i+1)%outline.size()];
+        if ((a.y > y) != (b.y > y) && x < a.x + (y-a.y)*(b.x-a.x)/(b.y-a.y)) inside = !inside;
+        const double dx = b.x-a.x, dy = b.y-a.y;
+        const double lengthSquared = dx*dx + dy*dy;
+        const double t = std::clamp(((x-a.x)*dx + (y-a.y)*dy)/lengthSquared, 0.0, 1.0);
+        const double px = a.x+t*dx, py = a.y+t*dy;
+        const double distance = std::hypot(x-px,y-py);
+        if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestX = px; nearestY = py;
+            edgeNormalX = dy/std::sqrt(lengthSquared); edgeNormalY = -dx/std::sqrt(lengthSquared);
+        }
+    }
+    if (!inside && nearestDistance >= service_dock::hullRadius) return false;
+    const double sign = inside ? -1.0 : 1.0;
+    normalX = nearestDistance > 1e-9 ? sign*(x-nearestX)/nearestDistance : edgeNormalX;
+    normalY = nearestDistance > 1e-9 ? sign*(y-nearestY)/nearestDistance : edgeNormalY;
+    const double separation = service_dock::hullRadius + .001 + (inside ? nearestDistance : -nearestDistance);
+    pose.x += normalX*separation; pose.y += normalY*separation;
+    contactX = nearestX; contactY = nearestY;
+    return true;
+}
+
 bool dockHullContact(DockLocalPose& pose, const DockHullBasis& hull, const service_dock::Profile& profile,
     double& normalX, double& normalY, double& contactX, double& contactY)
 {
@@ -104,6 +145,10 @@ bool dockHullContact(DockLocalPose& pose, const DockHullBasis& hull, const servi
     for (const double offset : samples) {
         const double offsetX = hull.forwardX * offset;
         const double offsetY = hull.forwardY * offset;
+        if (profile.hull.halfWidth > 0) {
+            if (dockConnectedHullContact(pose, offsetX, offsetY, profile, normalX, normalY, contactX, contactY)) return true;
+            continue;
+        }
         if (dockRectContact(pose, offsetX, offsetY,
                 -profile.outerWidth, -profile.halfWidth,
                 profile.backstop, profile.mouth,

@@ -118,6 +118,8 @@ There is no suit upgrade tree, ammunition inventory, propellant inventory, or fa
 
 ## Cargo, Passages, Depth, And Failure
 
+While piloting the Rig, hold C / left-stick click for 0.75 seconds to discard its carried common, rare and exotic ore. The amber hold ring and payload hint identify the action. Dumping reduces cargo mass immediately, including during artifact towing, but keeps artifacts, drone payloads, ship cargo, XP and mission rewards unchanged. Discarded ore cannot be recovered. No saved hold or new cargo currency is introduced.
+
 The suit has zero ore capacity. Hand-drilled ore and suit-killed enemy rewards become `MiningLooseChunk` world objects collected by the rig or Mining/Resource Support Drones. The artifact is the sole suit-cargo exception: existing normal/heavy weights `4` and `7.2` apply with zero suit free buffer and a `55%` minimum speed clamp.
 
 Generation may create explicit suit-only passages and pockets. These block the rig and artifact but admit the operator and Support Drones. The operator may change depth: the parked rig remains on its layer, while the operator, a validly tethered artifact, and the complete Support Drone swarm travel together.

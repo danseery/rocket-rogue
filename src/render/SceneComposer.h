@@ -72,6 +72,7 @@ private:
     void drawStraylightSequence(const RenderSnapshot& snapshot);
     void drawOrbitalArtifactSignal(const RenderSnapshot& snapshot, float x, float y,
         float radius, float alpha, float approachBlend);
+    void drawOrbitalArtifactLabel(float bodyX, float radius, float x, float y, int depth);
     void drawMining(const RenderSnapshot& snapshot, bool arrivalComposite = false);
     void drawSurfaceArrival(const RenderSnapshot& snapshot);
     void drawSurfaceExhaust(float nozzleX, float nozzleY, float shipSize, float strength, double animationTime);

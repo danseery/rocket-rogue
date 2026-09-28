@@ -64,7 +64,6 @@ void beltWarningFollowsTravelDirection()
             return SystemVector{radius * std::cos(angle), radius * std::sin(angle)};
         };
         for (double speed : {.01, 1.0, 5.0}) {
-            assert(approachingSolarAsteroidBelt(point(solarBeltInnerRadius-1), point(speed)));
             assert(!approachingSolarAsteroidBelt(point(solarBeltInnerRadius-1), point(-speed)));
             assert(approachingSolarAsteroidBelt(point(solarBeltOuterRadius+1), point(-speed)));
             assert(!approachingSolarAsteroidBelt(point(solarBeltOuterRadius+1), point(speed)));
@@ -72,7 +71,20 @@ void beltWarningFollowsTravelDirection()
             assert(approachingSolarAsteroidBelt(point(25), point(-speed)));
         }
     }
-    assert(approachingSolarAsteroidBelt({19,0},{1,0}));
+    const auto* mars = systemBody(solarSystemDefinition(), "mars");
+    assert(mars);
+    const double marsRadius = std::hypot(mars->position.x, mars->position.y);
+    const SystemVector outward{mars->position.x/marsRadius, mars->position.y/marsRadius};
+    const auto pastMars = [&](double distance) {
+        return SystemVector{mars->position.x + outward.x*distance,
+            mars->position.y + outward.y*distance};
+    };
+    assert(!approachingSolarAsteroidBelt(mars->position, {10,0}));
+    assert(!approachingSolarAsteroidBelt(pastMars(mars->influenceRadius+3.9), outward));
+    assert(approachingSolarAsteroidBelt(pastMars(mars->influenceRadius+4.1), outward));
+    assert(!approachingSolarAsteroidBelt({19,0},{5,0}));
+    assert(!approachingSolarAsteroidBelt({21,0},{5,0}));
+    assert(approachingSolarAsteroidBelt({-solarBeltInnerRadius+.25,0},{-1,0}));
     assert(approachingSolarAsteroidBelt({33,0},{-1,0}));
     assert(approachingSolarAsteroidBelt({25,0},{0,0}));
     assert(!approachingSolarAsteroidBelt({22,0},{0,0}));
@@ -5315,6 +5327,55 @@ void supportDronesPrioritizeArtifactWork()
     }
 }
 
+void miningDroneClearsRevealedArtifactNeighbors()
+{
+    MiningRunState mining;
+    mining.active = true;
+    mining.terrain.width = 14;
+    mining.terrain.height = 12;
+    mining.terrain.cells.assign(14 * 12,
+        {MiningCellMaterial::Empty, 0.0, 0.0, true, false});
+    mining.droneX = mining.operatorX = 6.5;
+    mining.droneY = mining.operatorY = 6.5;
+    mining.artifact.present = true;
+    mining.artifact.state = MiningArtifactState::Embedded;
+    mining.artifact.x = 8.5;
+    mining.artifact.y = 6.5;
+    *miningCellAt(mining.terrain, 8, 6) =
+        {MiningCellMaterial::ArtifactCache, 1.0, 1.0, false, false};
+    *miningCellAt(mining.terrain, 8, 5) =
+        {MiningCellMaterial::HardRock, 1.0, 1.0, true, false};
+    *miningCellAt(mining.terrain, 5, 6) =
+        {MiningCellMaterial::CommonOre, 1.0, 1.0, true, false};
+    MiningMiniDroneAgent worker;
+    worker.role = MiniDroneRole::Mining;
+    worker.x = 6.5;
+    worker.y = 6.5;
+    mining.miniDrones.push_back(worker);
+    MiningDroneCoordinator coordinator(mining);
+    auto& agent = mining.miniDrones.front();
+
+    require(coordinator.acquireAssignment(agent) && agent.targetCellX == 5,
+        "an unscanned artifact must not redirect the Mining Drone");
+    mining.artifact.revealed = true;
+    agent.behavior = MiningMiniDroneBehavior::Working;
+    agent.taskProgressSeconds = 1.0;
+    coordinator.synchronizeAssignments();
+    require(agent.targetCellX == 5 && agent.taskProgressSeconds == 1.0,
+        "a Mining Drone should finish its current cut before changing objectives");
+    agent.behavior = MiningMiniDroneBehavior::Traveling;
+    coordinator.synchronizeAssignments();
+    require(agent.targetCellX == -1 && coordinator.acquireAssignment(agent) &&
+            agent.targetCellX == 8 && agent.targetCellY == 5,
+        "a revealed artifact neighbor must preempt ordinary ore, even when it is hard rock");
+
+    coordinator.releaseAssignment(agent);
+    *miningCellAt(mining.terrain, 8, 5) =
+        {MiningCellMaterial::Bedrock, 1.0, 1.0, true, false};
+    require(coordinator.acquireAssignment(agent) && agent.targetCellX == 5,
+        "an unmineable artifact neighbor must not block ordinary Mining Drone work");
+}
+
 void drillPowerUpgradesProduceMeasuredCuttingGains()
 {
     const ContentCatalog catalog = createDefaultContent();
@@ -9448,6 +9509,13 @@ void secondaryMiningStateRoundTrips()
         "enemy encounter knowledge should round trip with the campaign save");
     require(restored.run.planetaryExpedition.scannerCooldownSeconds > 2.4 && restored.run.planetaryExpedition.treasureMarks.size() == 1,
         "scanner cooldown and treasure marks should round trip");
+    SaveData previousCooldownSave = *parsed;
+    previousCooldownSave.scannerCooldownSeconds = 4.0;
+    GameState restoredPreviousCooldown = createNewGame(catalog, 1);
+    restoreSaveData(restoredPreviousCooldown, catalog, previousCooldownSave);
+    require(std::abs(restoredPreviousCooldown.run.planetaryExpedition.scannerCooldownSeconds
+            - tuning::mining::scannerCooldownSeconds) < 1e-9,
+        "an older save should adopt the shorter scanner recharge");
     require(restored.run.expedition.progression.droneModuleAssignments.size() == 1 && restored.run.expedition.progression.droneModuleRuntime.size() == 1,
         "module assignments and runtime should round trip");
     require(restored.run.mining.miniDrones.size() == 1 &&
@@ -9513,13 +9581,14 @@ void treasurePingMarksRareFirstAndSkipsExcludedMaterials()
     const auto first = state.run.planetaryExpedition.treasureMarks;
     state.run.planetaryExpedition.scannerCooldownSeconds = 0.0;
     pulseMiningScanner(state, catalog);
-    require(state.run.planetaryExpedition.scannerCooldownSeconds > 3.9, "manual pulse should start the unified recharge");
+    require(std::abs(state.run.planetaryExpedition.scannerCooldownSeconds - tuning::mining::scannerCooldownSeconds) < 1e-9,
+        "manual pulse should start the shared 2.5-second recharge");
     require(std::abs(mining.scannerPulseSeconds - tuning::mining::scannerPulseSeconds) < 1e-9,
         "manual pulse should use the shared 0.64-second presentation duration");
-    require(tuning::mining::scannerRechargePresentationProgress(4.0) == 0.0
-            && tuning::mining::scannerRechargePresentationProgress(3.36) < 1e-9
+    require(tuning::mining::scannerRechargePresentationProgress(2.5) == 0.0
+            && std::abs(tuning::mining::scannerRechargePresentationProgress(1.25) - 0.5) < 1e-9
             && tuning::mining::scannerRechargePresentationProgress(0.0) == 1.0,
-        "visible scanner recharge should begin after the pulse and finish with the shared cooldown");
+        "visible scanner recharge should fill throughout the shared cooldown");
     require(state.run.planetaryExpedition.treasureMarks.size() >= first.size(), "repeated Treasure Ping should preserve existing marks and select new tiles");
     resource.upgradeLevel = 3;
     mining.miniDrones.front().upgradeLevel = 3;
@@ -9625,6 +9694,9 @@ void postSolarBodiesAndGeologiesAreDeterministicAndPersistent()
 } // namespace
 
 void persistentExpeditionTests();
+void massiveBodyGravityTests();
+void straylightFocusedTests();
+void parallelDockingFocusedTests();
 void incomingMessageTests();
 
 void rigCompoundCollisionSweepsAndRecovery()
@@ -9764,6 +9836,21 @@ void parkedShipLosesExcavatedSupport()
 
 int main(int argc, char** argv)
 {
+    if (argc > 1 && std::string_view(argv[1]) == "--parallel-docking-only") {
+        parallelDockingFocusedTests();
+        std::cout << "Parallel docking and connected hull checks passed\n";
+        return 0;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--straylight-only") {
+        straylightFocusedTests();
+        std::cout << "Straylight sequence checks passed\n";
+        return 0;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--gravity-only") {
+        massiveBodyGravityTests();
+        std::cout << "Sun and Jupiter gravity checks passed\n";
+        return 0;
+    }
     {
         std::vector<MiningCell> above(5 * 4);
         for (auto& cell : above) cell.material = MiningCellMaterial::HardRock;
@@ -9962,6 +10049,7 @@ int main(int argc, char** argv)
     hazardDroneFinishesCommittedTreatmentBeforeFollowingMovedPlayer();
     duplicateHazardDronesCoordinatePriorityAndExactAssistance();
     supportDronesPrioritizeArtifactWork();
+    miningDroneClearsRevealedArtifactNeighbors();
     hazardDroneAssignmentsNormalizeAcrossSaveRoundTrips();
     miningHazardAffinitiesApplyOnlyOnDrillContact();
     miningAndSurveyDroneAgentsPerformWorldActions();

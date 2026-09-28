@@ -7637,6 +7637,23 @@ std::string miningGateCapabilityStatus(const MiningCapabilityProfile& profile, c
         + ". Alternatives: " + std::string(gate.alternatives);
 }
 
+bool miningCanDumpCargo(const MiningRunState& mining)
+{
+    return mining.active && !mining.failurePending && !mining.rigDisabled
+        && !operatorControlled(mining) && materialCargoMass(mining.temporaryMaterials) > 0;
+}
+
+bool dumpMiningCargo(GameState& state)
+{
+    auto& mining = state.run.mining;
+    if (!miningCanDumpCargo(mining)) return false;
+    const int units = mining.temporaryMaterials.common + mining.temporaryMaterials.rare + mining.temporaryMaterials.exotic;
+    mining.cargo = std::max(0, mining.cargo - materialCargoMass(mining.temporaryMaterials));
+    mining.temporaryMaterials = {};
+    state.statusLine = "Dumped " + std::to_string(units) + " ore. Artifact and ship cargo kept.";
+    return true;
+}
+
 int miningCarriedCargo(const MiningRunState& mining)
 {
     return std::max(0, mining.cargo);

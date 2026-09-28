@@ -296,6 +296,8 @@ void setMiningAim(GameState& state, double normalizedX, double normalizedY);
 void setMiningDrilling(GameState& state, bool drilling);
 void setMiningFire(GameState& state, bool firing);
 void setMiningOperatorToggleProgress(GameState& state, double progress);
+bool miningCanDumpCargo(const MiningRunState& mining);
+bool dumpMiningCargo(GameState& state);
 bool toggleMiningOperator(GameState& state);
 MiningTetherTargetResolution resolveMiningTetherTarget(const MiningRunState& mining);
 void toggleMiningTether(GameState& state);

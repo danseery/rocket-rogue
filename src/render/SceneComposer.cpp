@@ -2938,20 +2938,27 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
     auto gridPoint = [&](double x, double y) {
         return view.gridPoint(x, y, {miningViewOffsetX, miningViewOffsetY});
     };
-    const auto interactionAnchor = [&](Vec2 world) {
+    const auto interactionAnchor = [&](Vec2 world, float radius = 0.0F) {
         const float x = packet_.transform.pixelCenterX + world.x * packet_.transform.worldUnitX;
         const float y = packet_.transform.pixelCenterY - world.y * packet_.transform.worldUnitY;
         const UiRect clip = packet_.logicalSceneClip;
         return SceneInteractionAnchor {
             x >= clip.x && x <= clip.x + clip.width && y >= clip.y && y <= clip.y + clip.height,
-            x, y};
+            x, y, radius * packet_.transform.worldUnitX, radius * packet_.transform.worldUnitY};
     };
-    if (!arrivalComposite && snapshot.miningInteractionVisible)
-        packet_.interactionAnchors.target = interactionAnchor(gridPoint(
-            snapshot.miningInteractionX, snapshot.miningInteractionY));
-    if (!arrivalComposite && snapshot.miningAtReturnZone && snapshot.miningShipPresent)
-        packet_.interactionAnchors.ship = interactionAnchor(gridPoint(
-            snapshot.miningReturnZoneX, snapshot.miningReturnZoneY - 1.5));
+    if (!arrivalComposite) {
+        const float spriteCellSize = std::min(cellW, cellH);
+        // A rotated square sprite fits inside its half-diagonal. The target
+        // uses the rig bounds so every tetherable object has enough clearance.
+        packet_.interactionAnchors.player = interactionAnchor(gridPoint(
+            snapshot.miningOperatorActive ? snapshot.miningOperatorX : snapshot.miningDroneX,
+            snapshot.miningOperatorActive ? snapshot.miningOperatorY : snapshot.miningDroneY),
+            spriteCellSize * (snapshot.miningOperatorActive ? 2.45F : kMiningRigSpriteCells) * 0.71F);
+        if (snapshot.miningInteractionVisible)
+            packet_.interactionAnchors.target = interactionAnchor(gridPoint(
+                snapshot.miningInteractionX, snapshot.miningInteractionY),
+                spriteCellSize * kMiningRigSpriteCells * 0.71F);
+    }
     // The same world-anchored back wall is visible through excavated cells
     // during descent, deployment, and mining. Never put stars underground.
     const auto& backdropClip = packet_.logicalSceneClip;
@@ -3515,6 +3522,12 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
     const float servicePulse = 0.5F + 0.5F * std::sin(static_cast<float>(snapshot.animationTime) * 2.8F);
     const float serviceRadiusX = cellW * static_cast<float>(tuning::mining::returnZoneRadiusCells);
     const float serviceRadiusY = cellH * static_cast<float>(tuning::mining::returnZoneRadiusCells);
+    if (!arrivalComposite && snapshot.miningAtReturnZone && snapshot.miningShipPresent) {
+        auto& anchors = packet_.interactionAnchors;
+        anchors.ship = interactionAnchor(serviceCenter);
+        anchors.shipRadiusX = serviceRadiusX * packet_.transform.worldUnitX;
+        anchors.shipRadiusY = serviceRadiusY * packet_.transform.worldUnitY;
+    }
     const Color serviceColor = snapshot.miningAtReturnZone
         ? Color {0.30F, 1.0F, 0.76F, 0.54F + servicePulse * 0.14F}
         : Color {0.28F, 0.82F, 1.0F, 0.20F + servicePulse * 0.07F};
@@ -5159,7 +5172,6 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
     };
     if (!snapshot.miningExtractionActive &&
         !snapshot.miningEvaDeathActive &&
-        snapshot.miningScannerPulse <= 0.0 &&
         snapshot.miningScannerRechargeProgress >= 0.0) {
         const float rechargeProgress = static_cast<float>(
             std::clamp(snapshot.miningScannerRechargeProgress, 0.0, 1.0));
@@ -5198,6 +5210,14 @@ void SceneComposer::drawMining(const RenderSnapshot& snapshot, bool arrivalCompo
         drawRingCrosshair(drone, rigScannerRingRadius, aim, 0.0F);
     }
     if (snapshot.miningRigPresent && !snapshot.miningExtractionActive) {
+        const float dumpProgress = static_cast<float>(std::clamp(snapshot.miningCargoDumpProgress, 0.0, 1.0));
+        if (!snapshot.miningOperatorActive && dumpProgress > 0.001F) {
+            const float radius = droneSize * 0.71F;
+            drawEllipseLine(drone.x, drone.y, radius, radius,
+                {0.18F, 0.12F, 0.04F, 0.74F}, 42, -kPi * 0.5F, kPi * 1.5F);
+            drawEllipseLine(drone.x, drone.y, radius, radius,
+                {1.0F, 0.74F, 0.26F, 0.95F}, 42, -kPi * 0.5F, -kPi * 0.5F + kPi * 2.0F * dumpProgress);
+        }
         const float toggleProgress = static_cast<float>(
             std::clamp(snapshot.miningOperatorToggleProgress, 0.0, 1.0));
         if (toggleProgress > 0.001F && toggleProgress < 0.999F) {
@@ -5945,6 +5965,23 @@ void SceneComposer::drawSurfaceArrival(const RenderSnapshot& snapshot)
         normalShip.y + viewOffset.y
     };
     const Vec2 pad = cell(snapshot.miningReturnZoneX, snapshot.miningReturnZoneY);
+
+    if (snapshot.surfaceArrivalActive && (snapshot.surfaceArrivalPhase == touchdownPhase
+        || snapshot.surfaceArrivalPhase == awaitingPhase)) {
+        // Landed commands share the surface service list and the transform
+        // that drew the ship. No surface actor has deployed yet.
+        auto& anchors = packet_.interactionAnchors;
+        anchors.ship = {packet_.flightPointer.active,
+            static_cast<float>(packet_.flightPointer.shipX),
+            static_cast<float>(packet_.flightPointer.shipY)};
+        const auto& clip = packet_.logicalSceneClip;
+        anchors.ship.visible = anchors.ship.visible && anchors.ship.x >= clip.x && anchors.ship.x <= clip.x + clip.width
+            && anchors.ship.y >= clip.y && anchors.ship.y <= clip.y + clip.height;
+        anchors.shipRadiusX = cellW * static_cast<float>(tuning::mining::returnZoneRadiusCells)
+            * packet_.transform.worldUnitX;
+        anchors.shipRadiusY = cellH * static_cast<float>(tuning::mining::returnZoneRadiusCells)
+            * packet_.transform.worldUnitY;
+    }
 
     if (snapshot.surfaceArrivalPhase == touchdownPhase) {
         const float progress = deploymentProgress;
@@ -7514,6 +7551,30 @@ void SceneComposer::drawRocket(const RenderSnapshot& snapshot)
     }
 }
 
+void SceneComposer::drawOrbitalArtifactLabel(float bodyX, float radius, float x, float y, int depth)
+{
+    const std::string label = "ARTIFACT - DEPTH " + std::to_string(depth);
+    constexpr float pixelSize = 0.0038F;
+    const float halfWidth = (label.size() * 6.0F + 1.8F) * pixelSize * 0.5F;
+    const float halfHeight = pixelSize * 4.9F;
+    const auto& transform = packet_.transform;
+    const auto& clip = packet_.logicalSceneClip;
+    const float minX = (clip.x + 8 - transform.pixelCenterX) / transform.worldUnitX + halfWidth;
+    const float maxX = (clip.x + clip.width - 8 - transform.pixelCenterX) / transform.worldUnitX - halfWidth;
+    const float minY = (transform.pixelCenterY - clip.y - clip.height + 8) / transform.worldUnitY + halfHeight;
+    const float maxY = (transform.pixelCenterY - clip.y - 8) / transform.worldUnitY - halfHeight;
+    float side = x >= bodyX ? 1.0F : -1.0F;
+    const float offset = radius + halfWidth + 0.05F;
+    if (side > 0 && bodyX + offset > maxX && bodyX - offset >= minX) side = -1;
+    else if (side < 0 && bodyX - offset < minX && bodyX + offset <= maxX) side = 1;
+    const float labelX = std::clamp(bodyX + side * offset, minX, std::max(minX, maxX));
+    const float labelY = std::clamp(y, minY, std::max(minY, maxY));
+    const Color color {0.90F, 0.72F, 1.0F, 0.95F};
+    drawCircle(x, y, 0.010F, color, 16);
+    drawLine(x, y, labelX - side * halfWidth, labelY, color, 1.5F);
+    drawPoiLabel(labelX, labelY, pixelSize, label, PoiGuidanceKind::Artifact);
+}
+
 void SceneComposer::drawOrbitalArtifactSignal(const RenderSnapshot& snapshot, float x, float y,
     float radius, float alpha, float approachBlend)
 {
@@ -7554,15 +7615,20 @@ void SceneComposer::drawOrbitalArtifactSignal(const RenderSnapshot& snapshot, fl
     const float length = std::max(0.00001F, std::hypot(direction.x, direction.y));
     const float r = radius * (snapshot.orbitalArtifactLocalized
         ? 1.0F-static_cast<float>(std::clamp(snapshot.orbitalArtifactDepth,0.0,5.0))/5.5F : 0.95F);
+    const float bodyX = x;
     x += r*direction.x/length;
     y += r*direction.y/length;
     const float pulse = 0.85F + 0.15F*std::sin(static_cast<float>(snapshot.animationTime)*2.0F);
     drawRadialGlow(x,y,radius*0.28F,{0.74F,0.28F,1.0F,0.34F*pulse*alpha},32);
     drawRadialGlow(x,y,radius*0.11F,{0.82F,0.58F,1.0F,0.46F*pulse*alpha},24);
-    if (snapshot.orbitalArtifactLocalized && !snapshot.missionSectorVisible) {
-        drawCircle(x,y,0.008F,{0.90F,0.72F,1.0F,alpha},16);
-        drawPoiLabel(x,y-0.05F,0.0028F,"ARTIFACT / DEPTH +" +
-            std::to_string(static_cast<int>(snapshot.orbitalArtifactDepth)),PoiGuidanceKind::Ship);
+    const bool labeledInSlice = snapshot.orbitalZoneSurveyed && snapshot.orbitalOverlay > 0.001 &&
+        std::any_of(snapshot.orbitalSurveyLayers.begin(), snapshot.orbitalSurveyLayers.end(),
+            [](const auto& layer) { return layer.artifact; });
+    if (snapshot.orbitalArtifactLocalized && !labeledInSlice) {
+        const float opacity = drawOpacity_;
+        drawOpacity_ *= alpha;
+        drawOrbitalArtifactLabel(bodyX, radius, x, y, static_cast<int>(snapshot.orbitalArtifactDepth));
+        drawOpacity_ = opacity;
     }
 }
 
@@ -7578,14 +7644,14 @@ void SceneComposer::drawStraylightSequence(const RenderSnapshot& snapshot)
     const float revealSize = static_cast<float>(packet_.logicalSceneClip.width) * .82F / sceneWorldUnitX_;
     float size=revealSize, x=.05F, y=.08F, light=.48F;
     float shipX=-.74F, shipY=-.58F, shipSize=.065F;
-    bool ship=true;
+    // The Neptune reveal is a remote view of the contact, not an arrival.
+    // The player's ship appears here only after the actual docking handoff.
+    bool ship=false;
     if (stage == Stage::Reveal) {
         const float reveal=ease((t-3)/5);
         drawSprite(-.64F-reveal*.8F,.15F,.6F,.6F,{.55F,.65F,1,1},NeptuneAsset);
         x=(sceneAspect_+revealSize*.5F)*(1-reveal)+.05F;
         light=.08F+.4F*ease((t-6)/4);
-        shipX=-.2F-.54F*reveal;
-        shipY=.1F-.68F*reveal;
     } else if (stage == Stage::Docking || stage == Stage::FirstContact || stage == Stage::RetrieveBeacons || stage == Stage::ConfirmOnline) {
         const float approach=stage == Stage::Docking ? ease(t/10) : 1;
         size=revealSize+approach*1.6F;
@@ -7659,7 +7725,8 @@ void SceneComposer::drawStraylightSequence(const RenderSnapshot& snapshot)
             y-size*kArkPortEngineExhaustYShare,size*.08F,size*.24F,1,0,
             {.6F,.85F,1,.85F},ThrustAsset,static_cast<int>(t*18)%6,6);
     }
-    const std::string_view title = stage == Stage::Reveal && t<8 ? "CONTACT RESOLVED" :
+    const std::string_view title = stage == Stage::Reveal ? "DISTANT CONTACT" :
+        stage == Stage::Invitation ? "18U BEYOND NEPTUNE" :
         stage == Stage::Docking ? "DOCKING CORRIDOR" : stage == Stage::Awakening ? "RESTORING POWER" :
         stage == Stage::Online ? "STRAYLIGHT ONLINE" : stage == Stage::Boarding ? "EVACUATION / BOARDING" :
         stage == Stage::Boarded ? "BOARDING COMPLETE" : stage == Stage::Secured ? "ARK SECURED / READY TO DEPART" :
@@ -7699,6 +7766,22 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
             static_cast<float>(service_dock::artWorldSize), handoff);
         if (profile.parallel) {
             const float artScale = view.camera.scale;
+            const float hullCenterY = static_cast<float>((profile.hull.top + profile.hull.bottom) * .5);
+            const float hullWidth = static_cast<float>(profile.hull.halfWidth * 2);
+            const float hullHeight = static_cast<float>(profile.hull.top - profile.hull.bottom);
+            // Calibrate the generated opaque rectangle (15..1522, 63..961)
+            // to the same bounds used by collision. Keep source alpha intact.
+            // An opaque underlay prevents its antialiased metal from showing stars.
+            submitInstance({center.x + outward.x * hullCenterY * artScale,
+                center.y + outward.y * hullCenterY * artScale,
+                outward.y * hullWidth * artScale * .5F, -outward.x * hullWidth * artScale * .5F,
+                outward.x * hullHeight * artScale * .5F, outward.y * hullHeight * artScale * .5F,
+                {.27F,.29F,.31F,handoff * drawOpacity_}, 0,0,1,1, SceneInstanceShape::Rectangle,4});
+            drawSpriteRotated(center.x + outward.x * hullCenterY * artScale,
+                center.y + outward.y * hullCenterY * artScale,
+                hullWidth * (1536.F / 1507.F) * artScale,
+                hullHeight * (1024.F / 898.F) * artScale,
+                outward.x, outward.y, {1,1,1,handoff}, static_cast<int>(TextureId::StraylightDockHull)-1);
             drawSpriteRotated(center.x + outward.x * static_cast<float>(profile.artOffsetY) * artScale,
                 center.y + outward.y * static_cast<float>(profile.artOffsetY) * artScale,
                 static_cast<float>(profile.artWidth) * view.camera.scale,
@@ -7798,7 +7881,7 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                 const auto dock = systemDockPosition(body);
                 const auto d = view.camera.point(dock.x-offset.x,dock.y-offset.y);
                 drawEllipseLine(d.x,d.y,.035F,.018F,{.2F,1,1,1},24,0,2*kPi);
-                drawPoiLabel(d.x,d.y+.06F,.003F,"SIDE BERTH",PoiGuidanceKind::Ship);
+                drawPoiLabel(d.x,d.y+.06F,.003F,"DOCK",PoiGuidanceKind::Ship);
                 slowDown(dock,body.velocity,d.x,d.y,expeditionDockRadius,expeditionDockSpeed);
             }
             else drawSprite(p.x,p.y,radius*2.0F,radius*2.0F,{1,1,1,1},asset);
@@ -8002,6 +8085,14 @@ void SceneComposer::drawBackdrop(const RenderSnapshot& snapshot)
                     if (!present) return;
                     const Vec2 point = zonePoint(zone.centerBearing + zone.halfAngle * (0.55-0.22*iconIndex++), r);
                     drawMiningMaterialMarker(point.x,point.y,0.009F,static_cast<int>(material),color);
+                    if (material == MiningCellMaterial::ArtifactCache && snapshot.orbitalZoneSurveyed &&
+                        snapshot.orbitalArtifactHint) {
+                        // Orbital survey reveals this depth band, even before
+                        // the surface scanner locates the physical artifact.
+                        drawOpacity_ *= alpha;
+                        drawOrbitalArtifactLabel(c.x, radius, point.x, point.y, layer.depth);
+                        drawOpacity_ = profileOpacity;
+                    }
                 };
                 icon(layer.common, MiningCellMaterial::CommonOre);
                 icon(layer.rare, MiningCellMaterial::RareOre);

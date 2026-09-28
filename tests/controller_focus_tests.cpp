@@ -7,6 +7,9 @@
 #include "core/ResearchSystem.h"
 #include "core/ScenarioSystem.h"
 #include "core/SolarProgression.h"
+#include "core/UiViewportLayout.h"
+#include "core/ArtifactProgression.h"
+#include "core/ContentIds.h"
 #include <RmlUi/Core/Context.h>
 #include <RmlUi/Core/Core.h>
 #include <RmlUi/Core/ElementDocument.h>
@@ -16,6 +19,7 @@
 #include <RmlUi/Core/RenderInterface.h>
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -23,6 +27,7 @@
 #include <limits>
 #include <memory>
 #include <set>
+#include <string_view>
 #include <vector>
 #if defined(_MSC_VER)
 #include <crtdbg.h>
@@ -498,6 +503,8 @@ void generatedPanelPass(int width, int height)
         ui.setPanelPresentation(presentation);
         const auto label = "screen " + std::to_string(static_cast<int>(screen)) + " @" + std::to_string(width);
         auditRenderedGraph(ui, label);
+        if (screen == rocket::Screen::DroneOps)
+            assertActionLabelFits(document()->GetElementById("rr-panel"), "drone_view:expand", "Expand bay");
         if (!presentation.missionTrackerMarkup.empty()) {
             assert(presentation.contentMarkup.find("rr-mission-tracker") == std::string::npos);
             auto* panelButton = document()->GetElementById("rr-panel")->QuerySelector("button[data-rr-action]");
@@ -942,6 +949,296 @@ void recoveredDockKeepsSubmittingVisibleGeometry(int width, int height, float de
     // pixels. A WebGL cache/context failure still requires live browser QA.
     ui.shutdown();
 }
+void dockMissionRoutePass(int width, int height)
+{
+    Preferences preferences;
+    Host host;
+    host.viewport = {width, height, width, height, 1.0F};
+    Bridge bridge;
+    RenderHost renderer;
+    rocket::GameRmlUi ui(preferences, host, bridge, renderer, assetRoot());
+    std::string action;
+    assert(ui.initialize([&](const std::string& value) { action = value; }));
+    ui.setControllerPresentation(true, rocket::ControllerFamily::PlayStation);
+    ui.setControllerFocusVisible(true);
+    const auto catalog = rocket::createDefaultContent();
+    auto state = std::make_unique<rocket::GameState>(rocket::createNewGame(catalog, 0xD0CCULL));
+    assert(rocket::initializeLiveExpedition(*state, catalog));
+    assert(rocket::performScenarioAction(*state, catalog,
+        rocket::content::scenario::lunarProspector, "briefing",
+        rocket::ScenarioActionKind::AcknowledgeBriefing).applied);
+    assert(rocket::recordScenarioEvent(*state, catalog,
+        {rocket::ScenarioEventKind::SafeMaterialDelivered,
+         rocket::content::scenario::lunarProspector, "delivery", "moon", "common", 20, 0}));
+    assert(rocket::recordScenarioEvent(*state, catalog,
+        {rocket::ScenarioEventKind::ProtectedObjectiveExtracted,
+         rocket::content::scenario::lunarProspector, "anomaly", "moon",
+         rocket::content::miningSite::lunarAnomalyCrevice, 1, 0}));
+    for (auto& battery : state->run.expedition.batteries)
+        if (battery.id == "moon") battery.owner = rocket::BatteryOwner::Ship;
+    rocket::reconcileArtifactCustody(*state, catalog);
+    rocket::bankMissionArtifacts(*state, catalog);
+    state->run.expedition.progression.pendingRunUpgradeChoices = 0;
+    state->run.expedition.progression.runUpgradeOfferPending = false;
+    state->screen = rocket::Screen::Hangar;
+    state->incomingMessages = {};
+    auto launch = rocket::expeditionFlightModel(*state, catalog);
+    rocket::PanelRenderContext context {*state, catalog, launch, launch};
+    context.firstTimeIntroductionsEnabled = false;
+    const auto ready = rocket::buildGamePanelPresentation(context);
+    const auto notice = std::find_if(ready.modals.begin(), ready.modals.end(), [](const auto& modal) {
+        return modal.id == "solar_mission_claim";
+    });
+    assert(notice != ready.modals.end());
+    ui.setPanelPresentation(ready);
+    ui.render();
+    auto* claim = document()->QuerySelector(".dock-mission-claim");
+    auto* route = document()->QuerySelector(".expedition-dock-route-actions");
+    auto* depart = route ? route->QuerySelector(".dock-depart") : nullptr;
+    auto* banner = document()->GetElementById("rr-incoming-banner");
+    assert(claim && depart && route->IsClassSet("is-secondary"));
+    assert(ui.focusedId() == "action:" + notice->closeAction);
+    assert(!depart->HasAttribute("data-ui-default-focus"));
+    const auto claimPosition = claim->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto claimSize = claim->GetBox().GetSize(Rml::BoxArea::Border);
+    const auto departPosition = depart->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto departSize = depart->GetBox().GetSize(Rml::BoxArea::Border);
+    assert(departPosition.y - (claimPosition.y + claimSize.y) >= 20);
+    assert(claimSize.y >= 56 && departSize.y < claimSize.y);
+    assert(claim->GetProperty<float>("font-size") > depart->GetProperty<float>("font-size"));
+    assert(banner && banner->GetInnerRML().find("Claim Mining Drone") != std::string::npos);
+    assert(!banner->QuerySelector(".modal-actions")->IsVisible(true));
+    assert(!ui.modalOpen());
+    assert(ui.activateFocused() && action == notice->closeAction);
+    // Navigation remains reachable, with the existing bright focus chip.
+    ui.requestFocus("action:expedition:depart");
+    soleFocus(ui);
+    ui.requestFocus("action:expedition:map");
+    assert(ui.activateFocused() && action == "expedition:map");
+    // Classic messages retain their original explicit completion control.
+    preferences.value.incomingNoticesAsModals = true;
+    ui.setPanelPresentation(ready);
+    ui.render();
+    assert(ui.modalOpen());
+    auto* modal = document()->GetElementById("rr-modal");
+    assert(modal && modal->QuerySelector(".modal-actions button")->IsVisible(true));
+    preferences.value.incomingNoticesAsModals = false;
+    ui.setPanelPresentation(ready);
+    ui.render();
+    // Completing the mission returns departure to primary status. Nothing
+    // accepts a mission or grants rewards merely by showing this layout.
+    assert(rocket::performScenarioAction(*state, catalog,
+        rocket::content::scenario::lunarProspector, "anomaly",
+        rocket::ScenarioActionKind::ClaimReward).applied);
+    ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+    ui.render();
+    route = document()->QuerySelector(".expedition-dock-route-actions");
+    assert(route && !route->IsClassSet("is-secondary"));
+    assert(document()->QuerySelector(".dock-mission-claim") == nullptr);
+    depart = route->QuerySelector(".dock-depart");
+    assert(depart->HasAttribute("data-ui-default-focus"));
+    assert(depart->GetBox().GetSize(Rml::BoxArea::Border).y >= 56);
+    ui.shutdown();
+}
+
+void beaconSidebarPass(int width, int height)
+{
+    Preferences preferences;
+    Host host;
+    host.viewport = {width, height, width, height, 1.0F};
+    Bridge bridge;
+    RenderHost renderer;
+    rocket::GameRmlUi ui(preferences, host, bridge, renderer, assetRoot());
+    std::string action;
+    assert(ui.initialize([&](const std::string& value) { action = value; }));
+    ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
+    const auto catalog = rocket::createDefaultContent();
+    auto state = std::make_unique<rocket::GameState>(rocket::createNewGame(catalog, 77));
+    assert(rocket::initializeLiveExpedition(*state, catalog));
+    state->screen = rocket::Screen::Hangar;
+    state->meta.straylightStage = rocket::StraylightStage::RetrieveBeacons;
+    state->incomingMessages = {};
+    auto& expedition = state->run.expedition;
+    for (auto& beacon : expedition.batteries) beacon.owner = rocket::BatteryOwner::EarthStorage;
+    const auto launch = rocket::expeditionFlightModel(*state, catalog);
+    rocket::PanelRenderContext context {*state, catalog, launch, launch};
+    context.firstTimeIntroductionsEnabled = false;
+    context.incomingMessageDeliveryAllowed = false;
+    const auto presentation = rocket::buildGamePanelPresentation(context);
+    assert(presentation.contentMarkup.find("BEACON RECOVERY") == std::string::npos);
+    assert(presentation.missionSidebarMarkup.find("expedition:straylight:collect") != std::string::npos);
+    ui.setPanelPresentation(presentation);
+    ui.render();
+    auto* panel = document()->GetElementById("rr-panel");
+    auto* depart = panel->QuerySelector("button[data-rr-action=\"expedition:depart\"]");
+    assert(depart);
+    auto dockPosition = depart->GetAbsoluteOffset();
+    const auto checkRail = [&] {
+        auto* recovery = document()->GetElementById("rr-beacon-recovery");
+        auto* dock = panel->QuerySelector(".expedition-home");
+        assert(recovery && dock && recovery->IsVisible(true));
+        const auto position = recovery->GetAbsoluteOffset(Rml::BoxArea::Border);
+        const auto size = recovery->GetBox().GetSize(Rml::BoxArea::Border);
+        const auto dockLeft = dock->GetAbsoluteOffset(Rml::BoxArea::Border).x;
+        assert(position.x >= 0 && position.y >= 0 && position.y + size.y <= height);
+        assert(position.x + size.x + 8 <= dockLeft);
+        Rml::ElementList rows;
+        recovery->GetElementsByClassName(rows, "beacon-row");
+        assert(rows.size() == 6);
+        for (auto* row : rows) {
+            const auto rowPosition = row->GetAbsoluteOffset(Rml::BoxArea::Border);
+            const auto rowSize = row->GetBox().GetSize(Rml::BoxArea::Border);
+            if (rowPosition.y < position.y || rowPosition.y + rowSize.y > position.y + size.y)
+                std::cerr << "Recovery card " << position.y << " + " << size.y << "; row " << rowPosition.y << " + " << rowSize.y << '\n';
+            assert(rowPosition.y >= position.y && rowPosition.y + rowSize.y <= position.y + size.y);
+        }
+        assert(panel->QuerySelector("button[data-rr-action=\"expedition:depart\"]")->GetAbsoluteOffset() == dockPosition);
+        return recovery;
+    };
+    auto* recovery = checkRail();
+    assertActionLabelFits(recovery, "expedition:straylight:collect", "Collect beacons");
+    ui.requestFocus("action:expedition:straylight:collect");
+    assert(ui.activateFocused() && action == "expedition:straylight:collect");
+    action.clear();
+    ui.setControllerPresentation(false, rocket::ControllerFamily::Xbox);
+    ui.render();
+    auto* collect = document()->GetElementById("rr-beacon-recovery")->QuerySelector("button[data-rr-action]");
+    const auto click = collect->GetAbsoluteOffset(Rml::BoxArea::Border);
+    assert(ui.hitTest(static_cast<int>(click.x + 12), static_cast<int>(click.y + 12)));
+    ui.mouseMove(static_cast<int>(click.x + 12), static_cast<int>(click.y + 12));
+    ui.mouseDown(static_cast<int>(click.x + 12), static_cast<int>(click.y + 12), 0);
+    ui.mouseUp(static_cast<int>(click.x + 12), static_cast<int>(click.y + 12), 0);
+    ui.render();
+    assert(action == "expedition:straylight:collect");
+    for (const auto& beacon : expedition.batteries) assert(beacon.owner == rocket::BatteryOwner::EarthStorage);
+    // Toggling the mission never moves dock controls or hides recovery actions.
+    ui.dispatchAction("ui:toggle_mission_tracker");
+    checkRail();
+    ui.dispatchAction("ui:toggle_mission_tracker");
+    checkRail();
+    for (auto& beacon : expedition.batteries) beacon.owner = rocket::BatteryOwner::Ship;
+    ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+    ui.render();
+    dockPosition = panel->QuerySelector("button[data-rr-action=\"expedition:depart\"]")->GetAbsoluteOffset();
+    recovery = checkRail();
+    assert(!recovery->QuerySelector("button[data-rr-action=\"expedition:straylight:collect\"]"));
+    assert(recovery->GetInnerRML().find("Aboard ship") != std::string::npos);
+    auto withoutSidebar = rocket::buildGamePanelPresentation(context);
+    withoutSidebar.missionSidebarMarkup.clear();
+    ui.setPanelPresentation(withoutSidebar);
+    ui.render();
+    assert(!document()->GetElementById("rr-beacon-recovery"));
+    assert(panel->QuerySelector("button[data-rr-action=\"expedition:depart\"]")->GetAbsoluteOffset() == dockPosition);
+    ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+    ui.render();
+    assert(document()->GetElementById("rr-beacon-recovery"));
+    ui.openModal("map");
+    ui.render();
+    assert(ui.modalOpen() && !document()->GetElementById("rr-beacon-recovery"));
+    ui.shutdown();
+}
+
+void landedShipServicesPass(int width, int height)
+{
+    Preferences preferences;
+    Host host;
+    host.viewport = {width, height, width, height, 1.0F};
+    Bridge bridge;
+    RenderHost renderer;
+    rocket::GameRmlUi ui(preferences, host, bridge, renderer, assetRoot());
+    std::string action;
+    assert(ui.initialize([&](const std::string& value) { action = value; }));
+    ui.setControllerPresentation(true, rocket::ControllerFamily::Xbox);
+    ui.setControllerFocusVisible(true);
+    const auto catalog = rocket::createDefaultContent();
+    auto state = std::make_unique<rocket::GameState>(rocket::createNewGame(catalog, 11));
+    state->screen = rocket::Screen::Flight;
+    rocket::Random rng(11);
+    const auto launch = rocket::prepareLaunch(*state, catalog, rng);
+    rocket::FlightRunState flight;
+    flight.physicalFlight = true;
+    flight.mode = rocket::FlightMode::Landing;
+    flight.landing.siteBound = true;
+    rocket::PanelRenderContext context {*state, catalog, launch, launch};
+    context.launchFlight = &flight;
+    context.flightArmed = true;
+    context.surfaceArrivalActive = true;
+    context.surfaceArrivalPhase = 3;
+    context.surfaceArrivalLandingCommitted = true;
+    context.firstTimeIntroductionsEnabled = false;
+    context.incomingMessageDeliveryAllowed = false;
+    rocket::SceneInteractionAnchors anchors;
+    anchors.ship = {true, width * .65F, height * .50F};
+    anchors.shipRadiusX = anchors.shipRadiusY = 160;
+    ui.setInteractionAnchors(anchors);
+    const auto show = [&] {
+        auto presentation = rocket::buildGamePanelPresentation(context);
+        assert(presentation.contentMarkup.find("surface-flight-actions") == std::string::npos);
+        assert(presentation.contentMarkup.find("deploy_surface_team") == std::string::npos);
+        assert(presentation.contentMarkup.find("depart_surface_undeployed") == std::string::npos);
+        ui.setPanelPresentation(presentation);
+        ui.render();
+        return presentation;
+    };
+    show();
+    auto* services = document()->GetElementById("rr-ship-services");
+    assert(services && services->IsVisible(true));
+    const auto position = services->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto size = services->GetBox().GetSize(Rml::BoxArea::Border);
+    assert(size.x <= 258 && size.y < 150);
+    assert(position.x > anchors.ship.x && position.y + size.y < anchors.ship.y);
+    assert(position.x + size.x <= width && position.y >= 0);
+    assert(ui.focusedId() == "interaction:deploy_surface_team");
+    assert(ui.activateFocused() && action == "deploy_surface_team");
+    auto* takeoff = services->QuerySelector("button[data-rr-action=\"depart_surface_undeployed\"]");
+    assert(takeoff && takeoff->GetInnerRML().find("Hold B") != std::string::npos);
+    ui.setControllerPresentation(true, rocket::ControllerFamily::PlayStation);
+    assert(document()->GetElementById("rr-ship-services")->GetInnerRML().find("Hold ○") != std::string::npos);
+    ui.setControllerConfirmCancelSwapped(true);
+    services = document()->GetElementById("rr-ship-services");
+    assert(services->GetInnerRML().find("Hold ×") != std::string::npos);
+    assert(services->QuerySelector("button[data-rr-action=\"deploy_surface_team\"]")
+        ->QuerySelector(".controller-key")->GetInnerRML() == "○");
+    ui.setControllerPresentation(true, rocket::ControllerFamily::SteamDeck);
+    ui.setControllerConfirmCancelSwapped(false);
+    services = document()->GetElementById("rr-ship-services");
+    assert(services->GetInnerRML().find("Hold B") != std::string::npos);
+    ui.setControllerPresentation(false, rocket::ControllerFamily::SteamDeck);
+    ui.render();
+    services = document()->GetElementById("rr-ship-services");
+    assert(services->QuerySelector(".keyboard-key")->GetInnerRML() == "Space");
+    takeoff = services->QuerySelector("button[data-rr-action=\"depart_surface_undeployed\"]");
+    const auto click = takeoff->GetAbsoluteOffset(Rml::BoxArea::Border);
+    ui.mouseMove(static_cast<int>(click.x + 12), static_cast<int>(click.y + 12));
+    ui.mouseDown(static_cast<int>(click.x + 12), static_cast<int>(click.y + 12), 0);
+    ui.mouseUp(static_cast<int>(click.x + 12), static_cast<int>(click.y + 12), 0);
+    ui.render();
+    assert(action == "depart_surface_undeployed");
+    // The same menu handles a failed deployment site, the touchdown queue,
+    // reload, and subsequent deployment/ascent transitions.
+    context.surfaceArrivalLandingCommitted = false;
+    show();
+    assert(ui.focusedId() == "interaction:depart_surface_undeployed");
+    services = document()->GetElementById("rr-ship-services");
+    assert(!services->QuerySelector("button[data-rr-action=\"deploy_surface_team\"]"));
+    context.surfaceArrivalLandingCommitted = true;
+    context.surfaceArrivalPhase = 2;
+    context.surfaceArrivalDeployQueued = true;
+    show();
+    services = document()->GetElementById("rr-ship-services");
+    assert(services->GetInnerRML().find("Deployment queued") != std::string::npos);
+    assert(!services->QuerySelector("button[data-rr-action=\"depart_surface_undeployed\"]"));
+    for (int phase : {4, 5}) {
+        context.surfaceArrivalPhase = phase;
+        assert(show().interactionMarkup.empty());
+        assert(!document()->GetElementById("rr-ship-services"));
+    }
+    context.surfaceArrivalPhase = 3;
+    context.titleScreenActive = true;
+    assert(rocket::buildGamePanelPresentation(context).interactionMarkup.empty());
+    ui.shutdown();
+}
+
 void contextualOverlayPass(int width, int height)
 {
     Preferences preferences;
@@ -987,17 +1284,74 @@ void contextualOverlayPass(int width, int height)
     ui.mouseUp(static_cast<int>(click.x + 12), static_cast<int>(click.y + 12), 0);
     ui.render();
     assert(action == "mining_tether");
-    anchors.target = {true, static_cast<float>(width / 2), static_cast<float>(height / 2)};
+    anchors.target = {};
+    ui.setInteractionAnchors(anchors);
+    ui.render();
+    assert(!prompt->IsVisible(true));
+    anchors.target = {true, static_cast<float>(width / 2), static_cast<float>(height / 2), 48, 48};
+    anchors.player = {true, anchors.target.x - 70, anchors.target.y - 10, 36, 36};
     ui.setInteractionAnchors(anchors);
     ui.render();
     prompt = document()->GetElementById("rr-context-interaction");
     const auto centerPosition = prompt->GetAbsoluteOffset(Rml::BoxArea::Border);
     assert(centerPosition.x >= anchors.target.x + 30);
+    const auto assertClearOfAction = [&] {
+        const auto p = prompt->GetAbsoluteOffset(Rml::BoxArea::Border);
+        const auto s = prompt->GetBox().GetSize(Rml::BoxArea::Border);
+        const auto scene = rocket::resolveUiViewportLayout(width, height, rocket::UiSurfaceKind::Mining).sceneRect;
+        assert(p.x >= scene.x && p.y >= scene.y);
+        assert(p.x + s.x <= scene.x + scene.width && p.y + s.y <= scene.y + scene.height);
+        for (const auto actor : {anchors.player, anchors.target}) {
+            assert(p.x + s.x <= actor.x - actor.halfWidth || p.x >= actor.x + actor.halfWidth
+                || p.y + s.y <= actor.y - actor.halfHeight || p.y >= actor.y + actor.halfHeight);
+        }
+    };
+    assertClearOfAction();
+    // EVA crosses the tethered rig: slide to the other side without passing
+    // through either sprite or the tether between them.
+    anchors.player.x = anchors.target.x + 70;
+    ui.setInteractionAnchors(anchors);
+    host.now += 1.0 / 60.0;
+    ui.render();
+    const auto slidingPrompt = prompt->GetAbsoluteOffset(Rml::BoxArea::Border);
+    assert(slidingPrompt.x < centerPosition.x && slidingPrompt.x + size.x > anchors.target.x);
+    assertClearOfAction();
+    for (int frame = 0; frame < 30; ++frame) {
+        host.now += 1.0 / 60.0;
+        ui.render();
+        assertClearOfAction();
+    }
+    assert(prompt->GetAbsoluteOffset(Rml::BoxArea::Border).x + size.x < anchors.target.x);
+    anchors.player.x = anchors.target.x - 3;
+    ui.setInteractionAnchors(anchors);
+    host.now += 0.05;
+    ui.render();
+    assert(prompt->GetAbsoluteOffset(Rml::BoxArea::Border).x + size.x < anchors.target.x);
+    assertClearOfAction();
+    // Clamping or rapid camera movement must not put the helper on top of the
+    // actor. When there is no room above, place it below the work area.
+    const auto scene = rocket::resolveUiViewportLayout(width, height, rocket::UiSurfaceKind::Mining).sceneRect;
+    anchors.target = {true, static_cast<float>(scene.x + 50), static_cast<float>(scene.y + 50), 48, 48};
+    anchors.player = {true, anchors.target.x + 40, anchors.target.y, 36, 36};
+    ui.setInteractionAnchors(anchors);
+    host.now += 1.0 / 60.0;
+    ui.render();
+    assertClearOfAction();
+    assert(prompt->GetAbsoluteOffset(Rml::BoxArea::Border).y >= anchors.target.y + anchors.target.halfHeight);
+    // Stacked player and payload positions during towing remain unobstructed.
+    anchors.player.x = anchors.target.x;
+    anchors.player.y = anchors.target.y;
+    ui.setInteractionAnchors(anchors);
+    host.now += 1.0 / 60.0;
+    ui.render();
+    assertClearOfAction();
     presentation.interactionMarkup =
         "<section id=\"rr-ship-services\" class=\"context-ship-services\">"
-        "<strong>SHIP SERVICES</strong><button class=\"interaction-action is-depart\" "
+        "<strong>SHIP SERVICES</strong><div class=\"context-ship-actions\">"
+        "<button class=\"interaction-action\" data-rr-action=\"drone_ops\">Drone Ops</button>"
+        "<button class=\"interaction-action is-depart\" "
         "data-rr-action=\"mining_depart\" data-ui-focus-id=\"interaction:mining_depart\">"
-        "Depart planet</button></section>";
+        "Depart planet</button></div></section>";
     ui.setPanelPresentation(presentation);
     anchors.target = {};
     anchors.ship = {true, static_cast<float>(width - 12), static_cast<float>(height - 12)};
@@ -1009,8 +1363,41 @@ void contextualOverlayPass(int width, int height)
     const auto shipSize = services->GetBox().GetSize(Rml::BoxArea::Border);
     assert(shipPosition.x >= 0 && shipPosition.y >= 0
         && shipPosition.x + shipSize.x <= width && shipPosition.y + shipSize.y <= height);
+    anchors.ship = {};
+    ui.setInteractionAnchors(anchors);
+    ui.render();
+    anchors.ship = {true, width * 0.5F, height * 0.35F};
+    anchors.player = {true, anchors.ship.x - 70, anchors.ship.y + 40};
+    anchors.shipRadiusX = anchors.shipRadiusY = 120;
+    ui.setInteractionAnchors(anchors);
+    ui.render();
+    services = document()->GetElementById("rr-ship-services");
+    const auto rightPosition = services->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto compactSize = services->GetBox().GetSize(Rml::BoxArea::Border);
+    assert(rightPosition.x > anchors.ship.x);
+    assert(rightPosition.y + compactSize.y < anchors.ship.y);
+    // Crossing the ship slides the list rather than snapping. Small movements
+    // directly beneath its center do not repeatedly swap sides.
+    anchors.player.x = anchors.ship.x + 70;
+    ui.setInteractionAnchors(anchors);
+    host.now += 1.0 / 60.0;
+    ui.render();
+    const auto slidingPosition = services->GetAbsoluteOffset(Rml::BoxArea::Border);
+    assert(slidingPosition.x < rightPosition.x && slidingPosition.x + compactSize.x > anchors.ship.x);
+    for (int frame = 0; frame < 30; ++frame) {
+        host.now += 1.0 / 60.0;
+        ui.render();
+    }
+    const auto leftPosition = services->GetAbsoluteOffset(Rml::BoxArea::Border);
+    assert(leftPosition.x + compactSize.x < anchors.ship.x);
+    assert(leftPosition.y + compactSize.y < anchors.ship.y);
+    anchors.player.x = anchors.ship.x - 3;
+    ui.setInteractionAnchors(anchors);
+    host.now += 0.05;
+    ui.render();
+    assert(services->GetAbsoluteOffset(Rml::BoxArea::Border).x + compactSize.x < anchors.ship.x);
     action.clear();
-    const auto departClick = services->QuerySelector("button")->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto departClick = services->QuerySelector("button[data-rr-action=\"mining_depart\"]")->GetAbsoluteOffset(Rml::BoxArea::Border);
     ui.mouseMove(static_cast<int>(departClick.x + 12), static_cast<int>(departClick.y + 12));
     ui.mouseDown(static_cast<int>(departClick.x + 12), static_cast<int>(departClick.y + 12), 0);
     ui.mouseUp(static_cast<int>(departClick.x + 12), static_cast<int>(departClick.y + 12), 0);
@@ -1100,7 +1487,189 @@ void pauseSettingsPass(int width, int height)
     assert(ui.cancel() && ui.focusedId() == "modal:map");
 }
 
-int main()
+void incomingBannerPass(int width, int height)
+{
+    Preferences preferences;
+    assert(!preferences.value.incomingNoticesAsModals);
+    Host host;
+    host.viewport = {width, height, width, height, 1.0F};
+    Bridge bridge;
+    RenderHost renderer;
+    rocket::GameRmlUi ui(preferences, host, bridge, renderer, assetRoot());
+    std::string action;
+    assert(ui.initialize([&](const std::string& value) { action = value; }));
+    auto presentation = panel("<p>Flight controls remain visible</p>");
+    presentation.modals.push_back({"incoming_message", "INCOMING MESSAGE",
+        "<section class=\"incoming-message modal-body\"><div class=\"incoming-message-layout\">"
+        "<div class=\"incoming-message-portrait\"></div><div class=\"incoming-message-copy\">"
+        "<h2>Mission Control</h2><h3>Mars mission complete</h3><p>Your second drone bay is online.</p>"
+        "</div></div><div class=\"modal-actions action-row\">"
+        "<button data-rr-action=\"ack_incoming_message:test\" data-ui-focus-id=\"action:ack_incoming_message:test\">Understood</button>"
+        "</div></section>", "ack_incoming_message:test", true, false, false,
+        rocket::ModalTone::Neutral, true});
+    ui.setPanelPresentation(presentation);
+    ui.render();
+    assert(!ui.modalOpen());
+    auto* banner = document()->GetElementById("rr-incoming-banner");
+    assert(banner && banner->IsVisible());
+    const auto position = banner->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto size = banner->GetBox().GetSize(Rml::BoxArea::Border);
+    assert(size.x == 744 && size.y >= 125 && size.y <= 126);
+    assert(std::abs(position.x + size.x * .5F - width * .5F) <= 2);
+    assert(position.y > height * 0.6F && height - (position.y + size.y) <= 24);
+    auto* acknowledgement = banner->QuerySelector("button[data-rr-action=\"ack_incoming_message:test\"]");
+    assert(acknowledgement && acknowledgement->IsVisible());
+    const auto buttonPosition = acknowledgement->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto buttonSize = acknowledgement->GetBox().GetSize(Rml::BoxArea::Border);
+    assert(buttonSize.x > 40 && buttonSize.y > 20 && buttonPosition.y + buttonSize.y <= height);
+    const auto assertNoMessageScroll = [&](Rml::Element* card) {
+        auto* copy = card->QuerySelector(".incoming-message-copy");
+        assert(copy && copy->GetScrollHeight() <= copy->GetClientHeight() + 1);
+        const auto cardPosition = card->GetAbsoluteOffset(Rml::BoxArea::Border);
+        const auto cardSize = card->GetBox().GetSize(Rml::BoxArea::Border);
+        const auto copyPosition = copy->GetAbsoluteOffset(Rml::BoxArea::Border);
+        const auto copySize = copy->GetBox().GetSize(Rml::BoxArea::Border);
+        assert(cardPosition.y >= 0 && cardPosition.y + cardSize.y <= height);
+        assert(copyPosition.y >= cardPosition.y && copyPosition.y + copySize.y <= cardPosition.y + cardSize.y);
+    };
+    assertNoMessageScroll(banner);
+    ui.requestFocus("action:ack_incoming_message:test");
+    assert(ui.activateFocused() && action == "ack_incoming_message:test");
+    preferences.value.incomingNoticesAsModals = true;
+    ui.setPanelPresentation(presentation);
+    ui.render();
+    assert(ui.modalOpen() && document()->GetElementById("rr-incoming-banner") == nullptr);
+    assert(document()->GetElementById("rr-modal")->IsClassSet("modal-incoming_message"));
+    preferences.value.incomingNoticesAsModals = false;
+    const auto catalog = rocket::createDefaultContent();
+    auto state = std::make_unique<rocket::GameState>(rocket::createNewGame(catalog, 0xA11CEULL));
+    // Match the save-free debug preview's prelaunch state.
+    state->screen = rocket::Screen::Hangar;
+    assert(rocket::enqueueIncomingMessage(state->incomingMessages, catalog,
+        {"preview.incoming", "earth_dock_intro", "services"}));
+    const auto launch = rocket::expeditionFlightModel(*state, catalog);
+    rocket::PanelRenderContext context {*state, catalog, launch, launch};
+    const auto dock = rocket::buildGamePanelPresentation(context);
+    const auto actualNotice = std::find_if(dock.modals.begin(), dock.modals.end(), [](const auto& modal) {
+        return modal.id == "incoming_message";
+    });
+    assert(actualNotice != dock.modals.end() && actualNotice->bannerEligible);
+    ui.setPanelPresentation(dock);
+    ui.render();
+    auto* dockBanner = document()->GetElementById("rr-incoming-banner");
+    assert(!ui.modalOpen() && dockBanner);
+    const auto dockPosition = dockBanner->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto dockSize = dockBanner->GetBox().GetSize(Rml::BoxArea::Border);
+    assert(std::abs(dockPosition.x + dockSize.x * .5F - width * .5F) <= 2);
+    assert(dockPosition.y >= 0 && height - (dockPosition.y + dockSize.y) <= 24);
+    assertNoMessageScroll(dockBanner);
+
+    // The fresh campaign's Moon briefing is delivered before reaching the
+    // Moon. Local acceptance eligibility must not force the classic popup.
+    *state = rocket::createNewGame(catalog, 0xA11CEULL);
+    state->incomingMessages = {};
+    state->screen = rocket::Screen::Flight;
+    state->run.expedition.travelInitialized = state->run.expedition.active = true;
+    state->run.expedition.location.bodyId = "earth";
+    const auto* moon = rocket::solarMissionForBody(catalog, "moon");
+    assert(moon && !rocket::solarMissionAcceptanceForBody(*state, catalog, "moon").available);
+    assert(rocket::enqueueIncomingMessage(state->incomingMessages, catalog,
+        {"test.moon.departure", moon->briefingMessageId, "default"}));
+    const auto moonPanel = rocket::buildGamePanelPresentation(context);
+    const auto moonNotice = std::find_if(moonPanel.modals.begin(), moonPanel.modals.end(), [](const auto& modal) {
+        return modal.id == "incoming_message";
+    });
+    assert(moonNotice != moonPanel.modals.end() && moonNotice->bannerEligible);
+    assert(moonNotice->bodyMarkup.find("Understood") != std::string::npos);
+    preferences.value.incomingNoticesAsModals = true;
+    ui.setPanelPresentation(moonPanel);
+    ui.render();
+    assert(ui.modalOpen());
+    preferences.value.incomingNoticesAsModals = false;
+    ui.setPanelPresentation(moonPanel);
+    ui.render();
+    auto* moonBanner = document()->GetElementById("rr-incoming-banner");
+    assert(!ui.modalOpen() && moonBanner);
+    const auto moonPosition = moonBanner->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto moonSize = moonBanner->GetBox().GetSize(Rml::BoxArea::Border);
+    assert(std::abs(moonPosition.x + moonSize.x * .5F - width * .5F) <= 2);
+    assert(height - (moonPosition.y + moonSize.y) <= 24);
+    assertActionLabelFits(moonBanner, "ack_incoming_message:test.moon.departure", "Understood");
+    assertNoMessageScroll(moonBanner);
+    ui.requestFocus("action:ack_incoming_message:test.moon.departure");
+    action.clear();
+    assert(ui.activateFocused() && action == "ack_incoming_message:test.moon.departure");
+
+    state->run.expedition.location.bodyId = "moon";
+    assert(rocket::solarMissionAcceptanceForBody(*state, catalog, "moon").available);
+    ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+    ui.render();
+    moonBanner = document()->GetElementById("rr-incoming-banner");
+    assert(!ui.modalOpen() && moonBanner);
+    assertActionLabelFits(moonBanner, "ack_incoming_message:test.moon.departure", "Accept Contract");
+    assertNoMessageScroll(moonBanner);
+
+    // The authored Mars briefing includes the bedrock lesson from the reported
+    // screenshot. Show the entire message, not merely a hidden scrollbar.
+    state->incomingMessages = {};
+    state->run.expedition.location.bodyId = "mars";
+    state->meta.unlockKeys.push_back(rocket::content::unlock::routeMars);
+    rocket::ensureScenarioInstances(*state, catalog);
+    const auto* mars = rocket::solarMissionForBody(catalog, "mars");
+    assert(mars && rocket::solarMissionAcceptanceForBody(*state, catalog, "mars").available);
+    assert(rocket::enqueueIncomingMessage(state->incomingMessages, catalog,
+        {"test.mars.briefing", mars->briefingMessageId, "default"}));
+    ui.setPanelPresentation(rocket::buildGamePanelPresentation(context));
+    ui.render();
+    auto* marsBanner = document()->GetElementById("rr-incoming-banner");
+    assert(marsBanner && marsBanner->GetInnerRML().find("bedrock shelf") != std::string::npos);
+    assertNoMessageScroll(marsBanner);
+    assertActionLabelFits(marsBanner, "ack_incoming_message:test.mars.briefing", "Accept Contract");
+
+    state->incomingMessages = {};
+    state->screen = rocket::Screen::Flight;
+    state->run.expedition.travelInitialized = state->run.expedition.active = true;
+    state->run.expedition.location = {"solar", "io", rocket::CoordinateFrame::Body,
+        {}, {}, 0, ""};
+    state->meta.unlockKeys.push_back(rocket::content::unlock::routeJupiter);
+    rocket::ensureScenarioInstances(*state, catalog);
+    const auto* io = rocket::solarMissionForBody(catalog, "io");
+    assert(io && rocket::solarMissionAcceptanceForBody(*state, catalog, "io").available);
+    assert(rocket::enqueueIncomingMessage(state->incomingMessages, catalog,
+        {"test.io.briefing", io->briefingMessageId, "default"}));
+    const auto ioPanel = rocket::buildGamePanelPresentation(context);
+    const auto ioNotice = std::find_if(ioPanel.modals.begin(), ioPanel.modals.end(), [](const auto& modal) {
+        return modal.id == "incoming_message";
+    });
+    assert(ioNotice != ioPanel.modals.end() && ioNotice->bannerEligible);
+    preferences.value.incomingNoticesAsModals = true;
+    ui.setPanelPresentation(ioPanel);
+    ui.render();
+    assert(ui.modalOpen() && document()->GetElementById("rr-incoming-banner") == nullptr);
+    preferences.value.incomingNoticesAsModals = false;
+    ui.setPanelPresentation(ioPanel);
+    ui.render();
+    auto* ioBanner = document()->GetElementById("rr-incoming-banner");
+    assert(!ui.modalOpen() && ioBanner);
+    const auto ioPosition = ioBanner->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto ioSize = ioBanner->GetBox().GetSize(Rml::BoxArea::Border);
+    assert(std::abs(ioPosition.x + ioSize.x * .5F - width * .5F) <= 2);
+    assert(height - (ioPosition.y + ioSize.y) <= 24);
+    assertNoMessageScroll(ioBanner);
+    auto* commission = ioBanner->QuerySelector("button[data-rr-action=\"ack_incoming_message:test.io.briefing\"]");
+    assert(commission && commission->IsVisible());
+    const auto commissionPosition = commission->GetAbsoluteOffset(Rml::BoxArea::Border);
+    const auto commissionSize = commission->GetBox().GetSize(Rml::BoxArea::Border);
+    assert(commissionPosition.x >= ioPosition.x &&
+        commissionPosition.x + commissionSize.x <= ioPosition.x + ioSize.x &&
+        commissionPosition.y + commissionSize.y <= ioPosition.y + ioSize.y);
+    action.clear();
+    ui.requestFocus("action:ack_incoming_message:test.io.briefing");
+    assert(ui.activateFocused() && action == "ack_incoming_message:test.io.briefing");
+    ui.shutdown();
+}
+
+int main(int argc, char** argv)
 {
 #if defined(_MSC_VER)
     _set_error_mode(_OUT_TO_STDERR);
@@ -1108,6 +1677,39 @@ int main()
     _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
     _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
 #endif
+    if (argc > 1 && std::string_view(argv[1]) == "--generated-panels-only") {
+        generatedPanelPass(800, 600);
+        generatedPanelPass(1280, 800);
+        generatedPanelPass(1600, 900);
+        std::cout << "Generated panel layout tests passed\n";
+        return 0;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--incoming-banner-only") {
+        incomingBannerPass(1280, 800);
+        incomingBannerPass(1600, 900);
+        std::cout << "Incoming banner layout tests passed\n";
+        return 0;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--context-interactions-only") {
+        landedShipServicesPass(1280, 800);
+        landedShipServicesPass(1600, 900);
+        contextualOverlayPass(1280, 800);
+        contextualOverlayPass(1600, 900);
+        std::cout << "Contextual interaction layout tests passed\n";
+        return 0;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--dock-mission-route-only") {
+        dockMissionRoutePass(1280, 800);
+        dockMissionRoutePass(1600, 900);
+        std::cout << "Dock mission route layout tests passed\n";
+        return 0;
+    }
+    if (argc > 1 && std::string_view(argv[1]) == "--beacon-sidebar-only") {
+        beaconSidebarPass(1280, 800);
+        beaconSidebarPass(1600, 900);
+        std::cout << "Beacon recovery sidebar tests passed\n";
+        return 0;
+    }
     recoveredDockKeepsSubmittingVisibleGeometry(800, 600, 1.0F);
     recoveredDockKeepsSubmittingVisibleGeometry(1422, 800, 1.125F);
     recoveredDockKeepsSubmittingVisibleGeometry(1600, 900, 1.0F);
@@ -1116,6 +1718,14 @@ int main()
     focusPass(1600, 900);
     contextualOverlayPass(1280, 800);
     contextualOverlayPass(1600, 900);
+    landedShipServicesPass(1280, 800);
+    landedShipServicesPass(1600, 900);
+    dockMissionRoutePass(1280, 800);
+    dockMissionRoutePass(1600, 900);
+    beaconSidebarPass(1280, 800);
+    beaconSidebarPass(1600, 900);
+    incomingBannerPass(1280, 800);
+    incomingBannerPass(1600, 900);
     generatedPanelPass(800, 600);
     generatedPanelPass(1280, 800);
     generatedPanelPass(1600, 900);

@@ -39,6 +39,54 @@
 
 namespace rocket {
 struct OrbitalLandingTestAccess {
+    static void miningIncomingMessage(RocketGameApp& app) {
+        app.debugStartMiningArena(1, 1, 220, 0, -1);
+        app.state_.incomingMessages = {};
+        app.state_.run.expedition.progression.pendingRunUpgradeChoices = 0;
+        app.state_.run.expedition.progression.runUpgradeOfferPending = false;
+        app.state_.run.mining.scannerPulseSeconds = 0.0;
+        app.state_.run.mining.depthTransitionCooldownSeconds = 0.0;
+        assert(enqueueIncomingMessage(app.state_.incomingMessages, app.catalog_,
+            {"preview.recovery", "lunar_recovery", "default"}));
+        app.refreshPanel();
+    }
+    static void cargoDumpHoldAndHandoffs(RocketGameApp& app) {
+        app.debugStartMining();
+        app.state_.incomingMessages = {};
+        app.state_.incomingMessages.informationalCooldown = 8;
+        app.state_.run.expedition.progression.pendingRunUpgradeChoices = 0;
+        app.services_.ui.closeModal();
+        app.pauseReason_ = PauseReason::None;
+        app.activeInputSource_ = InputSource::KeyboardPointer;
+        auto& mining = app.state_.run.mining;
+        mining.droneX = mining.returnZoneX + 10;
+        mining.operatorMode = MiningOperatorMode::Rig;
+        mining.temporaryMaterials = {12, 0, 0};
+        mining.cargo = 12;
+        app.miningCargoDumpHeld(true);
+        for (int i = 0; i < 8; ++i) app.tick(.05);
+        assert(mining.cargo == 12 && app.snapshot().miningCargoDumpProgress > .4);
+        app.miningCargoDumpHeld(false);
+        assert(app.snapshot().miningCargoDumpProgress == 0 && mining.cargo == 12);
+        app.miningCargoDumpHeld(true);
+        for (int i = 0; i < 16; ++i) app.tick(.05);
+        assert(mining.cargo == 0 && app.snapshot().miningCargoDumpProgress == 0);
+        mining.temporaryMaterials = {3, 0, 0};
+        mining.cargo = 3;
+        for (int i = 0; i < 20; ++i) app.tick(.05);
+        assert(mining.cargo == 3); // Holding after completion does not repeat.
+        app.miningCargoDumpHeld(false);
+        app.miningCargoDumpHeld(true);
+        app.tick(.05);
+        app.releaseRealtimeInputs(true);
+        app.miningCargoDumpHeld(true);
+        for (int i = 0; i < 20; ++i) app.tick(.05);
+        assert(mining.cargo == 3 && app.snapshot().miningCargoDumpProgress == 0);
+        app.miningCargoDumpHeld(false);
+        app.miningCargoDumpHeld(true);
+        for (int i = 0; i < 16; ++i) app.tick(.05);
+        assert(mining.cargo == 0);
+    }
     static void straylightRevealDeparture(RocketGameApp& app, bool skip) {
         app.debugStartExpedition();
         app.state_.incomingMessages = {};
@@ -2013,17 +2061,21 @@ void straylightSequenceActionsAndArrival()
     assert(fixture->ui.html.find("data-modal=\"system_menu\"")!=std::string::npos);
     assert(fixture->ui.html.find("data-modal=\"settings\"")!=std::string::npos);
     fixture->ui.dispatchAction("expedition:straylight:skip");
-    assert(fixture->ui.html.find("Bring me the artifacts you recovered.")!=std::string::npos);
+    assert(fixture->ui.html.find("A light beyond Neptune")!=std::string::npos);
+    assert(fixture->ui.html.find("Follow the signal")!=std::string::npos);
+    assert(fixture->ui.html.find("Bring me the artifacts you recovered.")==std::string::npos);
     fixture->ui.dispatchAction("expedition:straylight:skip");
-    assert(fixture->ui.html.find("I can still think")!=std::string::npos);
+    assert(fixture->ui.html.find("A light beyond Neptune")!=std::string::npos);
     app.debugStartStraylight(8);
     for (int i=0;i<70;++i) { fixture->host.now+=.05; fixture->runner.frame(); }
-    assert(fixture->ui.html.find("That is the name on my hull.")!=std::string::npos);
+    assert(fixture->ui.html.find("Welcome aboard")!=std::string::npos);
+    assert(fixture->ui.html.find("You made it. I'm Straylight.")!=std::string::npos);
+    assert(fixture->ui.html.find("A light beyond Neptune")==std::string::npos);
     assert(fixture->ui.html.find("Skip animation")==std::string::npos);
     // Legacy cinematic saves still finish through their original stage.
     app.debugStartStraylight(1);
     fixture->ui.dispatchAction("expedition:straylight:skip");
-    assert(fixture->ui.html.find("That is the name on my hull.")!=std::string::npos);
+    assert(fixture->ui.html.find("Welcome aboard")!=std::string::npos);
     fixture->ui.dispatchAction("expedition:straylight:retrieve");
     assert(fixture->ui.html.find("Install carried beacons")!=std::string::npos);
     assert(fixture->ui.html.find("MISSION ARTIFACTS READY")==std::string::npos);
@@ -3082,6 +3134,13 @@ void mouseRigInput()
 
 int main(int argc, char** argv)
 {
+    if (argc == 1 || std::string_view(argv[1]) == "--cargo-dump-only") {
+        AppFixture fixture;
+        assert(fixture.runner.initialize());
+        rocket::OrbitalLandingTestAccess::cargoDumpHoldAndHandoffs(fixture.runner.app());
+        fixture.runner.shutdown();
+        if (argc > 1) return 0;
+    }
     {
         rocket::SceneComposer composer;
         composer.setViewport({1280,800,1280,800,1.0F});
@@ -3485,7 +3544,7 @@ int main(int argc, char** argv)
     {
         AppFixture fixture;
         assert(fixture.runner.initialize());
-        fixture.runner.app().debugShowIncomingMessage();
+        rocket::OrbitalLandingTestAccess::miningIncomingMessage(fixture.runner.app());
         assert(fixture.ui.html.find("INCOMING MESSAGE") != std::string::npos);
         fixture.ui.modalOpenValue = true;
         const auto pausedHash = fixture.runner.app().deterministicStateHash();
@@ -4678,7 +4737,8 @@ int main(int argc, char** argv)
         fixture.ui.dispatchAction("continue_game");
         completeTitleLaunch(fixture);
         const auto& actions = fixture.ui.presentation.interactionMarkup;
-        for (const std::string_view key : {"E", "Q", "R", "O", "G"})
+        assert(actions.find("mining_scanner") == std::string::npos);
+        for (const std::string_view key : {"Q", "R", "O", "G"})
             assert(actions.find("keyboard-key\">" + std::string(key) + "</span>") != std::string::npos);
         assert(actions.find("data-rr-action=\"drone_ops\"") != std::string::npos);
         fixture.ui.dispatchAction("drone_ops");

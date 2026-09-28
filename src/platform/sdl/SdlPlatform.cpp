@@ -447,6 +447,7 @@ bool SdlPlatform::handleEvent(RocketGameApp& app, const SDL_Event& event)
     case SDL_EVENT_KEY_UP:
         noteKeyboardPointerActivity();
         if (event.key.key == SDLK_SPACE) app.miningKeyboardDrill(false);
+        if (event.key.key == SDLK_C) app.miningCargoDumpHeld(false);
         if (event.key.key == SDLK_SPACE || event.key.key == SDLK_RETURN) {
             app.orbitalWorkInput(false);
             launchOutcomeConfirmReleaseGuard_ = false;
@@ -518,6 +519,7 @@ void SdlPlatform::applyKeyboardState(RocketGameApp& app)
     case InputContext::MiningService:
         app.miningMove((right ? 1.0 : 0.0) - (left ? 1.0 : 0.0), (down ? 1.0 : 0.0) - (up ? 1.0 : 0.0));
         app.miningKeyboardDrill(state && state[SDL_SCANCODE_SPACE]);
+        app.miningCargoDumpHeld(state && state[SDL_SCANCODE_C]);
         break;
     default:
         break;

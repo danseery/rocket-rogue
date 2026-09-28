@@ -1301,6 +1301,35 @@ void disconnectedStartupDoesNotConsumeTheFirstFreshConfirm()
     }
 }
 
+void cargoDumpRequiresACompleteFreshHold()
+{
+    using namespace rocket;
+    GameInputRouter router;
+    auto frame = routedFrame();
+    router.route(InputContext::MiningActive, frame, {});
+    const auto stick = index(ControllerButton::LeftStick);
+    frame.down.set(stick);
+    frame.pressed.set(stick);
+    frame.heldSeconds[stick] = .5;
+    const auto partial = router.route(InputContext::MiningActive, frame, {});
+    require(!partial.has(GameInputAction::MiningDumpCargo) && partial.cargoDumpProgress > .5, "cargo dump shows progress without firing early");
+    frame.pressed.reset();
+    frame.heldSeconds[stick] = .75;
+    require(router.route(InputContext::MiningActive, frame, {}).has(GameInputAction::MiningDumpCargo), "a .75 second L3 hold dumps ore");
+    frame.heldSeconds[stick] = 2;
+    require(!router.route(InputContext::MiningActive, frame, {}).has(GameInputAction::MiningDumpCargo), "held L3 cannot repeatedly dump newly collected ore");
+    router.route(InputContext::Paused, frame, {});
+    require(!router.route(InputContext::MiningActive, frame, {}).has(GameInputAction::MiningDumpCargo), "a hold cannot carry across a menu");
+    frame = routedFrame();
+    router.route(InputContext::MiningActive, frame, {});
+    frame.down.set(stick);
+    frame.pressed.set(stick);
+    frame.heldSeconds[stick] = .75;
+    require(router.route(InputContext::MiningActive, frame, {}).has(GameInputAction::MiningDumpCargo), "release and a fresh hold can dump again");
+    router.reset();
+    require(!router.route(InputContext::Launch, frame, {}).has(GameInputAction::MiningDumpCargo), "L3 preserves its flight binding outside mining");
+}
+
 void shipServiceShortcutsRequireFreshInput()
 {
     using namespace rocket;
@@ -1379,6 +1408,7 @@ int main()
     inactiveSourceObservesReleaseWithoutConsumingFreshConfirm();
     disconnectedStartupDoesNotConsumeTheFirstFreshConfirm();
     shipServiceShortcutsRequireFreshInput();
+    cargoDumpRequiresACompleteFreshHold();
     std::cout << "Controller input tests passed.\n";
     return 0;
 }

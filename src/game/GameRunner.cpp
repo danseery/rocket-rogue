@@ -26,6 +26,7 @@ bool sameAppPreferences(const AppPreferences& lhs, const AppPreferences& rhs)
         && lhs.performanceStatsEnabled == rhs.performanceStatsEnabled
         && lhs.helpDisabled == rhs.helpDisabled
         && lhs.cameraShakeDisabled == rhs.cameraShakeDisabled
+        && lhs.incomingNoticesAsModals == rhs.incomingNoticesAsModals
         && lhs.fullscreen == rhs.fullscreen
         && lhs.miningDrillMode == rhs.miningDrillMode
         && lhs.dismissedHelpTopics == rhs.dismissedHelpTopics;

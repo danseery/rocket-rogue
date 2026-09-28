@@ -1967,6 +1967,7 @@ std::string_view controllerActionName(GameInputAction action)
     case GameInputAction::DepartSurfaceUndeployed: return "depart_surface_undeployed";
     case GameInputAction::Abort: return "abort";
     case GameInputAction::MiningScan: return "mining_scan";
+    case GameInputAction::MiningDumpCargo: return "mining_dump_cargo";
     case GameInputAction::MiningTether: return "mining_tether";
     case GameInputAction::MiningOperatorToggle: return "mining_operator_toggle";
     case GameInputAction::MiningRepairDrill: return "mining_repair_drill";
@@ -2117,6 +2118,9 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
     if (releaseKeyboard) {
         keyboardRealtimeInput_ = {};
         keyboardDrillPressed_ = false;
+        keyboardCargoDumpReleaseRequired_ |= keyboardCargoDumpHeld_;
+        keyboardCargoDumpHeld_ = false;
+        keyboardCargoDumpSeconds_ = 0.0;
     }
     session_.steerInput = 0.0;
     session_.strafeInput = 0.0;
@@ -2128,6 +2132,7 @@ void RocketGameApp::releaseRealtimeInputs(bool releaseKeyboard)
     setMiningFire(state_, false);
     setMiningOperatorToggleProgress(state_, 0.0);
     miningOperatorToggleConfirmationSeconds_ = 0.0;
+    miningCargoDumpProgress_ = 0.0;
 }
 
 void RocketGameApp::applyRealtimeInputs()
@@ -2334,6 +2339,9 @@ void RocketGameApp::dispatchControllerAction(InputContext context, GameInputActi
     case GameInputAction::MiningScan:
         miningScanner();
         break;
+    case GameInputAction::MiningDumpCargo:
+        miningDumpCargo();
+        break;
     case GameInputAction::MiningTether:
         miningTether();
         break;
@@ -2389,7 +2397,7 @@ void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGa
 {
     if (messageControllerNeutralRequired_ && !services_.ui.modalOpen() && realtimeControllerContext(context)) {
         if (std::abs(input.moveX) > 0.01 || std::abs(input.moveY) > 0.01 || std::abs(input.strafe) > 0.01 ||
-            std::abs(input.aimX) > 0.01 || std::abs(input.aimY) > 0.01 || input.drilling || input.firing || input.operatorToggleProgress > 0.0) return;
+            std::abs(input.aimX) > 0.01 || std::abs(input.aimY) > 0.01 || input.drilling || input.firing || input.operatorToggleProgress > 0.0 || input.cargoDumpProgress > 0.0) return;
         messageControllerNeutralRequired_ = false;
     }
     if (miningSceneHandoff_ != MiningSceneHandoff::None) {
@@ -2436,11 +2444,13 @@ void RocketGameApp::dispatchControllerInput(InputContext context, const RoutedGa
         controllerRealtimeInput_.aimY = input.aimY;
         controllerRealtimeInput_.firing = input.firing;
         setMiningOperatorToggleProgress(state_, input.operatorToggleProgress);
+        miningCargoDumpProgress_ = miningCanDumpCargo(state_.run.mining) ? input.cargoDumpProgress : 0.0;
     } else {
         controllerRealtimeInput_.aimX = 0.0;
         controllerRealtimeInput_.aimY = 0.0;
         controllerRealtimeInput_.firing = false;
         setMiningOperatorToggleProgress(state_, 0.0);
+        miningCargoDumpProgress_ = 0.0;
     }
     controllerRealtimeInput_.drilling = (context == InputContext::MiningActive || context == InputContext::MiningService)
         && input.drilling;
@@ -3234,6 +3244,17 @@ void RocketGameApp::tick(double deltaSeconds)
             realtimeHudDirty_ = true;
         }
     } else if (state_.screen == Screen::Mining) {
+        if (keyboardCargoDumpHeld_ && activeInputSource_ != InputSource::Controller
+            && !surfaceBaySequence_.active() && miningCanDumpCargo(state_.run.mining)) {
+            const double before = keyboardCargoDumpSeconds_;
+            keyboardCargoDumpSeconds_ = std::min(tuning::mining::cargoDumpHoldSeconds,
+                before + std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds));
+            miningCargoDumpProgress_ = keyboardCargoDumpSeconds_ / tuning::mining::cargoDumpHoldSeconds;
+            if (before < tuning::mining::cargoDumpHoldSeconds
+                && keyboardCargoDumpSeconds_ >= tuning::mining::cargoDumpHoldSeconds) miningDumpCargo();
+        } else if (keyboardCargoDumpHeld_) {
+            keyboardCargoDumpSeconds_ = miningCargoDumpProgress_ = 0.0;
+        }
         if (surfaceBaySequence_.kind == SurfaceBaySequenceKind::Extract) {
             surfaceBaySequence_.elapsed = std::min(
                 surfaceBaySequence_.elapsed + std::clamp(deltaSeconds, 0.0, tuning::launch::maxFrameStepSeconds),
@@ -4202,6 +4223,35 @@ void RocketGameApp::miningKeyboardDrill(bool active)
     applyRealtimeInputs();
 }
 
+void RocketGameApp::miningCargoDumpHeld(bool active)
+{
+    if (!active) {
+        keyboardCargoDumpHeld_ = false;
+        keyboardCargoDumpReleaseRequired_ = false;
+        keyboardCargoDumpSeconds_ = miningCargoDumpProgress_ = 0.0;
+        return;
+    }
+    if (keyboardCargoDumpReleaseRequired_ || state_.screen != Screen::Mining
+        || pauseReason_ != PauseReason::None || services_.ui.modalOpen()
+        || surfaceBaySequence_.active() || !miningCanDumpCargo(state_.run.mining)) return;
+    keyboardCargoDumpHeld_ = true;
+}
+
+void RocketGameApp::miningDumpCargo()
+{
+    if (state_.screen != Screen::Mining || pauseReason_ != PauseReason::None
+        || services_.ui.modalOpen() || surfaceBaySequence_.active()) return;
+    if (!dumpMiningCargo(state_)) return;
+    if (keyboardCargoDumpHeld_) {
+        keyboardCargoDumpHeld_ = false;
+        keyboardCargoDumpReleaseRequired_ = true;
+        keyboardCargoDumpSeconds_ = 0.0;
+    }
+    miningCargoDumpProgress_ = 0.0;
+    queueAudioCue(GameAudioCue::UiActivate);
+    panelDirty_ = realtimeHudDirty_ = true;
+}
+
 void RocketGameApp::miningScanner()
 {
     if (state_.screen != Screen::Mining || surfaceBaySequence_.active()) {
@@ -4747,13 +4797,9 @@ void RocketGameApp::debugShowHangar()
 
 void RocketGameApp::debugShowIncomingMessage()
 {
-    debugStartMiningArena(1, 1, 220, 0, -1);
+    debugShowHangar();
     state_.incomingMessages = {};
-    state_.run.expedition.progression.pendingRunUpgradeChoices = 0;
-    state_.run.expedition.progression.runUpgradeOfferPending = false;
-    state_.run.mining.scannerPulseSeconds = 0.0;
-    state_.run.mining.depthTransitionCooldownSeconds = 0.0;
-    enqueueIncomingMessage(state_.incomingMessages, catalog_, {"preview.recovery", "lunar_recovery", "default"});
+    enqueueIncomingMessage(state_.incomingMessages, catalog_, {"preview.incoming", "earth_dock_intro", "services"});
     refreshPanel();
 }
 
@@ -6520,13 +6566,15 @@ void RocketGameApp::runUiAction(const std::string& action)
             // Acceptance may enqueue a first-drone introduction. Acknowledge
             // the live queue rather than overwrite those newly added messages.
             (void)acknowledgeIncomingMessage(state_.incomingMessages, action.substr(incomingPrefix.size()));
-            releaseRealtimeInputs(true);
-            messageMoveReleaseRequired_ = true;
-            messageDrillReleaseRequired_ = true;
-            messageFireReleaseRequired_ = true;
-            messageControllerNeutralRequired_ = true;
-            services_.ui.closeModal();
-            if (pauseReason_ == PauseReason::BlockingModal) clearControllerPause();
+            if (services_.ui.modalOpen()) {
+                releaseRealtimeInputs(true);
+                messageMoveReleaseRequired_ = true;
+                messageDrillReleaseRequired_ = true;
+                messageFireReleaseRequired_ = true;
+                messageControllerNeutralRequired_ = true;
+                services_.ui.closeModal();
+                if (pauseReason_ == PauseReason::BlockingModal) clearControllerPause();
+            }
             if (earthLaunchReady(state_.run.expedition) &&
                 action.substr(incomingPrefix.size()) == "campaign.lunar_approach") {
                 startLaunch();
@@ -7004,6 +7052,7 @@ RenderSnapshot RocketGameApp::snapshot() const
         result.miningOperatorThrustY = result.miningOperatorActive ? mining.moveY : 0.0;
         result.miningOperatorIntegrity = mining.operatorIntegrity;
         result.miningOperatorToggleProgress = mining.operatorToggleProgress;
+        result.miningCargoDumpProgress = miningCargoDumpProgress_;
         result.miningOperatorFirePulse =
             std::clamp(mining.operatorFirePulseSeconds / 0.12, 0.0, 1.0);
         result.miningRigPresent = result.miningExtractionActive || mining.rigDepthZone == mining.depthZone;

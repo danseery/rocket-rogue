@@ -4,13 +4,14 @@ The committed PNGs are 90s arcade-style proof-of-concept sprites derived from pr
 
 ## Registered runtime textures
 
-`scene-textures.json` declares all 86 runtime textures in this section. A missing or corrupt declared texture fails atlas verification before packaging.
+`scene-textures.json` declares all 87 runtime textures in this section. A missing or corrupt declared texture fails atlas verification before packaging.
 
 | Files | Dimensions | Runtime use |
 |---|---:|---|
 | `earth.png`, `moon.png`, `mars.png` | 512x512 each | Early solar-system bodies. |
 | `mercury.png`, `venus.png`, `jupiter.png`, `saturn.png`, `uranus.png`, `neptune.png` | 512x512 each | Local solar-map bodies. |
 | `straylight-ark-operational.png`, `straylight-ark-damaged.png` | 1254x1254 each | Current Straylight Ark operational/damaged states. |
+| `straylight-dock-hull.png` | 1536x1024 | Solid grey hull section connected beneath the Straylight berth. See `straylight-dock-hull.prompt.md` for the generated source and replacement contract. |
 | `rocket-bay-closed.png`, `rocket-bay-open.png` | 1024x1024 each | Player shuttle with the mining-drone bay sealed/open. |
 | `thrust-sheet.png` | 768x128 | Six horizontal 128x128 thrust frames. |
 | `explosion-sheet.png` | 1024x128 | Eight horizontal 128x128 explosion frames. |
@@ -66,7 +67,7 @@ prompt contract and the fixed nineteen-frame order.
 
 ## Generated scene atlas
 
-`scene-textures.json` is the canonical offline atlas manifest for the 86 registered
+`scene-textures.json` is the canonical offline atlas manifest for the 87 registered
 scene textures. `tools/build-scene-atlas.py` splits the registered sprite sheets on their
 declared frame grids, preserves every source pixel, extrudes each frame edge by two
 pixels, and packs the frames into WebGL2-safe pages no larger than 4096 pixels on

@@ -140,6 +140,24 @@ int missionWorkPriority(const MiningRunState& mining, const MiningCell& cell, in
     return 2;
 }
 
+bool adjacentToRevealedArtifact(const MiningRunState& mining, int x, int y)
+{
+    const auto& artifact = mining.artifact;
+    if (!artifact.present || !artifact.revealed ||
+        artifact.state != MiningArtifactState::Embedded) return false;
+    const int artifactX = static_cast<int>(std::floor(artifact.x));
+    const int artifactY = static_cast<int>(std::floor(artifact.y));
+    return std::max(std::abs(x - artifactX), std::abs(y - artifactY)) == 1;
+}
+
+int miningWorkPriority(const MiningRunState& mining, const MiningCell& cell, int x, int y)
+{
+    const int missionPriority = missionWorkPriority(mining, cell, x, y);
+    if (missionPriority == 0) return 0;
+    if (adjacentToRevealedArtifact(mining, x, y)) return 1;
+    return missionPriority + 1;
+}
+
 bool miniDroneCanOccupyCell(const MiningTerrain& terrain, int x, int y)
 {
     const MiningCell* cell = miningCellAt(terrain, x, y);
@@ -524,6 +542,37 @@ void MiningDroneCoordinator::synchronizeAssignments()
             clearAssignment(agent);
         }
     }
+    // A scan can reveal the artifact while a drone is en route to ordinary
+    // ore. Switch to an open neighboring tile without discarding work already
+    // in progress or pulling a drone beyond its normal operating radius.
+    for (MiningMiniDroneAgent& agent : mining_.miniDrones) {
+        if (agent.role != MiniDroneRole::Mining ||
+            agent.behavior == MiningMiniDroneBehavior::Working ||
+            !hasAssignment(agent) ||
+            !mining_.artifact.present || !mining_.artifact.revealed ||
+            mining_.artifact.state != MiningArtifactState::Embedded) continue;
+        const MiningCell* current = miningCellAt(
+            mining_.terrain, agent.targetCellX, agent.targetCellY);
+        if (current == nullptr || miningWorkPriority(
+                mining_, *current, agent.targetCellX, agent.targetCellY) <= 1) continue;
+        const MiniDroneAnchorFrame anchor = agentAnchor(mining_, agent);
+        const int artifactX = static_cast<int>(std::floor(mining_.artifact.x));
+        const int artifactY = static_cast<int>(std::floor(mining_.artifact.y));
+        bool neighborAvailable = false;
+        for (int y = artifactY - 1; y <= artifactY + 1 && !neighborAvailable; ++y) {
+            for (int x = artifactX - 1; x <= artifactX + 1; ++x) {
+                if (!adjacentToRevealedArtifact(mining_, x, y) ||
+                    !isCandidateCell(x, y) || reservations_.contains(cellKey(x, y)) ||
+                    std::hypot(x + 0.5 - anchor.x, y + 0.5 - anchor.y) >
+                        tuning::mining::miningDroneAcquireRadiusCells ||
+                    miniDroneTaskPathLength(mining_, agent, x, y,
+                        tuning::mining::miningDroneWorkRangeCells) < 0) continue;
+                neighborAvailable = true;
+                break;
+            }
+        }
+        if (neighborAvailable) releaseAssignment(agent);
+    }
 }
 
 bool MiningDroneCoordinator::hasAssignment(const MiningMiniDroneAgent& agent) const
@@ -551,7 +600,7 @@ bool MiningDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
     const double acquireRadius = tuning::mining::miningDroneAcquireRadiusCells;
     const double acquireRangeSq = acquireRadius * acquireRadius;
     double bestScore = 1.0e9;
-    int bestPriority = 3;
+    int bestPriority = 4;
     int bestX = -1;
     int bestY = -1;
     const int minX = std::max(0, static_cast<int>(std::floor(anchor.x - acquireRadius)));
@@ -580,7 +629,7 @@ bool MiningDroneCoordinator::acquireAssignment(MiningMiniDroneAgent& agent)
             const double agentDx = centerX - agent.x;
             const double agentDy = centerY - agent.y;
             const double score = std::sqrt(agentDx * agentDx + agentDy * agentDy) + targetPriority(cell->material);
-            const int priority = missionWorkPriority(mining_, *cell, x, y);
+            const int priority = miningWorkPriority(mining_, *cell, x, y);
             if (priority < bestPriority || (priority == bestPriority && score < bestScore)) {
                 bestPriority = priority;
                 bestScore = score;

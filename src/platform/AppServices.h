@@ -155,6 +155,7 @@ struct AppPreferences {
     bool performanceStatsEnabled = false;
     bool helpDisabled = false;
     bool cameraShakeDisabled = false;
+    bool incomingNoticesAsModals = false;
     bool fullscreen = false;
     MiningDrillMode miningDrillMode = MiningDrillMode::Toggle;
     std::vector<std::string> dismissedHelpTopics;

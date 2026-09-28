@@ -208,6 +208,8 @@ int rr_rml_help_disabled() { return currentPreferences().helpDisabled ? 1 : 0; }
 void rr_rml_set_help_disabled(int disabled) { AppPreferences p = currentPreferences(); p.helpDisabled = disabled != 0; storePreferences(std::move(p)); }
 int rr_rml_camera_shake_disabled() { return currentPreferences().cameraShakeDisabled ? 1 : 0; }
 void rr_rml_set_camera_shake_disabled(int disabled) { AppPreferences p = currentPreferences(); p.cameraShakeDisabled = disabled != 0; storePreferences(std::move(p)); }
+int rr_rml_incoming_notices_as_modals() { return currentPreferences().incomingNoticesAsModals ? 1 : 0; }
+void rr_rml_set_incoming_notices_as_modals(int enabled) { AppPreferences p = currentPreferences(); p.incomingNoticesAsModals = enabled != 0; storePreferences(std::move(p)); }
 
 class RmlSystemInterface final : public Rml::SystemInterface {
 public:
@@ -280,7 +282,7 @@ std::string normalizeBooleanAttributes(std::string html)
 {
     static constexpr std::string_view names[] = {
         "disabled", "checked", "selected", "data-preflight-launch", "data-arrival-fanfare",
-        "data-help-settings", "data-help-toggle", "data-camera-shake-settings", "data-camera-shake-toggle", "data-resolution-settings", "data-resolution-select",
+        "data-help-settings", "data-help-toggle", "data-camera-shake-settings", "data-camera-shake-toggle", "data-incoming-notice-settings", "data-incoming-notice-toggle", "data-resolution-settings", "data-resolution-select",
         "data-desktop-fullscreen-settings", "data-desktop-fullscreen-toggle",
         "data-frame-limit-settings", "data-frame-limit-select",
         "data-game-speed-settings", "data-game-speed-select",
@@ -527,6 +529,12 @@ std::string syncCurrentCameraShakeToggle(std::string html)
         "Disable camera shake");
 }
 
+std::string syncCurrentIncomingNoticeToggle(std::string html)
+{
+    return syncControllerToggle(std::move(html), "data-incoming-notice-toggle",
+        rr_rml_incoming_notices_as_modals() != 0, "Use bottom banners", "Use classic pop-ups");
+}
+
 std::string syncDesktopFullscreenToggle(std::string html)
 {
     const std::string_view sectionMarker = "data-desktop-fullscreen-settings";
@@ -589,6 +597,7 @@ void refreshAutoPowerStatusElement();
 
 std::string syncSettingsControls(std::string html)
 {
+    html = syncCurrentIncomingNoticeToggle(std::move(html));
     return syncAutoPowerStatus(syncDesktopFullscreenToggle(syncCurrentControllerPreferences(syncCurrentCameraShakeToggle(syncCurrentHelpToggle(
         syncCurrentPerformanceStatsToggle(syncCurrentDebugToolsToggle(
             selectCurrentKeyboardDrillMode(selectCurrentGameSpeed(selectCurrentFrameLimit(selectCurrentResolution(std::move(html))))))))))));
@@ -635,6 +644,7 @@ RmlButtonBinding buttonBindingFromElement(Rml::Element& element)
     binding.close = element.HasAttribute("data-ui-close-modal");
     binding.helpToggle = element.HasAttribute("data-help-toggle");
     binding.cameraShakeToggle = element.HasAttribute("data-camera-shake-toggle");
+    binding.incomingNoticeToggle = element.HasAttribute("data-incoming-notice-toggle");
     binding.desktopFullscreenToggle = element.HasAttribute("data-desktop-fullscreen-toggle");
     binding.debugToolsToggle = element.HasAttribute("data-debug-tools-toggle");
     binding.performanceStatsToggle = element.HasAttribute("data-performance-stats-toggle");
@@ -1846,10 +1856,11 @@ std::string withOpeningControllerLabels(std::string markup, ControllerFamily fam
     replaceToken("{{controller_rt}}", labels.rightTrigger);
     replaceToken("{{controller_menu}}", labels.menu);
     replaceToken("{{controller_view}}", labels.view);
+    replaceToken("{{controller_ls}}", promptControllerFamily(family) == ControllerFamily::PlayStation ? "L3" : "LS click");
     return markup;
 }
 
-std::string withInteractionControllerSymbols(std::string markup, ControllerFamily family)
+std::string withInteractionControllerSymbols(std::string markup, ControllerFamily family, bool swapConfirmCancel)
 {
     const ControllerFamily resolved = promptControllerFamily(family);
     const bool playstation = resolved == ControllerFamily::PlayStation;
@@ -1864,6 +1875,10 @@ std::string withInteractionControllerSymbols(std::string markup, ControllerFamil
     replaceToken("{{controller_north}}", playstation ? "△" : "Y");
     replaceToken("{{controller_west}}", playstation ? "□" : "X");
     replaceToken("{{controller_south}}", playstation ? "×" : "A");
+    replaceToken("{{controller_confirm}}", playstation ? (swapConfirmCancel ? "○" : "×")
+        : (swapConfirmCancel ? "B" : "A"));
+    replaceToken("{{controller_cancel}}", playstation ? (swapConfirmCancel ? "×" : "○")
+        : (swapConfirmCancel ? "A" : "B"));
     replaceToken("{{controller_lb}}", playstation || deck ? "L1" : "LB");
     replaceToken("{{controller_rb}}", playstation || deck ? "R1" : "RB");
     return markup;
@@ -2365,7 +2380,7 @@ RmlSettingsEventListener g_settingsEventListener;
 
 bool dispatchButtonBinding(GameRmlUi& owner, RmlButtonBinding binding)
 {
-    if (binding.helpToggle || binding.cameraShakeToggle || binding.desktopFullscreenToggle ||
+    if (binding.helpToggle || binding.cameraShakeToggle || binding.incomingNoticeToggle || binding.desktopFullscreenToggle ||
         binding.debugToolsToggle || binding.performanceStatsToggle || !binding.controllerSetting.empty())
         owner.emitUiSound("toggle");
     if (binding.close) {
@@ -2387,6 +2402,11 @@ bool dispatchButtonBinding(GameRmlUi& owner, RmlButtonBinding binding)
     }
     if (binding.cameraShakeToggle) {
         rr_rml_set_camera_shake_disabled(rr_rml_camera_shake_disabled() == 0 ? 1 : 0);
+        owner.refresh();
+        return true;
+    }
+    if (binding.incomingNoticeToggle) {
+        rr_rml_set_incoming_notices_as_modals(rr_rml_incoming_notices_as_modals() == 0 ? 1 : 0);
         owner.refresh();
         return true;
     }
@@ -2566,6 +2586,9 @@ void collectFocusTargets(bool modalOpen)
         }
         if (Rml::Element* overlay = g_document->GetElementById("rr-scene-overlay-host")) {
             collectFocusableElements(overlay, elements);
+        }
+        if (Rml::Element* notice = g_document->GetElementById("rr-incoming-banner")) {
+            collectFocusableElements(notice, elements);
         }
     }
     std::vector<std::string> seen;
@@ -2950,8 +2973,11 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
             && left.closeAction == right.closeAction
             && left.autoOpen == right.autoOpen
             && left.dismissible == right.dismissible
-            && left.showClose == right.showClose;
+            && left.showClose == right.showClose
+            && left.bannerEligible == right.bannerEligible;
     };
+    const bool incomingNoticesAsModals = rr_rml_incoming_notices_as_modals() != 0;
+    const bool noticeModeChanged = renderedIncomingNoticesAsModals_ != incomingNoticesAsModals;
     const bool presentationStateUnchanged = samePanelStructure(presentation_, presentation)
         && presentation_.runtime.launchQueued == presentation.runtime.launchQueued
         && presentation_.runtime.miningTetherAvailable == presentation.runtime.miningTetherAvailable
@@ -2959,6 +2985,7 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
         && presentation_.runtime.overlayValue == presentation.runtime.overlayValue
         && presentation_.missionTrackerMarkup == presentation.missionTrackerMarkup
         && presentation_.missionTrackerCollapsedMarkup == presentation.missionTrackerCollapsedMarkup
+        && presentation_.missionSidebarMarkup == presentation.missionSidebarMarkup
         && presentation_.interactionMarkup == presentation.interactionMarkup
         && presentation_.runtime.expeditionLevel == presentation.runtime.expeditionLevel
         && presentation_.runtime.expeditionExperienceCurrent == presentation.runtime.expeditionExperienceCurrent
@@ -2973,7 +3000,7 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
             presentation_.modals.end(),
             presentation.modals.begin(),
             modalEqual);
-    if (presentationStateUnchanged && panelMarkupUnchanged && modalsUnchanged) {
+    if (presentationStateUnchanged && panelMarkupUnchanged && modalsUnchanged && !noticeModeChanged) {
         return;
     }
 
@@ -2982,8 +3009,8 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
     const bool rebuildPanelShell = presentation_.templateKind != presentation.templateKind;
     const RmlPanelMode nextPanelMode = panelModeForPresentation(presentation);
     const std::vector<ModalPresentation>& modals = presentation.modals;
-    const auto autoModal = std::find_if(modals.begin(), modals.end(), [](const ModalPresentation& modal) {
-        return modal.autoOpen;
+    const auto autoModal = std::find_if(modals.begin(), modals.end(), [incomingNoticesAsModals](const ModalPresentation& modal) {
+        return modal.autoOpen && (!modal.bannerEligible || incomingNoticesAsModals);
     });
     const bool activeModalRemainsValid = openModalId_.empty() || findModal(modals, openModalId_);
     const bool modalHierarchyRemainsValid = activeModalRemainsValid
@@ -3007,7 +3034,18 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
             || uiSurfaceKindForScreen(presentation.metadata.screen) != UiSurfaceKind::Fullscreen;
     }
     presentation_ = presentation;
+    renderedIncomingNoticesAsModals_ = incomingNoticesAsModals;
     panelMode_ = nextPanelMode;
+    const bool incomingBannerNowEligible = !incomingNoticesAsModals &&
+        std::any_of(modals.begin(), modals.end(), [&](const auto& modal) {
+            return modal.id == openModalId_ && modal.bannerEligible;
+        });
+    if (incomingBannerNowEligible) {
+        openModalId_.clear();
+        modalStack_.clear();
+        modalFocusStack_.clear();
+        modalExplicitFocusStack_.clear();
+    }
     if (!openModalId_.empty() && !modalHierarchyRemainsValid) {
         clearFocusTargets();
         openModalId_.clear();
@@ -3036,7 +3074,7 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
         return;
     }
 
-    const bool modalChanged = !modalsUnchanged || previousModalId != openModalId_;
+    const bool modalChanged = !modalsUnchanged || previousModalId != openModalId_ || noticeModeChanged;
     refreshPersistentHosts(
         rebuildPanel,
         rebuildPanelShell,
@@ -3110,7 +3148,8 @@ void GameRmlUi::render()
         g_displayPreferenceChanged = false;
         layoutViewportWidth_ = viewportWidth;
         layoutViewportHeight_ = viewportHeight;
-        refreshPersistentHosts(false, false, false, false, false, false);
+        const bool noticeVisible = g_document && g_document->GetElementById("rr-incoming-banner");
+        refreshPersistentHosts(false, false, noticeVisible, false, false, false);
         if (initialized_) {
             clearFocusTargets();
             rebindAndRestoreFocus(false);
@@ -3124,7 +3163,8 @@ void GameRmlUi::render()
         viewport.drawableHeight,
     });
     Rml::Rectanglei rootClip;
-    if (!openModalId_.empty() || !presentation_.interactionMarkup.empty()
+    if (!openModalId_.empty() || (g_document && g_document->GetElementById("rr-incoming-banner"))
+        || !presentation_.interactionMarkup.empty()
         || controllerPresentationActive_ || presentation_.runtime.gameplayInputHelper
         || presentation_.runtime.sceneTransitionActive
         || performanceStatsVisible_ || presentation_.metadata.overlay != PanelOverlayKind::None) {
@@ -3133,33 +3173,123 @@ void GameRmlUi::render()
         rootClip = expandedPanelClip(panelMode_);
     }
     renderHost_.setRootClip({rootClip.Left(), rootClip.Top(), rootClip.Right(), rootClip.Bottom()});
+    bool interactionVisibilityChanged = false;
     const auto placeInteraction = [&](const char* id, SceneInteractionAnchor anchor, int width, int height, bool ship) {
         Rml::Element* element = g_document->GetElementById(id);
+        const bool visible = element && anchor.visible && openModalId_.empty();
+        if (ship && !visible) shipServicesPlacementActive_ = false;
+        if (!ship && !visible) contextPlacementActive_ = false;
         if (!element) return;
-        element->SetProperty("display", anchor.visible && openModalId_.empty() ? "block" : "none");
-        if (!anchor.visible) return;
+        interactionVisibilityChanged |= element->IsVisible(true) != visible;
+        element->SetProperty("display", visible ? "block" : "none");
+        if (!visible) return;
         const UiSurfaceKind surface = presentation_.metadata.surface == PanelSurfaceKind::Mining
             ? UiSurfaceKind::Mining : uiSurfaceKindForScreen(presentation_.metadata.screen);
         const UiRect scene = resolveUiViewportLayout(viewportWidth, viewportHeight, surface).sceneRect;
-        if (surface == UiSurfaceKind::Mining && std::string_view(id) == "rr-context-interaction") {
-            constexpr int chipWidth = 176;
-            constexpr int chipHeight = 30;
-            constexpr int targetGap = 38;
-            const int targetX = static_cast<int>(anchor.x);
-            const int preferredRight = targetX + targetGap;
-            const int besideTarget = preferredRight + chipWidth <= scene.x + scene.width - 8
-                ? preferredRight : targetX - targetGap - chipWidth;
-            const int left = std::clamp(besideTarget, scene.x + 8,
-                std::max(scene.x + 8, scene.x + scene.width - chipWidth - 8));
-            const int top = std::clamp(static_cast<int>(anchor.y) - chipHeight / 2, scene.y + 8,
-                std::max(scene.y + 8, scene.y + scene.height - chipHeight - 8));
-            element->SetProperty("left", std::to_string(left) + "px");
-            element->SetProperty("top", std::to_string(top) + "px");
+        if (ship) {
+            // Each service list has a different height. Place its bottom in the
+            // upper half of the actual ship ring, away from the active actor.
+            g_context->Update();
+            const auto size = element->GetBox().GetSize(Rml::BoxArea::Border);
+            const float radiusX = std::max(48.0F, interactionAnchors_.shipRadiusX);
+            const float radiusY = std::max(48.0F, interactionAnchors_.shipRadiusY);
+            const float actorOffset = interactionAnchors_.player.visible ? interactionAnchors_.player.x - anchor.x : 0.0F;
+            const float centerBand = std::clamp(radiusX * 0.06F, 6.0F, 14.0F);
+            if (!shipServicesPlacementActive_) shipServicesOnRight_ = actorOffset <= 0.0F;
+            else if (actorOffset < -centerBand) shipServicesOnRight_ = true;
+            else if (actorOffset > centerBand) shipServicesOnRight_ = false;
+            const float minLeft = static_cast<float>(scene.x + 10);
+            const float maxLeft = std::max(minLeft, scene.x + scene.width - size.x - 10.0F);
+            float minTop = static_cast<float>(scene.y + 8);
+            if (auto* xp = g_document->GetElementById("rr-hud-mining-xp"); xp && xp->IsVisible(true)) {
+                minTop = std::max(minTop, xp->GetAbsoluteOffset(Rml::BoxArea::Border).y
+                    + xp->GetBox().GetSize(Rml::BoxArea::Border).y + 8.0F);
+            }
+            const float maxTop = std::max(minTop, scene.y + scene.height - size.y - 12.0F);
+            const float desiredLeft = std::clamp(shipServicesOnRight_
+                ? anchor.x + radiusX * 0.30F : anchor.x - radiusX * 0.30F - size.x,
+                minLeft, maxLeft);
+            const float desiredTop = std::clamp(anchor.y - radiusY * 0.30F - size.y, minTop, maxTop);
+            const double now = host_.monotonicSeconds();
+            if (!shipServicesPlacementActive_) {
+                shipServicesLeft_ = desiredLeft;
+                shipServicesTop_ = desiredTop;
+            } else {
+                const double delta = std::clamp(now - shipServicesPlacementSeconds_, 0.0, 0.05);
+                const float blend = static_cast<float>(1.0 - std::exp(-delta / 0.075));
+                shipServicesLeft_ = std::lerp(shipServicesLeft_, desiredLeft, blend);
+                shipServicesTop_ = std::lerp(shipServicesTop_, desiredTop, blend);
+            }
+            shipServicesPlacementActive_ = true;
+            shipServicesPlacementSeconds_ = now;
+            shipServicesLeft_ = std::clamp(shipServicesLeft_, minLeft, maxLeft);
+            shipServicesTop_ = std::clamp(shipServicesTop_, minTop, maxTop);
+            element->SetProperty("left", std::to_string(shipServicesLeft_) + "px");
+            element->SetProperty("top", std::to_string(shipServicesTop_) + "px");
             return;
         }
-        const int left = std::clamp(static_cast<int>(anchor.x) + (ship ? 44 : -width / 2),
+        if (surface == UiSurfaceKind::Mining && std::string_view(id) == "rr-context-interaction") {
+            g_context->Update();
+            const auto size = element->GetBox().GetSize(Rml::BoxArea::Border);
+            const auto player = interactionAnchors_.player;
+            const float actorOffset = player.visible ? player.x - anchor.x : 0.0F;
+            constexpr float gap = 12.0F;
+            constexpr float centerBand = 10.0F;
+            if (!contextPlacementActive_) contextOnRight_ = actorOffset <= 0.0F;
+            else if (actorOffset < -centerBand) contextOnRight_ = true;
+            else if (actorOffset > centerBand) contextOnRight_ = false;
+            const float minLeft = static_cast<float>(scene.x + 8);
+            const float maxLeft = std::max(minLeft, scene.x + scene.width - size.x - 8.0F);
+            float minTop = static_cast<float>(scene.y + 8);
+            if (auto* xp = g_document->GetElementById("rr-hud-mining-xp"); xp && xp->IsVisible(true)) {
+                minTop = std::max(minTop, xp->GetAbsoluteOffset(Rml::BoxArea::Border).y
+                    + xp->GetBox().GetSize(Rml::BoxArea::Border).y + 8.0F);
+            }
+            const float maxTop = std::max(minTop, scene.y + scene.height - size.y - 8.0F);
+            const float targetGap = std::max(38.0F, anchor.halfWidth + gap);
+            const float right = anchor.x + targetGap;
+            const float left = anchor.x - targetGap - size.x;
+            float desiredLeft = contextOnRight_ ? right : left;
+            if (desiredLeft > maxLeft && left >= minLeft) desiredLeft = left;
+            else if (desiredLeft < minLeft && right <= maxLeft) desiredLeft = right;
+            desiredLeft = std::clamp(desiredLeft, minLeft, maxLeft);
+            // Slide above both objects, so switching sides never passes over
+            // the player or the tether. Near the top edge use the space below.
+            float workTop = anchor.y - anchor.halfHeight;
+            float workBottom = anchor.y + anchor.halfHeight;
+            if (player.visible) {
+                workTop = std::min(workTop, player.y - player.halfHeight);
+                workBottom = std::max(workBottom, player.y + player.halfHeight);
+            }
+            const float above = workTop - size.y - gap;
+            const float below = workBottom + gap;
+            const float desiredTop = std::clamp(above >= minTop ? above : below, minTop, maxTop);
+            const double now = host_.monotonicSeconds();
+            if (!contextPlacementActive_) {
+                contextLeft_ = desiredLeft;
+                contextTop_ = desiredTop;
+            } else {
+                const double delta = std::clamp(now - contextPlacementSeconds_, 0.0, 0.05);
+                const float blend = static_cast<float>(1.0 - std::exp(-delta / 0.075));
+                contextLeft_ = std::lerp(contextLeft_, desiredLeft, blend);
+                contextTop_ = std::lerp(contextTop_, desiredTop, blend);
+            }
+            contextPlacementActive_ = true;
+            contextPlacementSeconds_ = now;
+            contextLeft_ = std::clamp(contextLeft_, minLeft, maxLeft);
+            contextTop_ = std::clamp(contextTop_, minTop, maxTop);
+            // Camera/actor movement can outrun the eased position. Keep the
+            // visible chip outside the work area even during that transition.
+            if (contextTop_ < workBottom + gap && contextTop_ + size.y > workTop - gap)
+                contextTop_ = desiredTop;
+            element->SetProperty("left", std::to_string(contextLeft_) + "px");
+            element->SetProperty("top", std::to_string(contextTop_) + "px");
+            return;
+        }
+        contextPlacementActive_ = false;
+        const int left = std::clamp(static_cast<int>(anchor.x) - width / 2,
             scene.x + 10, std::max(scene.x + 10, scene.x + scene.width - width - 10));
-        const int desiredTop = ship ? static_cast<int>(anchor.y) - height / 2 : static_cast<int>(anchor.y) - 66;
+        const int desiredTop = static_cast<int>(anchor.y) - 66;
         const int top = std::clamp(desiredTop, scene.y + (surface == UiSurfaceKind::Mining ? 102 : 16),
             std::max(scene.y + (surface == UiSurfaceKind::Mining ? 102 : 16), scene.y + scene.height - height - 12));
         element->SetProperty("left", std::to_string(left) + "px");
@@ -3169,6 +3299,7 @@ void GameRmlUi::render()
     placeInteraction("rr-ship-services", interactionAnchors_.ship, 258, 322, true);
     refreshAutoPowerStatusElement();
     g_context->Update();
+    if (interactionVisibilityChanged) rebindAndRestoreFocus(true);
     if (renderHost_.beginFrame()) {
         g_context->Render();
         renderHost_.endFrame();
@@ -3325,7 +3456,11 @@ bool GameRmlUi::hitTest(int x, int y) const
         return buttonElementAtPoint(*g_context, point) != nullptr;
     }
     if ((presentation_.metadata.overlay == PanelOverlayKind::PreflightLaunch ||
-         !presentation_.missionTrackerMarkup.empty()) && g_context) {
+         !presentation_.missionTrackerMarkup.empty() ||
+         !presentation_.missionSidebarMarkup.empty() ||
+         (rr_rml_incoming_notices_as_modals() == 0 && std::any_of(presentation_.modals.begin(), presentation_.modals.end(), [](const auto& modal) {
+             return modal.autoOpen && modal.bannerEligible;
+         }))) && g_context) {
         const Rml::Vector2f point {static_cast<float>(x), static_cast<float>(y)};
         if (buttonElementAtPoint(*g_context, point) != nullptr) {
             return true;
@@ -3782,7 +3917,7 @@ void GameRmlUi::setControllerPresentation(bool active, ControllerFamily family)
             controllerLabelsChanged,
             false,
             false,
-            interactionLabelsChanged || !presentation_.missionTrackerMarkup.empty(),
+            interactionLabelsChanged || !presentation_.missionTrackerMarkup.empty() || !presentation_.missionSidebarMarkup.empty(),
             true,
             false);
     }
@@ -3792,7 +3927,7 @@ void GameRmlUi::setControllerConfirmCancelSwapped(bool swapped)
 {
     if (controllerConfirmCancelSwapped_ == swapped) return;
     controllerConfirmCancelSwapped_ = swapped;
-    if (initialized_) refreshPersistentHosts(false, false, false, false, true, false);
+    if (initialized_) refreshPersistentHosts(false, false, false, true, true, false);
 }
 
 void GameRmlUi::setControllerFocusVisible(bool visible)
@@ -4331,7 +4466,7 @@ bool GameRmlUi::rebuildOverlayHost()
     }
     const ModalPresentation* activeModal = findModal(presentation_.modals, openModalId_);
     std::string overlays = nativeSceneOverlayMarkup(presentation_);
-    if (!presentation_.missionTrackerMarkup.empty()) {
+    if (!presentation_.missionTrackerMarkup.empty() || !presentation_.missionSidebarMarkup.empty()) {
         // Landed flight also uses the mining HUD. Anchor to that presentation,
         // rather than the gameplay screen's flight-sidebar geometry.
         const bool surfaceHud = presentation_.metadata.surface == PanelSurfaceKind::Mining;
@@ -4348,12 +4483,13 @@ bool GameRmlUi::rebuildOverlayHost()
             (compact ? " mission-overlay-compact" : "") + "\" style=\"left:" +
             std::to_string(layout.sceneRect.x + (surfaceHud ? 0 : 12)) +
             "px;top:" + std::to_string(layout.sceneRect.y + (compact ? 0 : fullscreen ? 12 : surfaceHud ? 50 : 64)) + "px;width:" +
-            std::to_string(!missionTrackerExpanded_ ? 138 : compact ? 160 : fullscreen ? std::min(250, std::max(210, layout.sceneRect.width / 4))
+            std::to_string(!missionTrackerExpanded_ && presentation_.missionSidebarMarkup.empty() ? 138 : compact ? 160 : fullscreen ? std::min(250, std::max(210, layout.sceneRect.width / 4))
                 : std::min(330, std::max(240, layout.sceneRect.width / 3))) + "px;\">" +
-            (missionTrackerExpanded_ ? presentation_.missionTrackerMarkup : presentation_.missionTrackerCollapsedMarkup) + "</div>";
+            (missionTrackerExpanded_ ? presentation_.missionTrackerMarkup : presentation_.missionTrackerCollapsedMarkup) +
+            presentation_.missionSidebarMarkup + "</div>";
     }
     if (!presentation_.interactionMarkup.empty())
-        overlays += withInteractionControllerSymbols(presentation_.interactionMarkup, controllerFamily_);
+        overlays += withInteractionControllerSymbols(presentation_.interactionMarkup, controllerFamily_, controllerConfirmCancelSwapped_);
     overlayHost->SetInnerRML(activeModal ? std::string {} : overlays);
     return true;
 }
@@ -4423,7 +4559,47 @@ bool GameRmlUi::rebuildModalHost()
         modalElement->SetAttribute("class", modalClass);
         if (activeModal->id == ui::modals::settings) applySettingsTabSelection();
     } else {
-        modalHost->SetInnerRML("");
+        const auto notice = std::find_if(presentation_.modals.begin(), presentation_.modals.end(), [](const auto& modal) {
+            return modal.autoOpen && modal.bannerEligible;
+        });
+        if (rr_rml_incoming_notices_as_modals() == 0 && notice != presentation_.modals.end()) {
+            const int viewportWidth = std::max(1, g_context->GetDimensions().x);
+            const int viewportHeight = std::max(1, g_context->GetDimensions().y);
+            const UiSurfaceKind surface = presentation_.metadata.surface == PanelSurfaceKind::Mining
+                ? UiSurfaceKind::Mining : uiSurfaceKindForScreen(presentation_.metadata.screen);
+            const UiRect scene = resolveUiViewportLayout(viewportWidth, viewportHeight, surface).sceneRect;
+            const bool liveScene = presentation_.metadata.screen == Screen::Flight || presentation_.metadata.screen == Screen::Mining;
+            const int areaWidth = liveScene ? scene.width : viewportWidth;
+            const int width = std::min({744, std::max(240, areaWidth - 32),
+                std::max(1, viewportWidth - 16)});
+            const int left = std::max(0, (viewportWidth - width) / 2);
+            const ViewportMetrics metrics = host_.viewportMetrics();
+            const int drawableLogicalHeight = static_cast<int>(std::round(
+                metrics.drawableHeight / std::max(0.1F, metrics.densityRatio)));
+            int visibleHeight = std::min(viewportHeight, drawableLogicalHeight);
+            modalHost->SetInnerRML("<div id=\"rr-incoming-banner\" class=\"incoming-banner\" style=\"left:"
+                + std::to_string(left) + "px;bottom:" + std::to_string(std::max(16, viewportHeight - visibleHeight + 16))
+                + "px;width:" + std::to_string(width) + "px;min-height:125px;\">"
+                + sanitizeRml(notice->bodyMarkup) + "</div>");
+            // A dock claim already has a prominent, default-focused control.
+            // Keep Fennec's reward preview without a second identical action.
+            if (auto* panel = g_document->GetElementById("rr-panel")) {
+                Rml::ElementList claims;
+                panel->QuerySelectorAll(claims, ".dock-mission-claim");
+                const bool inlineClaim = std::any_of(claims.begin(), claims.end(), [&](const Rml::Element* claim) {
+                    return !claim->HasAttribute("disabled")
+                        && claim->GetAttribute<Rml::String>("data-rr-action", "") == notice->closeAction;
+                });
+                if (inlineClaim) {
+                    if (auto* banner = g_document->GetElementById("rr-incoming-banner")) {
+                        if (auto* footer = banner->QuerySelector(".modal-actions"))
+                            footer->SetProperty("display", "none");
+                    }
+                }
+            }
+        } else {
+            modalHost->SetInnerRML("");
+        }
     }
     renderedModalId_ = activeModal ? activeModal->id : std::string {};
     rr_rml_set_modal_open(openModalId_.empty() ? 0 : 1);

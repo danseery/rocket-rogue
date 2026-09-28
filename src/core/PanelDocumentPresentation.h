@@ -108,6 +108,8 @@ struct ModalPresentation {
     bool dismissible = true;
     bool showClose = true;
     ModalTone tone = ModalTone::Neutral;
+    // Eligible Fennec messages may render as a nonblocking bottom banner.
+    bool bannerEligible = false;
 };
 
 struct PanelDocumentPresentation {
@@ -117,6 +119,8 @@ struct PanelDocumentPresentation {
     std::string contentMarkup;
     std::string missionTrackerMarkup;
     std::string missionTrackerCollapsedMarkup;
+    // Contextual mission actions share the left rail without entering page flow.
+    std::string missionSidebarMarkup;
     // Action affordances live over their world target instead of occupying
     // the persistent side/bottom gameplay rails.
     std::string interactionMarkup;

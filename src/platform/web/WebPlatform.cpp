@@ -44,6 +44,7 @@ EM_JS(int, rr_web_bool_preference, (int field), {
         if (field === 2) return localStorage.getItem("rocket_rogue_camera_shake_disabled") === "1";
         if (field === 3) return document.fullscreenElement ? 1 : 0;
         if (field === 4) return localStorage.getItem("rocket_rogue_performance_stats") === "1";
+        if (field === 5) return localStorage.getItem("rocket_rogue_incoming_notices_as_modals") === "1";
     } catch (error) {}
     return 0;
 });
@@ -92,11 +93,13 @@ EM_JS(void, rr_web_install_preference_revision_observer, (), {
         "[data-controller-deadzone-select]",
         "[data-help-toggle]",
         "[data-camera-shake-toggle]",
+        "[data-incoming-notice-toggle]",
         "[data-debug-tools-toggle]"
     ].join(",");
     const clickSelector = [
         "button[data-help-toggle]",
         "button[data-camera-shake-toggle]",
+        "button[data-incoming-notice-toggle]",
         "button[data-debug-tools-toggle]",
         "button[data-controller-invert-toggle]",
         "button[data-controller-swap-toggle]",
@@ -129,7 +132,7 @@ EM_JS(void, rr_web_bump_preference_revision, (), {
 });
 
 EM_JS(int, rr_web_store_preferences,
-    (const char* resolutionPtr, const char* frameLimitPtr, const char* drillModePtr, double gameSpeed, int debugTools, int performanceStats, int helpDisabled, int cameraShakeDisabled, const char* dismissedPtr), {
+    (const char* resolutionPtr, const char* frameLimitPtr, const char* drillModePtr, double gameSpeed, int debugTools, int performanceStats, int helpDisabled, int cameraShakeDisabled, int incomingNoticesAsModals, const char* dismissedPtr), {
         try {
             const resolution = UTF8ToString(resolutionPtr || 0) || "auto";
             const frameLimit = UTF8ToString(frameLimitPtr || 0) || "platform_default";
@@ -148,6 +151,7 @@ EM_JS(int, rr_web_store_preferences,
             setFlag("rocket_rogue_performance_stats", performanceStats !== 0);
             setFlag("rocket_rogue_help_disabled", helpDisabled !== 0);
             setFlag("rocket_rogue_camera_shake_disabled", cameraShakeDisabled !== 0);
+            setFlag("rocket_rogue_incoming_notices_as_modals", incomingNoticesAsModals !== 0);
             localStorage.setItem("rocket_rogue_help_dismissed_v1", dismissed);
             return 1;
         } catch (error) { return 0; }
@@ -400,6 +404,7 @@ AppPreferences WebPreferenceStore::load()
     preferences.performanceStatsEnabled = rr_web_bool_preference(4) != 0;
     preferences.helpDisabled = rr_web_bool_preference(1) != 0;
     preferences.cameraShakeDisabled = rr_web_bool_preference(2) != 0;
+    preferences.incomingNoticesAsModals = rr_web_bool_preference(5) != 0;
     preferences.fullscreen = rr_web_bool_preference(3) != 0;
     preferences.dismissedHelpTopics = parseSimpleJsonStrings(takeJsString(rr_web_string_preference(1)));
     cached_ = std::move(preferences);
@@ -419,7 +424,7 @@ bool WebPreferenceStore::store(const AppPreferences& preferences)
     const char* drillMode = preferences.miningDrillMode == MiningDrillMode::Hold ? "hold" : "toggle";
     if (rr_web_store_preferences(preferences.resolutionPreset.c_str(), frameLimitModeName(preferences.frameLimitMode), drillMode, preferences.gameSpeed,
             preferences.debugToolsEnabled, preferences.performanceStatsEnabled, preferences.helpDisabled,
-            preferences.cameraShakeDisabled, dismissed.c_str()) != 0) {
+            preferences.cameraShakeDisabled, preferences.incomingNoticesAsModals, dismissed.c_str()) != 0) {
         // Reload lazily so normalization performed by the JS storage boundary
         // remains authoritative without returning to per-frame localStorage reads.
         lastError_.clear();

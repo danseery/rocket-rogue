@@ -355,7 +355,7 @@ std::string interactionKey(std::string_view keyboard, std::string_view controlle
 
 std::string interactionAction(std::string_view label, std::string_view action,
     std::string_view keyboard, std::string_view controller, bool enabled = true,
-    std::string_view extraClass = {})
+    std::string_view extraClass = {}, bool defaultFocus = false)
 {
     const std::string content = interactionKey(keyboard, controller)
         + "<span class=\"interaction-label\">" + htmlEscape(label) + "</span>";
@@ -365,7 +365,13 @@ std::string interactionAction(std::string_view label, std::string_view action,
         + (extraClass.empty() ? std::string{} : " " + std::string(extraClass))
         + "\" data-rr-action=\""
         + htmlEscape(action) + "\" data-ui-focus-id=\"interaction:" + htmlEscape(action)
-        + "\">" + content + "</button>";
+        + "\"" + (defaultFocus ? " data-ui-default-focus=\"1\"" : "") + ">" + content + "</button>";
+}
+
+std::string shipServicesMarkup(const std::string& rows)
+{
+    return "<section id=\"rr-ship-services\" class=\"context-ship-services\" aria-label=\"Ship services\">"
+        "<strong>SHIP SERVICES</strong><div class=\"context-ship-actions\">" + rows + "</div></section>";
 }
 
 bool miningSafetyCueNeeded(const MiningRunState& mining)
@@ -379,10 +385,22 @@ bool miningSafetyCueNeeded(const MiningRunState& mining)
 std::string contextualInteractionMarkup(const PanelRenderContext& context)
 {
     const GameState& state = context.state;
-    if (context.sceneFadeToBlack > 0.0 || context.titleLaunchActive ||
+    if (context.sceneFadeToBlack > 0.0 || context.titleScreenActive || context.titleLaunchActive ||
         straylightCinematicDuration(state.meta.straylightStage) > 0.0 ||
         context.miningExtractionActive ||
         state.screen == Screen::Mining && state.run.mining.failurePending) return {};
+    if (surfaceHudForContext(context) && context.surfaceArrivalActive) {
+        const bool touchdown = context.surfaceArrivalPhase == 2;
+        const bool awaiting = context.surfaceArrivalPhase == 3;
+        std::string rows;
+        if ((touchdown || awaiting) && context.surfaceArrivalLandingCommitted)
+            rows += interactionAction(context.surfaceArrivalDeployQueued ? "Deployment queued" : "Deploy surface team",
+                ui::actions::deploySurfaceTeam, "Space", "{{controller_confirm}}", true, "is-primary", true);
+        if (awaiting)
+            rows += interactionAction("Take off", ui::actions::departSurfaceUndeployed,
+                "R", "Hold {{controller_cancel}}", true, {}, !context.surfaceArrivalLandingCommitted);
+        return rows.empty() ? std::string{} : shipServicesMarkup(rows);
+    }
     if (state.screen == Screen::Mining) {
         const MiningRunState& mining = state.run.mining;
         if (!mining.active) return {};
@@ -407,8 +425,6 @@ std::string contextualInteractionMarkup(const PanelRenderContext& context)
             return it == run.actions.end() ? nullptr : &*it;
         };
         std::string rows;
-        if (const auto* scan = action(ui::actions::miningScanner); scan && scan->enabled)
-            rows += interactionAction("Pulse scanner", scan->actionId, "E", "{{controller_west}}");
         if (miningDrillRepairCost(mining) > 0) {
             const auto* repair = action(ui::actions::miningRepairDrill);
             const std::string repairLabel = "Repair drill · " + std::to_string(miningDrillRepairCost(mining)) + " common";
@@ -435,8 +451,7 @@ std::string contextualInteractionMarkup(const PanelRenderContext& context)
             rows += interactionAction("Drone Ops", ui::actions::droneOps, "O", "D-pad ↑");
         rows += interactionAction("Depart", ui::actions::miningDepart, "G", "Hold D-pad ↓", true,
             "is-depart");
-        return "<section id=\"rr-ship-services\" class=\"context-ship-services\" aria-label=\"Ship services\">"
-            "<strong>SHIP SERVICES</strong><div class=\"context-ship-actions\">" + rows + "</div></section>";
+        return shipServicesMarkup(rows);
     }
     if (state.screen == Screen::Flight && context.launchFlight &&
         !context.surfaceArrivalActive && !(context.orbitalWork && context.orbitalWork->active())) {
@@ -676,6 +691,7 @@ void collectSharedUtilityModals()
         card("06 / Surface shortcuts",
             binding("West / X", "Pulse scanner", "controls-cyan") +
             binding("North / Y", "Tether / release", "controls-amber") +
+            binding("Hold LS click", "Dump carried ore · 0.75 seconds · artifact kept", "controls-amber") +
             binding("D-pad Up", "Drone Ops at ship") +
             binding("LB / RB", "Repair drill / Rig or suit at ship") +
             binding("Hold D-pad Down", "Depart from ship · 0.6 seconds") +
@@ -694,6 +710,7 @@ void collectSharedUtilityModals()
             binding("Space", "Drill · rig also uses left click") +
             binding("Left click", "Fire EVA weapon") +
             binding("E / T", "Scan / tether") +
+            binding("Hold C", "Dump carried ore · 0.75 seconds · artifact kept") +
             binding("F", "Enter or exit rig") +
             binding("O", "Drone Ops at ship") +
             binding("Q / R", "Repair drill / Rig or suit at ship") +
@@ -2634,6 +2651,10 @@ std::string buildGamePanelMarkup(
         << "<p>" << htmlEscape("Impact and drilling motion.") << "</p></div>"
         << "<button class=\"settings-toggle rr-text-button\" data-camera-shake-toggle=\"1\" data-ui-focus-id=\"setting:camera_shake\">"
         << "<span class=\"rr-button-label\">" << htmlEscape("Disable camera shake") << "</span></button></section>";
+    gameplaySettingsBody << "<section class=\"settings-control\" data-incoming-notice-settings>"
+        << "<div><h3>Message notices</h3><p>Show Fennec updates and mission actions along the bottom.</p></div>"
+        << "<button class=\"settings-toggle rr-text-button\" data-incoming-notice-toggle=\"1\" data-ui-focus-id=\"setting:incoming_notices\">"
+        << "<span class=\"rr-button-label\">Use classic pop-ups</span></button></section>";
     controlsSettingsBody << "<section class=\"settings-control\" data-keyboard-drill-mode-settings>"
         << "<div><h3>" << htmlEscape("Keyboard drill mode") << "</h3>"
         << "<p>" << htmlEscape("How Space operates the Rig drill.") << "</p></div>"
@@ -2945,21 +2966,16 @@ std::string buildGamePanelMarkup(
             metric("rr-landing-vertical", "VERTICAL", landingVerticalSpeedText(flight.landing.verticalVelocity));
             metric("rr-landing-lateral", "LATERAL", display::fixed(flight.landing.lateralVelocity, 1) + " m/s");
             metric("rr-landing-tilt", "TILT", display::fixed(flight.landing.surfaceAngle * 57.29577951308232, 0) + " deg");
-            out << "</section></header><footer class=\"mining-bottom-rail surface-flight-actions\">";
+            out << "</section></header>";
             if (landed) {
                 out << "<div data-surface-arrival=\"1\" data-surface-arrival-phase=\""
                     << context.surfaceArrivalPhase << "\" hidden></div>";
-                if ((touchdown || awaiting) && context.surfaceArrivalLandingCommitted) {
-                    out << button(context.surfaceArrivalDeployQueued ? "DEPLOYMENT QUEUED" : "DEPLOY SURFACE TEAM",
-                        ui::actions::deploySurfaceTeam, "ok", true);
-                }
-                if (awaiting) out << button("TAKE OFF", ui::actions::departSurfaceUndeployed, "ghost", !context.surfaceArrivalLandingCommitted);
-                if (deploying) out << "<p>Opening bay · Deploying surface team</p>";
             } else {
-                out << "<p>" << htmlEscape(landingControlHint(context)) << "</p><p>"
-                    << htmlEscape(physicalFlightControlHint(context)) << "</p>";
+                out << "<footer class=\"mining-bottom-rail surface-flight-actions\"><p>"
+                    << htmlEscape(landingControlHint(context)) << "</p><p>"
+                    << htmlEscape(physicalFlightControlHint(context)) << "</p></footer>";
             }
-            out << "</footer></section>";
+            out << "</section>";
             out << modalTemplate(ui::modals::settings, text::panel::modals::settings, settingsBody.str());
             return out.str();
         }
@@ -3406,7 +3422,10 @@ std::string buildGamePanelMarkup(
             << "<strong id=\"rr-hud-mining-payload-ownership\">" << htmlEscape(miningPayloadOwnershipText(state,catalog))
             << "</strong></header><small id=\"rr-hud-mining-payload-contract\">"
             << htmlEscape(miningPayloadContractText(state,catalog))
-            << "</small></article>";
+            << "</small><small id=\"rr-hud-mining-dump-hint\" class=\"mining-dump-hint"
+            << (miningCanDumpCargo(mining) && !context.miningExtractionActive ? " is-available" : "")
+            << "\"><span class=\"keyboard-key\">Hold C</span><span class=\"controller-key\">Hold {{controller_ls}}</span>"
+            << " · Dump ore (discard)</small></article>";
         out << "</section></footer>";
         out << "</section>";
         if (miningHud.failurePending && context.miningFailureModalReady) {
@@ -4196,18 +4215,22 @@ std::optional<ModalPresentation> buildIncomingMessageCard(
     const auto* speaker = message ? messageSpeaker(context.catalog, message->speakerId) : nullptr;
     const auto* variant = message ? messageVariant(*message, variantId) : nullptr;
     if (!speaker || !variant) return std::nullopt;
+    const bool identifiedAi = speaker->id == "straylight_ai" && straylightIdentityKnown(context.state.meta.straylightStage);
+    const std::string_view speakerName = identifiedAi ? std::string_view("Straylight") : std::string_view(speaker->name);
+    const std::string_view channel = identifiedAi ? std::string_view("SHIP AI // STRAYLIGHT") : std::string_view(speaker->channel);
             std::ostringstream body;
             body << "<section class=\"incoming-message modal-body"
                  << (messageId.starts_with("drone_arrival_") ? " drone-arrival-introduction" : "")
                  << "\"><div class=\"incoming-message-layout\">";
             if (speaker->unknownSignal) {
-                body << "<div class=\"incoming-message-portrait\"><div class=\"incoming-unknown-signal\" aria-label=\"Unknown ship AI signal\"><span>Unknown</span></div></div>";
+                body << "<div class=\"incoming-message-portrait\"><div class=\"incoming-unknown-signal\" aria-label=\""
+                     << htmlEscape(speakerName) << " ship AI signal\"><span>" << htmlEscape(speakerName) << "</span></div></div>";
             } else {
                 body << "<div class=\"incoming-message-portrait\"><img src=\"" << htmlEscape(message->concerned ? speaker->concernedPortrait : speaker->portrait)
                      << "\" alt=\"" << htmlEscape(speaker->name) << "\" /></div>";
             }
-            body << "<div class=\"incoming-message-copy\"><div class=\"incoming-message-channel\">" << htmlEscape(speaker->channel)
-                 << "</div><h2>" << htmlEscape(speaker->name) << "</h2><h3>" << htmlEscape(titleOverride.empty() ? message->title : titleOverride)
+            body << "<div class=\"incoming-message-copy\"><div class=\"incoming-message-channel\">" << htmlEscape(channel)
+                 << "</div><h2>" << htmlEscape(speakerName) << "</h2><h3>" << htmlEscape(titleOverride.empty() ? message->title : titleOverride)
                  << "</h3><p" << (highlightReward ? " class=\"incoming-message-reward\"" : "") << ">"
                  << htmlEscape(bodyOverride.empty() ? variant->body : bodyOverride) << "</p><div class=\"incoming-message-hints\">";
             for (const auto hint : variant->hints) {
@@ -4226,7 +4249,10 @@ std::optional<ModalPresentation> buildIncomingMessageCard(
             }
             body << "</div></div></div><div class=\"modal-actions action-row rr-action-footer\">"
                  << button(buttonOverride.empty() ? message->acknowledgement : buttonOverride, action, "ok", true) << "</div></section>";
-    return ModalPresentation{"incoming_message", "INCOMING MESSAGE", body.str(), action, true, false, false, ModalTone::Neutral};
+    // Presentation must not depend on whether acceptance is available at the
+    // current body: the first briefing can arrive while still departing Earth.
+    return ModalPresentation{"incoming_message", "INCOMING MESSAGE", body.str(), action, true, false, false,
+        ModalTone::Neutral, speaker->id == "mission_control_fennec"};
 }
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context)
@@ -4394,8 +4420,9 @@ PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& c
                 const auto acceptance = solarMissionAcceptanceForBody(context.state, context.catalog, mission->bodyId);
                 if (acceptance.available) acceptLabel = acceptance.actionLabel;
             }
-            if (auto card = buildIncomingMessageCard(context, occurrence.messageId, occurrence.variantId, action, {}, {}, acceptLabel))
+            if (auto card = buildIncomingMessageCard(context, occurrence.messageId, occurrence.variantId, action, {}, {}, acceptLabel)) {
                 result.modals.push_back(std::move(*card));
+            }
         }
         }
     }
@@ -4669,6 +4696,8 @@ void buildRealtimeHudState(const PanelRenderContext& context, RealtimeHudState& 
         result,
         "rr-hud-mining-payload-contract",
         miningPayloadContractText(state,catalog));
+    appendHudClass(result, "rr-hud-mining-dump-hint",
+        miningCanDumpCargo(mining) && !context.miningExtractionActive ? "mining-dump-hint is-available" : "mining-dump-hint");
     if (!mining.gate.cocoonLayers.empty()) {
         for (std::size_t layerIndex = 0; layerIndex < mining.gate.cocoonLayers.size(); ++layerIndex) {
             const MiningCocoonLayerProgress& layer = mining.gate.cocoonLayers[layerIndex];

@@ -669,6 +669,14 @@ void rr_mining_keyboard_drill(int active)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+void rr_mining_cargo_dump_held(int active)
+{
+    if (g_app) g_app->miningCargoDumpHeld(active != 0);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 void rr_mining_scanner()
 {
     if (g_app) {

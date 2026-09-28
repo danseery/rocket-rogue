@@ -1,6 +1,7 @@
 #pragma once
 
 #include "input/ControllerInput.h"
+#include "core/Tuning.h"
 
 #include <algorithm>
 #include <array>
@@ -25,6 +26,7 @@ enum class GameInputAction : std::size_t {
     DepartSurfaceUndeployed,
     Abort,
     MiningScan,
+    MiningDumpCargo,
     MiningTether,
     MiningOperatorToggle,
     MiningRepairDrill,
@@ -49,6 +51,7 @@ struct RoutedGameInput {
     double aimX = 0.0;
     double aimY = 0.0;
     double operatorToggleProgress = 0.0;
+    double cargoDumpProgress = 0.0;
     bool firing = false;
     bool drilling = false;
     bool orbitalHeld = false;
@@ -290,6 +293,12 @@ public:
             result.operatorToggleProgress = frame.isDown(ControllerButton::South)
                 ? std::clamp(frame.heldFor(ControllerButton::South) / operatorToggleHoldSeconds, 0.0, 1.0)
                 : 0.0;
+            result.cargoDumpProgress = frame.isDown(ControllerButton::LeftStick)
+                && !holdTriggered_.test(static_cast<std::size_t>(ControllerButton::LeftStick))
+                ? std::clamp(frame.heldFor(ControllerButton::LeftStick) / tuning::mining::cargoDumpHoldSeconds, 0.0, 1.0)
+                : 0.0;
+            if (holdCrossed(frame, ControllerButton::LeftStick, tuning::mining::cargoDumpHoldSeconds))
+                add(GameInputAction::MiningDumpCargo);
             if (frame.wasPressed(ControllerButton::West)) {
                 add(GameInputAction::MiningScan);
             }

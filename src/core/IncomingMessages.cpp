@@ -1,9 +1,11 @@
 #include "core/IncomingMessages.h"
 #include "core/Content.h"
 #include "core/ContentIds.h"
+#include "core/ExpeditionSystem.h"
 #include "core/GameState.h"
 #include "core/MiningSystem.h"
 #include "core/PayloadTransfer.h"
+#include "core/SystemContent.h"
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
@@ -109,9 +111,22 @@ bool reconcileMessageRelevance(GameState& game, const ContentCatalog& catalog) {
     const bool currentHardTouchdown = game.screen == Screen::Flight &&
         game.run.flight.mode == FlightMode::Landing && landing.siteCommitted &&
         landing.hardLanding && !landing.departureActive;
+    bool beltWarningRelevant = true;
+    const auto& expedition = game.run.expedition;
+    const bool beltWarningPending = std::any_of(messages.pending.begin(), messages.pending.end(),
+        [](const auto& item) { return item.messageId == "asteroid_belt_intro"; });
+    if (beltWarningPending && expedition.travelInitialized) {
+        beltWarningRelevant = false;
+        if (expedition.location.systemId == "solar") {
+            const auto pose = convertSystemFrame(expedition.location, CoordinateFrame::System,
+                "", solarSystemDefinition());
+            beltWarningRelevant = approachingSolarAsteroidBelt(pose.position, pose.velocity);
+        }
+    }
     const std::string currentHardId = "campaign.hard_landing_tip:" + std::to_string(landing.siteKey);
     const auto before = messages.pending.size();
     std::erase_if(messages.pending, [&](const auto& item) {
+        if (item.messageId == "asteroid_belt_intro") return !beltWarningRelevant;
         if (item.messageId == "hard_landing_tip")
             return !currentHardTouchdown || item.id != currentHardId;
         if ((item.messageId == "moon_arrival_complete" || item.messageId == "mars_arrival_complete") &&

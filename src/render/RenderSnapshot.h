@@ -419,6 +419,7 @@ struct RenderSnapshot {
     double miningOperatorThrustY = 0.0;
     double miningOperatorIntegrity = 1.0;
     double miningOperatorToggleProgress = 0.0;
+    double miningCargoDumpProgress = 0.0;
     double miningOperatorFirePulse = 0.0;
     bool miningRigPresent = true;
     bool miningRigDisabled = false;

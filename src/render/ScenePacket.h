@@ -112,6 +112,7 @@ enum class TextureId : std::uint8_t {
     StraylightDock,
     Sun,
     MiningRigFuelCell,
+    StraylightDockHull,
     Count
 };
 

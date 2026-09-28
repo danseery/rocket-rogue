@@ -51,16 +51,26 @@ bool crossesSolarAsteroidBelt(SystemVector from, SystemVector to)
 
 bool approachingSolarAsteroidBelt(SystemVector position, SystemVector velocity)
 {
-    // Inside the belt, retain the region label even while stopped. Outside it,
-    // the low-speed buffer must describe an approach, never the belt behind us.
+    // The Mars approach lies inside the belt's radial warning envelope, but
+    // its asteroid-free departure corridor is not a belt encounter. Rocks
+    // start at least 8U beyond influence, leaving 4U after this cutoff.
+    const auto* mars = systemBody(solarSystemDefinition(), "mars");
+    if (mars && std::hypot(position.x-mars->position.x, position.y-mars->position.y) <=
+            mars->influenceRadius + 4.0) return false;
+
+    // Inside the belt, retain the region label even while stopped. From its
+    // inner side, wait until the ship has passed Mars's orbit and is moving
+    // outward; a long lookahead must not interrupt the Mars arrival.
     const double radius = std::hypot(position.x, position.y);
+    const double radialMotion = position.x * velocity.x + position.y * velocity.y;
+    if (radius < solarBeltInnerRadius) {
+        if (radius < solarBeltInnerRadius - 1.0 || radialMotion <= 0.0) return false;
+        return true;
+    }
     if (radius >= solarBeltInnerRadius && radius <= solarBeltOuterRadius) return true;
     if (crossesSolarAsteroidBelt(position,
             {position.x + velocity.x * 6.0, position.y + velocity.y * 6.0})) return true;
 
-    const double radialMotion = position.x * velocity.x + position.y * velocity.y;
-    if (radius < solarBeltInnerRadius)
-        return radius >= solarBeltInnerRadius - 3.0 && radialMotion > 0.0;
     if (radius > solarBeltOuterRadius + 3.0 || radialMotion >= 0.0) return false;
     // An outer-side flyby can approach the ring radially but still miss it.
     const double speedSquared = velocity.x * velocity.x + velocity.y * velocity.y;
@@ -112,7 +122,9 @@ const SystemDefinition &solarSystemDefinition()
     SystemDefinition result{
         "solar",
         {
-            {"sun", "", "Sun", SystemBodyKind::Star, {-3, -1}, {}, 0.9, 2.2, 4, "", "", "Fatal solar impact"},
+            // Strong local wells remain bounded so ordinary campaign routes
+            // keep their existing clearance and smooth outer fade.
+            {"sun", "", "Sun", SystemBodyKind::Star, {-3, -1}, {}, 0.9, 2.2, 40, "", "", "Fatal solar impact"},
             {"mercury",
              "sun",
              "Mercury",
@@ -182,7 +194,7 @@ const SystemDefinition &solarSystemDefinition()
              {},
              .45,
              1.8,
-             2.5,
+             6,
              "",
              "Gravity assist",
              "Fatal atmospheric entry"},

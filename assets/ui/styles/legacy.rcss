@@ -9869,8 +9869,8 @@ body.controller-focus-visible #rr-panel.selection-family-panel .phase-board-draf
     line-height: 1.15;
 }
 
-/* At a service dock, departure is the only action that returns to flight.
-   Keep it above shipyard choices and visually dominant on both layouts. */
+/* Mission claims take priority at the service dock. Otherwise departure is
+   the primary route action, above shipyard choices on both layouts. */
 #rr-panel .expedition-home .expedition-dock-departure {
     box-sizing: border-box;
     display: flex;
@@ -10252,6 +10252,13 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 #rr-panel .expedition-home .expedition-dock-route-actions button { box-sizing: border-box; width: 0dp; min-width: 0dp; min-height: 56px; height: 56px; margin: 0px; padding: 0px 8px; line-height: 56px; }
 #rr-panel .expedition-home .expedition-dock-route-actions .dock-depart { flex: 3 1 0dp; }
 #rr-panel .expedition-home .expedition-dock-route-actions .dock-waypoint { flex: 1 1 0dp; white-space: normal; }
+.expedition-dock-route-actions.is-secondary { box-sizing: border-box; margin-top: 12dp; padding-top: 12dp; border-top: 1dp #315765; }
+#rr-panel .expedition-home .dock-mission-claim + .dock-mission-claim { margin-top: 8dp; }
+#rr-panel .expedition-home .expedition-dock-route-actions.is-secondary button { min-height: 42px; height: 42px; line-height: 42px; font-size: 13px; font-weight: normal; color: #c0d8e1; background-color: #102631; border-color: #557b8b; }
+#rr-panel .expedition-home .expedition-dock-route-actions.is-secondary button:hover,
+#rr-panel .expedition-home .expedition-dock-route-actions.is-secondary button:focus { color: #edffff; background-color: #24566d; border-color: #a7ecf7; }
+#rr-panel .expedition-home .dock-mission-claim:hover,
+#rr-panel .expedition-home .dock-mission-claim:focus { background-color: #277354; border-color: #b9ffdf; }
 .expedition-home h2, .expedition-home h3 { color: #62dbe8; margin: 10dp 0; }
 .expedition-home p, .expedition-map p { color: #d5e5eb; margin: 8dp 0; font-size: 13dp; }
 .expedition-dock-status { display: flex; flex-wrap: wrap; margin: 12dp 0dp; border: 1dp #284856; background-color: #071019; }
@@ -10388,6 +10395,39 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 .incoming-message-copy p { color: #d5e5eb; margin: 10dp 0; line-height: 1.45; }
 .incoming-message-copy p.incoming-message-reward { color: #64e4ef; font-size: 18dp; font-weight: bold; }
 .incoming-message-hints p { color: #7bd6e3; font-size: 12dp; margin: 4dp 0; }
+/* Eligible Fennec messages sit at the bottom without a scrim or input pause. */
+#rr-incoming-banner {
+    position: absolute;
+    z-index: 18;
+    box-sizing: border-box;
+    overflow: hidden;
+    padding: 7dp 10dp;
+    color: #d5e5eb;
+    background-color: #091821f2;
+    border: 1dp #52b8c8;
+    border-left: 3dp #64e4ef;
+    border-radius: 7dp;
+    pointer-events: auto;
+}
+#rr-incoming-banner .incoming-message { display: flex; flex-direction: row; align-items: center; width: 100%; height: auto; min-height: 109px; }
+#rr-incoming-banner .incoming-message-layout { flex: 1; min-width: 0dp; }
+#rr-incoming-banner .incoming-message-portrait { width: 68dp; padding: 0dp 8dp 0dp 0dp; }
+#rr-incoming-banner .incoming-unknown-signal { height: 54dp; line-height: 54dp; font-size: 11dp; border-radius: 8dp; }
+#rr-incoming-banner .incoming-message-copy { max-height: none; overflow-y: visible; padding: 2dp 8dp 2dp 0dp; }
+#rr-incoming-banner .incoming-message-channel { display: none; }
+#rr-incoming-banner .incoming-message-copy h2 { margin: 0dp 0dp 2dp; font-size: 11dp; color: #75cad6; }
+#rr-incoming-banner .incoming-message-copy h3 { margin: 0dp 0dp 4dp; font-size: 15dp; }
+#rr-incoming-banner .incoming-message-copy p,
+#rr-incoming-banner .incoming-message-copy p.incoming-message-reward { margin: 0dp; font-size: 12dp; line-height: 1.3; }
+#rr-incoming-banner .incoming-message-hints p { margin-top: 3dp; font-size: 10dp; }
+#rr-incoming-banner .modal-actions { flex: none; width: 128dp; margin: 0dp 0dp 0dp 8dp; padding: 0dp; border: 0dp; }
+#rr-incoming-banner .modal-actions button { width: 100%; min-width: 0dp; min-height: 34dp; margin: 0dp; padding: 5dp; font-size: 11dp; }
+#rr-incoming-banner .drone-arrival-introduction { border: 0dp; padding: 0dp; animation: none; }
+@media (max-width: 560dp) {
+    #rr-incoming-banner .incoming-message-layout { display: flex; }
+    #rr-incoming-banner .incoming-message-portrait { width: 48dp; margin: 0dp; }
+    #rr-incoming-banner .modal-actions { width: 82dp; }
+}
 @media (max-width: 560dp) {
     .incoming-message-layout { display: block; }
     .incoming-message-portrait { width: 120dp; padding: 4dp; margin: 0 auto; }
@@ -10402,7 +10442,6 @@ body.controller-focus-visible .title-menu .title-action.rr-controller-focus .rr-
 .surface-flight-hud .mining-vitals .metric span { font-size: 9px; }
 .surface-flight-actions { padding: 8px 12px; display: flex; flex-direction: row; flex-wrap: wrap; align-content: flex-start; }
 .surface-flight-actions p { width: 100%; margin: 2px 0px; font-size: 12px; }
-.surface-flight-actions button { display: inline-block; width: 230px; margin-right: 10px; }
 
 /* Orbit preparation: primary actions lead, with one compact status line. */
 #rr-panel .orbit-action-panel { display: block; margin-top: 12px; }
@@ -10431,6 +10470,8 @@ body.controller-focus-visible button.ok.rr-controller-focus,
 body.controller-focus-visible button.warn.rr-controller-focus,
 body.controller-focus-visible button.danger.rr-controller-focus,
 body.controller-focus-visible #rr-panel button.rr-controller-focus,
+body.controller-focus-visible #rr-panel .expedition-home .dock-mission-claim.rr-controller-focus,
+body.controller-focus-visible #rr-panel .expedition-home .expedition-dock-route-actions.is-secondary button.rr-controller-focus,
 body.controller-focus-visible #rr-modal button.rr-controller-focus,
 body.controller-focus-visible #rr-panel select.rr-controller-focus,
 body.controller-focus-visible #rr-modal select.rr-controller-focus,
@@ -10640,6 +10681,22 @@ body.controller-focus-visible .mission-overlay button.rr-controller-focus:focus 
 .mission-overlay-compact .mission-goals { margin: 4dp 0; }
 .mission-overlay-compact .mission-goal { margin: 4dp 0; }
 .mission-overlay-fullscreen .mission-tracker { background-color: #06131df0; }
+.mission-overlay .mission-support {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    margin-top: 10dp;
+    padding: 10dp;
+    background-color: #06131df0;
+    border: 1dp #9277b6;
+    border-radius: 6dp;
+    color: #d6e7ef;
+    font-size: 12dp;
+}
+.mission-support h3 { margin: 0 0 8dp; color: #c7a9ef; font-size: 13dp; }
+.mission-support .beacon-row { display: flex; justify-content: space-between; gap: 6dp; margin: 5dp 0; }
+.mission-support .beacon-custody { color: #a8becb; text-align: right; }
+.mission-support button { box-sizing: border-box; width: 100%; min-width: 0; min-height: 36dp; margin: 10dp 0 0; padding: 6dp; font-size: 12dp; pointer-events: auto; }
 .mission-overlay-compact-visible .expedition-home > h2,
 .mission-overlay-compact-visible .expedition-home > p { position: relative; left: 60dp; }
 .context-interaction,
@@ -10751,6 +10808,15 @@ body.controller-focus-visible .mission-overlay button.rr-controller-focus:focus 
     border-radius: 3px;
 }
 .controller-key { display: none; }
+.mining-ore-manifest small.mining-dump-hint {
+    display: none;
+    position: absolute;
+    left: 17px;
+    bottom: 6px;
+    margin-top: 0px;
+    color: #ffc77a;
+}
+.mining-ore-manifest small.mining-dump-hint.is-available { display: block; }
 body.controller-connected .controller-key { display: inline-block; }
 body.controller-connected .keyboard-key { display: none; }
 .interaction-requirement { display: block; padding: 7px 9px; color: #ffc77a; font-size: 13px; }
@@ -10765,17 +10831,21 @@ body.controller-connected .keyboard-key { display: none; }
 .context-ship-actions { display: block; }
 .context-ship-actions .interaction-action { margin-bottom: 4px; }
 .context-ship-actions .interaction-action:last-child { margin-bottom: 0px; }
+.context-ship-actions .interaction-action.is-primary,
 .context-ship-actions .interaction-action.is-depart {
     color: #f2fff9;
     font-weight: bold;
     background-color: #174235;
     border-color: #74d9ac;
 }
+.context-ship-actions .interaction-action.is-primary:hover,
+.context-ship-actions .interaction-action.is-primary:focus,
 .context-ship-actions .interaction-action.is-depart:hover,
 .context-ship-actions .interaction-action.is-depart:focus {
     background-color: #22634c;
     border-color: #b6ffd8;
 }
+.context-ship-actions .interaction-action.is-primary .interaction-key,
 .context-ship-actions .interaction-action.is-depart .interaction-key {
     color: #e8fff1;
     background-color: #235740;
@@ -10949,7 +11019,14 @@ body.controller-focus-visible #rr-modal.modal-settings .settings-footer button.d
 #rr-panel.drone-workspace-panel .drone-equipped-heading h2 { font-size: 17px; }
 #rr-panel.drone-workspace-panel .drone-equipped-heading h2 span { display: inline; font-size: 14px; color: #a8c1cb; margin-left: 12px; }
 #rr-panel.drone-workspace-panel .drone-equipped-heading p { font-size: 13px; margin-left: 20px; }
-#rr-panel.drone-workspace-panel .drone-equipped-heading button { padding: 8px 18px; }
+#rr-panel.drone-workspace-panel .drone-equipped-heading button {
+    flex: 0 0 156px;
+    width: 156px;
+    min-width: 156px;
+    padding: 8px 18px;
+    box-sizing: border-box;
+    white-space: nowrap;
+}
 #rr-panel.drone-workspace-panel .drone-slot-strip { display: flex; flex-direction: row; flex-wrap: wrap; }
 #rr-panel.drone-workspace-panel .drone-slot-strip .drone-slot-choice { flex: 0 0 auto; display: flex; flex-direction: row; align-items: center; min-width: 164px; padding: 10px 16px; margin: 0px 8px 6px 0px; background: #0c1e28; border: 1px #314c5a; border-radius: 5px; color: #dfedf2; }
 #rr-panel.drone-workspace-panel .drone-slot-number { margin-right: 12px; color: #88b4c7; }

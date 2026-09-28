@@ -108,6 +108,8 @@ public:
     void miningFire(bool active);
     void miningDrill(bool active);
     void miningKeyboardDrill(bool active);
+    void miningCargoDumpHeld(bool active);
+    void miningDumpCargo();
     void miningOperatorToggle();
     void miningOperatorToggleProgress(double progress);
     void miningScanner();
@@ -474,6 +476,10 @@ private:
     MiningDrillMode miningDrillMode_ = MiningDrillMode::Toggle;
     bool firstTimeIntroductionsEnabled_ = true;
     bool keyboardDrillPressed_ = false;
+    bool keyboardCargoDumpHeld_ = false;
+    bool keyboardCargoDumpReleaseRequired_ = false;
+    double keyboardCargoDumpSeconds_ = 0.0;
+    double miningCargoDumpProgress_ = 0.0;
     PauseReason pauseReason_ = PauseReason::None;
     Screen lastInputScreen_ = Screen::Hangar;
     bool controllerWasConnected_ = false;

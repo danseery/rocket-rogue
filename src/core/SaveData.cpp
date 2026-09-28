@@ -3140,7 +3140,8 @@ void restoreSaveData(GameState& state, const ContentCatalog& catalog, const Save
     state.run.approach = {};
     state.run.planetaryExpedition = save.planetaryExpedition;
     state.run.expedition.progression.droneModuleAssignments = save.droneModuleAssignments;
-    state.run.planetaryExpedition.scannerCooldownSeconds = save.scannerCooldownSeconds;
+    state.run.planetaryExpedition.scannerCooldownSeconds =
+        std::clamp(save.scannerCooldownSeconds, 0.0, tuning::mining::scannerCooldownSeconds);
     state.run.planetaryExpedition.treasureMarks = save.treasureMarks;
     state.run.expedition.progression.droneModuleRuntime = save.droneModuleRuntime;
     state.run.mining = save.mining;

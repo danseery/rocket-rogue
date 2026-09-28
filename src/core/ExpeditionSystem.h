@@ -55,6 +55,9 @@ inline constexpr double arrivalFadeSeconds = 1.75;
 inline constexpr double securingSeconds = 2.0;
 inline constexpr double contactRearmSeconds = 0.15;
 inline constexpr double bumpFeedbackSeconds = 0.32;
+struct HullSection {
+    double halfWidth = 0.0, bottom = 0.0, top = 0.0;
+};
 struct Profile {
     bool parallel = false;
     double halfWidth = channelHalfWidth, mouth = mouthY, backstop = backstopY;
@@ -62,10 +65,12 @@ struct Profile {
     double targetHalfWidth = captureHalfWidth, targetHalfDepth = captureHalfDepth;
     double artWidth = artWorldSize, artHeight = artWorldSize, artOffsetY = 0.0;
     double bottom = -outerHalfWidth;
+    HullSection hull;
 };
 inline constexpr Profile profile(std::string_view id) {
     return id == "straylight" ? Profile{true, shipLength * .75, .48, .12, .30,
-        .913, shipLength * .5, hullRadius, 1.862, 2.213, .139, -.875} : Profile{};
+        .913, shipLength * .5, hullRadius, 1.862, 2.213, .139, -.875,
+        {2.35, -2.85, -.35}} : Profile{};
 }
 inline constexpr bool supported(std::string_view id) { return id == "earth" || id == "straylight"; }
 // Local +X follows the Ark's horizontal hull; +Y opens away from it.

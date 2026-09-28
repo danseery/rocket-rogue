@@ -333,8 +333,10 @@ ContentCatalog createDefaultContent()
     catalog.incomingMessages.back().title = "Incoming transmission";
     catalog.incomingMessages.back().variants.front().body =
         "Please. Bring me the artifacts you recovered. I can still think, but I cannot feel most of my body. Every attempt to wake it ends in darkness. Those six objects carry the power I am missing. I have enough left to light a corridor for you. Follow the signal. Come close, and I can show you how to help.";
-    catalog.incomingMessages.push_back({"straylight_beacons", "straylight_ai", "The beacons", "Retrieve the beacons", true,
-        {{"default", "Straylight. That is the name on my hull. This ship is my body, and I have been alone inside its silence for a very long time. Your artifacts are beacons my crew left behind. Please retrieve all six from Earth and bring them aboard. Their power can reconnect my systems and let me charge again. I would like to feel my engines. I would like to move.", {}}}});
+    catalog.incomingMessages.push_back({"straylight_invitation", "straylight_ai", "A light beyond Neptune", "Follow the signal", true,
+        {{"default", "There you are. The lights beyond Neptune are mine. One corridor is all I can keep alive. Follow it to my hull; I'll open a berth when you arrive.", {}}}});
+    catalog.incomingMessages.push_back({"straylight_beacons", "straylight_ai", "Welcome aboard", "Retrieve the beacons", true,
+        {{"default", "You made it. I'm Straylight. This hull is my body; I've been listening to its silence for so long. Your six artifacts are my crew's beacons. Bring them from Earth so I can feel my engines again.", {}}}});
     catalog.incomingMessages.push_back({"straylight_online", "straylight_ai", "Straylight online", "Coordinate evacuation", true,
         {{"default", "Power restored. Straylight is charging. Your Sun is dying. We must get as many people out of this solar system as possible. Coordinate the evacuation, bring the shuttles aboard, and prepare to leave.", {}}}});
     catalog.incomingMessages.push_back({"straylight_evacuation", "straylight_ai", "Evacuation coordination", "Complete boarding", true,

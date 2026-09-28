@@ -104,6 +104,45 @@ void parallelDockTests()
         setup(0,position.first,position.second);
         check(step().dockBump && !f.docking.securing,"Bumpers and inner wall must remain solid");
     }
+    const auto hull = service_dock::profile("straylight").hull;
+    check(hull.top > service_dock::profile("straylight").bottom,
+        "The large hull must overlap the berth base without a gap");
+    check(std::hypot(hull.halfWidth, hull.bottom) + service_dock::hullHalfLength + service_dock::hullRadius <
+        service_dock::approachRadius * service_dock::localUnitsPerSystemUnit,
+        "The entire solid hull must be inside the existing docking approach volume");
+    for (int face = 0; face < 4; ++face) {
+        const double x = face == 0 ? 1.4 : face == 1 ? -hull.halfWidth-.3 : face == 2 ? hull.halfWidth+.3 : 1.0;
+        const double y = face == 0 ? hull.top+.3 : face == 3 ? hull.bottom-.3 : -1.7;
+        setup(0, x, y);
+        f.docking.velocityX = face == 1 ? .5 : face == 2 ? -.5 : 0;
+        f.docking.velocityY = face == 0 ? -.5 : face == 3 ? .5 : 0;
+        // Reload on the approach to the new hull uses the existing saved pose.
+        const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+        check(saved.has_value(), "Hull approach must round-trip through the existing save schema");
+        f = saved->flight; e = saved->expedition;
+        bool bumped = false;
+        for (int i=0; i<30 && !bumped; ++i) bumped = step().dockBump;
+        check(bumped && !f.docking.securing, "Every hull face must collide instead of docking or passing through");
+        if (face == 0) check(f.docking.positionY >= hull.top + service_dock::hullRadius,
+            "The visible top of the hull must stop downward passage outside the berth");
+        if (face == 3) check(f.docking.positionY <= hull.bottom - service_dock::hullRadius,
+            "The bottom of the hull must stop upward passage");
+        if (face == 1 || face == 2) check(std::abs(f.docking.positionX) >= hull.halfWidth +
+            service_dock::hullHalfLength + service_dock::hullRadius,
+            "Side collision must keep the complete ship outside the solid hull");
+    }
+    setup(0, 1.3, hull.top+.15);
+    f.docking.velocityY = -2;
+    check(step().dockBump && f.docking.positionY >= hull.top + service_dock::hullRadius,
+        "Substepping must prevent fast flight from tunneling through the hull");
+    setup(0, 0, -.9);
+    for (int i=0; i<12; ++i) step();
+    check(!(std::abs(f.docking.positionX) < service_dock::profile("straylight").outerWidth &&
+                f.docking.positionY < service_dock::profile("straylight").backstop) &&
+            !(std::abs(f.docking.positionX) < hull.halfWidth && f.docking.positionY < hull.top),
+        "An old save inside the new connected hull must resolve to an exposed surface without an internal seam");
+    check(service_dock::profile("earth").hull.halfWidth == 0,
+        "The hull extension belongs only to Straylight");
     setup(0,0,.4);
     f.docking.velocityY=-.03;
     for (int i=0;i<80 && !f.docking.securing;++i) step();
@@ -219,13 +258,31 @@ void straylightSequenceTests()
             "Restored contact labels must follow the saved identity reveal");
         check(restored->run.expedition.batteries[0].owner==e.batteries[0].owner,
             "Reload must preserve beacon ownership");
+        if (s.meta.straylightStage == Stage::Invitation)
+            check(restored->run.expedition.location.bodyId == e.location.bodyId
+                && restored->run.flight.positionX == s.run.flight.positionX
+                && restored->run.flight.positionY == s.run.flight.positionY
+                && restored->run.flight.velocityX == s.run.flight.velocityX
+                && restored->run.flight.velocityY == s.run.flight.velocityY
+                && restored->run.flight.fuelRemaining == s.run.flight.fuelRemaining,
+                "Reloading the remote invitation must preserve the ship's actual Neptune pose and fuel");
     };
     roundTrip();
     s.meta.straylightStage=Stage::Reveal;
+    e.location={"solar","neptune",CoordinateFrame::Body,{0,2},{.1,.2},.3,{}};
+    restoreSystemLocation(e.location,s.run.flight);
+    s.run.flight.active=true;
+    s.run.flight.fuelRemaining=7;
+    const auto revealLocation=e.location;
     check(applyStraylightAction(s,catalog,"skip") && s.meta.straylightStage==Stage::Invitation,
         "Skip ends only reveal animation");
+    roundTrip();
     check(!applyStraylightAction(s,catalog,"skip"), "Skip cannot acknowledge a transmission");
     check(applyStraylightAction(s,catalog,"invitation"), "Invitation acknowledgement must enable approach");
+    check(e.location.bodyId==revealLocation.bodyId && e.location.position.x==revealLocation.position.x
+        && e.location.position.y==revealLocation.position.y && s.run.flight.positionX==0 && s.run.flight.positionY==2
+        && s.run.flight.velocityX==.1 && s.run.flight.velocityY==.2 && s.run.flight.fuelRemaining==7,
+        "Reveal, reload, skip and invitation must leave the real ship at Neptune without a fake arrival");
     e.location={"solar","straylight",CoordinateFrame::Body,ark->dockOffset,{},0,"straylight.dock"};
     s.run.flight.active=false;
     s.meta.straylightStage=Stage::Docking;
@@ -1368,8 +1425,70 @@ void campaignBudgetTests()
     }
 }
 
+void straylightFocusedTests()
+{
+    straylightSequenceTests();
+    parallelDockTests();
+}
+
+void parallelDockingFocusedTests()
+{
+    parallelDockTests();
+}
+
+void massiveBodyGravityTests()
+{
+    using namespace rocket;
+    const auto& solar = solarSystemDefinition();
+    const auto& sun = *systemBody(solar, "sun");
+    const auto& jupiter = *systemBody(solar, "jupiter");
+    const double sunPull = systemBodyGravityAcceleration(sun, systemBodyDisplayRadius(sun) * 1.15);
+    const double jupiterPull = systemBodyGravityAcceleration(jupiter, systemBodyDisplayRadius(jupiter) * 1.15);
+    check(sunPull > 1.5 * jupiterPull && jupiterPull > .7,
+        "The Sun must have the strongest visible-surface pull, with Jupiter a substantial smaller well");
+    for (const auto* body : {&sun, &jupiter}) {
+        const SystemDefinition isolated {"gravity-test", {*body}};
+        const double radius = systemBodyDisplayRadius(*body) * 1.15;
+        for (const double angle : {0.0, 1.5707963267948966, 3.141592653589793, -1.5707963267948966}) {
+            SystemVector positions[2], velocities[2];
+            for (int frame = 0; frame < 2; ++frame) {
+                PersistentExpeditionState expedition;
+                expedition.active = expedition.travelInitialized = true;
+                expedition.location = {isolated.id, body->id, CoordinateFrame::Body,
+                    {radius * std::cos(angle), radius * std::sin(angle)}, {}, angle, {}};
+                if (frame == 0) expedition.location = convertSystemFrame(expedition.location, CoordinateFrame::System, "", isolated);
+                FlightRunState flight;
+                restoreSystemLocation(expedition.location, flight);
+                flight.active = flight.physicalFlight = true;
+                flight.mode = frame == 0 ? FlightMode::Travel : FlightMode::Orbit;
+                flight.hullRemaining = flight.hullMaximum = 100;
+                flight.fuelRemaining = flight.fuelCapacity = 10;
+                PreparedLaunch model;
+                model.trajectoryPreview = true;
+                for (int step = 0; step < 10; ++step)
+                    check(!advanceExpeditionFlight(expedition, flight, model, {}, isolated, {}, .05).failed,
+                        "A short coast outside the visible surface must remain collision-free");
+                const auto global = convertSystemFrame(expedition.location, CoordinateFrame::System, "", isolated);
+                positions[frame] = global.position;
+                velocities[frame] = global.velocity;
+                check(global.velocity.x * std::cos(angle) + global.velocity.y * std::sin(angle) < -.1,
+                    "Live flight must acquire clear inward momentum around the Sun and Jupiter from every side");
+            }
+            check(std::hypot(positions[0].x - positions[1].x, positions[0].y - positions[1].y) < 1e-9
+                && std::hypot(velocities[0].x - velocities[1].x, velocities[0].y - velocities[1].y) < 1e-9,
+                "Gravity must not change when flight switches between system and body coordinates");
+        }
+        const double boundary = body->influenceRadius;
+        check(std::abs(systemBodyGravityAcceleration(*body, boundary - 1e-7)
+            - systemBodyGravityAcceleration(*body, boundary + 1e-7)) < 1e-6
+            && systemBodyGravityAcceleration(*body, boundary * 1.1) == 0,
+            "Stronger gravity must retain the smooth fade and existing field boundary");
+    }
+}
+
 void persistentExpeditionTests()
 {
+    massiveBodyGravityTests();
     {
         using namespace rocket;
         PersistentExpeditionState expedition;
@@ -1586,12 +1705,13 @@ void persistentExpeditionTests()
             crossesSolarAsteroidBelt({30,0},{22,0}) &&
             crossesSolarAsteroidBelt({25,0},{25,0}),
             "Belt entry must handle both directions, swept crossings, and reload inside");
-        check(approachingSolarAsteroidBelt({19,0},{1,0}) &&
+        check(!approachingSolarAsteroidBelt({19,0},{1,0}) &&
               approachingSolarAsteroidBelt({33,0},{-1,0}) &&
-              approachingSolarAsteroidBelt({21,0},{.01,0}) &&
+              !approachingSolarAsteroidBelt({21,0},{.01,0}) &&
+              approachingSolarAsteroidBelt({-23,0},{-1,0}) &&
               !approachingSolarAsteroidBelt({19,0},{-1,0}) &&
               !approachingSolarAsteroidBelt({33,0},{1,0}),
-            "Belt warning must give six seconds of approach notice from either side without warning distant departing ships");
+            "Belt warning must wait until travel has cleared Mars while retaining outer-side approach notice");
         double smallest = 10, largest = 0;
         for (const auto& asteroid : solarAsteroidBelt()) {
             const double r = std::hypot(asteroid.position.x, asteroid.position.y);

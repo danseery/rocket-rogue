@@ -4,6 +4,7 @@
 #include "core/GameState.h"
 #include "core/MiningProgression.h"
 #include "core/MiningSystem.h"
+#include "core/PayloadTransfer.h"
 #include "core/ResearchSystem.h"
 #include "core/SaveData.h"
 #include "core/ScenarioSystem.h"
@@ -534,6 +535,52 @@ void rigLoadBandsAndHardCapacityAreImmediate()
     require(scaledLoad.capacity == 26.0 && scaledLoad.band == RigLoadBand::Packrat,
         "load bands must retain their quarter-capacity proportions after capacity changes");
 
+}
+
+void dumpingOreLightensArtifactTowAndPreservesOtherPayload()
+{
+    const auto catalog = createDefaultContent();
+    auto state = createNewGame(catalog, 221);
+    prepareSurface(state, content::destination::moon);
+    require(startMiningRun(state, catalog, {MiningAct::ActOne, 1, 0x21ULL}, true).applied, "cargo dump fixture starts");
+    auto& mining = state.run.mining;
+    mining.temporaryMaterials = {12, 2, 1};
+    mining.cargo = materialCargoMass(mining.temporaryMaterials) + tuning::mining::artifactCargo;
+    mining.temporaryArtifacts.push_back({});
+    mining.stowedMaterials = {8, 1, 0};
+    mining.stowedCargo = materialCargoMass(mining.stowedMaterials);
+    mining.miniDrones.resize(1);
+    mining.miniDrones[0].haulMaterials = {2, 1, 0};
+    mining.artifact.present = mining.artifact.tethered = true;
+    mining.artifact.id = "cargo-dump-test-artifact";
+    mining.artifact.state = MiningArtifactState::Loose;
+    const auto before = miningLoadStats(state, catalog);
+    const auto xp = state.run.expedition.progression.expeditionExperience;
+    require(dumpMiningCargo(state), "a loaded rig can discard ore while towing an artifact");
+    const auto after = miningLoadStats(state, catalog);
+    require(after.speedMultiplier > before.speedMultiplier && after.fuelConsumptionMultiplier < before.fuelConsumptionMultiplier,
+        "discarding ore immediately improves towing speed and fuel use");
+    require(mining.cargo == tuning::mining::artifactCargo && materialCargoMass(mining.temporaryMaterials) == 0,
+        "dump removes only ore mass, preserving carried artifact mass");
+    require(mining.temporaryArtifacts.size() == 1 && mining.artifact.present && mining.artifact.tethered
+        && mining.artifact.state == MiningArtifactState::Loose, "all artifacts retain custody and tether state");
+    require(mining.stowedMaterials.common == 8 && mining.stowedMaterials.rare == 1
+        && mining.stowedCargo == materialCargoMass(mining.stowedMaterials)
+        && mining.miniDrones[0].haulMaterials.common == 2 && mining.miniDrones[0].haulMaterials.rare == 1,
+        "ship and support drone cargo remain unchanged");
+    require(state.run.expedition.progression.expeditionExperience == xp && !dumpMiningCargo(state),
+        "dump cannot award XP or repeat on an empty ore hold");
+    const auto saved = deserializeSaveData(serializeSaveData(captureSaveData(state)));
+    require(saved && saved->mining.cargo == mining.cargo && materialCargoMass(saved->mining.temporaryMaterials) == 0
+        && saved->mining.artifact.tethered, "discarded ore and preserved artifact survive reload");
+    mining.temporaryMaterials = {2, 0, 0};
+    mining.cargo += 2;
+    mining.operatorMode = MiningOperatorMode::Jetpack;
+    mining.operatorPresent = true;
+    require(!dumpMiningCargo(state) && mining.temporaryMaterials.common == 2, "EVA cannot discard a parked rig's ore remotely");
+    mining.operatorMode = MiningOperatorMode::Rig;
+    mining.failurePending = true;
+    require(!dumpMiningCargo(state), "a failed mining run cannot discard recovery payload");
 }
 
 void supportDroneXpWaitsForAuthoritativeShipDelivery()
@@ -1489,6 +1536,7 @@ int main()
         richPayoutsShareOneLedger();
         lunarContractActivatesScannerLedEvaArtifactInSameRun();
         rigLoadBandsAndHardCapacityAreImmediate();
+        dumpingOreLightensArtifactTowAndPreservesOtherPayload();
         supportDroneXpWaitsForAuthoritativeShipDelivery();
         departurePacksEveryCarriedResourceExactlyOnce();
         supportDroneRecallIsPhysicalAndExplicit();

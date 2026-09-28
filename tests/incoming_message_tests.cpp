@@ -105,6 +105,21 @@ void incomingMessageTests() {
         check(message && message->variants.front().body.find("Brake early")!=std::string::npos &&
             message->variants.front().body.find("coasting won't slow you")!=std::string::npos,
             "Belt tutorial must explain the immediate braking decision");
+
+        auto arrival = createNewGame(catalog, 19);
+        arrival.run.expedition.travelInitialized = true;
+        arrival.run.expedition.location = {"solar", "mars", CoordinateFrame::Body,
+            {}, {1,0}, 0, ""};
+        check(enqueueIncomingMessage(arrival.incomingMessages,catalog,
+                {"campaign.asteroid_belt_intro","asteroid_belt_intro","default"}) &&
+              reconcileMessageRelevance(arrival,catalog) && arrival.incomingMessages.pending.empty(),
+            "A belt warning queued by an older save must not interrupt the Mars approach");
+        arrival.run.expedition.location = {"solar", "", CoordinateFrame::System,
+            {-25,0}, {-1,0}, 0, ""};
+        check(enqueueIncomingMessage(arrival.incomingMessages,catalog,
+                {"campaign.asteroid_belt_intro","asteroid_belt_intro","default"}) &&
+              !reconcileMessageRelevance(arrival,catalog) && arrival.incomingMessages.pending.size()==1,
+            "An outbound belt warning should remain pending when the belt is actually ahead");
     }
     catalog.messageSpeakers.push_back({"engineer", "An Engineer With A Long Display Name", "ENGINEERING",
                                        "portraits/mission-control-fennec.png"});
@@ -243,10 +258,37 @@ void incomingMessageTests() {
             card->bodyMarkup.find("Unknown") != std::string::npos &&
             card->bodyMarkup.find("<img") == std::string::npos,
             "Ship AI uses the outlined Unknown signal without a fox portrait");
+        const auto* invitation = incomingMessage(catalog, "straylight_invitation");
+        const auto* welcome = incomingMessage(catalog, "straylight_beacons");
+        check(invitation && welcome && invitation->variants.front().body != contact->variants.front().body
+            && welcome->variants.front().body != invitation->variants.front().body,
+            "Completion, distant invitation, and actual Ark welcome must be distinct story beats");
+        const auto invitationCard = buildIncomingMessageCard(context, "straylight_invitation", "default", "expedition:straylight:invitation");
+        check(invitationCard && invitationCard->bodyMarkup.find("Follow the signal") != std::string::npos
+            && invitationCard->bodyMarkup.find("<h2>Unknown</h2>") != std::string::npos,
+            "Distant invitation preserves the unidentified speaker and explicit approach acknowledgement");
+        const auto previousStage = game.meta.straylightStage;
+        const bool previousTravel = game.run.expedition.travelInitialized;
+        game.run.expedition.travelInitialized = true;
+        game.meta.straylightStage = StraylightStage::Invitation;
+        const auto invitationPanel = buildGamePanelPresentation(context);
+        check(std::any_of(invitationPanel.modals.begin(), invitationPanel.modals.end(), [](const auto& modal) {
+            return modal.bodyMarkup.find("A light beyond Neptune") != std::string::npos
+                && modal.bodyMarkup.find("expedition:straylight:invitation") != std::string::npos;
+        }), "The saved invitation stage must select the new signal story, not the Triton completion card");
+        game.meta.straylightStage = StraylightStage::FirstContact;
+        const auto welcomeCard = buildIncomingMessageCard(context, "straylight_beacons", "default", "expedition:straylight:retrieve");
+        check(welcomeCard && welcomeCard->bodyMarkup.find("Welcome aboard") != std::string::npos
+            && welcomeCard->bodyMarkup.find("<h2>Straylight</h2>") != std::string::npos
+            && welcomeCard->bodyMarkup.find("Bring them from Earth") != std::string::npos,
+            "Actual arrival introduces Straylight and keeps the beacon retrieval objective explicit");
+        game.meta.straylightStage = previousStage;
+        game.run.expedition.travelInitialized = previousTravel;
         const auto rewardCard = buildIncomingMessageCard(context, "moon_mission_complete", "default",
             "claim", "Moon mission ready", "Claim Mining Drone", "Complete Mission", true);
-        check(rewardCard && rewardCard->bodyMarkup.find("class=\"incoming-message-reward\">Claim Mining Drone") != std::string::npos,
-            "Mission claim renders a distinct compact reward line");
+        check(rewardCard && rewardCard->bannerEligible &&
+            rewardCard->bodyMarkup.find("class=\"incoming-message-reward\">Claim Mining Drone") != std::string::npos,
+            "Mission claim uses the banner with a distinct compact reward line");
     }
     context.firstTimeIntroductionsEnabled = false;
     auto panel = buildGamePanelPresentation(context);
@@ -260,6 +302,23 @@ void incomingMessageTests() {
           "Message needs explicit acknowledgement");
     check(find(panel)->bodyMarkup.find("Your suit fits") != std::string::npos,
           "Renderer must consume the selected content variant");
+    {
+        const auto keep = game.incomingMessages;
+        game.incomingMessages = {};
+        game.incomingMessages.pending.push_back({"test.mars.complete", "mars_mission_complete", "default"});
+        auto completion = buildGamePanelPresentation(context);
+        check(find(completion) != completion.modals.end() && find(completion)->bannerEligible,
+            "Routine mission completion is eligible for the nonblocking banner");
+        game.incomingMessages.pending = {{"test.triton.contact", "triton_mission_complete", "default"}};
+        auto contact = buildGamePanelPresentation(context);
+        check(find(contact) != contact.modals.end() && !find(contact)->bannerEligible,
+            "Straylight story contact keeps its modal presentation");
+        game.incomingMessages.pending = {{"test.mars.briefing", "mars_mission_briefing", "default"}};
+        auto briefing = buildGamePanelPresentation(context);
+        check(find(briefing) != briefing.modals.end() && find(briefing)->bannerEligible,
+            "Fennec briefing uses the banner even before local acceptance is available");
+        game.incomingMessages = keep;
+    }
     {
         const auto keep=game.incomingMessages;
         game.incomingMessages={};

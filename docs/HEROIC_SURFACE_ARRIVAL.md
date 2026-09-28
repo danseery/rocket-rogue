@@ -6,7 +6,7 @@ Flight prepares the deterministic Mining world without committing campaign chang
 
 The continuous landing-style shadow veil persists in controllable Mining, with feathered exploration frontiers instead of flat hidden-tile squares. Deployment blends into that same exploration mask. The finite playable area's side and bottom boundaries fade into shadow; revealed interior terrain is not darkened merely because it is far from the rig. These presentation shadows do not change discovery or collision rules.
 
-After the two-second touchdown flourish, Space/Enter (controller South) deploys the team. A fresh press during touchdown is buffered. R (controller East hold) takes off without deployment. The first accepted command owns the sequence.
+Ship Services appears beside the landed ship, using the same compact contextual list as Mining. Deploy surface team is the primary choice; Take off is secondary. The bottom action rail is removed. After the two-second touchdown flourish, Space/Enter (controller South) deploys the team. A fresh press during touchdown is buffered. R (controller East hold) takes off without deployment. The first accepted command owns the sequence. The list hides during deployment and ascent.
 
 Deployment lasts three seconds: bay opening, rig drop and arrest, equipped-drone fan, staging movement, and camera/layout handoff. Mining simulation and resource clocks do not run until control transfers. Completed deployment saves Mining; completed ship-only takeoff saves the routed state. Packing leads into manual local ascent; see [Underground Landing and Ascent](UNDERGROUND_LANDING_PROTOTYPE.md).
 
@@ -45,6 +45,8 @@ Handling and presentation acceptance require direct play checks in addition to a
 ## Trajectory guidance
 
 Fly and Orbit show a rolling coasting forecast of up to 20 simulated seconds at 0.2-second intervals (100 future points plus the ship). Prediction uses midpoint integration with the existing gravity law and continues across Fly/Orbit boundaries without resetting visual smoothing. Only contact or entry into the local Landing frame ends the space forecast early. Landing forecasts up to 3.84 seconds of local gravity-only motion with 96 samples, stopping at terrain or upward departure. Burns affect these guides through actual momentum, not assumed future engine use.
+
+Solar flight uses a gravity scale of 40 for the Sun and 6 for Jupiter. Both noticeably bend coasting trajectories near their visible surfaces, with the Sun exerting the stronger pull. Their existing influence radii and smooth outer falloff remain unchanged; live flight and forecasts use the same field.
 
 All forecast points feed a centripetal spline with shared bounded tangents. Fixed presentation budgets prevent changing contact length from resetting interpolation; the visible curve is resampled by arc length to 101 points in space or 96 in Landing. Near/far damping remains 100/450 ms, with an exact ship anchor, 4.5-pixel purple/pink/teal stroke, and faded tail. This changes guidance only, not live physics or saves.
 

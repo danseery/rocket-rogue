@@ -1132,6 +1132,7 @@
       miningFire: (active) => rrCall("rr_mining_fire", [active ? 1 : 0], ["number"]),
       miningDrill: (active) => rrCall("rr_mining_drill", [active ? 1 : 0], ["number"]),
       miningKeyboardDrill: (active) => rrCall("rr_mining_keyboard_drill", [active ? 1 : 0], ["number"]),
+      miningCargoDumpHeld: (active) => rrCall("rr_mining_cargo_dump_held", [active ? 1 : 0], ["number"]),
       miningScanner: () => rrCall("rr_mining_scanner"),
       miningRepairDrill: () => rrCall("rr_mining_repair_drill"),
       miningRepairDrone: () => rrCall("rr_mining_repair_drone"),
@@ -1489,6 +1490,7 @@
       miningSecondaryPointerDown = false;
       if (!window.rr) return;
       rr.miningKeyboardDrill(false);
+      rr.miningCargoDumpHeld(false);
       rr.miningFire(false);
       rr.miningDrill(false);
     }
@@ -1562,6 +1564,8 @@
         rr.miningKeyboardDrill(true);
       } else if (!event.repeat && key === "e") {
         rr.miningScanner();
+      } else if (key === "c") {
+        if (!event.repeat) rr.miningCargoDumpHeld(true);
       } else if (!event.repeat && key === "t") {
         rr.miningTether();
       } else if (!event.repeat && key === "f") {
@@ -1595,6 +1599,7 @@
       if (launchKeys.delete(key)) updateLaunchMove();
       if (miningKeys.delete(key)) updateMiningMove();
       if (isMiningActive() && key === " ") rr.miningKeyboardDrill(false);
+      if (key === "c") rr.miningCargoDumpHeld(false);
     }
 
     function handleRmlUiKey(event) {

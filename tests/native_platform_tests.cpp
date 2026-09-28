@@ -128,6 +128,7 @@ int main()
     std::filesystem::remove_all(saves.path().string() + ".tmp");
 
     rocket::NativePreferenceStore preferences(root);
+    assert(!preferences.load().incomingNoticesAsModals);
     rocket::AppPreferences expected;
     expected.controller.promptFamily = rocket::ControllerPromptFamily::PlayStation;
     expected.controller.stickDeadzone = 0.30;
@@ -140,6 +141,7 @@ int main()
     expected.debugToolsEnabled = true;
     expected.helpDisabled = true;
     expected.cameraShakeDisabled = true;
+    expected.incomingNoticesAsModals = true;
     expected.fullscreen = true;
     expected.dismissedHelpTopics = {"surface", "mining"};
     const std::uint64_t preferenceRevisionBeforeStore = preferences.revision();
@@ -158,7 +160,7 @@ int main()
     assert(actual.resolutionPreset == expected.resolutionPreset);
     assert(actual.frameLimitMode == expected.frameLimitMode);
     assert(actual.gameSpeed == expected.gameSpeed);
-    assert(actual.debugToolsEnabled && actual.helpDisabled && actual.cameraShakeDisabled && actual.fullscreen);
+    assert(actual.debugToolsEnabled && actual.helpDisabled && actual.cameraShakeDisabled && actual.incomingNoticesAsModals && actual.fullscreen);
     assert(actual.dismissedHelpTopics == expected.dismissedHelpTopics);
 
     const rocket::FrameLimitMode frameLimitModes[] = {

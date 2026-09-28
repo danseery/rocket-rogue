@@ -528,6 +528,7 @@ inline constexpr double surfaceShipVisibleFootShare = 0.455;
 inline constexpr double returnZoneCenterOffsetX = 0.5;
 inline constexpr double returnZoneCenterHeightCells = surfaceShipSpriteCells * surfaceShipVisibleFootShare;
 inline constexpr int rigCargoCapacityMass = 24;
+inline constexpr double cargoDumpHoldSeconds = 0.75;
 inline constexpr double tetheredArtifactCargoWeight = 4.0;
 inline constexpr double rigTetherPullAccelerationCellsPerSecondSquared = 11.0;
 inline constexpr double rigTetherDamping = 1.65;
@@ -550,18 +551,14 @@ inline constexpr double scannerRevealRadius = 5.5;
 // away.
 inline constexpr double artifactDetectionRadius = 8.0;
 inline constexpr double scannerProbeBonus = 2.0;
-inline constexpr double scannerCooldownSeconds = 4.0;
+inline constexpr double scannerCooldownSeconds = 2.5;
 inline constexpr double scannerPulseSeconds = 0.64;
 inline constexpr double tileDamageFlashSeconds = 0.26;
 inline constexpr float tileDamageFlashOpacity = 0.20F;
 inline double scannerRechargePresentationProgress(double cooldownRemaining) noexcept
 {
-    const double elapsed = scannerCooldownSeconds
-        - std::clamp(cooldownRemaining, 0.0, scannerCooldownSeconds);
-    return std::clamp(
-        (elapsed - scannerPulseSeconds) / (scannerCooldownSeconds - scannerPulseSeconds),
-        0.0,
-        1.0);
+    return 1.0 - std::clamp(cooldownRemaining, 0.0, scannerCooldownSeconds)
+        / scannerCooldownSeconds;
 }
 inline constexpr double regolithToughness = 2.1;
 inline constexpr double hardRockToughness = 6.8;
