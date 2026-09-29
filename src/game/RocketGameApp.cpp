@@ -6534,6 +6534,30 @@ void RocketGameApp::runUiAction(const std::string& action)
         return;
     }
     if (session_.destruction.active) return;
+    constexpr std::string_view automaticMessagePrefix = "auto_incoming_message:";
+    if (action.starts_with(automaticMessagePrefix)) {
+        const std::string messageAction = action.substr(automaticMessagePrefix.size());
+        runUiAction(messageAction);
+        constexpr std::string_view acknowledgementPrefix = "ack_incoming_message:";
+        // A briefing can arrive before its local mission action is available.
+        // Retire that notice after the timeout; the mission remains available
+        // through its normal controls when the player reaches the location.
+        if (messageAction.starts_with(acknowledgementPrefix) &&
+            acknowledgeIncomingMessage(state_.incomingMessages, messageAction.substr(acknowledgementPrefix.size()))) {
+            if (services_.ui.modalOpen()) {
+                releaseRealtimeInputs(true);
+                messageMoveReleaseRequired_ = true;
+                messageDrillReleaseRequired_ = true;
+                messageFireReleaseRequired_ = true;
+                messageControllerNeutralRequired_ = true;
+                services_.ui.closeModal();
+            }
+            if (pauseReason_ == PauseReason::BlockingModal) clearControllerPause();
+            save();
+            panelDirty_ = true;
+        }
+        return;
+    }
     if (runExpeditionAction(action)) return;
     constexpr std::string_view incomingPrefix = "ack_incoming_message:";
     if (action.starts_with(incomingPrefix)) {

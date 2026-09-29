@@ -4252,7 +4252,8 @@ std::optional<ModalPresentation> buildIncomingMessageCard(
     // Presentation must not depend on whether acceptance is available at the
     // current body: the first briefing can arrive while still departing Earth.
     return ModalPresentation{"incoming_message", "INCOMING MESSAGE", body.str(), action, true, false, false,
-        ModalTone::Neutral, speaker->id == "mission_control_fennec"};
+        ModalTone::Neutral, speaker->id == "mission_control_fennec",
+        speaker->id == "mission_control_fennec" ? 10.0 : 0.0};
 }
 
 PanelDocumentPresentation buildGamePanelPresentation(const PanelRenderContext& context)

@@ -1669,6 +1669,69 @@ void incomingBannerPass(int width, int height)
     ui.shutdown();
 }
 
+void incomingMessageTimeoutPass()
+{
+    Preferences preferences;
+    Host host;
+    host.viewport = {1280, 800, 1280, 800, 1.0F};
+    Bridge bridge;
+    RenderHost renderer;
+    rocket::GameRmlUi ui(preferences, host, bridge, renderer, assetRoot());
+    std::vector<std::string> actions;
+    assert(ui.initialize([&](const std::string& action) {
+        if (!action.starts_with("sfx:")) actions.push_back(action);
+    }));
+    auto presentation = panel("<p>Flight</p>");
+    presentation.modals.push_back({"incoming_message", "INCOMING MESSAGE",
+        "<section class=\"incoming-message modal-body\"><p>Mission Control</p></section>",
+        "ack_incoming_message:first", true, false, false, rocket::ModalTone::Neutral, true, 10.0});
+    ui.setPanelPresentation(presentation);
+    ui.render();
+    host.now = 10.99;
+    presentation.contentMarkup = "<p>Flight refreshed</p>";
+    ui.setPanelPresentation(presentation); // Routine refresh must not restart the timer.
+    ui.render();
+    assert(actions.empty());
+    host.now = 11.0;
+    ui.render();
+    assert(actions == std::vector<std::string>{"auto_incoming_message:ack_incoming_message:first"});
+    host.now = 30.0;
+    ui.render();
+    assert(actions.size() == 1); // Dispatch only once, even before the next panel refresh.
+
+    presentation.modals.back().closeAction = "ack_incoming_message:second";
+    ui.setPanelPresentation(presentation);
+    ui.render();
+    host.now = 39.99;
+    ui.render();
+    assert(actions.size() == 1); // Each queued message gets its own ten seconds.
+    presentation.modals.pop_back(); // Manually acknowledged before its deadline.
+    ui.setPanelPresentation(presentation);
+    host.now = 45.0;
+    ui.render();
+    assert(actions.size() == 1);
+
+    preferences.value.incomingNoticesAsModals = true;
+    presentation.modals.push_back({"incoming_message", "INCOMING MESSAGE",
+        "<p>Retry launch</p>", "expedition:retry_opening", true, false, false,
+        rocket::ModalTone::Neutral, false, 10.0});
+    ui.setPanelPresentation(presentation);
+    ui.render();
+    assert(ui.modalOpen());
+    host.now = 55.0;
+    ui.render();
+    assert(actions.size() == 2 && actions.back() == "auto_incoming_message:expedition:retry_opening");
+
+    presentation.modals.back().closeAction = "expedition:straylight:invitation";
+    presentation.modals.back().autoActionSeconds = 0.0;
+    ui.setPanelPresentation(presentation);
+    ui.render();
+    host.now = 100.0;
+    ui.render();
+    assert(actions.size() == 2); // Other speakers retain manual acknowledgement.
+    ui.shutdown();
+}
+
 int main(int argc, char** argv)
 {
 #if defined(_MSC_VER)
@@ -1685,6 +1748,7 @@ int main(int argc, char** argv)
         return 0;
     }
     if (argc > 1 && std::string_view(argv[1]) == "--incoming-banner-only") {
+        incomingMessageTimeoutPass();
         incomingBannerPass(1280, 800);
         incomingBannerPass(1600, 900);
         std::cout << "Incoming banner layout tests passed\n";
@@ -1726,6 +1790,7 @@ int main(int argc, char** argv)
     beaconSidebarPass(1600, 900);
     incomingBannerPass(1280, 800);
     incomingBannerPass(1600, 900);
+    incomingMessageTimeoutPass();
     generatedPanelPass(800, 600);
     generatedPanelPass(1280, 800);
     generatedPanelPass(1600, 900);

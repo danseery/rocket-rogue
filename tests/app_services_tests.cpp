@@ -2684,10 +2684,10 @@ void ioCommissioningReceiptsAndMiningRepairStayExplicit()
     const auto hazardCount = [](const SaveData& save) {
         return std::count(save.ownedDroneIds.begin(), save.ownedDroneIds.end(), content::drone::hazardDrone);
     };
-    {
+    for (const bool automatic : {false, true}) {
         auto state = makeIo(false, false, false);
         auto fixture = load(*state);
-        fixture->ui.dispatchAction(acknowledgement);
+        fixture->ui.dispatchAction((automatic ? "auto_incoming_message:" : "") + acknowledgement);
         const auto accepted = deserializeSaveData(fixture->saves.value);
         assert(accepted && accepted->incomingMessages.pending.size() == 1 &&
             accepted->incomingMessages.pending.front().messageId == "drone_arrival_hazard_drone");
@@ -2714,6 +2714,10 @@ void ioCommissioningReceiptsAndMiningRepairStayExplicit()
         assert(fixture->ui.modalOpenValue);
         const auto failed = deserializeSaveData(fixture->saves.value);
         assert(failed && failed->incomingMessages.pending.size() == 1 && hazardCount(*failed) == 0);
+        fixture->ui.dispatchAction("auto_incoming_message:" + acknowledgement);
+        const auto dismissed = deserializeSaveData(fixture->saves.value);
+        assert(dismissed && dismissed->incomingMessages.pending.empty() && hazardCount(*dismissed) == 0);
+        assert(!fixture->ui.modalOpenValue);
         fixture->runner.shutdown();
     }
     for (const int serviceCase : {0, 1, 2}) {
@@ -3134,6 +3138,11 @@ void mouseRigInput()
 
 int main(int argc, char** argv)
 {
+    if (argc > 1 && std::string_view(argv[1]) == "--incoming-message-actions-only") {
+        ioCommissioningReceiptsAndMiningRepairStayExplicit();
+        std::cout << "Incoming message action tests passed\n";
+        return 0;
+    }
     if (argc == 1 || std::string_view(argv[1]) == "--cargo-dump-only") {
         AppFixture fixture;
         assert(fixture.runner.initialize());

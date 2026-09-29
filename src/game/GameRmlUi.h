@@ -115,6 +115,7 @@ private:
     void applyPendingPointerActivation();
     void applyPendingModalOpen();
     void openModalImmediately(const std::string& id);
+    void advanceIncomingMessageTimeout();
 
     IPreferenceStore& preferences_;
     IPlatformHost& host_;
@@ -125,6 +126,9 @@ private:
     PanelDocumentPresentation presentation_;
     std::string externalRcss_;
     std::string openModalId_;
+    std::string timedMessageAction_;
+    double timedMessageStartedSeconds_ = 0.0;
+    bool timedMessageActionDispatched_ = false;
     SettingsTab settingsTab_ = SettingsTab::Display;
     std::string pendingModalOpenId_;
     std::vector<RmlButtonBinding> pendingPointerActivations_;

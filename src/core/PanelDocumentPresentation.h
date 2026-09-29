@@ -110,6 +110,8 @@ struct ModalPresentation {
     ModalTone tone = ModalTone::Neutral;
     // Eligible Fennec messages may render as a nonblocking bottom banner.
     bool bannerEligible = false;
+    // Run the message action after this many seconds on screen (0 disables).
+    double autoActionSeconds = 0.0;
 };
 
 struct PanelDocumentPresentation {

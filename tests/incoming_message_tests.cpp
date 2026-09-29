@@ -289,6 +289,12 @@ void incomingMessageTests() {
         check(rewardCard && rewardCard->bannerEligible &&
             rewardCard->bodyMarkup.find("class=\"incoming-message-reward\">Claim Mining Drone") != std::string::npos,
             "Mission claim uses the banner with a distinct compact reward line");
+        check(rewardCard->autoActionSeconds == 10.0 && invitationCard->autoActionSeconds == 0.0 &&
+            card->autoActionSeconds == 0.0,
+            "Only Fennec messages automatically act or dismiss after ten seconds");
+        const auto retryCard = buildIncomingMessageCard(context, "opening_retry", "default", "expedition:retry_opening");
+        check(retryCard && retryCard->autoActionSeconds == 10.0,
+            "Fennec's retry action also receives the ten-second timeout");
     }
     context.firstTimeIntroductionsEnabled = false;
     auto panel = buildGamePanelPresentation(context);

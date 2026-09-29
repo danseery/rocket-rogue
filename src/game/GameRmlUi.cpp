@@ -2974,7 +2974,8 @@ void GameRmlUi::setPanelPresentation(const PanelDocumentPresentation& presentati
             && left.autoOpen == right.autoOpen
             && left.dismissible == right.dismissible
             && left.showClose == right.showClose
-            && left.bannerEligible == right.bannerEligible;
+            && left.bannerEligible == right.bannerEligible
+            && left.autoActionSeconds == right.autoActionSeconds;
     };
     const bool incomingNoticesAsModals = rr_rml_incoming_notices_as_modals() != 0;
     const bool noticeModeChanged = renderedIncomingNoticesAsModals_ != incomingNoticesAsModals;
@@ -3125,6 +3126,34 @@ void GameRmlUi::setInteractionAnchors(const SceneInteractionAnchors& anchors)
     interactionAnchors_ = anchors;
 }
 
+void GameRmlUi::advanceIncomingMessageTimeout()
+{
+    const bool noticesAsModals = rr_rml_incoming_notices_as_modals() != 0;
+    const auto message = std::find_if(presentation_.modals.begin(), presentation_.modals.end(), [&](const auto& modal) {
+        return modal.autoOpen && modal.autoActionSeconds > 0.0 && !modal.closeAction.empty()
+            && (openModalId_ == modal.id ||
+                (openModalId_.empty() && modal.bannerEligible && !noticesAsModals));
+    });
+    if (!host_.focused() || !host_.visible() || message == presentation_.modals.end()) {
+        timedMessageAction_.clear();
+        timedMessageActionDispatched_ = false;
+        return;
+    }
+    const double now = host_.monotonicSeconds();
+    if (timedMessageAction_ != message->closeAction) {
+        timedMessageAction_ = message->closeAction;
+        timedMessageStartedSeconds_ = now;
+        timedMessageActionDispatched_ = false;
+    }
+    if (!timedMessageActionDispatched_ && now - timedMessageStartedSeconds_ >= message->autoActionSeconds) {
+        // Copy before dispatch: accepting a mission can replace the message
+        // and rebuild this presentation immediately.
+        const std::string action = "auto_incoming_message:" + timedMessageAction_;
+        timedMessageActionDispatched_ = true;
+        dispatchAction(action);
+    }
+}
+
 void GameRmlUi::render()
 {
     if (!initialized_ || !g_context) {
@@ -3136,6 +3165,7 @@ void GameRmlUi::render()
     // are always applied here, after the callback has returned.
     applyPendingPointerActivation();
     applyPendingModalOpen();
+    advanceIncomingMessageTimeout();
 
     const ViewportMetrics viewport = host_.viewportMetrics();
     const int viewportWidth = viewport.logicalWidth;
@@ -4153,7 +4183,8 @@ void GameRmlUi::dispatchAction(const std::string& action)
     // Expedition and scenario actions own their success/failure lifecycle.
     // Rejected selections must leave their feedback and choices on screen.
     const bool closesModal = !openModalId_.empty() &&
-        !action.starts_with("expedition:") && !action.starts_with("scenario_action:");
+        !action.starts_with("expedition:") && !action.starts_with("scenario_action:") &&
+        !action.starts_with("auto_incoming_message:");
     if (closesModal) {
         clearFocusTargets();
         openModalId_.clear();
@@ -4806,6 +4837,8 @@ void GameRmlUi::rebuildDocument()
 
 void GameRmlUi::shutdown()
 {
+    timedMessageAction_.clear();
+    timedMessageActionDispatched_ = false;
     if (g_context) {
         if (g_document) {
             clearFocusTargets();
